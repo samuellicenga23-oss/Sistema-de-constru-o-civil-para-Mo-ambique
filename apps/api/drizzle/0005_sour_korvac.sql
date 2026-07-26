@@ -1,0 +1,1 @@
+ALTER TYPE "public"."line_item_origin" ADD VALUE 'estimativa';

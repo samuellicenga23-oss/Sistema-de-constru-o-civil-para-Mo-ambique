@@ -1,0 +1,292 @@
+====================================================================
+MEDIOBRA — LISTA DE FUNCIONALIDADES E COMO O SISTEMA FUNCIONA
+====================================================================
+Sistema de gestao de medicoes, orcamentos e obras de construcao civil
+para Mocambique (multi-empresa / SaaS).
+
+
+--------------------------------------------------------------------
+1. CONTAS E ACESSOS
+--------------------------------------------------------------------
+- Sistema multi-empresa: cada empresa tem os seus dados totalmente
+  isolados das outras (projectos, catalogo, utilizadores).
+- Perfis de utilizador dentro de cada empresa:
+    * Administrador        -> gere utilizadores, definicoes, tudo
+    * Orcamentista          -> cria/edita orcamentos e medicoes
+    * Engenheiro/Fiscal     -> acompanha execucao da obra
+    * Visualizador          -> so consulta, nao edita
+- Super Admin (dono da plataforma):
+    * Painel proprio ("Painel da Plataforma")
+    * Cria novas empresas clientes
+    * Activa/suspende subscricoes
+    * Muda o plano de cada empresa
+- Cada utilizador pode mudar a sua propria palavra-passe (isto
+  termina automaticamente as outras sessoes abertas nesse login,
+  por seguranca).
+- Login por email + password. Login com Google ainda NAO esta
+  ligado (precisa de credenciais OAuth proprias, ver nota no fim).
+
+
+--------------------------------------------------------------------
+2. GESTAO DE UTILIZADORES (por empresa)
+--------------------------------------------------------------------
+- O Administrador da empresa pode:
+    * Ver a lista de toda a equipa
+    * Criar novos utilizadores (nome, email, password, perfil)
+    * Remover utilizadores
+- Cada plano de subscricao tem um limite de utilizadores (ver
+  seccao 10) — o sistema bloqueia automaticamente a criacao de
+  mais utilizadores do que o plano permite, com um aviso claro.
+
+
+--------------------------------------------------------------------
+3. CATALOGO DE PRECOS
+--------------------------------------------------------------------
+Base de tudo: mao-de-obra, materiais, maquinas e as "composicoes
+de custo" que os juntam.
+
+- Categorias de mao-de-obra (Servente, Pedreiro, Armador,
+  Electricista, Pintor, Canalizador, etc.) com salario mensal e
+  custo/hora calculado automaticamente.
+- Materiais (cimento, areia, brita, aco, blocos, tintas, tubagens,
+  aparelhos sanitarios/electricos...) com preco base e "embalagem
+  de compra" (ex: cimento vende-se por saco, areia por camiao).
+- Maquinas/equipamento (betoneira, placa compactadora, dumper...)
+  com custo por hora.
+- Composicoes de custo: cerca de 45 "receitas" prontas (ex: "Betao
+  B25", "Alvenaria de bloco 20", "Pintura acrilica exterior",
+  "Cobertura em chapa metalica"...). Cada composicao diz quanto de
+  mao-de-obra + materiais + maquina e preciso por m2/m3/ml/unidade,
+  e o preco final e calculado automaticamente.
+- Tudo e editavel: podes criar novas composicoes, editar as
+  existentes, apagar. Editar algo do catalogo partilhado clona-se
+  automaticamente para a tua empresa (nunca estragas o catalogo
+  global nem o de outras empresas).
+- Pesquisa rapida no catalogo por nome.
+
+
+--------------------------------------------------------------------
+4. ZONAS DE PRECO REGIONAIS
+--------------------------------------------------------------------
+- 15 zonas de preco cobrindo TODO o Mocambique:
+    Grande Maputo: Baixa/Polana/Sommerschield, Malhangalene/Alto
+    Mae, Zonas Suburbanas, Matola, Marracuene, Boane.
+    Resto do pais: Beira, Tete, Lichinga, Pemba, Nampula,
+    Quelimane, Chimoio, Xai-Xai, Inhambane.
+- Cada material pode ter um preco diferente por zona (ex: cimento
+  custa mais em Tete do que em Maputo). Isto reflecte-se
+  automaticamente no calculo das composicoes e orcamentos quando
+  o projecto tem uma zona atribuida.
+- Podes criar novas zonas ou editar os precos de qualquer material
+  numa zona, a qualquer momento, no Catalogo de Precos.
+- NOTA HONESTA: os precos de cimento das novas zonas nacionais tem
+  fonte real de mercado onde foi possivel confirmar (Beira, Tete,
+  Lichinga, Pemba); as restantes zonas e materiais usam uma
+  estimativa por proporcao regional — vale a pena confirmar
+  localmente antes de fechar uma proposta comercial numa zona nova.
+
+
+--------------------------------------------------------------------
+5. PROJECTOS E MAPA DE QUANTIDADES (ORCAMENTOS)
+--------------------------------------------------------------------
+- Criar um projecto (nome, cliente, localizacao — bairro/distrito/
+  provincia, fase da obra, moeda, zona de preco, taxa de IVA e de
+  Contingencias).
+- Ao criar o projecto, o Mapa de Quantidades e gerado
+  automaticamente com a estrutura padrao de capitulos (Trabalhos
+  Preliminares, Movimentos de Terra, Betoes/Acos/Cofragens,
+  Alvenarias, Rebocos, Revestimentos, Pinturas, Drenagens,
+  Cobertura, Instalacao Hidraulica, Fossa Septica, etc.)
+- Estrutura em arvore com 4 niveis: Capitulo -> Grupo -> Item ->
+  Sub-item/Nota — igual ao que se usa nos mapas de quantidades
+  reais de obra.
+- Cada item pode ter:
+    * Preco manual, OU
+    * Ligacao a uma composicao de custo do catalogo (o preco
+      calcula-se so)
+    * Medicao dimensional: Numero x Comprimento x Largura x
+      Altura, com subtotais automaticos (o classico "Nº x C x L x A"
+      das folhas de obra)
+- Subtotais por capitulo e totais gerais calculados automaticamente,
+  em tempo real, a medida que editas.
+- RESUMO do orcamento: Subtotal -> + Contingencias% -> Subtotal 2
+  -> + IVA% -> Valor Total — a mesma cadeia usada nos orcamentos
+  reais.
+- Podes trabalhar em MZN e/ou USD.
+- Edicao directa em qualquer linha (nao precisas de "clonar" nada
+  manualmente).
+- Pesquisa dentro do Mapa de Quantidades.
+
+
+--------------------------------------------------------------------
+6. ASSISTENTE DE MEDICOES (preenchimento automatico)
+--------------------------------------------------------------------
+- Ferramenta que gera quantidades estimadas para um projecto novo,
+  a partir de poucos dados (area do piso, numero de pisos, tipo de
+  fundacao, etc.), cobrindo: fundacoes/sapatas, estrutura, cobertura,
+  e instalacao hidraulica completa (incluindo fossa septica e vala
+  de infiltracao, pelo metodo tecnico "Morais").
+- Cada quantidade gerada e sempre acompanhada de:
+    * a formula exacta usada, com os numeros reais substituidos
+    * uma etiqueta de origem: "real" (veio de uma planta), "medido"
+      (valor que tu indicaste) ou "estimativa" (racio generico de
+      engenharia, documentado)
+- Nada e inventado ou escondido — podes ver sempre de onde veio
+  cada numero antes de aceitar.
+- O relatorio da ultima estimativa aplicada fica guardado no
+  projecto, para consultares depois.
+
+
+--------------------------------------------------------------------
+7. LEITURA AUTOMATICA DE PLANTAS (ArchiCAD)
+--------------------------------------------------------------------
+- Upload de plantas em PDF exportadas do ArchiCAD (Arquitectura ou
+  Estrutura).
+- O sistema le o texto vectorial da planta (nao e "adivinhacao" por
+  imagem) e extrai automaticamente:
+    * Areas de compartimentos (quartos, salas, etc.)
+    * Quadros de aco estrutural (varoes por elemento, diametro,
+      peso)
+- Ecra de revisao: tu escolhes o que importar para o Mapa de
+  Quantidades — nada e escrito automaticamente sem a tua aprovacao.
+
+
+--------------------------------------------------------------------
+8. AUTOS DE MEDICAO (execucao da obra)
+--------------------------------------------------------------------
+- Depois do orcamento aprovado, regista periodicamente quanto ja
+  foi executado de cada item (quantidade do periodo + quantidade
+  acumulada).
+- Calcula automaticamente a % de execucao e o valor a facturar.
+- Fluxo de estados: Rascunho -> Submetido -> Aprovado.
+- Dashboard "Previsto vs Executado" — compara o que foi orcamentado
+  com o que ja foi feito, por projecto.
+
+
+--------------------------------------------------------------------
+9. CALCULOS RAPIDOS (calculadoras avulsas, sem projecto)
+--------------------------------------------------------------------
+Para uso no dia-a-dia da obra, sem precisar de abrir um projecto.
+Todas exportam directamente para PDF com titulo e referencia
+editaveis (ex: nome da obra, cliente, responsavel).
+
+  a) LAJE — indicas area e espessura, sai o volume de betao, os
+     materiais (cimento/areia/brita/agua) e uma estimativa de aco
+     (peso, metros lineares e numero de varoes a comprar) para uma
+     malha com o espacamento que indicares.
+
+  b) BETAO (volume simples) — para sapatas, vigas, pilares, etc.
+     Indicas o volume directo ou as dimensoes (C x L x A), escolhes
+     a classe do betao (B15/B20/B25/B30), e sai a lista de
+     materiais. Opcao de incluir uma estimativa generica de aco
+     (80 kg/m3).
+
+  c) QUALQUER COMPOSICAO DO CATALOGO — a mais versatil: escolhes
+     QUALQUER uma das ~45 composicoes do catalogo (alvenaria,
+     reboco, betonilha, revestimento de pavimentos, pintura,
+     cobertura, tubagens de agua/esgoto, pontos electricos,
+     aparelhos sanitarios...), indicas a quantidade e, opcionalmente,
+     a zona de preco, e sai a lista de materiais + valor total.
+     Esta calculadora cobre automaticamente qualquer composicao
+     nova que adicionares ao catalogo no futuro.
+
+  d) FOSSA SEPTICA — indicas o numero de pessoas servidas, a
+     capitacao diaria de agua e o tipo de solo, e sai o volume util
+     da fossa, o numero de camaras recomendado e a area de
+     infiltracao necessaria (metodo tecnico Morais).
+
+
+--------------------------------------------------------------------
+10. PLANOS DE SUBSCRICAO
+--------------------------------------------------------------------
+Nao ha ainda gateway de pagamento — a factura e feita por fora do
+sistema (transferencia, etc.) e o Super Admin activa manualmente
+depois de confirmar o pagamento.
+
+  ARRANQUE       — 2.500 MT/mes
+     Até 2 utilizadores, até 3 projectos.
+     Mapa de Quantidades, Catalogo, Calculos Rapidos, exportacao
+     Excel/PDF.
+
+  PROFISSIONAL   — 6.500 MT/mes
+     Até 8 utilizadores, projectos ilimitados.
+     Tudo do Arranque + Autos de Medicao + leitura automatica de
+     plantas + zonas de preco regionais.
+
+  EMPRESARIAL    — 12.000 MT/mes
+     Utilizadores ilimitados, projectos ilimitados.
+     Tudo do Profissional + logotipo/identidade visual propria +
+     suporte prioritario.
+
+(Os precos acima sao uma sugestao de referencia minha — ajusta-os
+como quiseres antes de vender.)
+
+O limite de utilizadores de cada plano e aplicado de verdade pelo
+sistema: se tentares criar mais utilizadores do que o plano permite,
+aparece um aviso a pedir para mudar de plano.
+
+
+--------------------------------------------------------------------
+11. EXPORTACAO
+--------------------------------------------------------------------
+- Excel: Mapa de Quantidades e Relatorio de Materiais por Fase,
+  com formulas reais (SOMA()) que recalculam se abrires no Excel
+  e mudares algum numero — nao sao valores fixos.
+- PDF: Mapa de Quantidades, Autos de Medicao, Calculos Rapidos —
+  layout fiel ao que se usa em obra.
+
+
+--------------------------------------------------------------------
+12. RELATORIO DE MATERIAIS POR FASE DE OBRA
+--------------------------------------------------------------------
+- Pega no Mapa de Quantidades ja medido e agrupa os materiais
+  necessarios por fase de obra (Mobilizacao, Terraplenagem e
+  Fundacoes, Estrutura, Alvenaria, Cobertura, Instalacoes,
+  Revestimentos, Esquadrias, Acabamentos, Obras Exteriores,
+  Entrega/Garantia).
+- Util para saber o que encomendar e quando, fase a fase.
+- Inclui conversao de aco (kg) para numero de varoes a comprar,
+  quando o diametro esta identificado.
+
+
+--------------------------------------------------------------------
+13. DEFINICOES DA EMPRESA
+--------------------------------------------------------------------
+- Logotipo (aparece no menu lateral e nos PDFs exportados).
+- Nome da empresa.
+- Gestao da equipa (ver seccao 2).
+- Estado e plano da subscricao, com o uso actual (ex: "2 de 8
+  utilizadores").
+
+
+--------------------------------------------------------------------
+14. SEGURANCA (ja implementado)
+--------------------------------------------------------------------
+- Cada empresa so ve os seus proprios dados (isolamento total).
+- Passwords sempre encriptadas, nunca guardadas em texto simples.
+- Mudar a password termina automaticamente as outras sessoes
+  activas dessa conta.
+- Limite de tentativas de login (protege contra ataques de
+  adivinhar password).
+- Upload de logotipo verifica o ficheiro a serio (nao confia so na
+  extensao do nome do ficheiro).
+- Ligacao ao servico de leitura de plantas protegida por chave
+  interna.
+
+
+--------------------------------------------------------------------
+O QUE AINDA NAO ESTA LIGADO (precisa de decisao/credenciais tuas)
+--------------------------------------------------------------------
+- LOGIN COM GOOGLE: precisa de criares um projecto no Google Cloud
+  e gerar credenciais OAuth (Client ID/Secret) — depois ligo isso
+  ao sistema.
+- PAGAMENTOS REAIS (M-Pesa, cartao, etc.): precisa de escolheres um
+  gateway de pagamento em Mocambique e criares conta la — depois
+  integro isso para activar planos automaticamente em vez de
+  manualmente.
+
+
+====================================================================
+Fim da lista. Qualquer coisa que quiseres explicar melhor, adicionar
+ou mudar, diz que eu actualizo.
+====================================================================

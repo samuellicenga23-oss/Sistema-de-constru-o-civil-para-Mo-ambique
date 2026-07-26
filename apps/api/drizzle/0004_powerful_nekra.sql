@@ -1,0 +1,1 @@
+ALTER TABLE "cost_compositions" ADD COLUMN "category" varchar(100) DEFAULT 'Outros' NOT NULL;

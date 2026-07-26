@@ -1,0 +1,1 @@
+ALTER TABLE "extracted_rooms" ADD COLUMN "floor" varchar(100);

@@ -1,0 +1,1 @@
+ALTER TABLE "budget_documents" ADD COLUMN "last_estimate_report" jsonb;

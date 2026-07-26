@@ -1,0 +1,1 @@
+ALTER TABLE "plants" ADD COLUMN "structural_summary" jsonb;
