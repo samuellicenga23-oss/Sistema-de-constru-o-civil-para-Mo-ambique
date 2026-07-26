@@ -8,7 +8,7 @@
 #   sudo systemctl status sigo-plant-service
 #
 # Ajustar User=/WorkingDirectory se o caminho do repositório ou o utilizador do sistema forem
-# diferentes de /var/www/sigo e www-data.
+# diferentes de /home/sigo/htdocs/sud30s.org e sigo (padrão CloudPanel: site user = "sigo").
 
 [Unit]
 Description=SIGO Plant Service (FastAPI)
@@ -16,9 +16,9 @@ After=network.target
 
 [Service]
 Type=simple
-User=www-data
-WorkingDirectory=/var/www/sigo/apps/plant-service
-ExecStart=/var/www/sigo/apps/plant-service/.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8001
+User=sigo
+WorkingDirectory=/home/sigo/htdocs/sud30s.org/apps/plant-service
+ExecStart=/home/sigo/htdocs/sud30s.org/apps/plant-service/.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8001
 Restart=on-failure
 RestartSec=3
 

@@ -4,6 +4,7 @@ import cookie from "@fastify/cookie";
 import multipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
 import path from "node:path";
+import { existsSync, readFileSync } from "node:fs";
 import { env } from "./env.js";
 import { sql } from "./db/index.js";
 import { authRoutes } from "./routes/auth.js";
@@ -67,6 +68,23 @@ await app.register(financialRoutes);
 await app.register(siteDiaryRoutes);
 await app.register(supplierRoutes);
 await app.register(purchasingRoutes);
+
+// Em produção corremos um único processo Node (padrão CloudPanel: um domínio → um appPort) —
+// a API também serve o build do frontend, em vez de depender de um Nginx separado a servir
+// ficheiros estáticos. Em desenvolvimento o Vite serve o frontend à parte, por isso esta pasta
+// normalmente não existe localmente e o bloco fica inactivo.
+const webDistDir = path.resolve(process.cwd(), "../web/dist");
+const webIndexHtml = path.join(webDistDir, "index.html");
+if (existsSync(webIndexHtml)) {
+  await app.register(fastifyStatic, { root: webDistDir, prefix: "/", decorateReply: false });
+  app.setNotFoundHandler((request, reply) => {
+    if (request.raw.url?.startsWith("/api/") || request.raw.url?.startsWith("/uploads/")) {
+      reply.code(404).send({ error: "Não encontrado" });
+      return;
+    }
+    reply.type("text/html").send(readFileSync(webIndexHtml));
+  });
+}
 
 app.listen({ port: env.port, host: "0.0.0.0" }).catch((err) => {
   app.log.error(err);
