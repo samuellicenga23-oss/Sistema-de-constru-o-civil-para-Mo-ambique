@@ -27,8 +27,13 @@ import { financialRoutes } from "./routes/financial.js";
 import { siteDiaryRoutes } from "./routes/siteDiary.js";
 import { supplierRoutes } from "./routes/suppliers.js";
 import { purchasingRoutes } from "./routes/purchasing.js";
+import { fileRoutes } from "./routes/files.js";
 
-const app = Fastify({ logger: true });
+// trustProxy: a aplicação corre sempre atrás de um proxy (Nginx/CloudPanel em produção, o
+// proxy do Vite em dev) — sem isto, request.ip via o IP interno do proxy, não o do cliente
+// real, o que quebra o rate-limit por IP do login (todos os pedidos pareciam vir do mesmo
+// sítio) e torna os logs inúteis para investigar abuso.
+const app = Fastify({ logger: true, trustProxy: true });
 
 // Em produção, só as origens listadas em CORS_ORIGIN podem fazer pedidos com credenciais
 // (cookies) — "origin: true" (reflectir qualquer origem) combinado com credentials:true era
@@ -41,7 +46,11 @@ await app.register(cors, {
 });
 await app.register(cookie, { secret: env.sessionCookieSecret });
 await app.register(multipart, { limits: { fileSize: 50 * 1024 * 1024 } });
-await app.register(fastifyStatic, { root: path.resolve(env.uploadsDir), prefix: "/uploads/" });
+// Só o logótipo da empresa é público de propósito (usado no login/branding entre empresas
+// diferentes, antes de haver sessão). Plantas e fotografias do diário de obra são dados
+// privados de cada empresa — deixaram de ser servidos aqui, ver routes/files.ts (rotas
+// autenticadas com verificação de posse).
+await app.register(fastifyStatic, { root: path.resolve(env.uploadsDir, "logos"), prefix: "/uploads/logos/" });
 
 app.get("/api/health", async () => {
   const [{ now }] = await sql<{ now: Date }[]>`select now()`;
@@ -60,6 +69,7 @@ await app.register(budgetDocumentRoutes);
 await app.register(exportRoutes);
 await app.register(measurementCertificateRoutes);
 await app.register(plantRoutes);
+await app.register(fileRoutes);
 await app.register(dashboardRoutes);
 await app.register(measurementLineRoutes);
 await app.register(quickEstimateRoutes);

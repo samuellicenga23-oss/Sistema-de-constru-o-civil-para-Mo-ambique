@@ -144,6 +144,9 @@ export default function PlantReviewPage() {
       title={plant.originalFileName ?? "Planta"}
       actions={
         <div className="flex gap-2">
+          <a href={`/api/files/plants/${plant.id}`} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm">
+            Ver PDF original
+          </a>
           <button onClick={handleReprocess} disabled={reprocessing} className="btn btn-ghost btn-sm">
             <IconWand className="w-3.5 h-3.5" />
             {reprocessing ? "A reprocessar..." : "Reprocessar"}

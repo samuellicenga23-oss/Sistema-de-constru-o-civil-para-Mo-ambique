@@ -13,6 +13,13 @@ app = FastAPI(title="SIGO Plant Service")
 # desligada, tal como o CORS_ORIGIN da API principal segue o mesmo padrão "seguro por omissão
 # em produção, permissivo em dev sem configuração" (achado da auditoria).
 PLANT_SERVICE_TOKEN = os.environ.get("PLANT_SERVICE_TOKEN")
+IS_PRODUCTION = os.environ.get("ENVIRONMENT") == "production"
+
+# Falhar já no arranque, não silenciosamente pedido a pedido — sem isto, um deploy em produção
+# que se esquecesse de definir o token ficava a aceitar qualquer pedido sem autenticação
+# interna, e ninguém dava por isso até haver um problema.
+if IS_PRODUCTION and not PLANT_SERVICE_TOKEN:
+    raise RuntimeError("PLANT_SERVICE_TOKEN tem de estar definido quando ENVIRONMENT=production.")
 
 
 @app.get("/health")
