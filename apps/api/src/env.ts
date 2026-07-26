@@ -21,4 +21,18 @@ export const env = {
   // só o próprio domínio (via Nginx, mesma origem) funciona sem precisar de CORS. Em
   // desenvolvimento, sem isto definido, aceita qualquer origem (útil com portas locais variáveis).
   corsOrigin: process.env.CORS_ORIGIN?.split(",").map((o) => o.trim()) ?? null,
+  // Login com Google (OAuth 2.0 "Authorization Code", ver src/routes/auth.ts). Sem estas três
+  // variáveis definidas, o botão "Entrar com Google" fica escondido no frontend (GET
+  // /api/auth/config devolve googleEnabled:false) — não é um erro, só significa "não configurado".
+  googleClientId: process.env.GOOGLE_CLIENT_ID || null,
+  googleClientSecret: process.env.GOOGLE_CLIENT_SECRET || null,
+  // Tem de ser IGUAL, byte a byte, ao URI registado no Google Cloud Console (ex:
+  // https://sud30s.org/api/auth/google/callback). Nunca é derivado do pedido recebido — o Google
+  // exige uma correspondência exacta com o que está registado, por isso é sempre explícito aqui.
+  googleRedirectUri: process.env.GOOGLE_REDIRECT_URI || null,
+  // Para onde reencaminhar o browser depois do callback do Google. Em produção (frontend e API no
+  // mesmo processo/domínio) fica vazio de propósito — um caminho relativo ("/") já aponta para o
+  // sítio certo. Só é preciso definir em desenvolvimento, onde o Vite corre numa porta diferente
+  // da API (ex: FRONTEND_URL=http://localhost:5273).
+  frontendUrl: process.env.FRONTEND_URL ?? "",
 };

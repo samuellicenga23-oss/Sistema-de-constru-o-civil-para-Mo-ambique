@@ -60,6 +60,10 @@ export const users = pgTable("users", {
   email: varchar("email", { length: 200 }).notNull().unique(),
   passwordHash: text("password_hash").notNull(),
   role: userRoleEnum("role").notNull(),
+  // "sub" do Google para a conta associada — só preenchido depois do primeiro login com Google
+  // bem-sucedido. Não permite criar conta por si só: o login com Google só funciona para um
+  // email que já exista aqui (criado por um admin), nunca regista ninguém novo.
+  googleId: varchar("google_id", { length: 255 }).unique(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

@@ -134,6 +134,13 @@
       "when": 1785095417765,
       "tag": "0018_unusual_jetstream",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1785105816557,
+      "tag": "0019_noisy_psynapse",
+      "breakpoints": true
     }
   ]
 }
