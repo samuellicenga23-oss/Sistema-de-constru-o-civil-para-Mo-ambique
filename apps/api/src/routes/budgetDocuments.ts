@@ -190,7 +190,7 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
       const composition = await assertCompositionVisible(data.compositionId, companyId);
       if (!composition) return reply.code(400).send({ error: "Composição de custo não encontrada" });
       const zoneId = await getZoneIdForSection(id);
-      const breakdown = await computeCompositionUnitCost(data.compositionId, zoneId);
+      const breakdown = await computeCompositionUnitCost(data.compositionId, companyId, zoneId);
       unitPrice = breakdown.unitCost;
       origin = "composicao";
     }
@@ -224,7 +224,7 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
       const composition = await assertCompositionVisible(data.compositionId, companyId);
       if (!composition) return reply.code(400).send({ error: "Composição de custo não encontrada" });
       const zoneId = await getZoneIdForSection(existing.sectionId);
-      const breakdown = await computeCompositionUnitCost(data.compositionId, zoneId);
+      const breakdown = await computeCompositionUnitCost(data.compositionId, companyId, zoneId);
       unitPrice = breakdown.unitCost;
       origin = "composicao";
     } else if (data.compositionId === null) {

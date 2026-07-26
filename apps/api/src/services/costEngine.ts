@@ -19,7 +19,10 @@ import {
 // de outro sítio) — sem isto, a linha da composição continua presa ao id antigo e um preço
 // editado no catálogo (que edita/clona pelo NOME) não chega a esta composição, apesar da UI dizer
 // que "todas as composições que usam este material foram recalculadas".
-async function resolveByName<Row extends { name: string; companyId: string | null }>(
+// Exportados também para uso fora deste ficheiro (ex: routes/costCompositions.ts, para o editor
+// mostrar o preço que a empresa realmente vai pagar por cada linha, não o preço bruto gravado na
+// linha da composição).
+export async function resolveByName<Row extends { name: string; companyId: string | null }>(
   rows: Row[]
 ): Promise<Map<string, Row>> {
   const byName = new Map<string, Row>();
@@ -30,7 +33,7 @@ async function resolveByName<Row extends { name: string; companyId: string | nul
   return byName;
 }
 
-function companyScope(companyIdColumn: AnyPgColumn, companyId: string | null) {
+export function companyScope(companyIdColumn: AnyPgColumn, companyId: string | null) {
   return companyId ? or(isNull(companyIdColumn), eq(companyIdColumn, companyId)) : isNull(companyIdColumn);
 }
 
@@ -69,13 +72,20 @@ export type CompositionMaterialQuantityLine = {
 // Usado para "explodir" um item medido (quantidade × qtyPerUnit) nos materiais reais que vai
 // consumir, ex: relatório de Materiais por Fase. `zoneId` tem o mesmo efeito que em
 // computeCompositionUnitCost: usa o preço da zona quando existir uma excepção gravada.
+//
+// `requestingCompanyId`: a empresa que está a pedir o cálculo — NUNCA o dono da composição.
+// Uma composição do catálogo partilhado (companyId null) pode ser usada por uma empresa que já
+// clonou um dos seus ingredientes (ex: mudou o preço do cimento) sem alguma vez ter clonado a
+// composição inteira; se resolvêssemos pelo dono da composição, essa alteração de preço nunca
+// aparecia no cálculo. `null` (super_admin, sem empresa) só vê preços partilhados.
 export async function getCompositionMaterialQuantities(
   compositionId: string,
+  requestingCompanyId: string | null,
   zoneId?: string | null
 ): Promise<CompositionMaterialQuantityLine[]> {
   const [composition] = await db.select().from(costCompositions).where(eq(costCompositions.id, compositionId)).limit(1);
   if (!composition) return [];
-  const scope = composition.companyId;
+  const scope = requestingCompanyId;
 
   const materialLinesRaw = await db
     .select({
@@ -144,10 +154,17 @@ export async function getCompositionMaterialQuantities(
 // cada material passa a usar o preço dessa zona (material_zone_prices) em vez do preço base do
 // catálogo, sempre que exista uma linha gravada para esse par (material, zona) — os materiais
 // sem preço de zona continuam a usar o preço base normalmente.
-export async function computeCompositionUnitCost(compositionId: string, zoneId?: string | null): Promise<CompositionCostBreakdown> {
+//
+// `requestingCompanyId`: ver o comentário em getCompositionMaterialQuantities — é sempre a
+// empresa que pediu o cálculo, nunca o dono da composição.
+export async function computeCompositionUnitCost(
+  compositionId: string,
+  requestingCompanyId: string | null,
+  zoneId?: string | null
+): Promise<CompositionCostBreakdown> {
   const [composition] = await db.select().from(costCompositions).where(eq(costCompositions.id, compositionId)).limit(1);
   if (!composition) throw new Error("Composição de custo não encontrada");
-  const scope = composition.companyId;
+  const scope = requestingCompanyId;
 
   const labourLinesRaw = await db
     .select({ qtyPerUnit: compositionLabourLines.qtyPerUnit, name: labourCategories.name, hourlyRate: labourCategories.hourlyRate })

@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
-import { eq, isNull, or, and } from "drizzle-orm";
+import { eq, isNull, or, and, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import {
   costCompositions,
@@ -11,7 +11,7 @@ import {
   equipment,
 } from "../db/schema.js";
 import { requireRole } from "../auth/middleware.js";
-import { computeCompositionUnitCost } from "../services/costEngine.js";
+import { computeCompositionUnitCost, resolveByName, companyScope } from "../services/costEngine.js";
 import { cloneCompositionForCompany } from "../services/catalogClone.js";
 import { costCompositionInputSchema } from "@sigo/shared";
 
@@ -46,9 +46,10 @@ export async function costCompositionRoutes(app: FastifyInstance) {
 
   app.get("/api/catalog/compositions", auth, async (request: FastifyRequest) => {
     const { zoneId } = request.query as { zoneId?: string };
+    const companyId = request.currentUser!.companyId;
     const rows = await db.select().from(costCompositions).where(scopeFilter(request));
     const deduped = dedupeByName(rows).sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
-    return Promise.all(deduped.map(async (row) => ({ ...row, ...(await computeCompositionUnitCost(row.id, zoneId)) })));
+    return Promise.all(deduped.map(async (row) => ({ ...row, ...(await computeCompositionUnitCost(row.id, companyId, zoneId)) })));
   });
 
   app.get("/api/catalog/compositions/:id", auth, async (request, reply) => {
@@ -100,10 +101,71 @@ export async function costCompositionRoutes(app: FastifyInstance) {
         .from(compositionEquipmentLines)
         .innerJoin(equipment, eq(compositionEquipmentLines.equipmentId, equipment.id))
         .where(eq(compositionEquipmentLines.compositionId, id)),
-      computeCompositionUnitCost(id),
+      computeCompositionUnitCost(id, request.currentUser!.companyId),
     ]);
 
-    return { ...composition, labourLines, materialLines, equipmentLines, ...breakdown };
+    // As linhas acima trazem sempre o custo gravado na linha da composição (que pode apontar
+    // para um recurso global) — para o editor mostrar o preço que a empresa REALMENTE paga
+    // (o seu próprio clone, se tiver um com o mesmo nome), resolve cada linha pelo mesmo
+    // mecanismo usado no cálculo do total (computeCompositionUnitCost), para o detalhe nunca
+    // ficar inconsistente com a soma já mostrada em cima.
+    const requestingCompanyId = request.currentUser!.companyId;
+    const labourNames = Array.from(new Set(labourLines.map((l) => l.name)));
+    const materialNames = Array.from(new Set(materialLines.map((l) => l.name)));
+    const equipmentNames = Array.from(new Set(equipmentLines.map((l) => l.name)));
+    const [resolvedLabour, resolvedMaterials, resolvedEquipment] = await Promise.all([
+      labourNames.length
+        ? resolveByName(
+            await db
+              .select({ id: labourCategories.id, name: labourCategories.name, companyId: labourCategories.companyId, unitCost: labourCategories.hourlyRate })
+              .from(labourCategories)
+              .where(and(inArray(labourCategories.name, labourNames), companyScope(labourCategories.companyId, requestingCompanyId)))
+          )
+        : new Map(),
+      materialNames.length
+        ? resolveByName(
+            await db
+              .select({
+                id: materials.id,
+                name: materials.name,
+                companyId: materials.companyId,
+                unitCost: materials.baseUnitCost,
+                importFactor: materials.importFactor,
+                unit: materials.unit,
+              })
+              .from(materials)
+              .where(and(inArray(materials.name, materialNames), companyScope(materials.companyId, requestingCompanyId)))
+          )
+        : new Map(),
+      equipmentNames.length
+        ? resolveByName(
+            await db
+              .select({ id: equipment.id, name: equipment.name, companyId: equipment.companyId, unitCost: equipment.hourlyCost })
+              .from(equipment)
+              .where(and(inArray(equipment.name, equipmentNames), companyScope(equipment.companyId, requestingCompanyId)))
+          )
+        : new Map(),
+    ]);
+
+    const resolvedLabourLines = labourLines.map((l) => ({ ...l, unitCost: resolvedLabour.get(l.name)?.unitCost ?? l.unitCost }));
+    const resolvedMaterialLines = materialLines.map((l) => {
+      const resolved = resolvedMaterials.get(l.name);
+      return {
+        ...l,
+        unitCost: resolved?.unitCost ?? l.unitCost,
+        importFactor: resolved?.importFactor ?? l.importFactor,
+        unit: resolved?.unit ?? l.unit,
+      };
+    });
+    const resolvedEquipmentLines = equipmentLines.map((l) => ({ ...l, unitCost: resolvedEquipment.get(l.name)?.unitCost ?? l.unitCost }));
+
+    return {
+      ...composition,
+      labourLines: resolvedLabourLines,
+      materialLines: resolvedMaterialLines,
+      equipmentLines: resolvedEquipmentLines,
+      ...breakdown,
+    };
   });
 
   app.post("/api/catalog/compositions", auth, async (request: FastifyRequest, reply: FastifyReply) => {
@@ -142,7 +204,7 @@ export async function costCompositionRoutes(app: FastifyInstance) {
       );
     }
 
-    const breakdown = await computeCompositionUnitCost(composition.id);
+    const breakdown = await computeCompositionUnitCost(composition.id, companyId);
     return reply.code(201).send({ ...composition, ...breakdown });
   });
 
@@ -192,7 +254,7 @@ export async function costCompositionRoutes(app: FastifyInstance) {
       );
     }
 
-    const breakdown = await computeCompositionUnitCost(targetId);
+    const breakdown = await computeCompositionUnitCost(targetId, companyId);
     const [updated] = await db.select().from(costCompositions).where(eq(costCompositions.id, targetId)).limit(1);
     return { ...updated, ...breakdown };
   });

@@ -91,7 +91,7 @@ async function getProjectZoneId(documentId: string): Promise<string | null> {
 // explodidos em materiais — ficam listados à parte, por fase, com o seu próprio valor (quantidade
 // × preço unitário já gravado no item) para não desaparecerem silenciosamente do relatório; se
 // forem de aço com diâmetro identificável na descrição, ganham também nº de varões a comprar.
-export async function computeMaterialsByPhase(documentId: string): Promise<MaterialsByPhaseResult | null> {
+export async function computeMaterialsByPhase(documentId: string, companyId: string | null): Promise<MaterialsByPhaseResult | null> {
   const summary = await getBudgetDocumentSummary(documentId);
   if (!summary) return null;
   const zoneId = await getProjectZoneId(documentId);
@@ -118,7 +118,7 @@ export async function computeMaterialsByPhase(documentId: string): Promise<Mater
 
       if (node.compositionId) {
         if (!compositionQtyCache.has(node.compositionId)) {
-          compositionQtyCache.set(node.compositionId, await getCompositionMaterialQuantities(node.compositionId, zoneId));
+          compositionQtyCache.set(node.compositionId, await getCompositionMaterialQuantities(node.compositionId, companyId, zoneId));
         }
         const lines = compositionQtyCache.get(node.compositionId)!;
         const bucket = materialTotals.get(phaseKey)!;
