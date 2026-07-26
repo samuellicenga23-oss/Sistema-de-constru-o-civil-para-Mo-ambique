@@ -129,11 +129,36 @@ export async function companyRoutes(app: FastifyInstance) {
   app.put("/api/companies/me", { preHandler: requireRole("admin_empresa") }, async (request, reply) => {
     const companyId = request.currentUser!.companyId!;
     const parsed = z
-      .object({ name: z.string().min(1).optional(), nuit: z.string().optional(), address: z.string().optional() })
+      .object({
+        name: z.string().min(1).optional(),
+        nuit: z.string().optional(),
+        address: z.string().optional(),
+        province: z.string().optional(),
+        district: z.string().optional(),
+        phone: z.string().optional(),
+        email: z.string().email().or(z.literal("")).optional(),
+        website: z.string().optional(),
+        bankDetails: z.string().optional(),
+        documentFooter: z.string().optional(),
+        responsibleName: z.string().optional(),
+        defaultCurrency: z.enum(CURRENCIES).optional(),
+        workingDaysPerMonth: z.number().int().min(1).max(31).optional(),
+        workingHoursPerDay: z.number().min(1).max(24).optional(),
+      })
       .safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    const { workingDaysPerMonth, workingHoursPerDay, email, ...rest } = parsed.data;
 
-    const [row] = await db.update(companies).set(parsed.data).where(eq(companies.id, companyId)).returning();
+    const [row] = await db
+      .update(companies)
+      .set({
+        ...rest,
+        ...(email !== undefined ? { email: email || null } : {}),
+        ...(workingDaysPerMonth !== undefined ? { workingDaysPerMonth } : {}),
+        ...(workingHoursPerDay !== undefined ? { workingHoursPerDay: workingHoursPerDay.toString() } : {}),
+      })
+      .where(eq(companies.id, companyId))
+      .returning();
     return row;
   });
 

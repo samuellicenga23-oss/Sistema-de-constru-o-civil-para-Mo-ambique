@@ -46,11 +46,12 @@ await app.register(cors, {
 });
 await app.register(cookie, { secret: env.sessionCookieSecret });
 await app.register(multipart, { limits: { fileSize: 50 * 1024 * 1024 } });
-// Só o logótipo da empresa é público de propósito (usado no login/branding entre empresas
-// diferentes, antes de haver sessão). Plantas e fotografias do diário de obra são dados
-// privados de cada empresa — deixaram de ser servidos aqui, ver routes/files.ts (rotas
-// autenticadas com verificação de posse).
+// Só o logótipo da empresa e o avatar de perfil são públicos de propósito (mostrados em
+// contextos sem sessão própria — ex: branding no login, ou o avatar de outro utilizador da
+// mesma equipa). Plantas e fotografias do diário de obra são dados privados de cada empresa —
+// deixaram de ser servidos aqui, ver routes/files.ts (rotas autenticadas com verificação de posse).
 await app.register(fastifyStatic, { root: path.resolve(env.uploadsDir, "logos"), prefix: "/uploads/logos/" });
+await app.register(fastifyStatic, { root: path.resolve(env.uploadsDir, "avatars"), prefix: "/uploads/avatars/", decorateReply: false });
 
 app.get("/api/health", async () => {
   const [{ now }] = await sql<{ now: Date }[]>`select now()`;

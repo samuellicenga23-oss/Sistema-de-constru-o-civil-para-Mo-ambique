@@ -11,6 +11,7 @@ import PlantReviewPage from "./pages/PlantReviewPage";
 import SuperAdminPage from "./pages/SuperAdminPage";
 import CompositionDetailPage from "./pages/CompositionDetailPage";
 import CompanySettingsPage from "./pages/CompanySettingsPage";
+import ProfilePage from "./pages/ProfilePage";
 import QuickCalcPage from "./pages/QuickCalcPage";
 import ProjectFinancialPage from "./pages/ProjectFinancialPage";
 import ProjectSiteDiaryPage from "./pages/ProjectSiteDiaryPage";
@@ -147,6 +148,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <QuickCalcPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/perfil"
+        element={
+          <ProtectedRoute>
+            <ProfilePage />
           </ProtectedRoute>
         }
       />

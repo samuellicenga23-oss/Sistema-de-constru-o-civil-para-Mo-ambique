@@ -41,6 +41,19 @@ export const companies = pgTable("companies", {
   defaultCurrency: currencyEnum("default_currency").notNull().default("MZN"),
   workingDaysPerMonth: integer("working_days_per_month").notNull().default(22),
   workingHoursPerDay: numeric("working_hours_per_day", { precision: 4, scale: 1 }).notNull().default("8"),
+  // Perfil da empresa (Fase 1, Etapa 4) — todos opcionais, preenchidos pelo admin_empresa
+  // quando quiser; nenhum é usado em cálculos, só em identificação/documentos.
+  province: varchar("province", { length: 100 }),
+  district: varchar("district", { length: 100 }),
+  phone: varchar("phone", { length: 50 }),
+  email: varchar("email", { length: 200 }),
+  website: varchar("website", { length: 200 }),
+  bankDetails: text("bank_details"),
+  // Texto livre acrescentado ao rodapé dos documentos exportados (Excel/PDF) desta empresa —
+  // ainda não usado pelos serviços de exportação (services/excelExport.ts, pdfExport.ts); fica
+  // gravado já para quando essa integração for feita.
+  documentFooter: text("document_footer"),
+  responsibleName: varchar("responsible_name", { length: 150 }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -65,6 +78,11 @@ export const users = pgTable("users", {
   // bem-sucedido. Não permite criar conta por si só: o login com Google só funciona para um
   // email que já exista aqui (criado por um admin), nunca regista ninguém novo.
   googleId: varchar("google_id", { length: 255 }).unique(),
+  avatarUrl: text("avatar_url"),
+  lastLoginAt: timestamp("last_login_at"),
+  // Guardado já para quando houver internacionalização real (Fase 1 do documento diz
+  // "futuramente") — hoje não muda nada no comportamento da aplicação.
+  preferredLanguage: varchar("preferred_language", { length: 10 }).notNull().default("pt"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -72,6 +90,11 @@ export const sessions = pgTable("sessions", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   expiresAt: timestamp("expires_at").notNull(),
+  // Para "terminar sessões de outros dispositivos" fazer sentido, o utilizador precisa de
+  // conseguir distinguir as sessões — nenhum dos dois é fiável a 100% (IP muda, user-agent
+  // pode ser forjado) mas já é o suficiente para reconhecer "o meu telemóvel" vs "outra coisa".
+  userAgent: text("user_agent"),
+  ipAddress: varchar("ip_address", { length: 64 }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

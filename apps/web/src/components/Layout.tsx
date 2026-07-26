@@ -2,8 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { companiesApi } from "../api/companies";
-import ChangePasswordModal from "./ChangePasswordModal";
-import { IconHome, IconFolder, IconTag, IconBuilding, IconLogout, IconSettings, IconRuler, IconKey, IconUsers } from "./icons";
+import { IconHome, IconFolder, IconTag, IconBuilding, IconLogout, IconSettings, IconRuler, IconUsers } from "./icons";
 
 const ROLE_LABELS: Record<string, string> = {
   super_admin: "Super Admin",
@@ -36,7 +35,6 @@ export default function Layout({
   const location = useLocation();
   const [companyName, setCompanyName] = useState<string | null>(null);
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
-  const [showChangePassword, setShowChangePassword] = useState(false);
 
   useEffect(() => {
     if (user?.companyId) {
@@ -105,28 +103,25 @@ export default function Layout({
 
         <div className="px-4 py-4 border-t border-white/10">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-full bg-brand-600 flex items-center justify-center text-sm font-semibold">
-              {initials(user?.name)}
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium truncate">{user?.name}</p>
-              <p className="text-[11px] text-brand-300">{user ? ROLE_LABELS[user.role] : ""}</p>
-            </div>
-            <button
-              onClick={() => setShowChangePassword(true)}
-              title="Mudar palavra-passe"
-              className="text-brand-300 hover:text-white transition-colors"
-            >
-              <IconKey className="w-[18px] h-[18px]" />
-            </button>
+            <Link to="/perfil" className="flex items-center gap-3 min-w-0 flex-1 group">
+              {user?.avatarUrl ? (
+                <img src={user.avatarUrl} alt={user.name} className="w-9 h-9 rounded-full object-cover shrink-0" />
+              ) : (
+                <div className="w-9 h-9 rounded-full bg-brand-600 flex items-center justify-center text-sm font-semibold shrink-0">
+                  {initials(user?.name)}
+                </div>
+              )}
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium truncate group-hover:underline">{user?.name}</p>
+                <p className="text-[11px] text-brand-300">{user ? ROLE_LABELS[user.role] : ""}</p>
+              </div>
+            </Link>
             <button onClick={() => logout()} title="Sair" className="text-brand-300 hover:text-white transition-colors">
               <IconLogout className="w-[18px] h-[18px]" />
             </button>
           </div>
         </div>
       </aside>
-
-      {showChangePassword && <ChangePasswordModal onClose={() => setShowChangePassword(false)} />}
 
       {/* Conteúdo */}
       <div className="flex-1 min-w-0 flex flex-col">
@@ -141,6 +136,9 @@ export default function Layout({
                 {item.label.split(" ")[0]}
               </Link>
             ))}
+            <Link to="/perfil" className={location.pathname === "/perfil" ? "text-white font-semibold" : "text-brand-300"}>
+              Perfil
+            </Link>
             <button onClick={() => logout()} className="text-brand-300">
               Sair
             </button>
