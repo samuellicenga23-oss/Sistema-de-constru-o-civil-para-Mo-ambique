@@ -2,8 +2,8 @@ import { describe, it, expect } from "vitest";
 import { canAccessPath } from "../src/permissions";
 
 describe("canAccessPath", () => {
-  it("super_admin só acede a /, /perfil e /admin", () => {
-    expect(canAccessPath("super_admin", "/")).toBe(true);
+  it("super_admin só acede ao painel, perfil e administração", () => {
+    expect(canAccessPath("super_admin", "/painel")).toBe(true);
     expect(canAccessPath("super_admin", "/perfil")).toBe(true);
     expect(canAccessPath("super_admin", "/admin")).toBe(true);
     expect(canAccessPath("super_admin", "/projectos")).toBe(false);

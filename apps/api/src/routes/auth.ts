@@ -213,7 +213,7 @@ export async function authRoutes(app: FastifyInstance) {
       const session = await createSession(user.id, sessionMetaOf(request));
       await db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, user.id));
       reply.setCookie("sid", session.id, { ...COOKIE_OPTS, expires: session.expiresAt });
-      return reply.redirect(env.frontendUrl || "/");
+      return reply.redirect(env.frontendUrl ? `${env.frontendUrl.replace(/\/$/, "")}/painel` : "/painel");
     }
   );
 

@@ -10,6 +10,7 @@ import { buildSchedulePdf } from "../services/schedulePdf.js";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista", "engenheiro_fiscal"] as const;
 const taskInput = z.object({
+  parentId: z.string().uuid().nullable().optional(),
   code: z.string().min(1).max(30),
   name: z.string().min(1).max(240),
   budgetDocumentId: z.string().uuid().nullable().optional(),
@@ -33,6 +34,19 @@ async function ownedTask(id: string, companyId: string) {
   const [task] = await db.select().from(scheduleTasks).where(eq(scheduleTasks.id, id)).limit(1);
   if (!task || !(await assertProjectOwned(task.projectId, companyId))) return null;
   return task;
+}
+
+async function validateParentTask(parentId: string | null | undefined, projectId: string, companyId: string, taskId?: string) {
+  if (!parentId) return null;
+  if (parentId === taskId) throw new Error("Uma actividade não pode ser subactividade de si própria");
+  const parent = await ownedTask(parentId, companyId);
+  if (!parent || parent.projectId !== projectId) throw new Error("A actividade principal não pertence a este cronograma");
+  if (parent.parentId) throw new Error("O cronograma permite um nível de subactividades para manter a WBS clara");
+  if (taskId) {
+    const [{ value: childCount }] = await db.select({ value: count() }).from(scheduleTasks).where(eq(scheduleTasks.parentId, taskId));
+    if (childCount > 0) throw new Error("Uma actividade principal com subactividades não pode ser movida para outro nível");
+  }
+  return parent;
 }
 
 export async function scheduleRoutes(app: FastifyInstance) {
@@ -71,6 +85,11 @@ export async function scheduleRoutes(app: FastifyInstance) {
       const predecessor = await ownedTask(parsed.data.predecessorTaskId, companyId);
       if (!predecessor || predecessor.projectId !== projectId) return reply.code(400).send({ error: "A predecessora não pertence ao cronograma desta obra" });
     }
+    try {
+      await validateParentTask(parsed.data.parentId, projectId, companyId);
+    } catch (error) {
+      return reply.code(409).send({ error: error instanceof Error ? error.message : "Actividade principal inválida" });
+    }
     const [{ value: taskCount }] = await db.select({ value: count() }).from(scheduleTasks).where(eq(scheduleTasks.projectId, projectId));
     const durationDays = parsed.data.durationDays ?? (parsed.data.endDate ? workingDaysInclusive(parsed.data.startDate, parsed.data.endDate) : 1);
     const endDate = parsed.data.endDate ?? addWorkingDays(parsed.data.startDate, durationDays - 1);
@@ -93,6 +112,11 @@ export async function scheduleRoutes(app: FastifyInstance) {
     if (!current) return reply.code(404).send({ error: "Tarefa não encontrada" });
     const parsed = taskInput.partial().safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    try {
+      if (parsed.data.parentId !== undefined) await validateParentTask(parsed.data.parentId, current.projectId, companyIdOf(request), id);
+    } catch (error) {
+      return reply.code(409).send({ error: error instanceof Error ? error.message : "Actividade principal inválida" });
+    }
     const dependencyTouched = parsed.data.predecessorTaskId !== undefined || parsed.data.dependencyType !== undefined || parsed.data.lagDays !== undefined;
     const currentDependency = dependencyTouched ? await getTaskDependency(id) : null;
     const nextDependency = dependencyTouched ? {

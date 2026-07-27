@@ -36,12 +36,19 @@ export function workingDaysInclusive(startDate: string, endDate: string) {
 }
 
 export function allocateDurations(weights: number[], requestedTotal: number, minimum = 3) {
+  return allocateDurationsWithMinimums(weights, requestedTotal, weights.map(() => minimum));
+}
+
+export function allocateDurationsWithMinimums(weights: number[], requestedTotal: number, minimums: number[]) {
   if (!weights.length) return [];
-  const total = Math.max(requestedTotal, weights.length * minimum);
+  if (weights.length !== minimums.length) throw new Error("Pesos e mínimos do cronograma devem ter o mesmo tamanho");
+  const safeMinimums = minimums.map((minimum) => Math.max(1, Math.floor(minimum)));
+  const minimumTotal = safeMinimums.reduce((sum, minimum) => sum + minimum, 0);
+  const total = Math.max(requestedTotal, minimumTotal);
   const positiveWeights = weights.map((weight) => Math.max(0, weight));
   const safeWeights = positiveWeights.some((weight) => weight > 0) ? positiveWeights : weights.map(() => 1);
   const sum = safeWeights.reduce((value, weight) => value + weight, 0);
-  const raw = safeWeights.map((weight) => minimum + ((total - weights.length * minimum) * weight) / sum);
+  const raw = safeWeights.map((weight, index) => safeMinimums[index] + ((total - minimumTotal) * weight) / sum);
   const result = raw.map(Math.floor);
   let remaining = total - result.reduce((value, days) => value + days, 0);
   raw
@@ -73,16 +80,23 @@ export async function generateSchedule(args: {
   if (!summary) throw new Error("Mapa de Quantidades não encontrado");
   const roots = collectScheduleRoots(summary);
   if (!roots.length) throw new Error("O Mapa de Quantidades ainda não tem capítulos para gerar a WBS");
-  const durations = allocateDurations(roots.map((root) => root.totalPrice), args.totalDurationDays);
+  const childrenByRoot = roots.map((root) => root.children);
+  const durations = allocateDurationsWithMinimums(
+    roots.map((root) => root.totalPrice),
+    args.totalDurationDays,
+    childrenByRoot.map((children) => Math.max(3, children.length)),
+  );
 
   await db.delete(scheduleTasks).where(eq(scheduleTasks.projectId, args.projectId));
   let cursor = args.startDate;
-  const inserted: Array<typeof scheduleTasks.$inferSelect> = [];
+  let sortOrder = 0;
+  const rootTasks: Array<typeof scheduleTasks.$inferSelect> = [];
+  const dependencyValues: Array<typeof scheduleDependencies.$inferInsert> = [];
   for (let index = 0; index < roots.length; index += 1) {
     const root = roots[index];
     const durationDays = durations[index];
     const endDate = addWorkingDays(cursor, durationDays - 1);
-    const [task] = await db.insert(scheduleTasks).values({
+    const [rootTask] = await db.insert(scheduleTasks).values({
       projectId: args.projectId,
       budgetDocumentId: args.budgetDocumentId,
       code: root.code ?? String(index + 1),
@@ -93,19 +107,54 @@ export async function generateSchedule(args: {
       baselineStartDate: cursor,
       baselineEndDate: endDate,
       durationDays,
-      sortOrder: index,
+      sortOrder: sortOrder++,
     }).returning();
-    inserted.push(task);
+    rootTasks.push(rootTask);
+
+    const children = childrenByRoot[index];
+    if (children.length) {
+      const childDurations = allocateDurations(children.map((child) => child.totalPrice), durationDays, 1);
+      let childCursor = cursor;
+      let previousChild: typeof scheduleTasks.$inferSelect | null = null;
+      for (let childIndex = 0; childIndex < children.length; childIndex += 1) {
+        const child = children[childIndex];
+        const childDuration = childDurations[childIndex];
+        const childEndDate = addWorkingDays(childCursor, childDuration - 1);
+        const [childTask] = await db.insert(scheduleTasks).values({
+          projectId: args.projectId,
+          parentId: rootTask.id,
+          budgetDocumentId: args.budgetDocumentId,
+          code: child.code ?? `${rootTask.code}.${childIndex + 1}`,
+          name: child.description,
+          budgetChapterCode: child.code ?? rootTask.budgetChapterCode,
+          startDate: childCursor,
+          endDate: childEndDate,
+          baselineStartDate: childCursor,
+          baselineEndDate: childEndDate,
+          durationDays: childDuration,
+          sortOrder: sortOrder++,
+        }).returning();
+        if (previousChild) dependencyValues.push({
+          predecessorTaskId: previousChild.id,
+          successorTaskId: childTask.id,
+          type: "FS",
+          lagDays: 0,
+        });
+        previousChild = childTask;
+        childCursor = addWorkingDays(childEndDate, 1);
+      }
+    }
     cursor = addWorkingDays(endDate, 1);
   }
-  if (inserted.length > 1) {
-    await db.insert(scheduleDependencies).values(inserted.slice(1).map((task, index) => ({
-      predecessorTaskId: inserted[index].id,
+  if (rootTasks.length > 1) {
+    dependencyValues.push(...rootTasks.slice(1).map((task, index) => ({
+      predecessorTaskId: rootTasks[index].id,
       successorTaskId: task.id,
       type: "FS" as const,
       lagDays: 0,
     })));
   }
+  if (dependencyValues.length) await db.insert(scheduleDependencies).values(dependencyValues);
   return getProjectSchedule(args.projectId);
 }
 
@@ -156,7 +205,7 @@ export async function getProjectSchedule(projectId: string) {
   const latestDiaryProgress = new Map<string, number>();
   for (const row of diaryProgressRows) if (!latestDiaryProgress.has(row.progress.scheduleTaskId)) latestDiaryProgress.set(row.progress.scheduleTaskId, Number(row.progress.progressPercent));
 
-  const enriched = tasks.map((task) => {
+  const baseEnriched = tasks.map((task) => {
     const summary = task.budgetDocumentId ? summaries.get(task.budgetDocumentId) : null;
     const root = summary && task.budgetChapterCode
       ? summary.sections.flatMap((section) => section.items).map((node) => findNodeByCode([node], task.budgetChapterCode!)).find(Boolean)
@@ -176,34 +225,88 @@ export async function getProjectSchedule(projectId: string) {
       ? task.status
       : progress >= 100 ? "concluido" : progress > 0 ? "em_curso" : task.status;
     const predecessor = dependencies.find((dependency) => dependency.successorTaskId === task.id);
+    const progressSource: "autos" | "diario" | "manual" | "planeamento" = progress <= 0
+      ? "planeamento"
+      : measuredProgress >= diaryProgress && measuredProgress >= manualProgress
+        ? "autos"
+        : diaryProgress >= manualProgress
+          ? "diario"
+          : "manual";
     return {
       ...task,
       progress,
       status: effectiveStatus,
       plannedValue,
       executedValue,
-      progressSource: progress <= 0
-        ? "planeamento"
-        : measuredProgress >= diaryProgress && measuredProgress >= manualProgress
-          ? "autos"
-          : diaryProgress >= manualProgress
-            ? "diario"
-            : "manual",
+      progressSource,
       predecessorTaskId: predecessor?.predecessorTaskId ?? null,
       dependencyType: predecessor?.type ?? null,
       lagDays: predecessor?.lagDays ?? 0,
     };
   });
-  const plannedValue = enriched.reduce((sum, task) => sum + task.plannedValue, 0);
-  const executedValue = enriched.reduce((sum, task) => sum + task.executedValue, 0);
+  const childrenByParent = new Map<string, typeof baseEnriched>();
+  for (const task of baseEnriched) {
+    if (!task.parentId) continue;
+    const children = childrenByParent.get(task.parentId) ?? [];
+    children.push(task);
+    childrenByParent.set(task.parentId, children);
+  }
+  const enriched = baseEnriched.map((task) => {
+    const children = childrenByParent.get(task.id) ?? [];
+    if (!children.length) return { ...task, isSummary: false as const };
+    const childrenPlannedValue = children.reduce((sum, child) => sum + child.plannedValue, 0);
+    const plannedValue = childrenPlannedValue > 0 ? childrenPlannedValue : task.plannedValue;
+    const executedValue = childrenPlannedValue > 0 ? children.reduce((sum, child) => sum + child.executedValue, 0) : task.executedValue;
+    const progress = childrenPlannedValue > 0
+      ? children.reduce((sum, child) => sum + child.plannedValue * child.progress / 100, 0) / childrenPlannedValue * 100
+      : children.reduce((sum, child) => sum + child.progress, 0) / children.length;
+    const status = children.some((child) => child.status === "bloqueado")
+      ? "bloqueado" as const
+      : children.every((child) => child.status === "concluido")
+        ? "concluido" as const
+        : children.some((child) => child.status === "em_curso" || child.progress > 0)
+          ? "em_curso" as const
+          : "nao_iniciado" as const;
+    const startDate = children.reduce((min, child) => child.startDate < min ? child.startDate : min, children[0].startDate);
+    const endDate = children.reduce((max, child) => child.endDate > max ? child.endDate : max, children[0].endDate);
+    const baselineChildren = children.filter((child) => child.baselineStartDate && child.baselineEndDate);
+    const baselineStartDate = baselineChildren.length
+      ? baselineChildren.reduce((min, child) => child.baselineStartDate! < min ? child.baselineStartDate! : min, baselineChildren[0].baselineStartDate!)
+      : task.baselineStartDate;
+    const baselineEndDate = baselineChildren.length
+      ? baselineChildren.reduce((max, child) => child.baselineEndDate! > max ? child.baselineEndDate! : max, baselineChildren[0].baselineEndDate!)
+      : task.baselineEndDate;
+    return {
+      ...task,
+      isSummary: true as const,
+      startDate,
+      endDate,
+      baselineStartDate,
+      baselineEndDate,
+      durationDays: workingDaysInclusive(startDate, endDate),
+      plannedValue,
+      executedValue,
+      progress,
+      status,
+      progressSource: "subactividades" as const,
+    };
+  });
+  const orderedEnriched = enriched
+    .filter((task) => !task.parentId)
+    .flatMap((task) => [task, ...enriched.filter((child) => child.parentId === task.id)]);
+  // Os totais usam apenas o primeiro nível: cada actividade principal já agrega as suas
+  // subactividades. Assim, uma WBS detalhada nunca duplica o valor do orçamento.
+  const topLevelTasks = enriched.filter((task) => !task.parentId);
+  const plannedValue = topLevelTasks.reduce((sum, task) => sum + task.plannedValue, 0);
+  const executedValue = topLevelTasks.reduce((sum, task) => sum + task.executedValue, 0);
   return {
-    tasks: enriched,
+    tasks: orderedEnriched,
     dependencies,
-    startDate: enriched.reduce((min, task) => task.startDate < min ? task.startDate : min, enriched[0].startDate),
-    endDate: enriched.reduce((max, task) => task.endDate > max ? task.endDate : max, enriched[0].endDate),
+    startDate: orderedEnriched.reduce((min, task) => task.startDate < min ? task.startDate : min, orderedEnriched[0].startDate),
+    endDate: orderedEnriched.reduce((max, task) => task.endDate > max ? task.endDate : max, orderedEnriched[0].endDate),
     overallProgress: plannedValue > 0
-      ? Math.min(100, enriched.reduce((sum, task) => sum + task.plannedValue * task.progress / 100, 0) / plannedValue * 100)
-      : enriched.reduce((sum, task) => sum + task.progress, 0) / enriched.length,
+      ? Math.min(100, topLevelTasks.reduce((sum, task) => sum + task.plannedValue * task.progress / 100, 0) / plannedValue * 100)
+      : topLevelTasks.length ? topLevelTasks.reduce((sum, task) => sum + task.progress, 0) / topLevelTasks.length : 0,
     plannedValue,
     executedValue,
   };

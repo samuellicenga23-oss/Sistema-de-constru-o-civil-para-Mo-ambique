@@ -4,6 +4,7 @@ export type ScheduleTaskStatus = "nao_iniciado" | "em_curso" | "bloqueado" | "co
 export type ScheduleTask = {
   id: string;
   projectId: string;
+  parentId: string | null;
   budgetDocumentId: string | null;
   code: string;
   name: string;
@@ -22,7 +23,8 @@ export type ScheduleTask = {
   progress: number;
   plannedValue: number;
   executedValue: number;
-  progressSource: "autos" | "diario" | "manual" | "planeamento";
+  progressSource: "autos" | "diario" | "manual" | "planeamento" | "subactividades";
+  isSummary: boolean;
   predecessorTaskId: string | null;
   dependencyType: "FS" | "SS" | "FF" | "SF" | null;
   lagDays: number;
@@ -39,6 +41,7 @@ export type ProjectSchedule = {
 };
 
 export type ScheduleTaskInput = Partial<{
+  parentId: string | null;
   code: string;
   name: string;
   budgetDocumentId: string | null;

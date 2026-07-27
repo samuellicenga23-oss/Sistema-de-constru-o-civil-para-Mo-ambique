@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth, ApiError } from "../auth/AuthContext";
 
 // Mensagens para os códigos de erro que a API devolve via query string depois de um callback do
@@ -40,7 +40,7 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       await login(email, password);
-      navigate("/");
+      navigate("/painel");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Erro ao entrar");
     } finally {
@@ -52,13 +52,13 @@ export default function LoginPage() {
     <div className="min-h-screen grid lg:grid-cols-2 bg-[#172033]">
       {/* Painel de marca */}
       <div className="hidden lg:flex flex-col justify-between text-white p-14 xl:p-20">
-        <div className="flex items-center gap-3">
+        <Link to="/" className="flex items-center gap-3">
           <span className="grid h-10 w-10 place-items-center rounded-lg bg-[#e86f25] text-white text-lg font-black">S</span>
           <div>
             <p className="text-2xl font-black tracking-[0.2em]">SIGA</p>
             <p className="text-[10px] uppercase tracking-[0.22em] text-slate-400">Gestão inteligente de obras</p>
           </div>
-        </div>
+        </Link>
         <div className="max-w-lg">
           <h1 className="text-4xl font-bold leading-tight tracking-tight">Gestão de obras sem complicação.</h1>
           <p className="mt-4 max-w-md text-base leading-7 text-slate-300">

@@ -228,3 +228,50 @@ consultar o estado do Git e as entradas mais recentes. Cada intervenção deve i
   aprovados. Os novos testes cobrem acumulados/excedentes dos Autos, distribuição/calendário do
   cronograma e prevenção de recompra após consumo.
 - **Produção:** ainda não publicada; as alterações permanecem na branch de trabalho para revisão.
+
+## 2026-07-27 — Codex — Website público, planos comerciais e cronograma hierárquico
+
+- **Website antes do login:** a rota `/` deixou de abrir o painel privado e passou a apresentar o
+  novo site comercial do SIGA. O painel autenticado encontra-se agora em `/painel`; login, menu,
+  permissões e retorno do Google OAuth foram actualizados para essa rota.
+- **Direcção visual:** página editorial, responsiva e sem fotografias genéricas no conteúdo, com
+  paleta marfim/navy/laranja, demonstração visual do produto, proposta de valor, fluxo operacional,
+  contactos e navegação móvel. A composição tomou como referência os padrões actuais de clareza de
+  produto e preços de Procore, Buildertrend, Fieldwire e Buildxact, sem copiar textos ou layouts.
+- **Planos sugeridos:** Fundamento por `4.900 MZN/mês` (3 obras, 5 utilizadores), Profissional por
+  `12.900 MZN/mês` (15 obras, 20 utilizadores) e Empresa por `29.900 MZN/mês` (50 obras,
+  utilizadores ilimitados), com proposta de 15% de desconto anual. O Profissional é destacado como
+  recomendação comercial.
+- **Conversão comercial:** todos os planos abrem uma mensagem já preparada para o WhatsApp
+  `+58 846 63 84 194` (`wa.me/588466384194`) e têm alternativa por email para
+  `licsenga.samuel@mechanical.co.mz`. A página final repete os dois contactos.
+- **Partilha social:** novo `apps/web/public/og-siga.png`, gerado especificamente para a marca, e
+  metadados Open Graph/Twitter no `index.html` para uma apresentação cuidada ao partilhar o domínio.
+- **Cronograma WBS:** ao gerar/recriar a linha de base, cada capítulo do Mapa de Quantidades passa a
+  ser uma actividade principal e os nós imediatamente abaixo tornam-se subactividades. As durações
+  respeitam mínimos por nível e são distribuídas pelo peso financeiro; dependências FS são criadas
+  dentro de cada grupo e entre as actividades principais.
+- **Edição do plano:** novos comandos para criar actividade principal ou subactividade, selector de
+  nível WBS, edição do código, recolher/expandir grupos, indentação visual e resumo automático. Uma
+  actividade principal com filhos recebe datas, duração, estado e progresso a partir das
+  subactividades e não permite edição manual desses valores agregados.
+- **Integridade:** a API valida que o pai pertence à mesma obra, impede auto-referência, limita a WBS
+  a um nível de subactividades e impede mover um resumo já estruturado. Tarefas são devolvidas na
+  ordem pai → filhos, incluindo subactividades adicionadas posteriormente.
+- **Valores sem duplicação:** totais e progresso global usam apenas o primeiro nível agregado. O
+  detalhe não duplica o valor do orçamento; cronogramas antigos e actividades manuais continuam a
+  preservar o valor do capítulo. A sugestão de compras prefere a tarefa executável da fase em vez
+  do resumo.
+- **PDF A3:** actividades principais recebem estilo de resumo, subactividades ficam indentadas e as
+  barras-resumo têm leitura própria. Cabeçalhos repetem em várias páginas e as linhas evitam quebra
+  a meio.
+- **Compatibilidade:** cronogramas já existentes continuam válidos, mas só recebem as
+  subactividades automáticas depois de o utilizador escolher **Recriar WBS e linha de base**; essa
+  acção continua a pedir confirmação porque substitui o plano actual.
+- **Ambiente local:** frontend fixado em `http://127.0.0.1:5273`, com porta estrita, para evitar o
+  erro anterior de ligação local e não mudar silenciosamente de endereço.
+- **Validação:** build completo de shared/API/web aprovado; 31 testes da API e 12 do frontend
+  aprovados. Website verificado no browser em desktop e 390 px, incluindo menu móvel, contactos e
+  três planos. Cronograma, selecção, editor WBS e PDF A3 verificados sem erros de consola.
+- **Persistência:** nenhuma nova migração; `parent_id` já fazia parte da migração `0022`.
+- **Produção:** ainda não publicada; as alterações permanecem na branch de trabalho para revisão.

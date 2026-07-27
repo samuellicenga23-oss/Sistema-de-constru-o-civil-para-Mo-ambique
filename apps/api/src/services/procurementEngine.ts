@@ -124,6 +124,7 @@ export async function computeProcurementPlan(args: {
     db.select().from(scheduleTasks).where(eq(scheduleTasks.projectId, args.projectId)),
   ]);
   taskRows.sort((a, b) => a.startDate.localeCompare(b.startDate));
+  const summaryTaskIds = new Set(taskRows.filter((task) => task.parentId).map((task) => task.parentId!));
 
   const stock = new Map<string, number>();
   const consumed = new Map<string, number>();
@@ -157,7 +158,8 @@ export async function computeProcurementPlan(args: {
     const estimatedUnitCost = quote ? Number(quote.unitCost) : catalogUnitCost;
     const quoteSource: ProcurementRequirement["quoteSource"] = quote ? (quote.zoneId ? "zona" : "geral") : "catalogo";
     const phaseKeys = new Set(item.phases.map((phase) => phase.key));
-    const suggestedTask = taskRows.find((task) => phaseKeys.has(mapToPhase(task.name, [], task.name)));
+    const matchingTasks = taskRows.filter((task) => phaseKeys.has(mapToPhase(task.name, [], task.name)));
+    const suggestedTask = matchingTasks.find((task) => !summaryTaskIds.has(task.id)) ?? matchingTasks[0];
     return {
       materialId: item.materialId,
       materialName: item.materialName,

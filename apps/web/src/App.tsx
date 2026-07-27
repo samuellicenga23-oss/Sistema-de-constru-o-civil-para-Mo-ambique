@@ -20,6 +20,7 @@ import ProjectSiteDiaryPage from "./pages/ProjectSiteDiaryPage";
 import SuppliersPage from "./pages/SuppliersPage";
 import ProjectPurchasingPage from "./pages/ProjectPurchasingPage";
 import ProjectSchedulePage from "./pages/ProjectSchedulePage";
+import PublicLandingPage from "./pages/PublicLandingPage";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -48,8 +49,9 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/" element={<PublicLandingPage />} />
       <Route
-        path="/"
+        path="/painel"
         element={
           <ProtectedRoute>
             <DashboardPage />

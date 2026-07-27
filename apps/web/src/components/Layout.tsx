@@ -63,7 +63,7 @@ export default function Layout({
     user?.role === "super_admin"
       ? [{ to: "/admin", label: "Painel da Plataforma", icon: IconSettings }]
       : [
-          { to: "/", label: "Painel", icon: IconHome, exact: true },
+          { to: "/painel", label: "Painel", icon: IconHome, exact: true },
           { to: "/projectos", label: "Projectos e Orçamentos", icon: IconFolder },
           { to: "/catalogo", label: "Catálogo de Preços", icon: IconTag },
           { to: "/fornecedores", label: "Fornecedores", icon: IconUsers },
@@ -115,7 +115,7 @@ export default function Layout({
           {navItems.map((item) => {
             const active = isActive(item);
             const Icon = item.icon;
-            const sectionLabel = item.to === "/" || item.to === "/admin" ? "Trabalho" : item.to === "/fornecedores" ? "Operações" : item.to === "/empresa" ? "Administração" : null;
+            const sectionLabel = item.to === "/painel" || item.to === "/admin" ? "Trabalho" : item.to === "/fornecedores" ? "Operações" : item.to === "/empresa" ? "Administração" : null;
             return (
               <div key={item.to}>
               {sectionLabel && !sidebarCollapsed && <p className="mb-1 mt-4 px-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400 first:mt-0">{sectionLabel}</p>}

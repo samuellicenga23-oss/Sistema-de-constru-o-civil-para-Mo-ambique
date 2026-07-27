@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { validateMeasuredQuantity } from "../src/services/measurementEngine.js";
-import { addWorkingDays, allocateDurations } from "../src/services/scheduleEngine.js";
+import { addWorkingDays, allocateDurations, allocateDurationsWithMinimums } from "../src/services/scheduleEngine.js";
 import { calculateProcurementQuantity } from "../src/services/procurementEngine.js";
 
 describe("Regras dos Autos de Medição", () => {
@@ -24,6 +24,13 @@ describe("Regras do Cronograma", () => {
 
   it("usa calendário de obra de segunda a sábado", () => {
     expect(addWorkingDays("2026-07-25", 1)).toBe("2026-07-27"); // sábado + 1 dia útil = segunda
+  });
+
+  it("reserva duração suficiente para todas as subactividades da WBS", () => {
+    const durations = allocateDurationsWithMinimums([70, 30], 12, [8, 2]);
+    expect(durations.reduce((sum, value) => sum + value, 0)).toBe(12);
+    expect(durations[0]).toBeGreaterThanOrEqual(8);
+    expect(durations[1]).toBeGreaterThanOrEqual(2);
   });
 });
 

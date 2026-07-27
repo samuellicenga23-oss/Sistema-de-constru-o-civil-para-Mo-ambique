@@ -9,7 +9,7 @@ export type Role = CurrentUser["role"];
 // escrevendo o URL directamente.
 
 // super_admin só gere a plataforma — nunca vê dados operacionais de nenhuma empresa.
-const SUPER_ADMIN_ALLOWED = new Set(["/", "/perfil", "/admin"]);
+const SUPER_ADMIN_ALLOWED = new Set(["/painel", "/perfil", "/admin"]);
 
 // Só o admin_empresa gere as definições e a equipa da própria empresa.
 const ADMIN_EMPRESA_ONLY = new Set(["/empresa"]);
