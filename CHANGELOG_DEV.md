@@ -91,6 +91,8 @@ consultar o estado do Git e as entradas mais recentes. Cada intervenção deve i
   de preços adoptados e composições disponíveis.
 - **Medições:** o Assistente começa com diagnóstico de prontidão em oito grupos: compartimentos,
   perímetros/pés-direitos, fundações, vigas, lajes, aço, redes hidráulicas e preços críticos.
+- **Plantas:** ficheiros cujo processamento falhou passam a oferecer “Tentar novamente”, usando o
+  PDF já guardado, sem obrigar o utilizador a procurar e carregar o ficheiro outra vez.
 - **Transparência:** cada ausência explica o impacto e o rácio que seria usado; o utilizador pode
   prosseguir conscientemente e os pressupostos continuam identificados no relatório final.
 - **Persistência:** nenhuma migração necessária; diagnóstico e cotações são derivados das relações

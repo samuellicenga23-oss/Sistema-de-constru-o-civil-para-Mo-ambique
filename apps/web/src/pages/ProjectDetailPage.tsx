@@ -44,6 +44,7 @@ export default function ProjectDetailPage() {
   const [periodDate, setPeriodDate] = useState(todayStr());
   const [plantDiscipline, setPlantDiscipline] = useState<"arquitectura" | "estrutura">("arquitectura");
   const [uploading, setUploading] = useState(false);
+  const [reprocessingPlantId, setReprocessingPlantId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [costReadiness, setCostReadiness] = useState({ materials: 0, quoted: 0, zonePriced: 0, suppliers: 0, compositions: 0 });
 
@@ -148,6 +149,21 @@ export default function ProjectDetailPage() {
       await reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao eliminar planta");
+    }
+  }
+
+  async function handleReprocessPlant(e: MouseEvent, id: string) {
+    e.preventDefault();
+    e.stopPropagation();
+    setError(null);
+    setReprocessingPlantId(id);
+    try {
+      await plantsApi.reprocess(id);
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível reprocessar a planta");
+    } finally {
+      setReprocessingPlantId(null);
     }
   }
 
@@ -324,6 +340,11 @@ export default function ProjectDetailPage() {
                     <span className="font-medium text-gray-500 truncate pr-2">{p.originalFileName}</span>
                     <span className="flex items-center gap-2 shrink-0">
                       <span className={`badge ${PLANT_STATUS_BADGE[p.processingStatus].cls}`}>{PLANT_STATUS_BADGE[p.processingStatus].label}</span>
+                      {p.processingStatus === "erro" && (
+                        <button onClick={(e) => handleReprocessPlant(e, p.id)} disabled={reprocessingPlantId === p.id} className="btn btn-secondary btn-sm">
+                          {reprocessingPlantId === p.id ? "A tentar..." : "Tentar novamente"}
+                        </button>
+                      )}
                       <button
                         onClick={(e) => handleDeletePlant(e, p.id, p.originalFileName)}
                         className="icon-btn-danger opacity-0 pointer-coarse:opacity-100 group-hover:opacity-100 transition-opacity"
