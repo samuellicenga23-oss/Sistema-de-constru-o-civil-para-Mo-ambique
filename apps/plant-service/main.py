@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from parser import parse_pdf
 
-app = FastAPI(title="SIGO Plant Service")
+app = FastAPI(title="SIGA Plant Service")
 
 # Segredo partilhado com a API principal — este serviço não tem o seu próprio sistema de
 # utilizadores/sessões, e confiava até agora só em estar isolado na rede (127.0.0.1). Se

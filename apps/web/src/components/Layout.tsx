@@ -83,21 +83,26 @@ export default function Layout({
   return (
     <div className="min-h-screen flex">
       {/* Sidebar */}
-      <aside className="hidden md:flex w-64 shrink-0 flex-col bg-gradient-to-b from-brand-950 to-brand-900 text-white">
-        <div className="px-5 py-6 border-b border-white/10">
+      <aside className="hidden md:flex w-[17.5rem] shrink-0 flex-col bg-[#071d19] text-white relative overflow-hidden">
+        <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_0%_0%,rgba(52,211,153,0.16),transparent_38%)]" />
+        <div className="relative px-5 py-6 border-b border-white/8">
           {logoUrl ? (
             <div className="bg-white rounded-lg p-2 inline-block mb-2">
               <img src={logoUrl} alt={companyName ?? "Logótipo"} className="h-8 object-contain" />
             </div>
           ) : (
-            <p className="text-xl font-bold tracking-tight">
-              SIG<span className="text-brand-300">O</span>
-            </p>
+            <div className="flex items-center gap-3">
+              <span className="grid h-10 w-10 place-items-center rounded-xl bg-brand-400 text-brand-950 font-black shadow-lg shadow-black/20">S</span>
+              <div>
+                <p className="text-xl font-black tracking-[0.16em]">SIGA</p>
+                <p className="text-[9px] uppercase tracking-[0.2em] text-brand-300/80">Gestão de obras</p>
+              </div>
+            </div>
           )}
           {companyName && <p className="text-xs text-brand-300 mt-1 truncate">{companyName}</p>}
         </div>
 
-        <nav className="flex-1 px-3 py-4 space-y-1">
+        <nav className="relative flex-1 px-3 py-5 space-y-1.5">
           {navItems.map((item) => {
             const active = isActive(item);
             const Icon = item.icon;
@@ -105,8 +110,8 @@ export default function Layout({
               <Link
                 key={item.to}
                 to={item.to}
-                className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
-                  active ? "bg-white/15 text-white shadow-sm" : "text-brand-200 hover:bg-white/8 hover:text-white"
+                className={`group flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold transition-all ${
+                  active ? "bg-brand-400 text-brand-950 shadow-lg shadow-black/10" : "text-slate-300 hover:bg-white/8 hover:text-white"
                 }`}
               >
                 <Icon className="w-[18px] h-[18px]" />
@@ -116,7 +121,7 @@ export default function Layout({
           })}
         </nav>
 
-        <div className="px-4 py-4 border-t border-white/10">
+        <div className="relative px-4 py-4 border-t border-white/8 bg-black/10">
           <div className="flex items-center gap-3">
             <Link to="/perfil" className="flex items-center gap-3 min-w-0 flex-1 group">
               {user?.avatarUrl ? (
@@ -141,13 +146,11 @@ export default function Layout({
       {/* Conteúdo */}
       <div className="flex-1 min-w-0 flex flex-col">
         {/* Barra superior móvel (ecrãs pequenos, sem sidebar) */}
-        <div className="md:hidden bg-brand-950 text-white px-4 py-3 flex items-center justify-between">
+        <div className="md:hidden bg-[#071d19] text-white px-4 py-3 flex items-center justify-between shadow-lg">
           <button onClick={() => setDrawerOpen(true)} aria-label="Abrir menu" className="text-brand-200 hover:text-white -ml-1 p-1">
             <IconMenu className="w-5 h-5" />
           </button>
-          <p className="font-bold">
-            SIG<span className="text-brand-300">O</span>
-          </p>
+          <p className="font-black tracking-[0.18em]">SIGA</p>
           <Link to="/perfil" aria-label="Perfil">
             {user?.avatarUrl ? (
               <img src={user.avatarUrl} alt={user.name} className="w-7 h-7 rounded-full object-cover" />
@@ -164,9 +167,7 @@ export default function Layout({
             <div className="absolute inset-0 bg-gray-900/50" onClick={() => setDrawerOpen(false)} />
             <div className="relative w-72 max-w-[80vw] bg-gradient-to-b from-brand-950 to-brand-900 text-white flex flex-col">
               <div className="px-4 py-4 flex items-center justify-between border-b border-white/10">
-                <p className="text-lg font-bold tracking-tight">
-                  SIG<span className="text-brand-300">O</span>
-                </p>
+                <p className="text-lg font-black tracking-[0.18em]">SIGA</p>
                 <button onClick={() => setDrawerOpen(false)} aria-label="Fechar menu" className="text-brand-200 hover:text-white p-1">
                   <IconClose className="w-5 h-5" />
                 </button>
@@ -212,9 +213,9 @@ export default function Layout({
           </div>
         )}
 
-        <header className="bg-white border-b border-gray-200 px-5 md:px-8 py-4 flex flex-wrap items-center justify-between gap-3 sticky top-0 z-10">
+        <header className="bg-white/85 backdrop-blur-xl border-b border-slate-200/80 px-5 md:px-8 py-4 flex flex-wrap items-center justify-between gap-3 sticky top-0 z-10">
           <div className="min-w-0">
-            <h1 className="text-lg md:text-xl font-bold text-gray-900 truncate">{title}</h1>
+            <h1 className="text-lg md:text-xl font-black tracking-tight text-slate-900 truncate">{title}</h1>
             {subtitle && <p className="text-xs text-gray-400 mt-0.5">{subtitle}</p>}
           </div>
           <div className="flex items-center gap-3">
@@ -228,7 +229,7 @@ export default function Layout({
 
         <OfflineBanner />
 
-        <main className="flex-1 p-5 md:p-8 pb-20 md:pb-8">{children}</main>
+        <main className="page-enter flex-1 p-5 md:p-8 xl:p-10 pb-20 md:pb-8">{children}</main>
 
         {/* Barra inferior móvel — só os módulos principais, ícone + rótulo curto, tocável. */}
         <nav className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-white border-t border-gray-200 flex items-stretch">

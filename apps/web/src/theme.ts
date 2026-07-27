@@ -4,7 +4,7 @@
 // escuro, isso é trabalho da Etapa 5, não desta.
 export type Theme = "light" | "dark";
 
-const STORAGE_KEY = "sigo-theme";
+const STORAGE_KEY = "siga-theme";
 
 export function getStoredTheme(): Theme {
   const stored = window.localStorage.getItem(STORAGE_KEY);

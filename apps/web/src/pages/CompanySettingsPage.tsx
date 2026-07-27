@@ -372,7 +372,7 @@ export default function CompanySettingsPage() {
                 ) : null;
               })()}
             </div>
-            <p className="text-xs text-gray-400 mt-2">Para mudar de plano, contacte o suporte do SIGO.</p>
+            <p className="text-xs text-gray-400 mt-2">Para mudar de plano, contacte o suporte do SIGA.</p>
           </section>
         )}
 

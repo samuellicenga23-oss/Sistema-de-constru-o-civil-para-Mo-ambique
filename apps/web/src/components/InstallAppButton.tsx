@@ -38,7 +38,7 @@ export default function InstallAppButton() {
   }
 
   return (
-    <button onClick={handleInstall} className="btn btn-ghost btn-sm" title="Instalar o SIGO como aplicação">
+    <button onClick={handleInstall} className="btn btn-ghost btn-sm" title="Instalar o SIGA como aplicação">
       <IconDownload className="w-3.5 h-3.5" />
       <span className="hidden sm:inline">Instalar aplicação</span>
     </button>

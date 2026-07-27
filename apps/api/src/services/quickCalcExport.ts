@@ -39,7 +39,7 @@ function buildHtml(result: QuickCalcResult): string {
 <body>
   <h1>${escapeHtml(result.title)}</h1>
   ${result.reference ? `<div class="meta">${escapeHtml(result.reference)}</div>` : ""}
-  <div class="meta">SIGO — Cálculo Rápido · gerado em ${generatedAt}</div>
+  <div class="meta">SIGA — Cálculo Rápido · gerado em ${generatedAt}</div>
 
   <h2>Dados usados</h2>
   <ul>${inputsHtml}</ul>

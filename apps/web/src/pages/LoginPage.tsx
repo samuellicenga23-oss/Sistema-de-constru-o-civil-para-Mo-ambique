@@ -8,7 +8,7 @@ const GOOGLE_ERROR_MESSAGES: Record<string, string> = {
   google_nao_configurado: "O login com Google não está disponível neste momento.",
   falha_google: "Não foi possível confirmar a sua conta Google. Tente novamente.",
   email_google_nao_verificado: "O seu email Google não está verificado.",
-  conta_google_nao_encontrada: "Não existe nenhuma conta SIGO com este email. Peça ao administrador da sua empresa para a criar primeiro.",
+  conta_google_nao_encontrada: "Não existe nenhuma conta SIGA com este email. Peça ao administrador da sua empresa para a criar primeiro.",
   subscricao_suspensa: "A subscrição da sua empresa está suspensa. Contacte o suporte.",
 };
 
@@ -49,37 +49,51 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen grid lg:grid-cols-2">
+    <div className="min-h-screen grid lg:grid-cols-[1.08fr_0.92fr] bg-[#071d19]">
       {/* Painel de marca */}
-      <div className="hidden lg:flex flex-col justify-between bg-gradient-to-br from-brand-900 via-brand-950 to-black text-white p-12">
-        <p className="text-2xl font-bold tracking-tight">
-          SIG<span className="text-brand-300">O</span>
-        </p>
-        <div>
-          <h1 className="text-3xl font-bold leading-snug max-w-md">
-            Da estimativa à entrega da obra.
-          </h1>
-          <ul className="mt-6 space-y-2 text-brand-200 text-sm">
-            <li>• Mapas de quantidades com medições dimensionais (Nº × C × L × A)</li>
-            <li>• Composições de custo completas: mão-de-obra, materiais e máquinas</li>
-            <li>• Autos de medição da execução e exportação Excel/PDF</li>
-            <li>• Leitura automática de plantas ArchiCAD</li>
-          </ul>
+      <div className="hidden lg:flex relative overflow-hidden flex-col justify-between text-white p-14 xl:p-20">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_15%_10%,rgba(52,211,153,0.22),transparent_32%),linear-gradient(145deg,#071d19_0%,#022c22_58%,#04120f_100%)]" />
+        <div className="absolute -right-28 top-24 h-80 w-80 rounded-full border border-brand-300/10" />
+        <div className="absolute -right-12 top-40 h-52 w-52 rounded-full border border-brand-300/10" />
+        <div className="relative flex items-center gap-3">
+          <span className="grid h-11 w-11 place-items-center rounded-xl bg-brand-400 text-brand-950 text-lg font-black">S</span>
+          <div>
+            <p className="text-2xl font-black tracking-[0.2em]">SIGA</p>
+            <p className="text-[10px] uppercase tracking-[0.22em] text-brand-300/80">Gestão inteligente de obras</p>
+          </div>
         </div>
-        <p className="text-xs text-brand-400">Moçambique · MZN & USD</p>
+        <div className="relative max-w-xl">
+          <span className="inline-flex rounded-full border border-brand-300/20 bg-brand-300/10 px-3 py-1 text-xs font-semibold text-brand-200">
+            Construído para a realidade moçambicana
+          </span>
+          <h1 className="mt-6 text-4xl xl:text-5xl font-black leading-[1.08] tracking-tight">
+            Da primeira medição à entrega da obra.
+          </h1>
+          <p className="mt-5 max-w-lg text-base leading-7 text-slate-300">
+            Planeie custos, acompanhe a execução e tome decisões com informação clara — tudo num só lugar.
+          </p>
+          <div className="mt-8 grid grid-cols-2 gap-3 max-w-lg text-sm text-slate-200">
+            {["Orçamentos rigorosos", "Controlo financeiro", "Autos de medição", "Leitura de plantas"].map((item) => (
+              <div key={item} className="flex items-center gap-2 rounded-xl border border-white/8 bg-white/5 px-3 py-3">
+                <span className="h-2 w-2 rounded-full bg-brand-400 shadow-[0_0_12px_rgba(52,211,153,0.8)]" />
+                {item}
+              </div>
+            ))}
+          </div>
+        </div>
+        <p className="relative text-xs text-slate-400">Moçambique · MZN & USD</p>
       </div>
 
       {/* Formulário */}
-      <div className="flex items-center justify-center bg-gray-50 px-6">
-        <div className="w-full max-w-sm">
+      <div className="flex items-center justify-center bg-[#f7f8f6] px-6 py-12 lg:rounded-l-[2.5rem] lg:shadow-[-24px_0_80px_rgba(0,0,0,0.16)]">
+        <div className="w-full max-w-md">
           <div className="lg:hidden text-center mb-6">
-            <p className="text-2xl font-bold text-brand-900">
-              SIG<span className="text-brand-500">O</span>
-            </p>
+            <p className="text-2xl font-black tracking-[0.18em] text-brand-950">SIGA</p>
           </div>
-          <div className="card card-pad">
-            <h2 className="text-lg font-bold text-gray-900">Acesso restrito</h2>
-            <p className="text-sm text-gray-500 mb-5">Entre com as credenciais da sua empresa.</p>
+          <div className="rounded-3xl border border-slate-200/80 bg-white p-7 md:p-9 shadow-xl shadow-slate-900/5">
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-brand-700">Bem-vindo de volta</p>
+            <h2 className="mt-2 text-2xl font-black tracking-tight text-slate-900">Entre na sua conta</h2>
+            <p className="text-sm text-slate-500 mt-1 mb-7">Acompanhe as suas obras com confiança.</p>
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>

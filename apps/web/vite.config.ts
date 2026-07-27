@@ -28,8 +28,8 @@ export default defineConfig({
       },
       manifest: {
         lang: "pt",
-        name: "SIGO — Medições e Orçamentos",
-        short_name: "SIGO",
+        name: "SIGA — Gestão inteligente de obras",
+        short_name: "SIGA",
         description: "Mapas de quantidades, orçamentos, autos de medição e catálogo de custos para construção civil.",
         theme_color: "#4338ca",
         background_color: "#f4f5f7",
