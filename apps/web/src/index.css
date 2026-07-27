@@ -1,17 +1,17 @@
 @import "tailwindcss";
 
 @theme {
-  --color-brand-50: #ecfdf7;
-  --color-brand-100: #d1fae9;
-  --color-brand-200: #a7f3d6;
-  --color-brand-300: #6ee7bd;
-  --color-brand-400: #34d399;
-  --color-brand-500: #10b981;
-  --color-brand-600: #059669;
-  --color-brand-700: #047857;
-  --color-brand-800: #065f49;
-  --color-brand-900: #064e3b;
-  --color-brand-950: #022c22;
+  --color-brand-50: #eff6ff;
+  --color-brand-100: #dbeafe;
+  --color-brand-200: #bfdbfe;
+  --color-brand-300: #93c5fd;
+  --color-brand-400: #60a5fa;
+  --color-brand-500: #3b82f6;
+  --color-brand-600: #2563eb;
+  --color-brand-700: #1d4ed8;
+  --color-brand-800: #1e40af;
+  --color-brand-900: #1e3a8a;
+  --color-brand-950: #172033;
   --font-sans: "Aptos", "Segoe UI Variable", "Segoe UI", ui-sans-serif, system-ui, -apple-system, sans-serif;
 }
 
@@ -20,22 +20,20 @@
 }
 
 html {
-  background: #f7f8f6;
+  background: #f4f6f8;
 }
 
 body {
   min-width: 320px;
-  background:
-    radial-gradient(circle at 100% 0%, rgb(16 185 129 / 0.055), transparent 28rem),
-    #f7f8f6;
+  background: #f4f6f8;
   color: #1e293b;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
 
 ::selection {
-  background: #a7f3d6;
-  color: #022c22;
+  background: #bfdbfe;
+  color: #172033;
 }
 
 @keyframes fade-up {
@@ -50,13 +48,13 @@ body {
 @layer components {
   /* Botões */
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl text-sm font-semibold px-4 py-2.5 transition-all duration-200 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40 focus-visible:ring-offset-2;
+    @apply inline-flex items-center justify-center gap-2 rounded-lg text-sm font-semibold px-4 py-2.5 transition-colors duration-150 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40 focus-visible:ring-offset-2;
   }
   .btn-primary {
-    @apply bg-brand-700 text-white shadow-md shadow-brand-900/15 hover:bg-brand-800 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-brand-900/20 active:translate-y-0 active:bg-brand-900;
+    @apply bg-[#e86f25] text-white shadow-sm hover:bg-[#d85f18] active:bg-[#c75112];
   }
   .btn-secondary {
-    @apply bg-white text-slate-700 border border-slate-200 shadow-sm hover:border-brand-300 hover:text-brand-800 hover:bg-brand-50/60 hover:-translate-y-0.5;
+    @apply bg-white text-slate-700 border border-slate-300 shadow-sm hover:border-slate-400 hover:bg-slate-50;
   }
   .btn-ghost {
     @apply text-brand-700 hover:bg-brand-50;
@@ -81,7 +79,7 @@ body {
     @apply block text-xs font-medium text-gray-500 mb-1;
   }
   .input {
-    @apply w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-800 placeholder-slate-400 shadow-sm transition-all focus:outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10;
+    @apply w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 placeholder-slate-400 shadow-sm transition-all focus:outline-none focus:border-brand-500 focus:ring-3 focus:ring-brand-500/10;
   }
   .input-sm {
     @apply px-2 py-1 text-xs rounded-md;
@@ -89,7 +87,7 @@ body {
 
   /* Cartões e secções */
   .card {
-    @apply bg-white/95 rounded-2xl border border-slate-200/80 shadow-sm shadow-slate-900/5;
+    @apply bg-white rounded-xl border border-slate-200 shadow-sm;
   }
   .card-pad {
     @apply p-5 md:p-6;

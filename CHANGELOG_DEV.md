@@ -17,3 +17,15 @@ consultar o estado do Git e as entradas mais recentes. Cada intervenção deve i
 - **Validação:** 12 testes do frontend aprovados; build de produção aprovado.
 - **Produção:** ainda não publicada.
 
+## 2026-07-27 — Codex — Correcção da direcção visual
+
+- **Motivo:** a primeira proposta tinha excesso de padrões visuais associados a interfaces
+  geradas por IA: gradientes, cartões flutuantes, decoração circular e texto promocional.
+- **Referências analisadas:** Procore, Autodesk Construction Cloud e Fieldwire.
+- **Nova direcção:** software empresarial de construção, com azul-marinho e superfícies neutras,
+  laranja reservado às acções principais, cantos moderados, navegação previsível e maior densidade
+  informativa.
+- **Alterações:** simplificação do login, sidebar, cabeçalho, indicadores e introdução do painel;
+  removidos brilhos, elevação excessiva, gradientes decorativos e linguagem promocional no produto.
+- **Validação:** 12 testes do frontend aprovados; build de produção aprovado.
+- **Produção:** ainda não publicada.

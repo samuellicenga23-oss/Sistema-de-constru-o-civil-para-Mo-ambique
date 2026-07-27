@@ -83,8 +83,7 @@ export default function Layout({
   return (
     <div className="min-h-screen flex">
       {/* Sidebar */}
-      <aside className="hidden md:flex w-[17.5rem] shrink-0 flex-col bg-[#071d19] text-white relative overflow-hidden">
-        <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_0%_0%,rgba(52,211,153,0.16),transparent_38%)]" />
+      <aside className="hidden md:flex w-64 shrink-0 flex-col bg-[#172033] text-white relative overflow-hidden">
         <div className="relative px-5 py-6 border-b border-white/8">
           {logoUrl ? (
             <div className="bg-white rounded-lg p-2 inline-block mb-2">
@@ -92,10 +91,10 @@ export default function Layout({
             </div>
           ) : (
             <div className="flex items-center gap-3">
-              <span className="grid h-10 w-10 place-items-center rounded-xl bg-brand-400 text-brand-950 font-black shadow-lg shadow-black/20">S</span>
+              <span className="grid h-9 w-9 place-items-center rounded-lg bg-[#e86f25] text-white font-black">S</span>
               <div>
                 <p className="text-xl font-black tracking-[0.16em]">SIGA</p>
-                <p className="text-[9px] uppercase tracking-[0.2em] text-brand-300/80">Gestão de obras</p>
+                <p className="text-[9px] uppercase tracking-[0.2em] text-slate-400">Gestão de obras</p>
               </div>
             </div>
           )}
@@ -110,8 +109,8 @@ export default function Layout({
               <Link
                 key={item.to}
                 to={item.to}
-                className={`group flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold transition-all ${
-                  active ? "bg-brand-400 text-brand-950 shadow-lg shadow-black/10" : "text-slate-300 hover:bg-white/8 hover:text-white"
+                className={`group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors border-l-2 ${
+                  active ? "bg-white/10 text-white border-[#e86f25]" : "text-slate-300 hover:bg-white/6 hover:text-white border-transparent"
                 }`}
               >
                 <Icon className="w-[18px] h-[18px]" />
@@ -146,7 +145,7 @@ export default function Layout({
       {/* Conteúdo */}
       <div className="flex-1 min-w-0 flex flex-col">
         {/* Barra superior móvel (ecrãs pequenos, sem sidebar) */}
-        <div className="md:hidden bg-[#071d19] text-white px-4 py-3 flex items-center justify-between shadow-lg">
+        <div className="md:hidden bg-[#172033] text-white px-4 py-3 flex items-center justify-between shadow-sm">
           <button onClick={() => setDrawerOpen(true)} aria-label="Abrir menu" className="text-brand-200 hover:text-white -ml-1 p-1">
             <IconMenu className="w-5 h-5" />
           </button>
@@ -213,7 +212,7 @@ export default function Layout({
           </div>
         )}
 
-        <header className="bg-white/85 backdrop-blur-xl border-b border-slate-200/80 px-5 md:px-8 py-4 flex flex-wrap items-center justify-between gap-3 sticky top-0 z-10">
+        <header className="bg-white border-b border-slate-200 px-5 md:px-8 py-4 flex flex-wrap items-center justify-between gap-3 sticky top-0 z-10">
           <div className="min-w-0">
             <h1 className="text-lg md:text-xl font-black tracking-tight text-slate-900 truncate">{title}</h1>
             {subtitle && <p className="text-xs text-gray-400 mt-0.5">{subtitle}</p>}

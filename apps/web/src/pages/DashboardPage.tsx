@@ -29,17 +29,15 @@ function MoneyByCurrency({ totals }: { totals: CurrencyTotals }) {
 const CERT_STATUS_LABELS: Record<string, string> = { rascunho: "Rascunho", submetido: "Submetido", aprovado: "Aprovado" };
 const CERT_STATUS_TONE: Record<string, string> = { rascunho: "badge-gray", submetido: "badge-yellow", aprovado: "badge-green" };
 
-function StatCard({ label, value, icon, tint, detail }: { label: string; value: string | number; icon: ReactNode; tint: string; detail: string }) {
+function StatCard({ label, value, icon, tint }: { label: string; value: string | number; icon: ReactNode; tint: string }) {
   return (
-    <div className="card card-pad group relative overflow-hidden transition-all duration-300 hover:-translate-y-1 hover:shadow-lg hover:shadow-slate-900/8">
-      <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-transparent via-brand-400/80 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-      <div className="flex items-start justify-between gap-4">
+    <div className="card card-pad">
+      <div className="flex items-center justify-between gap-4">
         <div>
-          <p className="text-xs font-semibold text-slate-500">{label}</p>
-          <p className="mt-2 text-3xl font-black tracking-tight text-slate-900 leading-none">{value}</p>
-          <p className="mt-2 text-[11px] text-slate-400">{detail}</p>
+          <p className="text-sm text-slate-500">{label}</p>
+          <p className="mt-1 text-2xl font-bold text-slate-900">{value}</p>
         </div>
-        <div className={`w-11 h-11 rounded-2xl flex items-center justify-center shadow-sm ${tint}`}>{icon}</div>
+        <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${tint}`}>{icon}</div>
       </div>
     </div>
   );
@@ -90,24 +88,19 @@ export default function DashboardPage() {
       <div className="space-y-7 max-w-[1500px] mx-auto">
         {error && <p className="text-sm text-red-600">{error}</p>}
 
-        <div className="relative overflow-hidden rounded-3xl bg-[#08251f] px-6 py-7 md:px-8 md:py-8 text-white shadow-xl shadow-brand-950/10">
-          <div className="absolute -right-16 -top-28 h-72 w-72 rounded-full border-[44px] border-brand-400/10" />
-          <div className="absolute right-36 -bottom-24 h-40 w-40 rounded-full bg-brand-400/5" />
-          <div className="relative flex flex-wrap items-end justify-between gap-5">
+        <div className="flex flex-wrap items-end justify-between gap-4 border-b border-slate-200 pb-5">
             <div>
-              <p className="text-xs font-bold uppercase tracking-[0.16em] text-brand-300">Centro de operações</p>
-              <p className="mt-2 text-2xl md:text-3xl font-black tracking-tight">
-                {greeting}, {user?.name?.split(" ")[0]}.
+              <p className="text-2xl font-bold tracking-tight text-slate-900">
+                {greeting}, {user?.name?.split(" ")[0]}
               </p>
-              <p className="mt-2 text-sm text-slate-300">Acompanhe o pulso das suas obras e aja onde importa.</p>
+              <p className="mt-1 text-sm text-slate-500">Resumo das obras e actividades da empresa.</p>
             </div>
-            <div className="rounded-2xl border border-white/10 bg-white/7 px-4 py-3 backdrop-blur-sm">
-              <p className="text-[10px] uppercase tracking-wider text-slate-400">Hoje</p>
-              <p className="mt-0.5 text-sm font-bold capitalize">
+            <div className="text-right">
+              <p className="text-xs text-slate-400">Hoje</p>
+              <p className="mt-0.5 text-sm font-medium text-slate-700 capitalize">
                 {new Intl.DateTimeFormat("pt-MZ", { weekday: "long", day: "2-digit", month: "long" }).format(new Date())}
               </p>
             </div>
-          </div>
         </div>
 
         {data && (
@@ -121,10 +114,10 @@ export default function DashboardPage() {
             )}
 
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-              <StatCard label="Projectos activos" value={data.totalProjects} detail="Obras sob gestão" tint="bg-brand-100 text-brand-800" icon={<IconFolder className="w-5 h-5" />} />
-              <StatCard label="Mapas de quantidades" value={data.totalDocuments} detail="Documentos preparados" tint="bg-sky-100 text-sky-700" icon={<IconDoc className="w-5 h-5" />} />
-              <StatCard label="Autos de medição" value={data.totalCertificates} detail="Progresso documentado" tint="bg-amber-100 text-amber-700" icon={<IconClipboard className="w-5 h-5" />} />
-              <StatCard label="Plantas carregadas" value={data.totalPlants} detail="Ficheiros processados" tint="bg-violet-100 text-violet-700" icon={<IconMap className="w-5 h-5" />} />
+              <StatCard label="Projectos" value={data.totalProjects} tint="bg-blue-50 text-blue-700" icon={<IconFolder className="w-5 h-5" />} />
+              <StatCard label="Mapas de quantidades" value={data.totalDocuments} tint="bg-cyan-50 text-cyan-700" icon={<IconDoc className="w-5 h-5" />} />
+              <StatCard label="Autos de medição" value={data.totalCertificates} tint="bg-orange-50 text-orange-700" icon={<IconClipboard className="w-5 h-5" />} />
+              <StatCard label="Plantas" value={data.totalPlants} tint="bg-slate-100 text-slate-700" icon={<IconMap className="w-5 h-5" />} />
             </div>
 
             <div className="grid md:grid-cols-2 gap-4">
