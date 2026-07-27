@@ -1,11 +1,11 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, count } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { db } from "../db/index.js";
-import { companies, users, subscriptions } from "../db/schema.js";
+import { companies, users, subscriptions, projects } from "../db/schema.js";
 import { requireRole, requireCompanyUser } from "../auth/middleware.js";
 import { hashPassword } from "../auth/password.js";
 import { env } from "../env.js";
@@ -116,6 +116,57 @@ export async function companyRoutes(app: FastifyInstance) {
       .where(eq(subscriptions.id, current.id))
       .returning();
     return row;
+  });
+
+  // Estatísticas para o painel do super_admin (Fase 1, Etapa 5) — antes o painel só listava
+  // empresas, sem nenhum resumo agregado da plataforma.
+  app.get("/api/admin/stats", { preHandler: requireRole("super_admin") }, async () => {
+    const allCompanies = await db.select().from(companies);
+    const allSubscriptions = await db.select().from(subscriptions);
+
+    const latestByCompany = new Map<string, (typeof allSubscriptions)[number]>();
+    for (const s of allSubscriptions) {
+      const current = latestByCompany.get(s.companyId);
+      if (!current || s.createdAt > current.createdAt) latestByCompany.set(s.companyId, s);
+    }
+
+    let activeCompanies = 0;
+    let trialCompanies = 0;
+    let suspendedCompanies = 0;
+    const planCounts: Record<string, number> = {};
+    for (const c of allCompanies) {
+      const sub = latestByCompany.get(c.id);
+      const status = sub?.status ?? "trial";
+      if (status === "activo") activeCompanies++;
+      else if (status === "suspenso") suspendedCompanies++;
+      else trialCompanies++;
+      const plan = sub?.plan ?? "free";
+      planCounts[plan] = (planCounts[plan] ?? 0) + 1;
+    }
+
+    const [{ value: totalUsers }] = await db.select({ value: count() }).from(users);
+    const [{ value: totalProjects }] = await db.select({ value: count() }).from(projects);
+
+    // Estado dos serviços — a própria API está claramente "no ar" (está a responder a este
+    // pedido); o plant-service precisa de um ping real porque corre num processo à parte.
+    let plantServiceUp = false;
+    try {
+      const res = await fetch(`${env.plantServiceUrl}/health`, { signal: AbortSignal.timeout(3000) });
+      plantServiceUp = res.ok;
+    } catch {
+      plantServiceUp = false;
+    }
+
+    return {
+      totalCompanies: allCompanies.length,
+      activeCompanies,
+      trialCompanies,
+      suspendedCompanies,
+      totalUsers: Number(totalUsers),
+      totalProjects: Number(totalProjects),
+      planCounts,
+      services: { api: true, plantService: plantServiceUp },
+    };
   });
 
   // ---------- Definições da própria empresa (admin_empresa) ----------

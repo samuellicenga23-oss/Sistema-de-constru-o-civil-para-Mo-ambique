@@ -1,5 +1,7 @@
-import { Routes, Route, Navigate } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
+import { canAccessPath } from "./permissions";
+import LoadingState from "./components/LoadingState";
 import LoginPage from "./pages/LoginPage";
 import DashboardPage from "./pages/DashboardPage";
 import CatalogPage from "./pages/CatalogPage";
@@ -20,10 +22,24 @@ import ProjectPurchasingPage from "./pages/ProjectPurchasingPage";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
+  const location = useLocation();
   if (loading) {
-    return <div className="min-h-screen flex items-center justify-center text-gray-400">A carregar...</div>;
+    return <LoadingState fullScreen />;
   }
   if (!user) return <Navigate to="/login" replace />;
+  // Antes só o menu escondia páginas que o perfil não devia usar — a rota em si continuava
+  // acessível escrevendo o URL directamente. Agora bloqueia aqui também (o backend já recusava
+  // as chamadas de escrita/leitura correspondentes, isto só evita mostrar um ecrã vazio/quebrado).
+  if (!canAccessPath(user.role, location.pathname)) {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-4">
+        <div className="card card-pad max-w-sm text-center">
+          <p className="text-sm font-medium text-gray-900 mb-1">Sem acesso a esta página</p>
+          <p className="text-xs text-gray-500">O seu perfil não tem permissão para ver esta secção.</p>
+        </div>
+      </div>
+    );
+  }
   return <>{children}</>;
 }
 

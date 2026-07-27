@@ -2,7 +2,10 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { companiesApi } from "../api/companies";
-import { IconHome, IconFolder, IconTag, IconBuilding, IconLogout, IconSettings, IconRuler, IconUsers } from "./icons";
+import UserMenu from "./UserMenu";
+import InstallAppButton from "./InstallAppButton";
+import OfflineBanner from "./OfflineBanner";
+import { IconHome, IconFolder, IconTag, IconBuilding, IconLogout, IconSettings, IconRuler, IconUsers, IconMenu, IconClose } from "./icons";
 
 const ROLE_LABELS: Record<string, string> = {
   super_admin: "Super Admin",
@@ -35,6 +38,13 @@ export default function Layout({
   const location = useLocation();
   const [companyName, setCompanyName] = useState<string | null>(null);
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
+  // Fecha o menu lateral móvel sempre que a rota muda (navegar por um link não o deixa aberto
+  // por cima do ecrã seguinte).
+  useEffect(() => {
+    setDrawerOpen(false);
+  }, [location.pathname]);
 
   useEffect(() => {
     if (user?.companyId) {
@@ -64,6 +74,11 @@ export default function Layout({
     if (item.exact) return location.pathname === item.to;
     return location.pathname === item.to || location.pathname.startsWith(item.to + "/");
   }
+
+  // Barra inferior móvel: só os módulos principais (máx. 5, para caberem sem apertar) — o resto
+  // fica no menu recolhível (hamburger). Antes a "navegação móvel" era só uma tira horizontal
+  // com scroll, sem hierarquia entre módulos principais e secundários.
+  const bottomBarItems = navItems.slice(0, 5);
 
   return (
     <div className="min-h-screen flex">
@@ -125,35 +140,115 @@ export default function Layout({
 
       {/* Conteúdo */}
       <div className="flex-1 min-w-0 flex flex-col">
-        {/* Barra móvel (ecrãs pequenos, sem sidebar) */}
+        {/* Barra superior móvel (ecrãs pequenos, sem sidebar) */}
         <div className="md:hidden bg-brand-950 text-white px-4 py-3 flex items-center justify-between">
+          <button onClick={() => setDrawerOpen(true)} aria-label="Abrir menu" className="text-brand-200 hover:text-white -ml-1 p-1">
+            <IconMenu className="w-5 h-5" />
+          </button>
           <p className="font-bold">
             SIG<span className="text-brand-300">O</span>
           </p>
-          <div className="flex gap-3 text-xs overflow-x-auto">
-            {navItems.map((item) => (
-              <Link key={item.to} to={item.to} className={isActive(item) ? "text-white font-semibold" : "text-brand-300"}>
-                {item.label.split(" ")[0]}
-              </Link>
-            ))}
-            <Link to="/perfil" className={location.pathname === "/perfil" ? "text-white font-semibold" : "text-brand-300"}>
-              Perfil
-            </Link>
-            <button onClick={() => logout()} className="text-brand-300">
-              Sair
-            </button>
-          </div>
+          <Link to="/perfil" aria-label="Perfil">
+            {user?.avatarUrl ? (
+              <img src={user.avatarUrl} alt={user.name} className="w-7 h-7 rounded-full object-cover" />
+            ) : (
+              <div className="w-7 h-7 rounded-full bg-brand-600 flex items-center justify-center text-xs font-semibold">{initials(user?.name)}</div>
+            )}
+          </Link>
         </div>
+
+        {/* Gaveta lateral móvel — menu completo (todos os módulos + perfil + sair), aberta pelo
+            botão hamburger acima; a barra inferior só tem os módulos principais. */}
+        {drawerOpen && (
+          <div className="md:hidden fixed inset-0 z-40 flex">
+            <div className="absolute inset-0 bg-gray-900/50" onClick={() => setDrawerOpen(false)} />
+            <div className="relative w-72 max-w-[80vw] bg-gradient-to-b from-brand-950 to-brand-900 text-white flex flex-col">
+              <div className="px-4 py-4 flex items-center justify-between border-b border-white/10">
+                <p className="text-lg font-bold tracking-tight">
+                  SIG<span className="text-brand-300">O</span>
+                </p>
+                <button onClick={() => setDrawerOpen(false)} aria-label="Fechar menu" className="text-brand-200 hover:text-white p-1">
+                  <IconClose className="w-5 h-5" />
+                </button>
+              </div>
+              <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+                {navItems.map((item) => {
+                  const active = isActive(item);
+                  const Icon = item.icon;
+                  return (
+                    <Link
+                      key={item.to}
+                      to={item.to}
+                      className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+                        active ? "bg-white/15 text-white" : "text-brand-200 hover:bg-white/8 hover:text-white"
+                      }`}
+                    >
+                      <Icon className="w-[18px] h-[18px]" />
+                      {item.label}
+                    </Link>
+                  );
+                })}
+              </nav>
+              <div className="px-3 py-4 border-t border-white/10 space-y-1">
+                <Link to="/perfil" className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-brand-200 hover:bg-white/8 hover:text-white">
+                  {user?.avatarUrl ? (
+                    <img src={user.avatarUrl} alt={user.name} className="w-[18px] h-[18px] rounded-full object-cover" />
+                  ) : (
+                    <span className="w-[18px] h-[18px] rounded-full bg-brand-600 flex items-center justify-center text-[9px] font-semibold">
+                      {initials(user?.name)}
+                    </span>
+                  )}
+                  Perfil
+                </Link>
+                <button
+                  onClick={() => logout()}
+                  className="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-brand-200 hover:bg-white/8 hover:text-white"
+                >
+                  <IconLogout className="w-[18px] h-[18px]" />
+                  Sair
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <header className="bg-white border-b border-gray-200 px-5 md:px-8 py-4 flex flex-wrap items-center justify-between gap-3 sticky top-0 z-10">
           <div className="min-w-0">
             <h1 className="text-lg md:text-xl font-bold text-gray-900 truncate">{title}</h1>
             {subtitle && <p className="text-xs text-gray-400 mt-0.5">{subtitle}</p>}
           </div>
-          {actions && <div className="flex items-center gap-2 flex-wrap">{actions}</div>}
+          <div className="flex items-center gap-3">
+            <InstallAppButton />
+            {actions && <div className="flex items-center gap-2 flex-wrap">{actions}</div>}
+            <div className="hidden md:block">
+              <UserMenu />
+            </div>
+          </div>
         </header>
 
-        <main className="flex-1 p-5 md:p-8">{children}</main>
+        <OfflineBanner />
+
+        <main className="flex-1 p-5 md:p-8 pb-20 md:pb-8">{children}</main>
+
+        {/* Barra inferior móvel — só os módulos principais, ícone + rótulo curto, tocável. */}
+        <nav className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-white border-t border-gray-200 flex items-stretch">
+          {bottomBarItems.map((item) => {
+            const active = isActive(item);
+            const Icon = item.icon;
+            return (
+              <Link
+                key={item.to}
+                to={item.to}
+                className={`flex-1 flex flex-col items-center justify-center gap-0.5 py-2 text-[10px] font-medium ${
+                  active ? "text-brand-700" : "text-gray-400"
+                }`}
+              >
+                <Icon className="w-5 h-5" />
+                {item.label.split(" ")[0]}
+              </Link>
+            );
+          })}
+        </nav>
       </div>
     </div>
   );

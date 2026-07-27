@@ -1,16 +1,27 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useAuth } from "../auth/AuthContext";
 import { companiesApi, type Company } from "../api/companies";
+import { dashboardApi, type AdminStats } from "../api/dashboard";
 import Layout from "../components/Layout";
 import { IconBuilding, IconPlus } from "../components/icons";
-import { SUBSCRIPTION_PLANS } from "@sigo/shared";
+import { SUBSCRIPTION_PLANS, getPlanDefinition } from "@sigo/shared";
 
 const STATUS_LABELS: Record<string, string> = { trial: "Trial", activo: "Activo", suspenso: "Suspenso" };
 const STATUS_BADGE: Record<string, string> = { trial: "badge-yellow", activo: "badge-green", suspenso: "badge-red" };
 
+function StatCard({ label, value, tint }: { label: string; value: ReactNode; tint: string }) {
+  return (
+    <div className="card card-pad">
+      <p className={`text-2xl font-bold leading-tight ${tint}`}>{value}</p>
+      <p className="text-xs text-gray-500 mt-0.5">{label}</p>
+    </div>
+  );
+}
+
 export default function SuperAdminPage() {
   const { user } = useAuth();
   const [companies, setCompanies] = useState<Company[]>([]);
+  const [stats, setStats] = useState<AdminStats | null>(null);
   const [name, setName] = useState("");
   const [adminName, setAdminName] = useState("");
   const [adminEmail, setAdminEmail] = useState("");
@@ -20,6 +31,7 @@ export default function SuperAdminPage() {
 
   async function reload() {
     setCompanies(await companiesApi.list());
+    setStats(await dashboardApi.adminStats());
   }
 
   useEffect(() => {
@@ -62,6 +74,44 @@ export default function SuperAdminPage() {
     <Layout title="Painel da Plataforma">
       <div className="space-y-5 max-w-4xl">
         {error && <p className="text-sm text-red-600">{error}</p>}
+
+        {stats && (
+          <>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <StatCard label="Empresas" value={stats.totalCompanies} tint="text-gray-900" />
+              <StatCard label="Activas" value={stats.activeCompanies} tint="text-green-700" />
+              <StatCard label="Em trial" value={stats.trialCompanies} tint="text-yellow-700" />
+              <StatCard label="Suspensas" value={stats.suspendedCompanies} tint="text-red-700" />
+              <StatCard label="Utilizadores totais" value={stats.totalUsers} tint="text-gray-900" />
+              <StatCard label="Projectos totais" value={stats.totalProjects} tint="text-gray-900" />
+              <StatCard
+                label="API"
+                value={<span className={stats.services.api ? "text-green-700" : "text-red-700"}>{stats.services.api ? "No ar" : "Em baixo"}</span>}
+                tint=""
+              />
+              <StatCard
+                label="Plant-service"
+                value={
+                  <span className={stats.services.plantService ? "text-green-700" : "text-red-700"}>
+                    {stats.services.plantService ? "No ar" : "Em baixo"}
+                  </span>
+                }
+                tint=""
+              />
+            </div>
+
+            <section className="card card-pad">
+              <h2 className="section-title mb-3">Empresas por plano</h2>
+              <div className="flex gap-2 flex-wrap">
+                {Object.entries(stats.planCounts).map(([plan, n]) => (
+                  <span key={plan} className="badge badge-brand">
+                    {getPlanDefinition(plan)?.label ?? plan}: {n}
+                  </span>
+                ))}
+              </div>
+            </section>
+          </>
+        )}
 
         <section className="card card-pad">
           <h2 className="section-title mb-3">Nova empresa</h2>

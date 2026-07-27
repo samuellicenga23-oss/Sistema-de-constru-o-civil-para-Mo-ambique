@@ -190,6 +190,22 @@ export function IconUsers(p: IconProps) {
   );
 }
 
+export function IconMenu(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M4 6h16M4 12h16M4 18h16" />
+    </Svg>
+  );
+}
+
+export function IconClose(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="m6 6 12 12M18 6 6 18" />
+    </Svg>
+  );
+}
+
 export function IconMap(p: IconProps) {
   return (
     <Svg {...p}>

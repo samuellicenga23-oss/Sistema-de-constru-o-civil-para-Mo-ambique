@@ -3,6 +3,8 @@ import { companiesApi, type Company, type Subscription, type CompanyUpdateInput 
 import { usersApi, type CompanyUser, type CompanyUserRole } from "../api/users";
 import { useAuth } from "../auth/AuthContext";
 import Layout from "../components/Layout";
+import LoadingState from "../components/LoadingState";
+import ConfirmDialog from "../components/ConfirmDialog";
 import { IconPlus, IconTrash, IconUsers } from "../components/icons";
 import { CURRENCIES, getPlanDefinition } from "@sigo/shared";
 
@@ -62,6 +64,8 @@ export default function CompanySettingsPage() {
   const [newUserRole, setNewUserRole] = useState<CompanyUserRole>("orcamentista");
   const [userError, setUserError] = useState<string | null>(null);
   const [savingUser, setSavingUser] = useState(false);
+  const [deletingUser, setDeletingUser] = useState<{ id: string; name: string } | null>(null);
+  const [deletingBusy, setDeletingBusy] = useState(false);
 
   async function reload() {
     const data = await companiesApi.me();
@@ -178,19 +182,23 @@ export default function CompanySettingsPage() {
     }
   }
 
-  async function handleDeleteUser(id: string, userName: string) {
-    if (!window.confirm(`Remover "${userName}" da equipa? Esta acção não pode ser desfeita.`)) return;
+  async function handleDeleteUser() {
+    if (!deletingUser) return;
     setUserError(null);
+    setDeletingBusy(true);
     try {
-      await usersApi.delete(id);
+      await usersApi.delete(deletingUser.id);
       await reloadUsers();
+      setDeletingUser(null);
     } catch (err) {
       setUserError(err instanceof Error ? err.message : "Erro ao remover utilizador");
+    } finally {
+      setDeletingBusy(false);
     }
   }
 
   if (!company) {
-    return <div className="min-h-screen flex items-center justify-center text-gray-400">A carregar...</div>;
+    return <LoadingState fullScreen />;
   }
 
   return (
@@ -429,7 +437,7 @@ export default function CompanySettingsPage() {
                         <span className="muted hidden sm:inline">desde {fmtDate(u.createdAt)}</span>
                         {u.id !== user?.id && (
                           <button
-                            onClick={() => handleDeleteUser(u.id, u.name)}
+                            onClick={() => setDeletingUser({ id: u.id, name: u.name })}
                             className="icon-btn-danger opacity-0 pointer-coarse:opacity-100 group-hover:opacity-100 transition-opacity"
                             title="Remover utilizador"
                           >
@@ -448,6 +456,18 @@ export default function CompanySettingsPage() {
           </section>
         )}
       </div>
+
+      {deletingUser && (
+        <ConfirmDialog
+          title="Remover utilizador"
+          message={`Remover "${deletingUser.name}" da equipa? Esta acção não pode ser desfeita.`}
+          confirmLabel="Remover"
+          danger
+          busy={deletingBusy}
+          onConfirm={handleDeleteUser}
+          onCancel={() => setDeletingUser(null)}
+        />
+      )}
     </Layout>
   );
 }
