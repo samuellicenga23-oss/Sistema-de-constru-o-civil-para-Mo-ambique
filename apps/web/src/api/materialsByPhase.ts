@@ -8,6 +8,7 @@ export type PhaseMaterialLine = {
   currency: string;
   purchaseQty: number | null;
   purchasePackageLabel: string | null;
+  purchasePackageQty: number | null;
 };
 
 export type SteelBarInfo = { diameterMm: number; lengthM: number; barLengthM: number; barsNeeded: number };

@@ -11,6 +11,8 @@ export type FinancialEntry = {
   dueDate: string | null;
   paidDate: string | null;
   status: "pendente" | "pago";
+  sourceType: "purchase_order" | "measurement_certificate" | null;
+  sourceId: string | null;
   createdAt: string;
 };
 

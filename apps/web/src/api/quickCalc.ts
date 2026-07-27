@@ -1,6 +1,6 @@
 import { ApiError } from "./http";
 
-export type QuickCalcLine = { name: string; quantity: number; unit: string };
+export type QuickCalcLine = { name: string; quantity: number; unit: string; unitPrice?: number; totalPrice?: number; currency?: "MZN" | "USD"; priceSource?: string };
 export type QuickCalcResult = { title: string; reference?: string; inputsSummary: string[]; lines: QuickCalcLine[]; notes?: string[] };
 
 export const quickCalcApi = {

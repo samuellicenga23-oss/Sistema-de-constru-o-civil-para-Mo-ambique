@@ -6,6 +6,7 @@ import { getCompositionMaterialQuantities } from "./costEngine.js";
 import { CONSTRUCTION_PHASES, mapToPhase, phaseLabel, type PhaseKey } from "./phaseMapping.js";
 
 export type PhaseMaterialLine = {
+  materialId: string;
   name: string;
   unit: string;
   quantity: number;
@@ -16,6 +17,7 @@ export type PhaseMaterialLine = {
   // se apenas na unidade de medida).
   purchaseQty: number | null;
   purchasePackageLabel: string | null;
+  purchasePackageQty: number | null;
 };
 
 export type SteelBarInfo = { diameterMm: number; lengthM: number; barLengthM: number; barsNeeded: number };
@@ -96,7 +98,7 @@ export async function computeMaterialsByPhase(documentId: string, companyId: str
   if (!summary) return null;
   const zoneId = await getProjectZoneId(documentId);
 
-  type MaterialBucket = { unit: string; quantity: number; value: number; currency: string; purchasePackageLabel: string | null; purchasePackageQty: number | null };
+  type MaterialBucket = { materialId: string; unit: string; quantity: number; value: number; currency: string; purchasePackageLabel: string | null; purchasePackageQty: number | null };
   const materialTotals = new Map<PhaseKey, Map<string, MaterialBucket>>();
   const unmapped = new Map<PhaseKey, PhaseUnmappedItem[]>();
   const compositionQtyCache = new Map<string, Awaited<ReturnType<typeof getCompositionMaterialQuantities>>>();
@@ -131,6 +133,7 @@ export async function computeMaterialsByPhase(documentId: string, companyId: str
             existing.value += addValue;
           } else {
             bucket.set(line.name, {
+              materialId: line.materialId,
               unit: line.unit,
               quantity: addQty,
               value: addValue,
@@ -163,6 +166,7 @@ export async function computeMaterialsByPhase(documentId: string, companyId: str
   const phases = CONSTRUCTION_PHASES.map((p) => {
     const materials = Array.from(materialTotals.get(p.key)?.entries() ?? [])
       .map(([name, v]) => ({
+        materialId: v.materialId,
         name,
         unit: v.unit,
         quantity: v.quantity,
@@ -170,6 +174,7 @@ export async function computeMaterialsByPhase(documentId: string, companyId: str
         currency: v.currency,
         purchaseQty: v.purchasePackageQty ? Math.ceil(v.quantity / v.purchasePackageQty) : null,
         purchasePackageLabel: v.purchasePackageLabel,
+        purchasePackageQty: v.purchasePackageQty,
       }))
       .sort((a, b) => a.name.localeCompare(b.name, "pt"));
     const itemsWithoutComposition = unmapped.get(p.key) ?? [];

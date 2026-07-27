@@ -19,6 +19,7 @@ import ProjectFinancialPage from "./pages/ProjectFinancialPage";
 import ProjectSiteDiaryPage from "./pages/ProjectSiteDiaryPage";
 import SuppliersPage from "./pages/SuppliersPage";
 import ProjectPurchasingPage from "./pages/ProjectPurchasingPage";
+import ProjectSchedulePage from "./pages/ProjectSchedulePage";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -84,6 +85,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <ProjectDetailPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/projectos/:projectId/cronograma"
+        element={
+          <ProtectedRoute>
+            <ProjectSchedulePage />
           </ProtectedRoute>
         }
       />

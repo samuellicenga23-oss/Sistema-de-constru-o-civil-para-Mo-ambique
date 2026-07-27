@@ -12,8 +12,9 @@ function fmt(n: number) {
 function buildHtml(result: QuickCalcResult): string {
   const generatedAt = new Date().toLocaleString("pt-MZ");
   const inputsHtml = result.inputsSummary.map((i) => `<li>${escapeHtml(i)}</li>`).join("");
+  const hasPrices = result.lines.some((line) => line.totalPrice !== undefined);
   const rowsHtml = result.lines
-    .map((l) => `<tr><td>${escapeHtml(l.name)}</td><td class="num">${fmt(l.quantity)}</td><td>${escapeHtml(l.unit)}</td></tr>`)
+    .map((l) => `<tr><td>${escapeHtml(l.name)}${l.priceSource ? `<small>${escapeHtml(l.priceSource)}</small>` : ""}</td><td class="num">${fmt(l.quantity)}</td><td>${escapeHtml(l.unit)}</td>${hasPrices ? `<td class="num">${l.unitPrice !== undefined ? fmt(l.unitPrice) : "—"}</td><td class="num total">${l.totalPrice !== undefined ? `${fmt(l.totalPrice)} ${escapeHtml(l.currency ?? "")}` : "—"}</td>` : ""}</tr>`)
     .join("");
   const notesHtml = (result.notes ?? []).map((n) => `<li>${escapeHtml(n)}</li>`).join("");
 
@@ -33,6 +34,8 @@ function buildHtml(result: QuickCalcResult): string {
   th, td { border-bottom: 1px solid #e5e7eb; padding: 6px 8px; text-align: left; }
   th { background: #eef2ff; font-size: 11px; }
   td.num, th.num { text-align: right; }
+  td small { display: block; color: #6b7280; font-size: 9px; margin-top: 2px; }
+  td.total { font-weight: 700; }
   .notes { color: #6b7280; font-size: 10.5px; }
 </style>
 </head>
@@ -46,7 +49,7 @@ function buildHtml(result: QuickCalcResult): string {
 
   <h2>Quantidades</h2>
   <table>
-    <thead><tr><th>Material</th><th class="num">Quantidade</th><th>Unidade</th></tr></thead>
+    <thead><tr><th>Material</th><th class="num">Quantidade</th><th>Unidade</th>${hasPrices ? '<th class="num">Preço unit.</th><th class="num">Total</th>' : ""}</tr></thead>
     <tbody>${rowsHtml}</tbody>
   </table>
 

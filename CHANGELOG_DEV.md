@@ -181,3 +181,50 @@ consultar o estado do Git e as entradas mais recentes. Cada intervenção deve i
   cabeçalho, conteúdo e acções visíveis. Sem erros de consola.
 - **Validação técnica:** 12 testes do frontend e build completo de shared/API/web aprovados.
 - **Produção:** ainda não publicada.
+
+## 2026-07-27 — Codex — Operação integrada, autos genuínos e cronograma A3
+
+- **Objectivo:** fechar a cadeia operacional entre composições, cotações, orçamento, cronograma,
+  compras, stock, Diário de Obra, Autos de Medição e financeiro. Nenhuma destas áreas deve voltar a
+  ser uma ilha de dados.
+- **Aprovisionamento automático:** o mapa aprovado é decomposto pelas composições e pelas fases da
+  obra. Para cada material, o SIGA compara necessidade total, consumo já aplicado, saldo em stock e
+  ordens abertas; a sugestão respeita embalagem comercial e não volta a comprar material já
+  consumido.
+- **Fornecedor e zona:** a sugestão escolhe primeiro a cotação exacta da zona, depois a cotação geral
+  mais económica e só usa o Catálogo como fallback. Materiais sem composição são apresentados como
+  pendência, em vez de aparecer uma falsa cobertura total.
+- **Compras e cronograma:** as necessidades são associadas automaticamente à primeira actividade da
+  fase correspondente. Ao preparar a ordem, vêm preenchidas a actividade e a data em que o material
+  deve estar na obra; a API valida que a tarefa pertence ao mesmo projecto.
+- **Stock e Diário:** receber uma ordem cria entradas de stock idempotentes na data real de recepção.
+  O Diário permite declarar consumos estruturados e cria as saídas correspondentes, bloqueando
+  quantidades sem saldo. Movimentos automáticos não podem ser eliminados fora do documento de origem.
+- **Financeiro:** aprovar uma ordem cria uma conta a pagar; aprovar um Auto cria uma conta a receber.
+  Ambos são idempotentes e ficam protegidos contra alteração ou eliminação manual, mantendo a origem
+  documental. O utilizador apenas confirma o pagamento ou regista movimentos excepcionais.
+- **Autos de Medição:** o campo editável passa a ser a quantidade do período. O acumulado nasce
+  exclusivamente do último Auto aprovado; excedentes exigem justificação e um novo Auto só pode ser
+  criado depois de o anterior estar aprovado. Fluxo explícito rascunho → submetido → aprovado, com
+  devolução fundamentada e documentos aprovados imutáveis.
+- **Cronograma:** nova área com WBS gerada a partir dos capítulos do orçamento, calendário de obra de
+  segunda a sábado, linha de base, durações ponderadas pelo valor, dependências FS/SS/FF/SF, estados e
+  progresso. Autos aprovados e registos do Diário alimentam automaticamente o progresso físico; o
+  valor medido continua separado e vem apenas dos Autos aprovados.
+- **PDF A3:** exportação horizontal inspirada na leitura operacional do MS Project, com cabeçalho do
+  projecto, métricas, tabela WBS, datas, duração útil, barras de base/progresso, meses e legenda. O PDF
+  final foi renderizado e inspeccionado visualmente; confirmou-se 1 página em formato A3
+  (1191,12 × 841,92 pt) para o cronograma de validação com 9 actividades.
+- **Cálculos Rápidos:** Laje, Betão e composição genérica aceitam zona de preços, carregam materiais e
+  composições do Catálogo e mostram preço unitário, origem e custo total também no PDF.
+- **Persistência:** nova migração `0022_low_smiling_tiger.sql`, com tarefas/dependências, progresso do
+  Diário, origem documental financeira, ligação de stock ao Diário e campos adicionais de Autos e
+  ordens de compra.
+- **Validação funcional:** revistos no browser Diário, ligação de actividade, necessidades de compra,
+  ordem ligada ao cronograma, Financeiro sincronizado, Auto com excedente justificado, Cálculos
+  Rápidos por zona e Gantt. A migração local pendente que causava `Erro 500` no Diário foi aplicada e
+  o fluxo foi retestado sem o erro.
+- **Validação técnica:** build completo de shared/API/web aprovado; 30 testes da API e 12 do frontend
+  aprovados. Os novos testes cobrem acumulados/excedentes dos Autos, distribuição/calendário do
+  cronograma e prevenção de recompra após consumo.
+- **Produção:** ainda não publicada; as alterações permanecem na branch de trabalho para revisão.

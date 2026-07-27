@@ -26,6 +26,8 @@ export const unitEnum = pgEnum("unit", ["m", "m2", "m3", "ml", "kg", "un", "vg",
 export const lineItemKindEnum = pgEnum("line_item_kind", ["capitulo", "grupo", "item", "nota"]);
 export const lineItemOriginEnum = pgEnum("line_item_origin", ["manual", "planta", "composicao", "estimativa"]);
 export const documentStatusEnum = pgEnum("document_status", ["rascunho", "submetido", "aprovado"]);
+export const scheduleTaskStatusEnum = pgEnum("schedule_task_status", ["nao_iniciado", "em_curso", "bloqueado", "concluido"]);
+export const scheduleDependencyTypeEnum = pgEnum("schedule_dependency_type", ["FS", "SS", "FF", "SF"]);
 export const subscriptionStatusEnum = pgEnum("subscription_status", ["trial", "activo", "suspenso"]);
 export const plantDisciplineEnum = pgEnum("plant_discipline", ["arquitectura", "estrutura"]);
 export const plantStatusEnum = pgEnum("plant_status", ["pendente", "processando", "concluido", "erro"]);
@@ -310,8 +312,12 @@ export const measurementCertificates = pgTable("measurement_certificates", {
   projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
   budgetDocumentId: uuid("budget_document_id").notNull().references(() => budgetDocuments.id),
   number: integer("number").notNull(),
+  periodStartDate: date("period_start_date"),
   periodDate: date("period_date").notNull(),
   status: documentStatusEnum("status").notNull().default("rascunho"),
+  notes: text("notes"),
+  submittedAt: timestamp("submitted_at"),
+  approvedAt: timestamp("approved_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -321,7 +327,45 @@ export const measurementCertificateLines = pgTable("measurement_certificate_line
   lineItemId: uuid("line_item_id").notNull().references(() => lineItems.id),
   cumulativeQty: numeric("cumulative_qty", { precision: 16, scale: 4 }).notNull().default("0"),
   periodQty: numeric("period_qty", { precision: 16, scale: 4 }).notNull().default("0"),
+  notes: text("notes"),
+  overrunReason: text("overrun_reason"),
 });
+
+// ---------- Cronograma de obra ----------
+
+// O cronograma usa a mesma WBS do orçamento. `budgetChapterCode` liga cada tarefa a um capítulo
+// (e, por prefixo, aos respectivos itens), permitindo que autos e diário actualizem o progresso
+// sem o utilizador voltar a lançar percentagens noutro módulo.
+export const scheduleTasks = pgTable("schedule_tasks", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  budgetDocumentId: uuid("budget_document_id").references(() => budgetDocuments.id, { onDelete: "set null" }),
+  parentId: uuid("parent_id").references((): AnyPgColumn => scheduleTasks.id, { onDelete: "cascade" }),
+  code: varchar("code", { length: 30 }).notNull(),
+  name: varchar("name", { length: 240 }).notNull(),
+  budgetChapterCode: varchar("budget_chapter_code", { length: 30 }),
+  startDate: date("start_date").notNull(),
+  endDate: date("end_date").notNull(),
+  baselineStartDate: date("baseline_start_date"),
+  baselineEndDate: date("baseline_end_date"),
+  actualStartDate: date("actual_start_date"),
+  actualEndDate: date("actual_end_date"),
+  durationDays: integer("duration_days").notNull().default(1),
+  manualProgress: numeric("manual_progress", { precision: 5, scale: 2 }),
+  status: scheduleTaskStatusEnum("status").notNull().default("nao_iniciado"),
+  notes: text("notes"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const scheduleDependencies = pgTable("schedule_dependencies", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  predecessorTaskId: uuid("predecessor_task_id").notNull().references(() => scheduleTasks.id, { onDelete: "cascade" }),
+  successorTaskId: uuid("successor_task_id").notNull().references(() => scheduleTasks.id, { onDelete: "cascade" }),
+  type: scheduleDependencyTypeEnum("type").notNull().default("FS"),
+  lagDays: integer("lag_days").notNull().default(0),
+}, (table) => [unique("schedule_dependency_unique").on(table.predecessorTaskId, table.successorTaskId)]);
 
 // ---------- Plantas ----------
 
@@ -398,9 +442,13 @@ export const financialEntries = pgTable("financial_entries", {
   dueDate: date("due_date"),
   paidDate: date("paid_date"),
   status: financialEntryStatusEnum("status").notNull().default("pendente"),
+  // Ligações idempotentes aos documentos operacionais: uma OC aprovada cria uma despesa e um
+  // auto aprovado cria uma receita. Linhas manuais mantêm ambos os campos nulos.
+  sourceType: varchar("source_type", { length: 40 }),
+  sourceId: uuid("source_id"),
   createdByUserId: uuid("created_by_user_id").references(() => users.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+}, (table) => [unique("financial_entry_source_unique").on(table.projectId, table.sourceType, table.sourceId)]);
 
 // ---------- Diário de Obra ----------
 
@@ -430,6 +478,14 @@ export const siteDiaryEntries = pgTable("site_diary_entries", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+export const siteDiaryTaskProgress = pgTable("site_diary_task_progress", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  diaryEntryId: uuid("diary_entry_id").notNull().references(() => siteDiaryEntries.id, { onDelete: "cascade" }),
+  scheduleTaskId: uuid("schedule_task_id").notNull().references(() => scheduleTasks.id, { onDelete: "cascade" }),
+  progressPercent: numeric("progress_percent", { precision: 5, scale: 2 }).notNull(),
+  notes: text("notes"),
+}, (table) => [unique("site_diary_task_progress_unique").on(table.diaryEntryId, table.scheduleTaskId)]);
+
 // ---------- Compras, Fornecedores e Armazém ----------
 
 export const purchaseOrderStatusEnum = pgEnum("purchase_order_status", ["rascunho", "aprovado", "recebido", "cancelado"]);
@@ -452,6 +508,8 @@ export const purchaseOrders = pgTable("purchase_orders", {
   supplierId: uuid("supplier_id").notNull().references(() => suppliers.id),
   status: purchaseOrderStatusEnum("status").notNull().default("rascunho"),
   orderDate: date("order_date").notNull(),
+  requiredByDate: date("required_by_date"),
+  scheduleTaskId: uuid("schedule_task_id").references(() => scheduleTasks.id, { onDelete: "set null" }),
   notes: text("notes"),
   createdByUserId: uuid("created_by_user_id").references(() => users.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -487,6 +545,7 @@ export const stockMovements = pgTable("stock_movements", {
   currency: currencyEnum("currency").default("MZN"),
   notes: text("notes"),
   purchaseOrderId: uuid("purchase_order_id").references(() => purchaseOrders.id, { onDelete: "cascade" }),
+  diaryEntryId: uuid("diary_entry_id").references(() => siteDiaryEntries.id, { onDelete: "cascade" }),
   createdByUserId: uuid("created_by_user_id").references(() => users.id),
   date: date("date").notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),

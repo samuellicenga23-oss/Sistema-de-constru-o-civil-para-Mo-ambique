@@ -67,6 +67,9 @@ export async function financialRoutes(app: FastifyInstance) {
 
     const parsed = entryUpdateSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    if (entry.sourceType && (parsed.data.type || parsed.data.category || parsed.data.description !== undefined || parsed.data.amount !== undefined || parsed.data.currency)) {
+      return reply.code(409).send({ error: "O valor deste lançamento é sincronizado com o documento de origem; altere apenas o pagamento" });
+    }
     const { amount, ...rest } = parsed.data;
     const [row] = await db
       .update(financialEntries)
@@ -80,6 +83,7 @@ export async function financialRoutes(app: FastifyInstance) {
     const { id } = request.params as { id: string };
     const entry = await assertEntryOwned(id, companyIdOf(request));
     if (!entry) return { ok: true };
+    if (entry.sourceType) return reply.code(409).send({ error: "Lançamentos automáticos devem ser corrigidos no documento de origem" });
     await db.delete(financialEntries).where(eq(financialEntries.id, id));
     return { ok: true };
   });
@@ -95,12 +99,13 @@ export async function financialRoutes(app: FastifyInstance) {
     const project = await assertProjectOwned(projectId, companyIdOf(request));
     if (!project) return reply.code(404).send({ error: "Projecto não encontrado" });
 
-    const [latestDocument] = await db
+    const documents = await db
       .select()
       .from(budgetDocuments)
       .where(eq(budgetDocuments.projectId, projectId))
-      .orderBy(desc(budgetDocuments.createdAt))
-      .limit(1);
+      .orderBy(desc(budgetDocuments.createdAt));
+    const latestDocument = documents.find((document) => document.status === "aprovado" && document.currency === project.currency)
+      ?? documents.find((document) => document.currency === project.currency);
     const summary = latestDocument ? await getBudgetDocumentSummary(latestDocument.id) : null;
     const valorContratado = summary?.total ?? 0;
 

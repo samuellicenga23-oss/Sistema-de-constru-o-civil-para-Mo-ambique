@@ -7,6 +7,10 @@ export const quickCalcLineSchema = z.object({
   name: z.string().min(1),
   quantity: z.number(),
   unit: z.string().min(1),
+  unitPrice: z.number().nonnegative().optional(),
+  totalPrice: z.number().nonnegative().optional(),
+  currency: z.enum(["MZN", "USD"]).optional(),
+  priceSource: z.string().optional(),
 });
 
 export const quickCalcResultSchema = z.object({

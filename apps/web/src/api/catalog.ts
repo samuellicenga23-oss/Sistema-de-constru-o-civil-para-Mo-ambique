@@ -6,7 +6,7 @@ export type LabourCategory = {
   name: string;
   monthlySalary: string;
   hourlyRate: string;
-  currency: string;
+  currency: "MZN" | "USD";
 };
 
 export type Material = {
@@ -39,7 +39,7 @@ export type CostComposition = {
   name: string;
   category: string;
   outputUnit: string;
-  currency: string;
+  currency: "MZN" | "USD";
   labourCost: number;
   materialCost: number;
   equipmentCost: number;
@@ -115,7 +115,7 @@ export const catalogApi = {
   deleteMaterial: (id: string) => request<{ ok: true }>(`/catalog/materials/${id}`, { method: "DELETE" }),
 
   listCompositions: (zoneId?: string) => request<CostComposition[]>(`/catalog/compositions${zoneId ? `?zoneId=${zoneId}` : ""}`),
-  getComposition: (id: string) => request<CostCompositionDetail>(`/catalog/compositions/${id}`),
+  getComposition: (id: string, zoneId?: string) => request<CostCompositionDetail>(`/catalog/compositions/${id}${zoneId ? `?zoneId=${zoneId}` : ""}`),
   createComposition: (data: CompositionSaveInput) =>
     request<CostComposition>("/catalog/compositions", { method: "POST", body: JSON.stringify(data) }),
   updateComposition: (id: string, data: CompositionSaveInput) =>

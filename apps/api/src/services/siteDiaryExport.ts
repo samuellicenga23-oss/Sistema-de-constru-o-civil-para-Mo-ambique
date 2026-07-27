@@ -13,7 +13,12 @@ function field(label: string, value: string | number | null | undefined): string
   return `<div class="field"><span class="label">${escapeHtml(label)}</span><span class="value">${escapeHtml(String(value))}</span></div>`;
 }
 
-function buildHtml(entry: SiteDiaryEntry, project: ProjectRow): string {
+type DiaryLinks = {
+  progress: Array<{ code: string; name: string; progressPercent: number; notes: string | null }>;
+  consumptions: Array<{ name: string; quantity: number; unit: string; notes: string | null }>;
+};
+
+function buildHtml(entry: SiteDiaryEntry, project: ProjectRow, links?: DiaryLinks): string {
   const generatedAt = new Date().toLocaleString("pt-MZ");
   return `<!doctype html>
 <html lang="pt">
@@ -47,10 +52,12 @@ function buildHtml(entry: SiteDiaryEntry, project: ProjectRow): string {
 
   <h2>Trabalhos executados</h2>
   ${field("", entry.workDone)}
+  ${links?.progress.length ? `<div class="field"><span class="label">Progresso do cronograma</span>${links.progress.map((item) => `<div class="value">${escapeHtml(item.code)} · ${escapeHtml(item.name)} — <strong>${item.progressPercent.toFixed(1)}%</strong>${item.notes ? ` · ${escapeHtml(item.notes)}` : ""}</div>`).join("")}</div>` : ""}
 
   <h2>Materiais</h2>
   ${field("Recebidos", entry.materialsReceived)}
   ${field("Consumidos", entry.materialsConsumed)}
+  ${links?.consumptions.length ? `<div class="field"><span class="label">Saídas de stock ligadas ao registo</span>${links.consumptions.map((item) => `<div class="value">${escapeHtml(item.name)} — <strong>${item.quantity.toLocaleString("pt-MZ", { maximumFractionDigits: 3 })} ${escapeHtml(item.unit)}</strong></div>`).join("")}</div>` : ""}
 
   <h2>Ocorrências</h2>
   ${field("Visitas", entry.visitors)}
@@ -63,11 +70,11 @@ function buildHtml(entry: SiteDiaryEntry, project: ProjectRow): string {
 </html>`;
 }
 
-export async function buildSiteDiaryPdf(entry: SiteDiaryEntry, project: ProjectRow): Promise<Buffer> {
+export async function buildSiteDiaryPdf(entry: SiteDiaryEntry, project: ProjectRow, links?: DiaryLinks): Promise<Buffer> {
   const browser = await puppeteer.launch({ args: ["--no-sandbox", "--disable-setuid-sandbox"] });
   try {
     const page = await browser.newPage();
-    await page.setContent(buildHtml(entry, project), { waitUntil: "networkidle0" });
+    await page.setContent(buildHtml(entry, project, links), { waitUntil: "networkidle0" });
     const pdf = await page.pdf({ format: "A4", printBackground: true, margin: { top: "15mm", bottom: "15mm", left: "15mm", right: "15mm" } });
     return Buffer.from(pdf);
   } finally {

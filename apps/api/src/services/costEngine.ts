@@ -55,6 +55,7 @@ export type CompositionCostBreakdown = {
 };
 
 export type CompositionMaterialQuantityLine = {
+  materialId: string;
   name: string;
   unit: string;
   qtyPerUnit: number;
@@ -135,6 +136,7 @@ export async function getCompositionMaterialQuantities(
     const unitCost = (resolved && zoneCostByMaterialId.get(resolved.id)) ?? Number(resolved?.baseUnitCost ?? l.baseUnitCost);
     const importFactor = Number(resolved?.importFactor ?? l.importFactor);
     return {
+      materialId: resolved?.id ?? "",
       name: l.name,
       unit: resolved?.unit ?? l.unit,
       qtyPerUnit: Number(l.qtyPerUnit),

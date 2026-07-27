@@ -2,6 +2,8 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { boqApi, type Project } from "../api/boq";
 import { siteDiaryApi, type SiteDiaryEntry } from "../api/siteDiary";
+import { scheduleApi, type ScheduleTask } from "../api/schedule";
+import { purchasingApi, type StockSummaryLine } from "../api/purchasing";
 import Layout from "../components/Layout";
 import ProjectWorkspaceNav from "../components/ProjectWorkspaceNav";
 import { IconBack, IconPlus, IconTrash, IconDownload, IconUpload } from "../components/icons";
@@ -17,6 +19,8 @@ export default function ProjectSiteDiaryPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const [project, setProject] = useState<Project | null>(null);
   const [entries, setEntries] = useState<SiteDiaryEntry[]>([]);
+  const [tasks, setTasks] = useState<ScheduleTask[]>([]);
+  const [stock, setStock] = useState<StockSummaryLine[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -35,12 +39,16 @@ export default function ProjectSiteDiaryPage() {
   const [decisions, setDecisions] = useState("");
   const [entryTime, setEntryTime] = useState("07:00");
   const [exitTime, setExitTime] = useState("17:00");
+  const [taskProgress, setTaskProgress] = useState<Array<{ taskId: string; progressPercent: string; notes: string }>>([]);
+  const [consumptions, setConsumptions] = useState<Array<{ materialId: string; quantity: string; notes: string }>>([]);
 
   async function reload() {
     if (!projectId) return;
-    const [proj, list] = await Promise.all([boqApi.getProject(projectId), siteDiaryApi.list(projectId)]);
+    const [proj, list, schedule, stockLines] = await Promise.all([boqApi.getProject(projectId), siteDiaryApi.list(projectId), scheduleApi.get(projectId), purchasingApi.stockSummary(projectId)]);
     setProject(proj);
     setEntries(list);
+    setTasks(schedule.tasks);
+    setStock(stockLines);
   }
 
   useEffect(() => {
@@ -67,6 +75,8 @@ export default function ProjectSiteDiaryPage() {
         decisions: decisions.trim() || undefined,
         entryTime,
         exitTime,
+        taskProgress: taskProgress.filter((item) => item.taskId).map((item) => ({ taskId: item.taskId, progressPercent: Number(item.progressPercent), notes: item.notes || undefined })),
+        consumptions: consumptions.filter((item) => item.materialId && Number(item.quantity) > 0).map((item) => ({ materialId: item.materialId, quantity: Number(item.quantity), notes: item.notes || undefined })),
       });
       setWorkersPresent("");
       setEquipmentPresent("");
@@ -77,6 +87,8 @@ export default function ProjectSiteDiaryPage() {
       setInspectorInstructions("");
       setIncidents("");
       setDecisions("");
+      setTaskProgress([]);
+      setConsumptions([]);
       await reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao registar entrada do diário");
@@ -177,6 +189,10 @@ export default function ProjectSiteDiaryPage() {
               <label className="label">Trabalhos executados *</label>
               <textarea required value={workDone} onChange={(e) => setWorkDone(e.target.value)} rows={2} className="input" />
             </div>
+            <div className="grid gap-4 rounded-xl border border-blue-200 bg-blue-50/50 p-4 lg:grid-cols-2">
+              <div className="space-y-2"><div className="flex items-center justify-between"><div><h3 className="text-sm font-semibold text-slate-900">Progresso do cronograma</h3><p className="text-xs text-slate-500">Actualize as actividades realmente executadas hoje.</p></div><button type="button" className="btn btn-secondary btn-sm" disabled={!tasks.length} onClick={() => setTaskProgress([...taskProgress, { taskId: tasks[0]?.id ?? "", progressPercent: "", notes: "" }])}><IconPlus className="h-3.5 w-3.5" /> Actividade</button></div>{taskProgress.map((item, index) => <div key={index} className="grid grid-cols-[minmax(0,1fr)_90px_auto] gap-2"><select className="input" value={item.taskId} onChange={(event) => setTaskProgress(taskProgress.map((row, rowIndex) => rowIndex === index ? { ...row, taskId: event.target.value } : row))}>{tasks.map((task) => <option key={task.id} value={task.id}>{task.code} · {task.name}</option>)}</select><div className="relative"><input className="input pr-7" type="number" min="0" max="100" placeholder="%" value={item.progressPercent} onChange={(event) => setTaskProgress(taskProgress.map((row, rowIndex) => rowIndex === index ? { ...row, progressPercent: event.target.value } : row))} /><span className="absolute right-2 top-2.5 text-xs text-slate-400">%</span></div><button type="button" className="icon-btn-danger" onClick={() => setTaskProgress(taskProgress.filter((_, rowIndex) => rowIndex !== index))}><IconTrash className="h-3.5 w-3.5" /></button><input className="input col-span-2" placeholder="Trabalho executado, restrição ou evidência" value={item.notes} onChange={(event) => setTaskProgress(taskProgress.map((row, rowIndex) => rowIndex === index ? { ...row, notes: event.target.value } : row))} /></div>)}{!tasks.length && <p className="rounded-lg bg-white px-3 py-2 text-xs text-amber-700">Crie o cronograma da obra para ligar trabalhos diários a actividades.</p>}</div>
+              <div className="space-y-2"><div className="flex items-center justify-between"><div><h3 className="text-sm font-semibold text-slate-900">Consumo real do armazém</h3><p className="text-xs text-slate-500">A saída é criada no stock ao guardar o diário.</p></div><button type="button" className="btn btn-secondary btn-sm" disabled={!stock.length} onClick={() => setConsumptions([...consumptions, { materialId: stock.find((item) => item.balance > 0)?.materialId ?? "", quantity: "", notes: "" }])}><IconPlus className="h-3.5 w-3.5" /> Material</button></div>{consumptions.map((item, index) => { const current = stock.find((line) => line.materialId === item.materialId); return <div key={index} className="grid grid-cols-[minmax(0,1fr)_110px_auto] gap-2"><select className="input" value={item.materialId} onChange={(event) => setConsumptions(consumptions.map((row, rowIndex) => rowIndex === index ? { ...row, materialId: event.target.value } : row))}>{stock.filter((line) => line.balance > 0).map((line) => <option key={line.materialId} value={line.materialId}>{line.materialName} · disponível {line.balance.toLocaleString("pt-MZ", { maximumFractionDigits: 3 })} {line.unit}</option>)}</select><input className="input" type="number" min="0" step="0.001" placeholder={current?.unit ?? "Quant."} value={item.quantity} onChange={(event) => setConsumptions(consumptions.map((row, rowIndex) => rowIndex === index ? { ...row, quantity: event.target.value } : row))} /><button type="button" className="icon-btn-danger" onClick={() => setConsumptions(consumptions.filter((_, rowIndex) => rowIndex !== index))}><IconTrash className="h-3.5 w-3.5" /></button><input className="input col-span-2" placeholder="Frente de trabalho ou finalidade do consumo" value={item.notes} onChange={(event) => setConsumptions(consumptions.map((row, rowIndex) => rowIndex === index ? { ...row, notes: event.target.value } : row))} /></div>})}{!stock.some((item) => item.balance > 0) && <p className="rounded-lg bg-white px-3 py-2 text-xs text-amber-700">Sem material disponível. Receba primeiro uma ordem de compra no Armazém.</p>}</div>
+            </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
                 <label className="label">Materiais recebidos</label>
@@ -242,6 +258,8 @@ export default function ProjectSiteDiaryPage() {
                         <span className="font-medium">Materiais consumidos:</span> {entry.materialsConsumed}
                       </p>
                     )}
+                    {entry.taskProgress?.length > 0 && <div className="rounded-lg border border-blue-100 bg-blue-50 p-3"><p className="mb-2 text-xs font-semibold uppercase tracking-wide text-blue-700">Progresso comunicado ao cronograma</p>{entry.taskProgress.map((progress) => <div key={progress.id} className="flex justify-between text-sm"><span>{progress.taskCode} · {progress.taskName}</span><strong>{progress.progressPercent.toFixed(1)}%</strong></div>)}</div>}
+                    {entry.consumptions?.length > 0 && <div className="rounded-lg border border-emerald-100 bg-emerald-50 p-3"><p className="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-700">Saídas de stock</p>{entry.consumptions.map((consumption) => <div key={consumption.id} className="flex justify-between text-sm"><span>{consumption.materialName}</span><strong>{consumption.quantity.toLocaleString("pt-MZ", { maximumFractionDigits: 3 })} {consumption.unit}</strong></div>)}</div>}
                     {entry.visitors && (
                       <p>
                         <span className="font-medium">Visitas:</span> {entry.visitors}

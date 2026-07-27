@@ -9,6 +9,7 @@ import {
   labourCategories,
   materials,
   equipment,
+  materialZonePrices,
 } from "../db/schema.js";
 import { requireRole } from "../auth/middleware.js";
 import { computeCompositionUnitCost, resolveByName, companyScope } from "../services/costEngine.js";
@@ -54,6 +55,7 @@ export async function costCompositionRoutes(app: FastifyInstance) {
 
   app.get("/api/catalog/compositions/:id", auth, async (request, reply) => {
     const { id } = request.params as { id: string };
+    const { zoneId } = request.query as { zoneId?: string };
     // Tal como as restantes rotas deste ficheiro: só vê o detalhe de uma composição partilhada
     // (companyId null) ou da própria empresa — nunca a de outra empresa, mesmo sabendo o id.
     const [composition] = await db
@@ -101,7 +103,7 @@ export async function costCompositionRoutes(app: FastifyInstance) {
         .from(compositionEquipmentLines)
         .innerJoin(equipment, eq(compositionEquipmentLines.equipmentId, equipment.id))
         .where(eq(compositionEquipmentLines.compositionId, id)),
-      computeCompositionUnitCost(id, request.currentUser!.companyId),
+      computeCompositionUnitCost(id, request.currentUser!.companyId, zoneId),
     ]);
 
     // As linhas acima trazem sempre o custo gravado na linha da composição (que pode apontar
@@ -157,6 +159,17 @@ export async function costCompositionRoutes(app: FastifyInstance) {
         unit: resolved?.unit ?? l.unit,
       };
     });
+    if (zoneId && resolvedMaterialLines.length) {
+      const resolvedIds = resolvedMaterialLines.map((line) => resolvedMaterials.get(line.name)?.id).filter((value): value is string => Boolean(value));
+      const zonePrices = resolvedIds.length
+        ? await db.select().from(materialZonePrices).where(and(eq(materialZonePrices.zoneId, zoneId), inArray(materialZonePrices.materialId, resolvedIds)))
+        : [];
+      const priceByMaterial = new Map(zonePrices.map((price) => [price.materialId, price.unitCost]));
+      for (const line of resolvedMaterialLines) {
+        const materialId = resolvedMaterials.get(line.name)?.id;
+        if (materialId && priceByMaterial.has(materialId)) line.unitCost = priceByMaterial.get(materialId)!;
+      }
+    }
     const resolvedEquipmentLines = equipmentLines.map((l) => ({ ...l, unitCost: resolvedEquipment.get(l.name)?.unitCost ?? l.unitCost }));
 
     return {

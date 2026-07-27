@@ -18,6 +18,8 @@ export type SiteDiaryEntry = {
   exitTime: string | null;
   photoUrls: string[];
   createdAt: string;
+  taskProgress: Array<{ id: string; scheduleTaskId: string; taskName: string; taskCode: string; progressPercent: number; notes: string | null }>;
+  consumptions: Array<{ id: string; materialId: string; materialName: string; unit: string; quantity: number; notes: string | null }>;
 };
 
 export type SiteDiaryEntryInput = {
@@ -34,6 +36,8 @@ export type SiteDiaryEntryInput = {
   decisions?: string;
   entryTime?: string;
   exitTime?: string;
+  taskProgress?: Array<{ taskId: string; progressPercent: number; notes?: string }>;
+  consumptions?: Array<{ materialId: string; quantity: number; notes?: string }>;
 };
 
 export const siteDiaryApi = {

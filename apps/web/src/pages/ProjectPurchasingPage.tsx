@@ -9,7 +9,10 @@ import {
   type PurchaseOrderLineInput,
   type StockMovement,
   type StockSummaryLine,
+  type ProcurementPlan,
+  type ProcurementRequirement,
 } from "../api/purchasing";
+import { scheduleApi, type ScheduleTask } from "../api/schedule";
 import Layout from "../components/Layout";
 import { MetricCard, SectionHeader } from "../components/WorkspaceUI";
 import ProjectWorkspaceNav from "../components/ProjectWorkspaceNav";
@@ -58,6 +61,8 @@ export default function ProjectPurchasingPage() {
   const [orders, setOrders] = useState<PurchaseOrder[]>([]);
   const [movements, setMovements] = useState<StockMovement[]>([]);
   const [stockSummary, setStockSummary] = useState<StockSummaryLine[]>([]);
+  const [procurementPlan, setProcurementPlan] = useState<ProcurementPlan | null>(null);
+  const [scheduleTasks, setScheduleTasks] = useState<ScheduleTask[]>([]);
   const [supplierPrices, setSupplierPrices] = useState<SupplierMaterialPrice[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -65,6 +70,8 @@ export default function ProjectPurchasingPage() {
   const [showOrderForm, setShowOrderForm] = useState(false);
   const [supplierId, setSupplierId] = useState("");
   const [orderDate, setOrderDate] = useState(todayStr());
+  const [requiredByDate, setRequiredByDate] = useState("");
+  const [scheduleTaskId, setScheduleTaskId] = useState("");
   const [orderNotes, setOrderNotes] = useState("");
   const [lines, setLines] = useState<PurchaseOrderLineInput[]>([]);
 
@@ -77,13 +84,15 @@ export default function ProjectPurchasingPage() {
 
   async function reload() {
     if (!projectId) return;
-    const [proj, sups, mats, ords, movs, summary] = await Promise.all([
+    const [proj, sups, mats, ords, movs, summary, plan, schedule] = await Promise.all([
       boqApi.getProject(projectId),
       suppliersApi.list(),
       catalogApi.listMaterials(),
       purchasingApi.listOrders(projectId),
       purchasingApi.listStockMovements(projectId),
       purchasingApi.stockSummary(projectId),
+      purchasingApi.procurementPlan(projectId).catch(() => null),
+      scheduleApi.get(projectId).catch(() => null),
     ]);
     setProject(proj);
     setSuppliers(sups);
@@ -91,6 +100,8 @@ export default function ProjectPurchasingPage() {
     setOrders(ords);
     setMovements(movs);
     setStockSummary(summary);
+    setProcurementPlan(plan);
+    setScheduleTasks(schedule?.tasks ?? []);
     if (!supplierId && sups.length) setSupplierId(sups[0].id);
     if (!movMaterialId && mats.length) setMovMaterialId(mats[0].id);
     if (lines.length === 0 && mats.length) setLines([emptyLine(mats)]);
@@ -132,6 +143,23 @@ export default function ProjectPurchasingPage() {
     updateLine(index, { materialId, unitCost: known ? Number(known.unitCost) : 0 });
   }
 
+  function prepareAutomaticOrder(suggestion: ProcurementRequirement) {
+    const firstPhase = suggestion.phases[0]?.key;
+    const requirements = procurementPlan?.requirements.filter((item) => item.supplierId === suggestion.supplierId && item.suggestedOrderQty > 0 && (
+      suggestion.suggestedScheduleTaskId
+        ? item.suggestedScheduleTaskId === suggestion.suggestedScheduleTaskId
+        : item.phases[0]?.key === firstPhase
+    )) ?? [];
+    if (!requirements.length) return;
+    setSupplierId(suggestion.supplierId!);
+    setScheduleTaskId(suggestion.suggestedScheduleTaskId ?? "");
+    setRequiredByDate(suggestion.requiredByDate ?? "");
+    setLines(requirements.map((item) => ({ materialId: item.materialId, quantity: item.suggestedOrderQty, unitCost: item.estimatedUnitCost, currency: project?.currency })));
+    setOrderNotes("Pedido preparado automaticamente a partir das composições e do stock actual");
+    setShowOrderForm(true);
+    window.setTimeout(() => document.getElementById("purchase-order-form")?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  }
+
   async function handleCreateOrder(e: FormEvent) {
     e.preventDefault();
     if (!projectId || !supplierId) return;
@@ -147,8 +175,10 @@ export default function ProjectPurchasingPage() {
       // com linhas em moedas diferentes do resto da obra, que não se poderia somar de forma
       // honesta no resumo de stock.
       const linesInProjectCurrency = validLines.map((l) => ({ ...l, currency: project?.currency ?? "MZN" }));
-      await purchasingApi.createOrder(projectId, { supplierId, orderDate, notes: orderNotes.trim() || undefined, lines: linesInProjectCurrency });
+      await purchasingApi.createOrder(projectId, { supplierId, orderDate, requiredByDate: requiredByDate || undefined, scheduleTaskId: scheduleTaskId || null, notes: orderNotes.trim() || undefined, lines: linesInProjectCurrency });
       setOrderNotes("");
+      setRequiredByDate("");
+      setScheduleTaskId("");
       setLines([emptyLine(materials)]);
       setShowOrderForm(false);
       await reload();
@@ -235,11 +265,18 @@ export default function ProjectPurchasingPage() {
         )}
 
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <MetricCard label="Materiais em stock" value={stockSummary.length} note="Itens com movimentos" />
-          <MetricCard label="Ordens de compra" value={orders.length} note="Total registado" />
+          <MetricCard label="Cobertura de materiais" value={procurementPlan?.requirements.length ? `${procurementPlan.coveragePercent.toFixed(0)}%` : "—"} note={procurementPlan?.requirements.length ? "Stock + pedidos em curso" : "Composições por associar"} />
+          <MetricCard label="Necessidade por comprar" value={(procurementPlan?.shortageValue ?? 0).toLocaleString("pt-MZ", { maximumFractionDigits: 0 })} note={project.currency} />
           <MetricCard label="Por aprovar" value={orders.filter((order) => order.status === "rascunho").length} tone="warning" />
           <MetricCard label="Recebidas" value={orders.filter((order) => order.status === "recebido").length} tone="positive" />
         </div>
+
+        {procurementPlan && <section className="card overflow-hidden">
+          <SectionHeader title="Necessidades automáticas" description="Composições do orçamento − stock disponível − pedidos em curso" />
+          <div className="border-b border-slate-100 bg-blue-50/60 px-5 py-3 text-sm text-blue-900"><strong>O sistema já fez a conferência.</strong> Só propõe a quantidade ainda em falta e escolhe a melhor cotação aplicável à zona da obra. Confirme antes de criar o pedido.</div>
+          <div className="overflow-x-auto"><table className="min-w-[980px] w-full text-sm"><thead><tr className="table-head-row"><th className="px-5 py-2 text-left font-medium">Material / fase</th><th className="text-right font-medium">Necessário</th><th className="text-right font-medium">Em stock</th><th className="text-right font-medium">Já pedido</th><th className="text-right font-medium">A comprar</th><th className="text-right font-medium">Estimativa</th><th className="px-5 text-right font-medium">Acção</th></tr></thead><tbody>{procurementPlan.requirements.filter((item) => item.shortageQty > 0).map((item) => <tr key={item.materialId} className="table-row"><td className="px-5 py-3"><strong className="block text-slate-900">{item.materialName}</strong><span className="text-xs text-slate-500">{item.phases.map((phase) => phase.label).join(" · ")}</span>{item.suggestedScheduleTaskName && <small className="mt-1 block font-medium text-blue-700">Necessário em {item.requiredByDate} · {item.suggestedScheduleTaskName}</small>}</td><td className="text-right tabular-nums">{item.requiredQty.toLocaleString("pt-MZ", { maximumFractionDigits: 3 })} {item.unit}</td><td className="text-right tabular-nums">{item.stockQty.toLocaleString("pt-MZ", { maximumFractionDigits: 3 })}</td><td className="text-right tabular-nums">{item.orderedQty.toLocaleString("pt-MZ", { maximumFractionDigits: 3 })}</td><td className="text-right tabular-nums font-semibold text-orange-700">{item.suggestedOrderQty.toLocaleString("pt-MZ", { maximumFractionDigits: 3 })} {item.unit}{item.purchaseQty && item.purchasePackageLabel ? <small className="block font-normal">{item.purchaseQty} × {item.purchasePackageLabel}</small> : null}</td><td className="text-right tabular-nums"><strong>{item.estimatedTotal.toLocaleString("pt-MZ", { maximumFractionDigits: 2 })} {procurementPlan.currency}</strong><small className="block text-slate-500">{item.supplierName ?? "preço do Catálogo"} · {item.quoteSource}</small></td><td className="px-5 text-right">{item.supplierId ? <button className="btn btn-secondary btn-sm" onClick={() => prepareAutomaticOrder(item)}>Preparar pedido</button> : <Link className="text-xs font-semibold text-orange-700 hover:underline" to="/fornecedores">Adicionar cotação</Link>}</td></tr>)}{!procurementPlan.requirements.length && <tr><td colSpan={7} className="px-5 py-8 text-center text-amber-700">Associe composições aos itens do orçamento para calcular as necessidades de materiais.</td></tr>}{procurementPlan.requirements.length > 0 && !procurementPlan.requirements.some((item) => item.shortageQty > 0) && <tr><td colSpan={7} className="px-5 py-8 text-center text-emerald-700">Materiais totalmente cobertos pelo stock e pelos pedidos em curso.</td></tr>}</tbody></table></div>
+          {procurementPlan.missingCompositionItems.length > 0 && <div className="border-t border-amber-200 bg-amber-50 px-5 py-3 text-sm text-amber-900"><strong>{procurementPlan.missingCompositionItems.length} item(ns) ainda não entram no aprovisionamento.</strong> Associe composições no Mapa de Quantidades para o sistema saber que materiais devem ser comprados.</div>}
+        </section>}
 
         {/* Stock actual */}
         <section className="card">
@@ -286,8 +323,8 @@ export default function ProjectPurchasingPage() {
           } />
 
           {showOrderForm && (
-            <form onSubmit={handleCreateOrder} className="px-5 py-4 border-b border-gray-100 space-y-3">
-              <div className="grid gap-3 sm:grid-cols-3">
+            <form id="purchase-order-form" onSubmit={handleCreateOrder} className="px-5 py-4 border-b border-gray-100 space-y-3">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
                 <div>
                   <label className="label">Fornecedor</label>
                   <select value={supplierId} onChange={(e) => setSupplierId(e.target.value)} className="input">
@@ -305,8 +342,16 @@ export default function ProjectPurchasingPage() {
                   )}
                 </div>
                 <div>
-                  <label className="label">Data</label>
+                  <label className="label">Data do pedido</label>
                   <input type="date" value={orderDate} onChange={(e) => setOrderDate(e.target.value)} className="input" />
+                </div>
+                <div>
+                  <label className="label">Actividade do cronograma</label>
+                  <select value={scheduleTaskId} onChange={(event) => { const id = event.target.value; setScheduleTaskId(id); const task = scheduleTasks.find((item) => item.id === id); if (task) setRequiredByDate(task.startDate); }} className="input"><option value="">Sem actividade associada</option>{scheduleTasks.map((task) => <option key={task.id} value={task.id}>{task.code} · {task.name}</option>)}</select>
+                </div>
+                <div>
+                  <label className="label">Necessário na obra até</label>
+                  <input type="date" value={requiredByDate} onChange={(event) => setRequiredByDate(event.target.value)} className="input" />
                 </div>
                 <div>
                   <label className="label">Notas</label>
@@ -400,6 +445,7 @@ export default function ProjectPurchasingPage() {
                   <div>
                     <span className="font-medium text-gray-900">{o.supplierName}</span>{" "}
                     <span className="text-gray-400 text-sm">— {o.orderDate}</span>
+                    {(o.scheduleTaskId || o.requiredByDate) && <small className="block mt-1 text-xs text-blue-700">{o.scheduleTaskId ? scheduleTasks.find((task) => task.id === o.scheduleTaskId)?.name ?? "Actividade do cronograma" : "Entrega planeada"}{o.requiredByDate ? ` · necessário até ${o.requiredByDate}` : ""}</small>}
                   </div>
                   <div className="flex items-center gap-2">
                     <span className={`badge ${STATUS_BADGE[o.status]}`}>{STATUS_LABELS[o.status]}</span>
@@ -418,9 +464,9 @@ export default function ProjectPurchasingPage() {
                         cancelar
                       </button>
                     )}
-                    <button onClick={() => handleDeleteOrder(o)} className="icon-btn-danger">
+                    {(o.status === "rascunho" || o.status === "cancelado") && <button onClick={() => handleDeleteOrder(o)} className="icon-btn-danger">
                       <IconTrash className="w-3.5 h-3.5" />
-                    </button>
+                    </button>}
                   </div>
                 </div>
                 <table className="w-full text-sm mt-2">
@@ -507,8 +553,8 @@ export default function ProjectPurchasingPage() {
                     </td>
                     <td className="text-gray-500">{m.date}</td>
                     <td className="pr-5 text-gray-500 flex items-center justify-between gap-2">
-                      <span>{m.purchaseOrderId ? "Ordem de compra" : "Manual"}</span>
-                      {!m.purchaseOrderId && (
+                      <span>{m.purchaseOrderId ? "Ordem de compra" : m.diaryEntryId ? "Diário de obra" : "Manual"}</span>
+                      {!m.purchaseOrderId && !m.diaryEntryId && (
                         <button
                           onClick={() => handleDeleteMovement(m)}
                           className="icon-btn-danger opacity-0 pointer-coarse:opacity-100 group-hover:opacity-100 transition-opacity"

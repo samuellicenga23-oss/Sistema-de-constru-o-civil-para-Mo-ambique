@@ -109,7 +109,7 @@ export default function QuickCalcPage() {
   // --- Qualquer composição ---
   const [genericoTitle, setGenericoTitle] = useState("Cálculo Rápido");
   const [zones, setZones] = useState<PriceZone[]>([]);
-  const [genericoZoneId, setGenericoZoneId] = useState("");
+  const [zoneId, setZoneId] = useState("");
   const [genericoCompositions, setGenericoCompositions] = useState<CostComposition[]>([]);
   const [genericoCompId, setGenericoCompId] = useState("");
   const [genericoCompDetail, setGenericoCompDetail] = useState<CostCompositionDetail | null>(null);
@@ -127,23 +127,23 @@ export default function QuickCalcPage() {
 
   useEffect(() => {
     catalogApi
-      .listCompositions(genericoZoneId || undefined)
+      .listCompositions(zoneId || undefined)
       .then((list) => {
         setGenericoCompositions(list);
         if (!genericoCompId && list.length) setGenericoCompId(list[0].id);
       })
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [genericoZoneId]);
+  }, [zoneId]);
 
   useEffect(() => {
     if (!genericoCompId) return;
-    catalogApi.getComposition(genericoCompId).then(setGenericoCompDetail).catch(() => {});
-  }, [genericoCompId]);
+    catalogApi.getComposition(genericoCompId, zoneId || undefined).then(setGenericoCompDetail).catch(() => {});
+  }, [genericoCompId, zoneId]);
 
   useEffect(() => {
     catalogApi
-      .listCompositions()
+      .listCompositions(zoneId || undefined)
       .then((all) => {
         const concrete = all.filter((c) => normalize(c.name).startsWith("betao b"));
         setConcreteOptions(concrete);
@@ -156,10 +156,10 @@ export default function QuickCalcPage() {
         // (aço bruto por kg aplicado) e o rácio de arame de amarração — reaproveita-se em vez de
         // inventar valores novos aqui, para ficar sempre coerente com o resto do sistema.
         const acoComp = all.find((c) => normalize(c.name).includes("aco a400 aplicado"));
-        if (acoComp) catalogApi.getComposition(acoComp.id).then(setAcoCompDetail).catch(() => {});
+        if (acoComp) catalogApi.getComposition(acoComp.id, zoneId || undefined).then(setAcoCompDetail).catch(() => {});
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Erro ao carregar composições"));
-  }, []);
+  }, [zoneId]);
 
   const steelCutWasteRatio = useMemo(
     () => Number(acoCompDetail?.materialLines.find((l) => normalize(l.name) === "aco a400")?.qtyPerUnit ?? DEFAULT_STEEL_CUT_WASTE_RATIO),
@@ -172,13 +172,13 @@ export default function QuickCalcPage() {
 
   useEffect(() => {
     if (!lajeCompId) return;
-    catalogApi.getComposition(lajeCompId).then(setLajeCompDetail).catch(() => {});
-  }, [lajeCompId]);
+    catalogApi.getComposition(lajeCompId, zoneId || undefined).then(setLajeCompDetail).catch(() => {});
+  }, [lajeCompId, zoneId]);
 
   useEffect(() => {
     if (!betaoCompId) return;
-    catalogApi.getComposition(betaoCompId).then(setBetaoCompDetail).catch(() => {});
-  }, [betaoCompId]);
+    catalogApi.getComposition(betaoCompId, zoneId || undefined).then(setBetaoCompDetail).catch(() => {});
+  }, [betaoCompId, zoneId]);
 
   const lajeResult = useMemo(() => {
     const area = Number(areaM2);
@@ -193,6 +193,10 @@ export default function QuickCalcPage() {
       name: l.name,
       quantity: volumeM3 * Number(l.qtyPerUnit),
       unit: l.unit ?? "",
+      unitPrice: Number(l.unitCost) * Number(l.importFactor ?? 1),
+      totalPrice: volumeM3 * Number(l.qtyPerUnit) * Number(l.unitCost) * Number(l.importFactor ?? 1),
+      currency: lajeCompDetail.currency,
+      priceSource: zoneId ? "Preço ajustado à zona seleccionada" : "Preço base do Catálogo",
     }));
 
     let steelNetKg = 0;
@@ -211,8 +215,8 @@ export default function QuickCalcPage() {
       tieWireKg = steelNetKg * tieWireRatio;
     }
 
-    return { volumeM3, materialLines, steelNetKg, steelPurchaseKg, steelLengthM, barsNeeded, tieWireKg, diameter, spacing, barLength };
-  }, [lajeCompDetail, areaM2, thicknessCm, barDiameterMm, spacingCm, barLengthM, steelCutWasteRatio, tieWireRatio]);
+    return { volumeM3, materialLines, concreteTotal: volumeM3 * lajeCompDetail.unitCost, currency: lajeCompDetail.currency, steelNetKg, steelPurchaseKg, steelLengthM, barsNeeded, tieWireKg, diameter, spacing, barLength };
+  }, [lajeCompDetail, areaM2, thicknessCm, barDiameterMm, spacingCm, barLengthM, steelCutWasteRatio, tieWireRatio, zoneId]);
 
   const betaoVolumeM3 = useMemo(() => {
     if (volumeMode === "directo") return Number(volumeM3Input) || 0;
@@ -225,6 +229,10 @@ export default function QuickCalcPage() {
       name: l.name,
       quantity: betaoVolumeM3 * Number(l.qtyPerUnit),
       unit: l.unit ?? "",
+      unitPrice: Number(l.unitCost) * Number(l.importFactor ?? 1),
+      totalPrice: betaoVolumeM3 * Number(l.qtyPerUnit) * Number(l.unitCost) * Number(l.importFactor ?? 1),
+      currency: betaoCompDetail.currency,
+      priceSource: zoneId ? "Preço ajustado à zona seleccionada" : "Preço base do Catálogo",
     }));
 
     let steelNetKg = 0;
@@ -239,8 +247,8 @@ export default function QuickCalcPage() {
       tieWireKg = steelNetKg * tieWireRatio;
     }
 
-    return { materialLines, steelNetKg, steelPurchaseKg, tieWireKg };
-  }, [betaoCompDetail, betaoVolumeM3, includeSteelRatio, steelCutWasteRatio, tieWireRatio]);
+    return { materialLines, compositionTotal: betaoVolumeM3 * betaoCompDetail.unitCost, currency: betaoCompDetail.currency, steelNetKg, steelPurchaseKg, tieWireKg };
+  }, [betaoCompDetail, betaoVolumeM3, includeSteelRatio, steelCutWasteRatio, tieWireRatio, zoneId]);
 
   const genericoCompositionsByCategory = useMemo(() => {
     const map = new Map<string, CostComposition[]>();
@@ -263,6 +271,10 @@ export default function QuickCalcPage() {
       name: l.name,
       quantity: qty * Number(l.qtyPerUnit),
       unit: l.unit ?? "",
+      unitPrice: Number(l.unitCost) * Number(l.importFactor ?? 1),
+      totalPrice: qty * Number(l.qtyPerUnit) * Number(l.unitCost) * Number(l.importFactor ?? 1),
+      currency: selectedGenericoComposition.currency,
+      priceSource: zoneId ? "Preço ajustado à zona seleccionada" : "Preço base do Catálogo",
     }));
     const totalValue = qty * selectedGenericoComposition.unitCost;
     return { materialLines, totalValue, currency: selectedGenericoComposition.currency };
@@ -292,6 +304,7 @@ export default function QuickCalcPage() {
       lines: [
         { name: "Volume de betão", quantity: lajeResult.volumeM3, unit: "m³" },
         ...lajeResult.materialLines,
+        { name: "Composição de betão completa", quantity: lajeResult.volumeM3, unit: "m³", unitPrice: lajeCompDetail.unitCost, totalPrice: lajeResult.concreteTotal, currency: lajeResult.currency, priceSource: "Materiais + mão-de-obra + equipamento" },
         { name: "Aço líquido (aplicado na malha)", quantity: lajeResult.steelNetKg, unit: "kg" },
         { name: "Aço a comprar (com desperdício de corte)", quantity: lajeResult.steelPurchaseKg, unit: "kg" },
         { name: "Aço a comprar, em metros lineares", quantity: lajeResult.steelLengthM, unit: "m" },
@@ -325,6 +338,7 @@ export default function QuickCalcPage() {
       lines: [
         { name: "Volume de betão", quantity: betaoVolumeM3, unit: "m³" },
         ...betaoResult.materialLines,
+        { name: "Composição de betão completa", quantity: betaoVolumeM3, unit: "m³", unitPrice: betaoCompDetail.unitCost, totalPrice: betaoResult.compositionTotal, currency: betaoResult.currency, priceSource: "Materiais + mão-de-obra + equipamento" },
         ...(includeSteelRatio
           ? [
               { name: "Aço líquido (rácio genérico 80 kg/m³)", quantity: betaoResult.steelNetKg, unit: "kg" },
@@ -349,7 +363,7 @@ export default function QuickCalcPage() {
 
   async function handleExportGenerico() {
     if (!genericoResult || !selectedGenericoComposition) return;
-    const zoneName = zones.find((z) => z.id === genericoZoneId)?.name;
+    const zoneName = zones.find((z) => z.id === zoneId)?.name;
     const result: QuickCalcResult = {
       title: genericoTitle.trim() || "Cálculo Rápido",
       reference: reference.trim() || undefined,
@@ -360,7 +374,7 @@ export default function QuickCalcPage() {
       ],
       lines: [
         ...genericoResult.materialLines,
-        { name: "Valor total (mão-de-obra + materiais + máquinas)", quantity: genericoResult.totalValue, unit: genericoResult.currency },
+        { name: "Composição completa", quantity: Number(genericoQty), unit: selectedGenericoComposition.outputUnit, unitPrice: selectedGenericoComposition.unitCost, totalPrice: genericoResult.totalValue, currency: genericoResult.currency, priceSource: "Materiais + mão-de-obra + equipamento" },
       ],
       notes: [
         "Quantidades de materiais = quantidade indicada × rácio da composição escolhida no Catálogo de Preços.",
@@ -461,6 +475,14 @@ export default function QuickCalcPage() {
               className="input"
             />
           </div>
+          <div>
+            <label className="label">Zona de preço usada nos cálculos</label>
+            <select value={zoneId} onChange={(event) => setZoneId(event.target.value)} className="input">
+              <option value="">Preço base do Catálogo</option>
+              {zones.map((zone) => <option key={zone.id} value={zone.id}>{zone.name}</option>)}
+            </select>
+            <p className="mt-1 text-xs text-slate-500">Aplica-se a Laje, Betão e Qualquer composição. Os totais são recalculados automaticamente.</p>
+          </div>
         </div>
 
         {tab === "laje" && (
@@ -515,12 +537,15 @@ export default function QuickCalcPage() {
                     <tr className="table-head-row">
                       <th className="text-left py-2 px-4 font-medium">Material</th>
                       <th className="text-right font-medium pr-4">Quantidade</th>
+                      <th className="text-right font-medium pr-4">Preço unit.</th>
+                      <th className="text-right font-medium pr-4">Custo</th>
                     </tr>
                   </thead>
                   <tbody>
                     <tr className="table-row">
                       <td className="py-2 px-4">Volume de betão</td>
                       <td className="text-right pr-4 tabular-nums font-medium">{fmt(lajeResult.volumeM3)} m³</td>
+                      <td className="text-right pr-4 text-slate-400">—</td><td className="text-right pr-4 text-slate-400">—</td>
                     </tr>
                     {lajeResult.materialLines.map((l) => (
                       <tr key={l.name} className="table-row">
@@ -528,28 +553,36 @@ export default function QuickCalcPage() {
                         <td className="text-right pr-4 tabular-nums">
                           {fmt(l.quantity)} {l.unit}
                         </td>
+                        <td className="text-right pr-4 tabular-nums">{fmt(l.unitPrice)} {l.currency}</td>
+                        <td className="text-right pr-4 tabular-nums font-medium">{fmt(l.totalPrice)} {l.currency}</td>
                       </tr>
                     ))}
                     <tr className="table-row">
                       <td className="py-2 px-4">Aço líquido (aplicado na malha)</td>
                       <td className="text-right pr-4 tabular-nums">{fmt(lajeResult.steelNetKg)} kg</td>
+                      <td className="text-right pr-4 text-slate-400">—</td><td className="text-right pr-4 text-slate-400">—</td>
                     </tr>
                     <tr className="table-row bg-brand-50/60">
                       <td className="py-2 px-4 font-medium">Aço a comprar (com desperdício de corte)</td>
                       <td className="text-right pr-4 tabular-nums font-semibold">{fmt(lajeResult.steelPurchaseKg)} kg</td>
+                      <td className="text-right pr-4 text-slate-400">—</td><td className="text-right pr-4 text-slate-400">—</td>
                     </tr>
                     <tr className="table-row">
                       <td className="py-2 px-4">Aço a comprar, em metros lineares</td>
                       <td className="text-right pr-4 tabular-nums">{fmt(lajeResult.steelLengthM)} m</td>
+                      <td className="text-right pr-4 text-slate-400">—</td><td className="text-right pr-4 text-slate-400">—</td>
                     </tr>
                     <tr className="table-row bg-brand-50/60">
                       <td className="py-2 px-4 font-medium">Nº de varões a comprar (barras de {fmt(lajeResult.barLength)}m)</td>
                       <td className="text-right pr-4 tabular-nums font-semibold">{lajeResult.barsNeeded} varões</td>
+                      <td className="text-right pr-4 text-slate-400">—</td><td className="text-right pr-4 text-slate-400">—</td>
                     </tr>
                     <tr className="table-row">
                       <td className="py-2 px-4">Arame de amarração</td>
                       <td className="text-right pr-4 tabular-nums">{fmt(lajeResult.tieWireKg)} kg</td>
+                      <td className="text-right pr-4 text-slate-400">—</td><td className="text-right pr-4 text-slate-400">—</td>
                     </tr>
+                    <tr className="table-row bg-slate-900 text-white"><td className="py-2 px-4 font-semibold" colSpan={3}>Composição completa (inclui mão-de-obra e equipamento)</td><td className="text-right pr-4 font-semibold">{fmt(lajeResult.concreteTotal)} {lajeResult.currency}</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -638,12 +671,15 @@ export default function QuickCalcPage() {
                     <tr className="table-head-row">
                       <th className="text-left py-2 px-4 font-medium">Material</th>
                       <th className="text-right font-medium pr-4">Quantidade</th>
+                      <th className="text-right font-medium pr-4">Preço unit.</th>
+                      <th className="text-right font-medium pr-4">Custo</th>
                     </tr>
                   </thead>
                   <tbody>
                     <tr className="table-row">
                       <td className="py-2 px-4">Volume de betão</td>
                       <td className="text-right pr-4 tabular-nums font-medium">{fmt(betaoVolumeM3)} m³</td>
+                      <td className="text-right pr-4 text-slate-400">—</td><td className="text-right pr-4 text-slate-400">—</td>
                     </tr>
                     {betaoResult.materialLines.map((l) => (
                       <tr key={l.name} className="table-row">
@@ -651,6 +687,8 @@ export default function QuickCalcPage() {
                         <td className="text-right pr-4 tabular-nums">
                           {fmt(l.quantity)} {l.unit}
                         </td>
+                        <td className="text-right pr-4 tabular-nums">{fmt(l.unitPrice)} {l.currency}</td>
+                        <td className="text-right pr-4 tabular-nums font-medium">{fmt(l.totalPrice)} {l.currency}</td>
                       </tr>
                     ))}
                     {includeSteelRatio && (
@@ -658,17 +696,21 @@ export default function QuickCalcPage() {
                         <tr className="table-row">
                           <td className="py-2 px-4">Aço líquido (rácio genérico)</td>
                           <td className="text-right pr-4 tabular-nums">{fmt(betaoResult.steelNetKg)} kg</td>
+                          <td className="text-right pr-4 text-slate-400">—</td><td className="text-right pr-4 text-slate-400">—</td>
                         </tr>
                         <tr className="table-row bg-brand-50/60">
                           <td className="py-2 px-4 font-medium">Aço a comprar (com desperdício de corte)</td>
                           <td className="text-right pr-4 tabular-nums font-semibold">{fmt(betaoResult.steelPurchaseKg)} kg</td>
+                          <td className="text-right pr-4 text-slate-400">—</td><td className="text-right pr-4 text-slate-400">—</td>
                         </tr>
                         <tr className="table-row">
                           <td className="py-2 px-4">Arame de amarração</td>
                           <td className="text-right pr-4 tabular-nums">{fmt(betaoResult.tieWireKg)} kg</td>
+                          <td className="text-right pr-4 text-slate-400">—</td><td className="text-right pr-4 text-slate-400">—</td>
                         </tr>
                       </>
                     )}
+                    <tr className="table-row bg-slate-900 text-white"><td className="py-2 px-4 font-semibold" colSpan={3}>Composição completa (inclui mão-de-obra e equipamento)</td><td className="text-right pr-4 font-semibold">{fmt(betaoResult.compositionTotal)} {betaoResult.currency}</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -695,7 +737,7 @@ export default function QuickCalcPage() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="label">Zona de preço (opcional)</label>
-                <select value={genericoZoneId} onChange={(e) => setGenericoZoneId(e.target.value)} className="input">
+                <select value={zoneId} onChange={(e) => setZoneId(e.target.value)} className="input">
                   <option value="">Preço base do Catálogo</option>
                   {zones.map((z) => (
                     <option key={z.id} value={z.id}>
@@ -732,6 +774,8 @@ export default function QuickCalcPage() {
                     <tr className="table-head-row">
                       <th className="text-left py-2 px-4 font-medium">Material</th>
                       <th className="text-right font-medium pr-4">Quantidade</th>
+                      <th className="text-right font-medium pr-4">Preço unit.</th>
+                      <th className="text-right font-medium pr-4">Custo</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -741,10 +785,12 @@ export default function QuickCalcPage() {
                         <td className="text-right pr-4 tabular-nums">
                           {fmt(l.quantity)} {l.unit}
                         </td>
+                        <td className="text-right pr-4 tabular-nums">{fmt(l.unitPrice)} {l.currency}</td>
+                        <td className="text-right pr-4 tabular-nums font-medium">{fmt(l.totalPrice)} {l.currency}</td>
                       </tr>
                     ))}
                     <tr className="table-row bg-brand-50/60">
-                      <td className="py-2 px-4 font-medium">Valor total (mão-de-obra + materiais + máquinas)</td>
+                      <td className="py-2 px-4 font-medium" colSpan={3}>Valor total (mão-de-obra + materiais + máquinas)</td>
                       <td className="text-right pr-4 tabular-nums font-semibold">
                         {fmt(genericoResult.totalValue)} {genericoResult.currency}
                       </td>

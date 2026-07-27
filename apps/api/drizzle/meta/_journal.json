@@ -155,6 +155,13 @@
       "when": 1785108917626,
       "tag": "0021_oval_hiroim",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1785170549796,
+      "tag": "0022_low_smiling_tiger",
+      "breakpoints": true
     }
   ]
 }

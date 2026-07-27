@@ -1,11 +1,11 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { eq, desc } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { db } from "../db/index.js";
-import { siteDiaryEntries, projects } from "../db/schema.js";
+import { materials, projects, scheduleTasks, siteDiaryEntries, siteDiaryTaskProgress, stockMovements } from "../db/schema.js";
 import { requireCompanyUser, requireRole } from "../auth/middleware.js";
 import { assertProjectOwned } from "../services/accessControl.js";
 import { detectImageExtension } from "../services/imageValidation.js";
@@ -32,8 +32,10 @@ const entrySchema = z.object({
   decisions: z.string().optional(),
   entryTime: z.string().optional(),
   exitTime: z.string().optional(),
+  taskProgress: z.array(z.object({ taskId: z.string().uuid(), progressPercent: z.number().min(0).max(100), notes: z.string().optional() })).optional(),
+  consumptions: z.array(z.object({ materialId: z.string().uuid(), quantity: z.number().positive(), notes: z.string().optional() })).optional(),
 });
-const entryUpdateSchema = entrySchema.partial();
+const entryUpdateSchema = entrySchema.omit({ taskProgress: true, consumptions: true }).partial();
 
 // Exportado para uso em routes/files.ts (serve as fotos do diário, agora autenticadas).
 export async function assertEntryOwned(entryId: string, companyId: string) {
@@ -48,7 +50,26 @@ export async function siteDiaryRoutes(app: FastifyInstance) {
     const { projectId } = request.params as { projectId: string };
     const project = await assertProjectOwned(projectId, companyIdOf(request));
     if (!project) return reply.code(404).send({ error: "Projecto não encontrado" });
-    return db.select().from(siteDiaryEntries).where(eq(siteDiaryEntries.projectId, projectId)).orderBy(desc(siteDiaryEntries.date));
+    const entries = await db.select().from(siteDiaryEntries).where(eq(siteDiaryEntries.projectId, projectId)).orderBy(desc(siteDiaryEntries.date));
+    if (!entries.length) return [];
+    const entryIds = entries.map((entry) => entry.id);
+    const [progressRows, consumptionRows] = await Promise.all([
+      db
+        .select({ row: siteDiaryTaskProgress, taskName: scheduleTasks.name, taskCode: scheduleTasks.code })
+        .from(siteDiaryTaskProgress)
+        .innerJoin(scheduleTasks, eq(siteDiaryTaskProgress.scheduleTaskId, scheduleTasks.id))
+        .where(inArray(siteDiaryTaskProgress.diaryEntryId, entryIds)),
+      db
+        .select({ row: stockMovements, materialName: materials.name, unit: materials.unit })
+        .from(stockMovements)
+        .innerJoin(materials, eq(stockMovements.materialId, materials.id))
+        .where(and(inArray(stockMovements.diaryEntryId, entryIds), eq(stockMovements.type, "saida"))),
+    ]);
+    return entries.map((entry) => ({
+      ...entry,
+      taskProgress: progressRows.filter(({ row }) => row.diaryEntryId === entry.id).map(({ row, ...meta }) => ({ ...row, ...meta, progressPercent: Number(row.progressPercent) })),
+      consumptions: consumptionRows.filter(({ row }) => row.diaryEntryId === entry.id).map(({ row, ...meta }) => ({ ...row, ...meta, quantity: Number(row.quantity) })),
+    }));
   });
 
   app.post("/api/projects/:projectId/site-diary", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
@@ -58,10 +79,49 @@ export async function siteDiaryRoutes(app: FastifyInstance) {
 
     const parsed = entrySchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    const { taskProgress = [], consumptions = [], ...entryData } = parsed.data;
+    if (taskProgress.length) {
+      const tasks = await db.select().from(scheduleTasks).where(inArray(scheduleTasks.id, taskProgress.map((item) => item.taskId)));
+      if (tasks.length !== new Set(taskProgress.map((item) => item.taskId)).size || tasks.some((task) => task.projectId !== projectId)) {
+        return reply.code(400).send({ error: "Uma das tarefas não pertence ao cronograma desta obra" });
+      }
+    }
+    if (consumptions.length) {
+      const companyId = companyIdOf(request);
+      const materialIds = Array.from(new Set(consumptions.map((item) => item.materialId)));
+      const visibleMaterials = await db.select().from(materials).where(and(inArray(materials.id, materialIds), or(isNull(materials.companyId), eq(materials.companyId, companyId))));
+      if (visibleMaterials.length !== materialIds.length) return reply.code(400).send({ error: "Um dos materiais não existe no Catálogo" });
+      const movements = await db.select().from(stockMovements).where(and(eq(stockMovements.projectId, projectId), inArray(stockMovements.materialId, materialIds)));
+      for (const materialId of materialIds) {
+        const available = movements.filter((movement) => movement.materialId === materialId).reduce((sum, movement) => sum + (movement.type === "entrada" ? Number(movement.quantity) : -Number(movement.quantity)), 0);
+        const requested = consumptions.filter((item) => item.materialId === materialId).reduce((sum, item) => sum + item.quantity, 0);
+        if (requested > available + 0.0001) {
+          const material = visibleMaterials.find((item) => item.id === materialId);
+          return reply.code(409).send({ error: `Stock insuficiente de ${material?.name ?? "material"}: disponível ${available.toFixed(3)} ${material?.unit ?? ""}` });
+        }
+      }
+    }
+
     const [row] = await db
       .insert(siteDiaryEntries)
-      .values({ ...parsed.data, projectId, createdByUserId: request.currentUser!.id })
+      .values({ ...entryData, projectId, createdByUserId: request.currentUser!.id })
       .returning();
+    if (taskProgress.length) await db.insert(siteDiaryTaskProgress).values(taskProgress.map((item) => ({
+      diaryEntryId: row.id,
+      scheduleTaskId: item.taskId,
+      progressPercent: item.progressPercent.toString(),
+      notes: item.notes,
+    })));
+    if (consumptions.length) await db.insert(stockMovements).values(consumptions.map((item) => ({
+      projectId,
+      materialId: item.materialId,
+      type: "saida" as const,
+      quantity: item.quantity.toString(),
+      notes: item.notes ?? "Consumo registado no Diário de Obra",
+      diaryEntryId: row.id,
+      createdByUserId: request.currentUser!.id,
+      date: entryData.date,
+    })));
     return reply.code(201).send(row);
   });
 
@@ -118,7 +178,14 @@ export async function siteDiaryRoutes(app: FastifyInstance) {
     const [project] = await db.select().from(projects).where(eq(projects.id, entry.projectId)).limit(1);
     if (!project) return reply.code(404).send({ error: "Projecto não encontrado" });
 
-    const buffer = await buildSiteDiaryPdf(entry, project);
+    const [progressRows, consumptionRows] = await Promise.all([
+      db.select({ code: scheduleTasks.code, name: scheduleTasks.name, progressPercent: siteDiaryTaskProgress.progressPercent, notes: siteDiaryTaskProgress.notes }).from(siteDiaryTaskProgress).innerJoin(scheduleTasks, eq(siteDiaryTaskProgress.scheduleTaskId, scheduleTasks.id)).where(eq(siteDiaryTaskProgress.diaryEntryId, id)),
+      db.select({ name: materials.name, unit: materials.unit, quantity: stockMovements.quantity, notes: stockMovements.notes }).from(stockMovements).innerJoin(materials, eq(stockMovements.materialId, materials.id)).where(eq(stockMovements.diaryEntryId, id)),
+    ]);
+    const buffer = await buildSiteDiaryPdf(entry, project, {
+      progress: progressRows.map((row) => ({ ...row, progressPercent: Number(row.progressPercent) })),
+      consumptions: consumptionRows.map((row) => ({ ...row, quantity: Number(row.quantity) })),
+    });
     reply
       .header("Content-Type", "application/pdf")
       .header("Content-Disposition", `attachment; filename="diario-obra-${entry.date}.pdf"`)

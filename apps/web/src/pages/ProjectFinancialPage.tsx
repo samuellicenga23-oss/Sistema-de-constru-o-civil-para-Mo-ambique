@@ -106,7 +106,7 @@ export default function ProjectFinancialPage() {
   return (
     <Layout
       title={`Financeiro — ${project.name}`}
-      subtitle="Receitas, despesas, contas a pagar/receber e fluxo de caixa desta obra"
+      subtitle="Compromissos de compras, receitas dos autos, pagamentos e fluxo de caixa da obra"
       actions={
         <Link to={`/projectos/${projectId}`} className="btn btn-ghost btn-sm">
           <IconBack className="w-3.5 h-3.5" />
@@ -117,6 +117,7 @@ export default function ProjectFinancialPage() {
       <div className="space-y-5 max-w-7xl">
         <ProjectWorkspaceNav projectId={projectId!} />
         {error && <p className="text-sm text-red-600">{error}</p>}
+        <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900"><strong>Financeiro sincronizado.</strong> Ordens de compra aprovadas entram em contas a pagar; autos aprovados entram em contas a receber. Aqui só confirma o pagamento ou acrescenta movimentos excepcionais.</div>
 
         {/* Indicadores */}
         <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
@@ -128,8 +129,7 @@ export default function ProjectFinancialPage() {
           <MetricCard label="Contas a pagar" value={fmt(summary.contasAPagar, currency)} tone="warning" />
         </div>
         <p className="text-xs text-gray-400 -mt-3">
-          A margem realizada é sempre valor recebido − custo pago (dinheiro real); o Mapa de Quantidades não distingue
-          preço de venda de custo interno por item, por isso não existe uma "margem prevista" separada.
+          A margem realizada é sempre valor recebido − custo pago. Valores pendentes vêm automaticamente dos documentos operacionais e não entram no caixa até serem liquidados.
         </p>
 
         {/* Fluxo de caixa mensal */}
@@ -228,7 +228,7 @@ export default function ProjectFinancialPage() {
                     <td className="py-2 px-5">
                       <span className={`badge ${e.type === "receita" ? "badge-green" : "badge-red"}`}>{e.type === "receita" ? "Receita" : "Despesa"}</span>
                     </td>
-                    <td>{e.category}</td>
+                    <td><span className="font-medium">{e.category}</span>{e.sourceType && <span className="mt-1 block w-fit rounded bg-blue-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-blue-700">{e.sourceType === "purchase_order" ? "Ordem de compra" : "Auto de medição"}</span>}</td>
                     <td className="text-gray-500">{e.description ?? "—"}</td>
                     <td className="text-right tabular-nums font-medium">{fmt(Number(e.amount), e.currency)}</td>
                     <td className="text-gray-500">{e.dueDate ?? "—"}</td>
@@ -241,9 +241,9 @@ export default function ProjectFinancialPage() {
                           marcar pago
                         </button>
                       )}
-                      <button onClick={() => handleDelete(e)} className="icon-btn-danger opacity-0 pointer-coarse:opacity-100 group-hover:opacity-100 transition-opacity inline-flex">
+                      {!e.sourceType && <button onClick={() => handleDelete(e)} className="icon-btn-danger opacity-0 pointer-coarse:opacity-100 group-hover:opacity-100 transition-opacity inline-flex">
                         <IconTrash className="w-3.5 h-3.5" />
-                      </button>
+                      </button>}
                     </td>
                   </tr>
                 ))}

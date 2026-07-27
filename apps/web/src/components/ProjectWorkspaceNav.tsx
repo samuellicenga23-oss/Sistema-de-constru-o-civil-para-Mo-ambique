@@ -6,6 +6,7 @@ export default function ProjectWorkspaceNav({ projectId }: { projectId: string }
   const items = [
     { to: `/projectos/${projectId}`, label: "Visão geral", icon: IconHome, exact: true },
     { to: `/projectos/${projectId}/diario`, label: "Diário de obra", icon: IconClipboard },
+    { to: `/projectos/${projectId}/cronograma`, label: "Cronograma", icon: IconChart },
     { to: `/projectos/${projectId}/compras`, label: "Compras e stock", icon: IconUpload },
     { to: `/projectos/${projectId}/financeiro`, label: "Financeiro", icon: IconChart },
   ];

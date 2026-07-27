@@ -28,6 +28,7 @@ import { siteDiaryRoutes } from "./routes/siteDiary.js";
 import { supplierRoutes } from "./routes/suppliers.js";
 import { purchasingRoutes } from "./routes/purchasing.js";
 import { fileRoutes } from "./routes/files.js";
+import { scheduleRoutes } from "./routes/schedule.js";
 
 // Separado de index.ts (que só chama isto e depois app.listen()) para os testes poderem
 // construir a mesma app real e usar app.inject() — pedidos HTTP simulados em memória, sem abrir
@@ -85,6 +86,7 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   await app.register(siteDiaryRoutes);
   await app.register(supplierRoutes);
   await app.register(purchasingRoutes);
+  await app.register(scheduleRoutes);
 
   // Em produção corremos um único processo Node (padrão CloudPanel: um domínio → um appPort) —
   // a API também serve o build do frontend, em vez de depender de um Nginx separado a servir
