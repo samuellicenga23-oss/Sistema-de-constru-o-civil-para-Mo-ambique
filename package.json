@@ -17,7 +17,8 @@
     "db:generate": "npm run db:generate --workspace=apps/api",
     "db:migrate": "npm run db:migrate --workspace=apps/api",
     "db:seed": "npm run db:seed --workspace=apps/api",
-    "bootstrap:admin": "npm run bootstrap:admin --workspace=apps/api --"
+    "bootstrap:admin": "npm run bootstrap:admin --workspace=apps/api --",
+    "test": "npm run test --workspace=apps/api && npm run test --workspace=apps/web"
   },
   "devDependencies": {
     "drizzle-orm": "^0.45.2"
