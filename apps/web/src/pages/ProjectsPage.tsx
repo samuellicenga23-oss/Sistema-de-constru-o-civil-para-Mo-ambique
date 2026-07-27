@@ -4,6 +4,8 @@ import { boqApi, type Project } from "../api/boq";
 import { catalogApi, type PriceZone } from "../api/catalog";
 import QuickEstimateWizard from "../components/QuickEstimateWizard";
 import Layout from "../components/Layout";
+import Modal from "../components/Modal";
+import ConfirmDialog from "../components/ConfirmDialog";
 import { IconFolder, IconPlus, IconTrash, IconWand } from "../components/icons";
 
 export default function ProjectsPage() {
@@ -20,6 +22,8 @@ export default function ProjectsPage() {
   const [showWizard, setShowWizard] = useState(false);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
+  const [pendingDelete, setPendingDelete] = useState<{ id: string; name: string } | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   async function reload() {
     setProjects(await boqApi.listProjects());
@@ -36,15 +40,23 @@ export default function ProjectsPage() {
     `${project.name} ${project.client ?? ""} ${zoneName(project.zoneId) ?? ""}`.toLocaleLowerCase("pt").includes(query.toLocaleLowerCase("pt")),
   );
 
-  async function handleDelete(e: MouseEvent, id: string, name: string) {
+  function handleDelete(e: MouseEvent, id: string, name: string) {
     e.preventDefault();
     e.stopPropagation();
-    if (!window.confirm(`Eliminar o projecto "${name}"? Isto apaga também os seus Mapas de Quantidades, plantas carregadas e autos de medição. Esta acção não pode ser desfeita.`)) return;
+    setPendingDelete({ id, name });
+  }
+
+  async function confirmDelete() {
+    if (!pendingDelete) return;
+    setDeleting(true);
     try {
-      await boqApi.deleteProject(id);
+      await boqApi.deleteProject(pendingDelete.id);
+      setPendingDelete(null);
       await reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao eliminar projecto");
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -102,10 +114,9 @@ export default function ProjectsPage() {
         )}
 
         {showForm && (
-          <section className="card card-pad">
-            <h2 className="section-title mb-3">Novo projecto</h2>
-            <form onSubmit={handleCreate} className="grid gap-3 sm:grid-cols-[1fr_1fr_auto_auto_auto] items-end">
-              <div>
+          <Modal title="Novo projecto" subtitle="Comece com os dados essenciais. Poderá completar o resto dentro da obra." onClose={() => setShowForm(false)} maxWidth="max-w-2xl">
+            <form onSubmit={handleCreate} className="grid gap-4 sm:grid-cols-2 items-end">
+              <div className="sm:col-span-2">
                 <label className="label">Nome do projecto *</label>
                 <input required value={name} onChange={(e) => setName(e.target.value)} className="input" placeholder="ex: Moradia T3 — Marracuene" />
               </div>
@@ -131,15 +142,18 @@ export default function ProjectsPage() {
                   <option value="USD">USD</option>
                 </select>
               </div>
+              <div className="sm:col-span-2 flex justify-end gap-2 border-t border-slate-200 pt-4">
+              <button type="button" onClick={() => setShowForm(false)} className="btn btn-secondary">Cancelar</button>
               <button type="submit" className="btn btn-primary">
                 Criar
               </button>
+              </div>
             </form>
             <p className="text-xs text-gray-500 mt-2">
               A zona determina que preços de material se aplicam (quando um material tem preço próprio nessa zona) —
               defina/gira as zonas no Catálogo de Preços.
             </p>
-          </section>
+          </Modal>
         )}
 
         {!loading && projects.length > 0 && (
@@ -205,6 +219,18 @@ export default function ProjectsPage() {
             navigate(`/documentos/${freshDocumentId}`);
           }}
           onApplied={() => {}}
+        />
+      )}
+
+      {pendingDelete && (
+        <ConfirmDialog
+          title="Eliminar projecto?"
+          message={`O projecto “${pendingDelete.name}” e todos os mapas, plantas e autos associados serão eliminados definitivamente.`}
+          confirmLabel="Eliminar projecto"
+          danger
+          busy={deleting}
+          onCancel={() => setPendingDelete(null)}
+          onConfirm={confirmDelete}
         />
       )}
     </Layout>

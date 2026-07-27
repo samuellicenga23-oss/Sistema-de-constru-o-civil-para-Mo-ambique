@@ -5,8 +5,9 @@ import { measurementApi, type MeasurementCertificate } from "../api/measurement"
 import { plantsApi, type Plant } from "../api/plants";
 import { catalogApi, type PriceZone } from "../api/catalog";
 import Layout from "../components/Layout";
-import { MetricCard, SectionHeader } from "../components/WorkspaceUI";
-import { IconBack, IconDoc, IconClipboard, IconMap, IconPlus, IconTrash, IconUpload, IconChart } from "../components/icons";
+import { InlineNotice, MetricCard, SectionHeader } from "../components/WorkspaceUI";
+import ProjectWorkspaceNav from "../components/ProjectWorkspaceNav";
+import { IconBack, IconDoc, IconClipboard, IconMap, IconPlus, IconTrash, IconUpload } from "../components/icons";
 
 const PLANT_STATUS_BADGE: Record<Plant["processingStatus"], { label: string; cls: string }> = {
   pendente: { label: "Pendente", cls: "badge-gray" },
@@ -168,28 +169,28 @@ export default function ProjectDetailPage() {
     <Layout
       title={project.name}
       actions={
-        <>
-          <Link to={`/projectos/${projectId}/compras`} className="btn btn-secondary btn-sm">
-            <IconUpload className="w-3.5 h-3.5" />
-            Compras e Armazém
-          </Link>
-          <Link to={`/projectos/${projectId}/diario`} className="btn btn-secondary btn-sm">
-            <IconClipboard className="w-3.5 h-3.5" />
-            Diário de Obra
-          </Link>
-          <Link to={`/projectos/${projectId}/financeiro`} className="btn btn-secondary btn-sm">
-            <IconChart className="w-3.5 h-3.5" />
-            Financeiro
-          </Link>
           <Link to="/projectos" className="btn btn-ghost btn-sm">
             <IconBack className="w-3.5 h-3.5" />
-            Projectos
+            Todos os projectos
           </Link>
-        </>
       }
     >
       <div className="grid gap-5 lg:grid-cols-2 max-w-7xl">
+        <div className="lg:col-span-2"><ProjectWorkspaceNav projectId={projectId!} /></div>
         {error && <p className="text-sm text-red-600 lg:col-span-2">{error}</p>}
+
+        <div className="lg:col-span-2">
+          <InlineNotice>
+            <strong>Próximo passo recomendado: </strong>
+            {documents.length === 0
+              ? "crie o primeiro Mapa de Quantidades para estruturar o orçamento da obra."
+              : plants.length === 0
+                ? "carregue as plantas do projecto para acelerar medições e manter a documentação centralizada."
+                : certificates.length === 0
+                  ? "quando a execução começar, crie o primeiro Auto de Medição para acompanhar o progresso."
+                  : "reveja o Diário de Obra, compras pendentes e movimentos financeiros antes de actualizar a medição."}
+          </InlineNotice>
+        </div>
 
         <div className="lg:col-span-2 grid gap-3 sm:grid-cols-3">
           <MetricCard label="Mapas de quantidades" value={documents.length} note="Documentos do projecto" />

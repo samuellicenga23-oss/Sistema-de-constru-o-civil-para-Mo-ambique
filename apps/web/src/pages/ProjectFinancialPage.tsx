@@ -4,6 +4,7 @@ import { boqApi, type Project } from "../api/boq";
 import { financialApi, type FinancialEntry, type FinancialSummary } from "../api/financial";
 import Layout from "../components/Layout";
 import { MetricCard, SectionHeader } from "../components/WorkspaceUI";
+import ProjectWorkspaceNav from "../components/ProjectWorkspaceNav";
 import { IconBack, IconPlus, IconTrash } from "../components/icons";
 
 const CATEGORY_SUGGESTIONS_DESPESA = ["Mão-de-obra", "Materiais", "Equipamento", "Subcontratação", "Transporte", "Outros"];
@@ -114,6 +115,7 @@ export default function ProjectFinancialPage() {
       }
     >
       <div className="space-y-5 max-w-7xl">
+        <ProjectWorkspaceNav projectId={projectId!} />
         {error && <p className="text-sm text-red-600">{error}</p>}
 
         {/* Indicadores */}

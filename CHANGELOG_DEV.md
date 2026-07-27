@@ -58,3 +58,19 @@ consultar o estado do Git e as entradas mais recentes. Cada intervenção deve i
 - **Mobile:** gaveta lateral actualizada para a mesma linguagem clara.
 - **Validação:** 12 testes do frontend aprovados; build de produção aprovado.
 - **Produção:** ainda não publicada.
+
+## 2026-07-27 — Codex — UX funcional, fase 1
+
+- **Referências:** Autodesk Build Project Home e navegação por ferramentas, Fieldwire e Buildertrend.
+- **Problema corrigido:** cada módulo abria como uma página isolada e as acções da obra competiam
+  no cabeçalho, sem continuidade de contexto.
+- **Navegação da obra:** novo menu persistente entre Visão geral, Diário de obra, Compras/stock e
+  Financeiro, com estado activo e comportamento responsivo.
+- **Orientação:** a visão geral recomenda dinamicamente o próximo passo com base em documentos,
+  plantas e autos existentes.
+- **Criação de projecto:** formulário transferido para modal focado, com dados essenciais e
+  cancelamento claro.
+- **Acções destrutivas:** eliminação de projecto passou de `window.confirm` para confirmação
+  contextual, não bloqueante e com estado de processamento.
+- **Validação:** 12 testes do frontend aprovados; build de produção aprovado.
+- **Produção:** ainda não publicada.

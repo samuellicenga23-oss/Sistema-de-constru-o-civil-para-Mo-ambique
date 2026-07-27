@@ -12,6 +12,7 @@ import {
 } from "../api/purchasing";
 import Layout from "../components/Layout";
 import { MetricCard, SectionHeader } from "../components/WorkspaceUI";
+import ProjectWorkspaceNav from "../components/ProjectWorkspaceNav";
 import { IconBack, IconPlus, IconTrash } from "../components/icons";
 
 const STATUS_LABELS: Record<PurchaseOrder["status"], string> = {
@@ -195,6 +196,7 @@ export default function ProjectPurchasingPage() {
       }
     >
       <div className="space-y-5 max-w-7xl">
+        <ProjectWorkspaceNav projectId={projectId!} />
         {error && <p className="text-sm text-red-600">{error}</p>}
 
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

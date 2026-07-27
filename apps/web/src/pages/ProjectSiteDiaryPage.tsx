@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { boqApi, type Project } from "../api/boq";
 import { siteDiaryApi, type SiteDiaryEntry } from "../api/siteDiary";
 import Layout from "../components/Layout";
+import ProjectWorkspaceNav from "../components/ProjectWorkspaceNav";
 import { IconBack, IconPlus, IconTrash, IconDownload, IconUpload } from "../components/icons";
 
 function todayStr() {
@@ -133,7 +134,8 @@ export default function ProjectSiteDiaryPage() {
         </Link>
       }
     >
-      <div className="space-y-5 max-w-5xl">
+      <div className="space-y-5 max-w-7xl">
+        <ProjectWorkspaceNav projectId={projectId!} />
         {error && <p className="text-sm text-red-600">{error}</p>}
 
         <section className="card card-pad">
