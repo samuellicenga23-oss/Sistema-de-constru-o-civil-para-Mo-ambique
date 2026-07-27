@@ -9,6 +9,7 @@ import {
   pgEnum,
   date,
   jsonb,
+  unique,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
@@ -40,6 +41,19 @@ export const companies = pgTable("companies", {
   defaultCurrency: currencyEnum("default_currency").notNull().default("MZN"),
   workingDaysPerMonth: integer("working_days_per_month").notNull().default(22),
   workingHoursPerDay: numeric("working_hours_per_day", { precision: 4, scale: 1 }).notNull().default("8"),
+  // Perfil da empresa (Fase 1, Etapa 4) — todos opcionais, preenchidos pelo admin_empresa
+  // quando quiser; nenhum é usado em cálculos, só em identificação/documentos.
+  province: varchar("province", { length: 100 }),
+  district: varchar("district", { length: 100 }),
+  phone: varchar("phone", { length: 50 }),
+  email: varchar("email", { length: 200 }),
+  website: varchar("website", { length: 200 }),
+  bankDetails: text("bank_details"),
+  // Texto livre acrescentado ao rodapé dos documentos exportados (Excel/PDF) desta empresa —
+  // ainda não usado pelos serviços de exportação (services/excelExport.ts, pdfExport.ts); fica
+  // gravado já para quando essa integração for feita.
+  documentFooter: text("document_footer"),
+  responsibleName: varchar("responsible_name", { length: 150 }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -64,6 +78,11 @@ export const users = pgTable("users", {
   // bem-sucedido. Não permite criar conta por si só: o login com Google só funciona para um
   // email que já exista aqui (criado por um admin), nunca regista ninguém novo.
   googleId: varchar("google_id", { length: 255 }).unique(),
+  avatarUrl: text("avatar_url"),
+  lastLoginAt: timestamp("last_login_at"),
+  // Guardado já para quando houver internacionalização real (Fase 1 do documento diz
+  // "futuramente") — hoje não muda nada no comportamento da aplicação.
+  preferredLanguage: varchar("preferred_language", { length: 10 }).notNull().default("pt"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -71,36 +90,53 @@ export const sessions = pgTable("sessions", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   expiresAt: timestamp("expires_at").notNull(),
+  // Para "terminar sessões de outros dispositivos" fazer sentido, o utilizador precisa de
+  // conseguir distinguir as sessões — nenhum dos dois é fiável a 100% (IP muda, user-agent
+  // pode ser forjado) mas já é o suficiente para reconhecer "o meu telemóvel" vs "outra coisa".
+  userAgent: text("user_agent"),
+  ipAddress: varchar("ip_address", { length: 64 }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
 // ---------- Catálogo de preços (companyId nullable = catálogo global partilhado) ----------
 
-export const labourCategories = pgTable("labour_categories", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  companyId: uuid("company_id").references(() => companies.id, { onDelete: "cascade" }),
-  name: varchar("name", { length: 150 }).notNull(),
-  monthlySalary: numeric("monthly_salary", { precision: 14, scale: 2 }).notNull(),
-  hourlyRate: numeric("hourly_rate", { precision: 14, scale: 4 }).notNull(),
-  currency: currencyEnum("currency").notNull().default("MZN"),
-});
+export const labourCategories = pgTable(
+  "labour_categories",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id").references(() => companies.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 150 }).notNull(),
+    monthlySalary: numeric("monthly_salary", { precision: 14, scale: 2 }).notNull(),
+    hourlyRate: numeric("hourly_rate", { precision: 14, scale: 4 }).notNull(),
+    currency: currencyEnum("currency").notNull().default("MZN"),
+  },
+  // Impede duas clonagens em corrida (dois pedidos simultâneos a clonar a mesma categoria
+  // partilhada para a mesma empresa) — companyId NULL nunca colide consigo próprio em Postgres
+  // (semântica normal de UNIQUE com NULL), por isso isto só restringe cópias já pertencentes a
+  // uma empresa, nunca a lista partilhada.
+  (table) => [unique().on(table.companyId, table.name)]
+);
 
-export const materials = pgTable("materials", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  companyId: uuid("company_id").references(() => companies.id, { onDelete: "cascade" }),
-  name: varchar("name", { length: 200 }).notNull(),
-  unit: unitEnum("unit").notNull(),
-  baseUnitCost: numeric("base_unit_cost", { precision: 14, scale: 4 }).notNull(),
-  importFactor: numeric("import_factor", { precision: 6, scale: 4 }).notNull().default("1.0"),
-  currency: currencyEnum("currency").notNull().default("MZN"),
-  // Embalagem/unidade de compra de mercado, quando difere da unidade de medida usada nas
-  // composições (ex: areia medida em m3 nas composições, mas vendida por camião de Xm3) — ambos
-  // nullable: null = compra-se directamente na unidade de medida, sem conversão (ex: água, local;
-  // pregos/arame, ao peso). `purchasePackageQty` é quantas unidades de medida cabem numa unidade
-  // de compra (ex: 10 para um camião de 10m3).
-  purchasePackageLabel: varchar("purchase_package_label", { length: 100 }),
-  purchasePackageQty: numeric("purchase_package_qty", { precision: 14, scale: 4 }),
-});
+export const materials = pgTable(
+  "materials",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id").references(() => companies.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 200 }).notNull(),
+    unit: unitEnum("unit").notNull(),
+    baseUnitCost: numeric("base_unit_cost", { precision: 14, scale: 4 }).notNull(),
+    importFactor: numeric("import_factor", { precision: 6, scale: 4 }).notNull().default("1.0"),
+    currency: currencyEnum("currency").notNull().default("MZN"),
+    // Embalagem/unidade de compra de mercado, quando difere da unidade de medida usada nas
+    // composições (ex: areia medida em m3 nas composições, mas vendida por camião de Xm3) — ambos
+    // nullable: null = compra-se directamente na unidade de medida, sem conversão (ex: água, local;
+    // pregos/arame, ao peso). `purchasePackageQty` é quantas unidades de medida cabem numa unidade
+    // de compra (ex: 10 para um camião de 10m3).
+    purchasePackageLabel: varchar("purchase_package_label", { length: 100 }),
+    purchasePackageQty: numeric("purchase_package_qty", { precision: 14, scale: 4 }),
+  },
+  (table) => [unique().on(table.companyId, table.name)]
+);
 
 // Zonas de preço (ex: "Baixa", "Matola") — o custo de um material pode variar consoante a zona
 // da obra (transporte, disponibilidade local); companyId nullable = lista partilhada (mesma
@@ -122,14 +158,18 @@ export const materialZonePrices = pgTable("material_zone_prices", {
   unitCost: numeric("unit_cost", { precision: 14, scale: 4 }).notNull(),
 });
 
-export const equipment = pgTable("equipment", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  companyId: uuid("company_id").references(() => companies.id, { onDelete: "cascade" }),
-  name: varchar("name", { length: 200 }).notNull(),
-  unit: unitEnum("unit").notNull(),
-  hourlyCost: numeric("hourly_cost", { precision: 14, scale: 4 }).notNull(),
-  currency: currencyEnum("currency").notNull().default("MZN"),
-});
+export const equipment = pgTable(
+  "equipment",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id").references(() => companies.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 200 }).notNull(),
+    unit: unitEnum("unit").notNull(),
+    hourlyCost: numeric("hourly_cost", { precision: 14, scale: 4 }).notNull(),
+    currency: currencyEnum("currency").notNull().default("MZN"),
+  },
+  (table) => [unique().on(table.companyId, table.name)]
+);
 
 export const costCompositions = pgTable("cost_compositions", {
   id: uuid("id").primaryKey().defaultRandom(),

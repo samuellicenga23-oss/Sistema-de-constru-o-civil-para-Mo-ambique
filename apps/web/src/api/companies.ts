@@ -15,9 +15,36 @@ export type Company = {
   address: string | null;
   logoUrl: string | null;
   defaultCurrency: string;
+  workingDaysPerMonth: number;
+  workingHoursPerDay: string;
+  province: string | null;
+  district: string | null;
+  phone: string | null;
+  email: string | null;
+  website: string | null;
+  bankDetails: string | null;
+  documentFooter: string | null;
+  responsibleName: string | null;
   createdAt: string;
   subscription?: Subscription | null;
 };
+
+export type CompanyUpdateInput = Partial<{
+  name: string;
+  nuit: string;
+  address: string;
+  province: string;
+  district: string;
+  phone: string;
+  email: string;
+  website: string;
+  bankDetails: string;
+  documentFooter: string;
+  responsibleName: string;
+  defaultCurrency: string;
+  workingDaysPerMonth: number;
+  workingHoursPerDay: number;
+}>;
 
 export const companiesApi = {
   list: () => request<Company[]>("/companies"),
@@ -27,8 +54,7 @@ export const companiesApi = {
     request<Subscription>(`/companies/${companyId}/subscription`, { method: "PUT", body: JSON.stringify(data) }),
 
   me: () => request<{ company: Company; subscription: Subscription | null }>("/companies/me"),
-  updateMe: (data: { name?: string; nuit?: string; address?: string }) =>
-    request<Company>("/companies/me", { method: "PUT", body: JSON.stringify(data) }),
+  updateMe: (data: CompanyUpdateInput) => request<Company>("/companies/me", { method: "PUT", body: JSON.stringify(data) }),
   uploadLogo: async (file: File) => {
     const form = new FormData();
     form.append("file", file);

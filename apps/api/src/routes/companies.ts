@@ -1,11 +1,11 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, count } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { db } from "../db/index.js";
-import { companies, users, subscriptions } from "../db/schema.js";
+import { companies, users, subscriptions, projects } from "../db/schema.js";
 import { requireRole, requireCompanyUser } from "../auth/middleware.js";
 import { hashPassword } from "../auth/password.js";
 import { env } from "../env.js";
@@ -118,6 +118,57 @@ export async function companyRoutes(app: FastifyInstance) {
     return row;
   });
 
+  // Estatísticas para o painel do super_admin (Fase 1, Etapa 5) — antes o painel só listava
+  // empresas, sem nenhum resumo agregado da plataforma.
+  app.get("/api/admin/stats", { preHandler: requireRole("super_admin") }, async () => {
+    const allCompanies = await db.select().from(companies);
+    const allSubscriptions = await db.select().from(subscriptions);
+
+    const latestByCompany = new Map<string, (typeof allSubscriptions)[number]>();
+    for (const s of allSubscriptions) {
+      const current = latestByCompany.get(s.companyId);
+      if (!current || s.createdAt > current.createdAt) latestByCompany.set(s.companyId, s);
+    }
+
+    let activeCompanies = 0;
+    let trialCompanies = 0;
+    let suspendedCompanies = 0;
+    const planCounts: Record<string, number> = {};
+    for (const c of allCompanies) {
+      const sub = latestByCompany.get(c.id);
+      const status = sub?.status ?? "trial";
+      if (status === "activo") activeCompanies++;
+      else if (status === "suspenso") suspendedCompanies++;
+      else trialCompanies++;
+      const plan = sub?.plan ?? "free";
+      planCounts[plan] = (planCounts[plan] ?? 0) + 1;
+    }
+
+    const [{ value: totalUsers }] = await db.select({ value: count() }).from(users);
+    const [{ value: totalProjects }] = await db.select({ value: count() }).from(projects);
+
+    // Estado dos serviços — a própria API está claramente "no ar" (está a responder a este
+    // pedido); o plant-service precisa de um ping real porque corre num processo à parte.
+    let plantServiceUp = false;
+    try {
+      const res = await fetch(`${env.plantServiceUrl}/health`, { signal: AbortSignal.timeout(3000) });
+      plantServiceUp = res.ok;
+    } catch {
+      plantServiceUp = false;
+    }
+
+    return {
+      totalCompanies: allCompanies.length,
+      activeCompanies,
+      trialCompanies,
+      suspendedCompanies,
+      totalUsers: Number(totalUsers),
+      totalProjects: Number(totalProjects),
+      planCounts,
+      services: { api: true, plantService: plantServiceUp },
+    };
+  });
+
   // ---------- Definições da própria empresa (admin_empresa) ----------
   app.get("/api/companies/me", { preHandler: requireCompanyUser }, async (request, reply) => {
     const companyId = request.currentUser!.companyId!;
@@ -129,11 +180,36 @@ export async function companyRoutes(app: FastifyInstance) {
   app.put("/api/companies/me", { preHandler: requireRole("admin_empresa") }, async (request, reply) => {
     const companyId = request.currentUser!.companyId!;
     const parsed = z
-      .object({ name: z.string().min(1).optional(), nuit: z.string().optional(), address: z.string().optional() })
+      .object({
+        name: z.string().min(1).optional(),
+        nuit: z.string().optional(),
+        address: z.string().optional(),
+        province: z.string().optional(),
+        district: z.string().optional(),
+        phone: z.string().optional(),
+        email: z.string().email().or(z.literal("")).optional(),
+        website: z.string().optional(),
+        bankDetails: z.string().optional(),
+        documentFooter: z.string().optional(),
+        responsibleName: z.string().optional(),
+        defaultCurrency: z.enum(CURRENCIES).optional(),
+        workingDaysPerMonth: z.number().int().min(1).max(31).optional(),
+        workingHoursPerDay: z.number().min(1).max(24).optional(),
+      })
       .safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    const { workingDaysPerMonth, workingHoursPerDay, email, ...rest } = parsed.data;
 
-    const [row] = await db.update(companies).set(parsed.data).where(eq(companies.id, companyId)).returning();
+    const [row] = await db
+      .update(companies)
+      .set({
+        ...rest,
+        ...(email !== undefined ? { email: email || null } : {}),
+        ...(workingDaysPerMonth !== undefined ? { workingDaysPerMonth } : {}),
+        ...(workingHoursPerDay !== undefined ? { workingHoursPerDay: workingHoursPerDay.toString() } : {}),
+      })
+      .where(eq(companies.id, companyId))
+      .returning();
     return row;
   });
 

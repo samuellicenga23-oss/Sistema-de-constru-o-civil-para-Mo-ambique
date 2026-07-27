@@ -149,7 +149,7 @@ export async function generateStandardBoq(documentId: string, companyId: string,
   const unitCostCache = new Map<string, number>();
   async function unitCostOf(compositionId: string): Promise<number> {
     if (!unitCostCache.has(compositionId)) {
-      const breakdown = await computeCompositionUnitCost(compositionId, zoneId);
+      const breakdown = await computeCompositionUnitCost(compositionId, companyId, zoneId);
       unitCostCache.set(compositionId, breakdown.unitCost);
     }
     return unitCostCache.get(compositionId)!;

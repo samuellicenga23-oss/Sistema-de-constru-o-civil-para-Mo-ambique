@@ -12,7 +12,7 @@ export async function materialsByPhaseRoutes(app: FastifyInstance) {
     const document = await assertDocumentOwned(id, companyId);
     if (!document) return reply.code(404).send({ error: "Documento não encontrado" });
 
-    const result = await computeMaterialsByPhase(id);
+    const result = await computeMaterialsByPhase(id, companyId);
     if (!result) return reply.code(404).send({ error: "Documento não encontrado" });
     return { document: { id: document.id, title: document.title }, ...result };
   });
@@ -23,7 +23,7 @@ export async function materialsByPhaseRoutes(app: FastifyInstance) {
     const document = await assertDocumentOwned(id, companyId);
     if (!document) return reply.code(404).send({ error: "Documento não encontrado" });
 
-    const result = await computeMaterialsByPhase(id);
+    const result = await computeMaterialsByPhase(id, companyId);
     if (!result) return reply.code(404).send({ error: "Documento não encontrado" });
 
     const buffer = await buildMaterialsByPhasePdf(document.title, result);
@@ -39,7 +39,7 @@ export async function materialsByPhaseRoutes(app: FastifyInstance) {
     const document = await assertDocumentOwned(id, companyId);
     if (!document) return reply.code(404).send({ error: "Documento não encontrado" });
 
-    const result = await computeMaterialsByPhase(id);
+    const result = await computeMaterialsByPhase(id, companyId);
     if (!result) return reply.code(404).send({ error: "Documento não encontrado" });
 
     const buffer = await buildMaterialsByPhaseExcel(document.title, result);

@@ -33,4 +33,18 @@ cd apps/plant-service
 uvicorn main:app --reload --port 8001
 ```
 
+## Testes
+
+```bash
+# Backend: precisa de uma base de dados de teste separada (nunca a de desenvolvimento)
+createdb sigo_test   # ou: psql -U postgres -c "CREATE DATABASE sigo_test"
+cp apps/api/.env.test.example apps/api/.env.test   # ajustar credenciais se necessário
+
+npm run test   # corre backend (Vitest + Fastify inject()) e frontend (Vitest + Testing Library)
+```
+
+O CI (`.github/workflows/ci.yml`) corre `npm ci`, build, typecheck, os mesmos testes contra um
+Postgres efémero, validação de que o schema e as migrations estão sincronizados, e uma
+auditoria de dependências informativa — em cada push/PR. Nunca faz deploy sozinho.
+
 Ver `C:\Users\Expert Sam\.claude\plans\shiny-conjuring-muffin.md` para o plano técnico completo e as decisões de âmbito validadas.

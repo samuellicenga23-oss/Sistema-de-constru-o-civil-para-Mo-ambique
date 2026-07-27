@@ -3,8 +3,10 @@ dist/
 build/
 .env
 .env.local
+.env.test
 *.log
 uploads/
 .venv/
 __pycache__/
 *.pyc
+*.tsbuildinfo

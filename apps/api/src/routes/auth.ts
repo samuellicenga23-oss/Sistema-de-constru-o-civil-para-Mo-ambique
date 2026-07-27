@@ -1,14 +1,30 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import rateLimit from "@fastify/rate-limit";
 import { z } from "zod";
 import { eq, desc } from "drizzle-orm";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { db } from "../db/index.js";
 import { users, subscriptions } from "../db/schema.js";
 import { hashPassword, verifyPassword } from "../auth/password.js";
-import { createSession, deleteSession, deleteAllSessionsForUser } from "../auth/session.js";
+import {
+  createSession,
+  deleteSession,
+  deleteAllSessionsForUser,
+  listSessionsForUser,
+  deleteSessionForUser,
+  deleteOtherSessionsForUser,
+} from "../auth/session.js";
 import { requireAuth } from "../auth/middleware.js";
+import { detectImageExtension } from "../services/imageValidation.js";
 import { env } from "../env.js";
+
+// Extrai os dados da sessão que ajudam o utilizador a reconhecer o dispositivo mais tarde (ecrã
+// de Perfil → "Sessões") — nenhum dos dois é uma identidade forte, só um auxiliar visual.
+function sessionMetaOf(request: FastifyRequest) {
+  return { userAgent: request.headers["user-agent"] ?? null, ipAddress: request.ip };
+}
 
 // Hash bcrypt real (de uma password arbitrária, nunca usada por ninguém) só para gastar o mesmo
 // tempo do bcrypt verdadeiro quando o email não existe — sem isto, responder mais depressa
@@ -79,7 +95,9 @@ export async function authRoutes(app: FastifyInstance) {
         }
       }
 
-      const session = await createSession(user.id);
+      const session = await createSession(user.id, sessionMetaOf(request));
+      const lastLoginAt = new Date();
+      await db.update(users).set({ lastLoginAt }).where(eq(users.id, user.id));
       reply.setCookie("sid", session.id, { ...COOKIE_OPTS, expires: session.expiresAt });
 
       return {
@@ -88,6 +106,10 @@ export async function authRoutes(app: FastifyInstance) {
         name: user.name,
         email: user.email,
         role: user.role,
+        avatarUrl: user.avatarUrl,
+        lastLoginAt,
+        preferredLanguage: user.preferredLanguage,
+        createdAt: user.createdAt,
       };
     }
   );
@@ -188,7 +210,8 @@ export async function authRoutes(app: FastifyInstance) {
         await db.update(users).set({ googleId: profile.sub }).where(eq(users.id, user.id));
       }
 
-      const session = await createSession(user.id);
+      const session = await createSession(user.id, sessionMetaOf(request));
+      await db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, user.id));
       reply.setCookie("sid", session.id, { ...COOKIE_OPTS, expires: session.expiresAt });
       return reply.redirect(env.frontendUrl || "/");
     }
@@ -205,6 +228,80 @@ export async function authRoutes(app: FastifyInstance) {
 
   app.get("/api/auth/me", { preHandler: requireAuth }, async (request) => {
     return request.currentUser;
+  });
+
+  const updateProfileSchema = z.object({
+    name: z.string().min(1).optional(),
+    preferredLanguage: z.string().min(2).max(10).optional(),
+  });
+
+  // Editar os próprios dados de perfil (nome, idioma preferido) — nunca email/perfil/empresa,
+  // que continuam só geríveis por um admin (email é a identidade de login, perfil/empresa são
+  // decisões de acesso que não cabem ao próprio utilizador mudar sozinho).
+  app.patch("/api/auth/me", { preHandler: requireAuth }, async (request, reply) => {
+    const parsed = updateProfileSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    if (Object.keys(parsed.data).length === 0) return request.currentUser;
+
+    const [updated] = await db.update(users).set(parsed.data).where(eq(users.id, request.currentUser!.id)).returning();
+    return {
+      id: updated.id,
+      companyId: updated.companyId,
+      name: updated.name,
+      email: updated.email,
+      role: updated.role,
+      avatarUrl: updated.avatarUrl,
+      lastLoginAt: updated.lastLoginAt,
+      preferredLanguage: updated.preferredLanguage,
+      createdAt: updated.createdAt,
+    };
+  });
+
+  app.post("/api/auth/me/avatar", { preHandler: requireAuth }, async (request, reply) => {
+    const data = await request.file();
+    if (!data) return reply.code(400).send({ error: "Ficheiro em falta" });
+
+    const buffer = await data.toBuffer();
+    const ext = detectImageExtension(buffer);
+    if (!ext) return reply.code(400).send({ error: "Ficheiro inválido — só são aceites imagens PNG, JPG, WEBP ou GIF" });
+
+    const uploadsDir = path.join(env.uploadsDir, "avatars");
+    await mkdir(uploadsDir, { recursive: true });
+    const fileName = `${randomUUID()}${ext}`;
+    await writeFile(path.join(uploadsDir, fileName), buffer);
+    const avatarUrl = `/uploads/avatars/${fileName}`;
+
+    const [updated] = await db.update(users).set({ avatarUrl }).where(eq(users.id, request.currentUser!.id)).returning();
+    return { avatarUrl: updated.avatarUrl };
+  });
+
+  app.delete("/api/auth/me/avatar", { preHandler: requireAuth }, async (request) => {
+    await db.update(users).set({ avatarUrl: null }).where(eq(users.id, request.currentUser!.id));
+    return { ok: true };
+  });
+
+  // Sessões activas do próprio utilizador (Perfil → "Sessões") — "terminar sessões de outros
+  // dispositivos" pedido no documento da Fase 1.
+  app.get("/api/auth/sessions", { preHandler: requireAuth }, async (request) => {
+    const sessions = await listSessionsForUser(request.currentUser!.id);
+    return sessions.map((s) => ({ ...s, current: s.id === request.cookies?.sid }));
+  });
+
+  app.delete("/api/auth/sessions/:id", { preHandler: requireAuth }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    if (id === request.cookies?.sid) {
+      return reply.code(400).send({ error: "Não pode terminar a sessão actual por aqui — use \"Sair\"" });
+    }
+    const deleted = await deleteSessionForUser(id, request.currentUser!.id);
+    if (!deleted) return reply.code(404).send({ error: "Sessão não encontrada" });
+    return { ok: true };
+  });
+
+  app.post("/api/auth/sessions/terminate-others", { preHandler: requireAuth }, async (request, reply) => {
+    const sessionId = request.cookies?.sid;
+    if (!sessionId) return reply.code(401).send({ error: "Não autenticado" });
+    await deleteOtherSessionsForUser(request.currentUser!.id, sessionId);
+    return { ok: true };
   });
 
   // Mudar a própria password — antes disto só era possível editando a base de dados

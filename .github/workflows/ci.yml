@@ -1,0 +1,79 @@
+name: CI
+
+# Corre em cada push/PR — nunca faz deploy sozinho (isso continua manual, via SSH, só depois
+# disto passar e alguém aprovar). O deploy pega o código já validado aqui.
+on:
+  push:
+    branches: ["main", "feature/**"]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sigo_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/sigo_ci
+      # Segredos só para este job efémero — nunca usados fora do CI, sem relação com produção.
+      SESSION_COOKIE_SECRET: ci-secret-nao-usado-em-producao
+      PLANT_SERVICE_TOKEN: ci-token-nao-usado-em-producao
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # npm ci (não npm install) — instalação reproduzível a partir do package-lock.json,
+      # tal como o documento da Fase 1 pede explicitamente para o servidor também usar.
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Build (shared → api → web)
+        run: npm run build
+
+      - name: Typecheck do pacote partilhado
+        run: npm run typecheck --workspace=packages/shared
+
+      # Corre ANTES das migrations/testes: só compara o schema.ts actual com as migrations já
+      # commitadas (não precisa de ligação real à BD) — apanha o caso de alguém editar o schema
+      # e esquecer-se de gerar/commitar a migration correspondente.
+      - name: Verificar que schema e migrations estão sincronizados
+        run: |
+          npm run db:generate --workspace=apps/api
+          if [ -n "$(git status --porcelain apps/api/drizzle)" ]; then
+            echo "::error::O schema (apps/api/src/db/schema.ts) foi alterado sem gerar/commitar a migration correspondente. Corra 'npm run db:generate' localmente e faça commit do resultado."
+            git status --porcelain apps/api/drizzle
+            exit 1
+          fi
+
+      - name: Aplicar migrations na base de dados do CI
+        run: npm run db:migrate
+
+      - name: Testes do backend
+        run: npm run test --workspace=apps/api
+
+      - name: Testes do frontend
+        run: npm run test --workspace=apps/web
+
+      # Informativo, nunca bloqueia — o objectivo é visibilidade sobre CVEs em dependências
+      # transitivas, não travar todos os merges por causa de uma vulnerabilidade de baixo risco
+      # sem correcção disponível ainda.
+      - name: Auditoria de dependências (informativo)
+        run: npm audit --audit-level=high || true

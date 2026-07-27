@@ -35,7 +35,8 @@ const entrySchema = z.object({
 });
 const entryUpdateSchema = entrySchema.partial();
 
-async function assertEntryOwned(entryId: string, companyId: string) {
+// Exportado para uso em routes/files.ts (serve as fotos do diário, agora autenticadas).
+export async function assertEntryOwned(entryId: string, companyId: string) {
   const [entry] = await db.select().from(siteDiaryEntries).where(eq(siteDiaryEntries.id, entryId)).limit(1);
   if (!entry) return null;
   const project = await assertProjectOwned(entry.projectId, companyId);
@@ -98,7 +99,9 @@ export async function siteDiaryRoutes(app: FastifyInstance) {
     await mkdir(uploadsDir, { recursive: true });
     const fileName = `${randomUUID()}${ext}`;
     await writeFile(path.join(uploadsDir, fileName), buffer);
-    const photoUrl = `/uploads/site-diary/${fileName}`;
+    // Rota autenticada (routes/files.ts), não a antiga /uploads/ pública — a foto só é
+    // acessível a quem tiver sessão na empresa dona do registo do diário.
+    const photoUrl = `/api/files/site-diary/${id}/${fileName}`;
 
     const [row] = await db
       .update(siteDiaryEntries)

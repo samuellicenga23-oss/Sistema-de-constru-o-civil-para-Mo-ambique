@@ -1,13 +1,33 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
-import { dashboardApi, type DashboardData } from "../api/dashboard";
+import { dashboardApi, type DashboardData, type CurrencyTotals } from "../api/dashboard";
 import Layout from "../components/Layout";
 import { IconFolder, IconDoc, IconClipboard, IconMap, IconPlus } from "../components/icons";
 
 function money(value: number, currency: string) {
   return `${value.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`;
 }
+
+// Uma empresa pode ter projectos em MZN e USD ao mesmo tempo — nunca soma as duas moedas
+// num único número, mostra uma linha por moeda presente.
+function MoneyByCurrency({ totals }: { totals: CurrencyTotals }) {
+  const entries = Object.entries(totals);
+  if (entries.length === 0) return <span className="text-gray-400">—</span>;
+  return (
+    <>
+      {entries.map(([currency, value], i) => (
+        <span key={currency}>
+          {i > 0 && " · "}
+          {money(value, currency)}
+        </span>
+      ))}
+    </>
+  );
+}
+
+const CERT_STATUS_LABELS: Record<string, string> = { rascunho: "Rascunho", submetido: "Submetido", aprovado: "Aprovado" };
+const CERT_STATUS_TONE: Record<string, string> = { rascunho: "badge-gray", submetido: "badge-yellow", aprovado: "badge-green" };
 
 function StatCard({ label, value, icon, tint }: { label: string; value: string | number; icon: ReactNode; tint: string }) {
   return (
@@ -75,11 +95,68 @@ export default function DashboardPage() {
 
         {data && (
           <>
+            {data.contasVencidas > 0 && (
+              <div className="card card-pad border-red-200 bg-red-50 flex items-center justify-between gap-3 flex-wrap">
+                <p className="text-sm text-red-800">
+                  <span className="font-semibold">{data.contasVencidas}</span> conta(s) a pagar/receber vencida(s) — verifique o Financeiro de cada projecto.
+                </p>
+              </div>
+            )}
+
             <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
               <StatCard label="Projectos" value={data.totalProjects} tint="bg-brand-100 text-brand-700" icon={<IconFolder className="w-5 h-5" />} />
               <StatCard label="Mapas de Quantidades" value={data.totalDocuments} tint="bg-emerald-100 text-emerald-700" icon={<IconDoc className="w-5 h-5" />} />
               <StatCard label="Autos de Medição" value={data.totalCertificates} tint="bg-amber-100 text-amber-700" icon={<IconClipboard className="w-5 h-5" />} />
               <StatCard label="Plantas carregadas" value={data.totalPlants} tint="bg-sky-100 text-sky-700" icon={<IconMap className="w-5 h-5" />} />
+            </div>
+
+            <div className="grid md:grid-cols-2 gap-4">
+              <section className="card card-pad">
+                <h2 className="section-title mb-3">Financeiro (todos os projectos)</h2>
+                <dl className="grid grid-cols-2 gap-y-2 text-sm">
+                  <dt className="text-gray-500">Recebido</dt>
+                  <dd className="text-right font-medium text-gray-900">
+                    <MoneyByCurrency totals={data.valorRecebido} />
+                  </dd>
+                  <dt className="text-gray-500">Despesas</dt>
+                  <dd className="text-right font-medium text-gray-900">
+                    <MoneyByCurrency totals={data.despesas} />
+                  </dd>
+                  <dt className="text-gray-500">Contas a receber</dt>
+                  <dd className="text-right font-medium text-gray-900">
+                    <MoneyByCurrency totals={data.contasAReceber} />
+                  </dd>
+                  <dt className="text-gray-500">Contas a pagar</dt>
+                  <dd className="text-right font-medium text-gray-900">
+                    <MoneyByCurrency totals={data.contasAPagar} />
+                  </dd>
+                </dl>
+              </section>
+
+              <section className="card card-pad">
+                <h2 className="section-title mb-3">Autos de medição recentes</h2>
+                {data.recentCertificates.length === 0 ? (
+                  <p className="text-sm text-gray-400">Ainda não há autos de medição.</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {data.recentCertificates.map((c) => (
+                      <li key={c.id}>
+                        <Link to={`/autos/${c.id}`} className="flex items-center justify-between gap-2 text-sm hover:text-brand-700">
+                          <span className="truncate">
+                            Auto {c.number} — {c.projectName}
+                          </span>
+                          <span className={`badge ${CERT_STATUS_TONE[c.status]} shrink-0`}>{CERT_STATUS_LABELS[c.status]}</span>
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {data.ordensCompraPendentes > 0 && (
+                  <p className="text-xs text-gray-400 mt-3 pt-3 border-t border-gray-100">
+                    {data.ordensCompraPendentes} ordem(ns) de compra pendente(s) de aprovação/recepção.
+                  </p>
+                )}
+              </section>
             </div>
 
             <section className="card">
