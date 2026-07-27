@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { catalogApi } from "../api/catalog";
+import { catalogApi, type Material } from "../api/catalog";
 import { quickEstimateApi, type FoundationType, type RoofType, type QuickEstimateResult, type SoilType } from "../api/quickEstimate";
 import type { StructuralSummary } from "../api/plants";
 import type { ExtractedRoom } from "../api/plants";
@@ -122,7 +122,7 @@ function floorsFromExtractedRooms(rooms: ExtractedRoom[]): FloorForm[] {
   return labels.map((label) => floorFromRooms(label, groups.get(label)!));
 }
 
-const STEPS = ["Pisos e Compartimentos", "Estrutura", "Hidráulica", "Preços", "Revisão"];
+const STEPS = ["Pisos e Compartimentos", "Estrutura", "Hidráulica", "Custos", "Revisão"];
 
 const FOUNDATION_LABELS: Record<FoundationType, string> = {
   sapata_isolada: "Sapata isolada",
@@ -142,6 +142,8 @@ type Props = {
   structuralPlantName?: string | null;
   architectureRooms?: ExtractedRoom[] | null;
   architecturePlantName?: string | null;
+  zoneId?: string | null;
+  documentCurrency?: string;
 };
 
 export default function QuickEstimateWizard({
@@ -152,6 +154,8 @@ export default function QuickEstimateWizard({
   structuralPlantName,
   architectureRooms,
   architecturePlantName,
+  zoneId,
+  documentCurrency = "MZN",
 }: Props) {
   const hasStructuralFootings = !!structuralSummary && structuralSummary.footingsCount > 0;
   const hasArchitectureRooms = !!architectureRooms && architectureRooms.length > 0;
@@ -202,26 +206,31 @@ export default function QuickEstimateWizard({
   const [septicFlow, setSepticFlow] = useState("100");
   const [septicSoilType, setSepticSoilType] = useState<SoilType>("areia_fina");
   const [hydraulicInitialized, setHydraulicInitialized] = useState(false);
-  const [cementPrice, setCementPrice] = useState("");
-  const [steelPrice, setSteelPrice] = useState("");
-  const [blockPrice, setBlockPrice] = useState("");
+  const [criticalMaterials, setCriticalMaterials] = useState<Material[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<QuickEstimateResult | null>(null);
 
   useEffect(() => {
+    setCatalogLoading(true);
     catalogApi
-      .listMaterials()
-      .then((materials) => {
-        const cement = materials.find((m) => m.name === "Cimento (saco 50kg)");
-        const steel = materials.find((m) => m.name === "Aço A400");
-        const block = materials.find((m) => m.name === "Bloco de cimento 20x20x40");
-        if (cement) setCementPrice(Number(cement.baseUnitCost).toString());
-        if (steel) setSteelPrice(Number(steel.baseUnitCost).toString());
-        if (block) setBlockPrice(Number(block.baseUnitCost).toString());
-      })
-      .catch(() => {});
-  }, []);
+      .listMaterials(zoneId ?? undefined)
+      .then(setCriticalMaterials)
+      .catch(() => setCriticalMaterials([]))
+      .finally(() => setCatalogLoading(false));
+  }, [zoneId]);
+
+  const criticalCosts = [
+    { key: "cement", label: "Cimento (saco 50kg)", material: criticalMaterials.find((m) => m.name === "Cimento (saco 50kg)") },
+    { key: "steel", label: "Aço A400", material: criticalMaterials.find((m) => m.name === "Aço A400") },
+    { key: "block", label: "Bloco de cimento 20x20x40", material: criticalMaterials.find((m) => m.name === "Bloco de cimento 20x20x40") },
+  ].map((item) => ({
+    ...item,
+    price: item.material ? Number(item.material.zonePrice ?? item.material.baseUnitCost) : null,
+    source: item.material?.zonePrice != null ? "Preço da zona do projecto" : "Preço base do catálogo",
+  }));
+  const criticalCostsReady = criticalCosts.every((item) => item.price != null && item.price > 0);
 
   // Área de cobertura sugerida a partir do último piso do corpo principal (+10% de beirado) —
   // ignora pisos "Anexo"/"Cobertura" nesta escolha (têm cobertura própria, normalmente mais
@@ -308,7 +317,11 @@ export default function QuickEstimateWizard({
     { label: "Lajes e espessuras", ready: Boolean(structuralSummary?.slabsAvgThicknessCm), impact: "Sem espessura real, o volume das lajes será estimado." },
     { label: "Mapa de aço", ready: Boolean(structuralSummary?.totalSteelWeightKg), impact: "Sem quadro de armaduras, o peso será calculado por kg/m³ de betão." },
     { label: "Redes hidráulicas e sanitárias", ready: Boolean(sewerPipe110M || sewerPipe40M || waterSupplyPipeM), impact: "Confirme comprimentos de tubagem; contagens de aparelhos não definem o traçado real." },
-    { label: "Preços críticos da obra", ready: Boolean(cementPrice && steelPrice && blockPrice), impact: "Sem confirmação, permanecem os preços do catálogo e da zona seleccionada." },
+    {
+      label: "Custos críticos do catálogo",
+      ready: criticalCostsReady,
+      impact: "Cimento, aço e bloco devem ter custos válidos no catálogo; a zona do projecto tem prioridade quando possui preço próprio.",
+    },
   ];
   const readyCount = readinessChecks.filter((item) => item.ready).length;
   const readinessPercent = Math.round((readyCount / readinessChecks.length) * 100);
@@ -370,11 +383,6 @@ export default function QuickEstimateWizard({
               },
             }
           : {}),
-        prices: {
-          cementBagPrice: cementPrice ? Number(cementPrice) : undefined,
-          steelKgPrice: steelPrice ? Number(steelPrice) : undefined,
-          blockUnitPrice: blockPrice ? Number(blockPrice) : undefined,
-        },
       };
       const res = await quickEstimateApi.apply(documentId, payload);
       setResult(res);
@@ -989,23 +997,52 @@ export default function QuickEstimateWizard({
               )}
 
               {step === 3 && (
-                <div className="space-y-4 max-w-md">
-                  <p className="text-sm text-gray-500">
-                    Actualize os preços-chave que mais pesam no orçamento — ficam gravados no catálogo da empresa (sem
-                    alterar o catálogo partilhado). Deixe em branco para manter o preço actual.
-                  </p>
-                  <div>
-                    <label className="label">Cimento — MZN por saco 50kg</label>
-                    <input type="number" step="1" min="0" value={cementPrice} onChange={(e) => setCementPrice(e.target.value)} className="input" />
+                <div className="space-y-4">
+                  <div className="rounded-xl border border-brand-100 bg-brand-50 p-4">
+                    <p className="text-sm font-semibold text-brand-950">Custos aplicados automaticamente</p>
+                    <p className="mt-1 text-sm leading-relaxed text-brand-800">
+                      Esta medição não altera o catálogo. As composições usam primeiro o preço da zona do projecto e,
+                      quando não existe, o preço base já aprovado pela empresa.
+                    </p>
                   </div>
-                  <div>
-                    <label className="label">Aço A400 — MZN por kg</label>
-                    <input type="number" step="0.5" min="0" value={steelPrice} onChange={(e) => setSteelPrice(e.target.value)} className="input" />
+
+                  {documentCurrency !== "MZN" && (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+                      O catálogo automático está em MZN. Para evitar uma conversão silenciosa, o SIGA vai preparar um
+                      mapa automático separado em MZN e preservar este documento em {documentCurrency}.
+                    </div>
+                  )}
+
+                  <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+                    {criticalCosts.map((item) => (
+                      <div key={item.key} className="flex items-center justify-between gap-4 border-b border-slate-100 px-4 py-3 last:border-0">
+                        <div>
+                          <p className="text-sm font-medium text-slate-900">{item.label}</p>
+                          <p className="mt-0.5 text-xs text-slate-500">
+                            {item.material ? item.source : "Material não encontrado no catálogo"}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className={`text-sm font-semibold tabular-nums ${item.price != null && item.price > 0 ? "text-slate-900" : "text-rose-700"}`}>
+                            {item.price != null && item.price > 0
+                              ? `${item.price.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MZN`
+                              : "Por definir"}
+                          </p>
+                          {item.material && <p className="mt-0.5 text-xs text-slate-400">por {item.material.unit}</p>}
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                  <div>
-                    <label className="label">Bloco de cimento 20x20x40 — MZN por unidade</label>
-                    <input type="number" step="0.5" min="0" value={blockPrice} onChange={(e) => setBlockPrice(e.target.value)} className="input" />
-                  </div>
+
+                  {catalogLoading ? (
+                    <p className="text-sm text-slate-500">A consultar o catálogo da zona...</p>
+                  ) : !criticalCostsReady ? (
+                    <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
+                      Existem custos críticos em falta. Actualize-os no Catálogo de Preços antes de emitir um orçamento.
+                    </p>
+                  ) : (
+                    <p className="text-sm text-emerald-700">Custos críticos disponíveis para calcular as composições.</p>
+                  )}
                 </div>
               )}
 
@@ -1062,11 +1099,19 @@ export default function QuickEstimateWizard({
                     </p>
                   </div>
                   <div className="rounded-lg border border-gray-200 p-3">
-                    <p className="text-gray-500">
-                      Cimento: <span className="text-gray-900">{cementPrice || "—"} MZN</span> · Aço:{" "}
-                      <span className="text-gray-900">{steelPrice || "—"} MZN</span> · Bloco:{" "}
-                      <span className="text-gray-900">{blockPrice || "—"} MZN</span>
-                    </p>
+                    <p className="mb-2 font-medium text-gray-900">Custos do catálogo ({zoneId ? "zona do projecto" : "preço base"})</p>
+                    <div className="grid gap-2 sm:grid-cols-3">
+                      {criticalCosts.map((item) => (
+                        <div key={item.key}>
+                          <p className="text-xs text-gray-500">{item.label}</p>
+                          <p className="font-medium text-gray-900">
+                            {item.price != null && item.price > 0
+                              ? `${item.price.toLocaleString("pt-MZ", { maximumFractionDigits: 2 })} MZN`
+                              : "Por definir"}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
               )}

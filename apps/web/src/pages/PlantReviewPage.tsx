@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { plantsApi, type ExtractedRoom, type ExtractedRebarLine, type Plant } from "../api/plants";
-import { boqApi, type BudgetDocument } from "../api/boq";
+import { boqApi } from "../api/boq";
 import Layout from "../components/Layout";
 import { IconBack, IconWand } from "../components/icons";
 
@@ -23,13 +23,14 @@ function floorSortKey(floor: string): number {
 
 export default function PlantReviewPage() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const [plant, setPlant] = useState<Plant | null>(null);
   const [rooms, setRooms] = useState<ExtractedRoom[]>([]);
   const [rebarSchedules, setRebarSchedules] = useState<ExtractedRebarLine[]>([]);
-  const [documents, setDocuments] = useState<BudgetDocument[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [savingRoomId, setSavingRoomId] = useState<string | null>(null);
   const [reprocessing, setReprocessing] = useState(false);
+  const [preparingMeasurements, setPreparingMeasurements] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -39,7 +40,6 @@ export default function PlantReviewPage() {
         setPlant(detail.plant);
         setRooms(detail.rooms);
         setRebarSchedules(detail.rebarSchedules);
-        setDocuments(await boqApi.listBudgetDocuments(detail.plant.projectId));
       })
       .catch((err) => setError(err.message));
   }, [id]);
@@ -98,13 +98,26 @@ export default function PlantReviewPage() {
     }
   }
 
+  async function handleContinueToMeasurements() {
+    if (!plant) return;
+    setPreparingMeasurements(true);
+    setError(null);
+    try {
+      const { document } = await boqApi.prepareMeasurementWorkspace(plant.projectId);
+      navigate(`/documentos/${document.id}?assistente=1`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível preparar as medições");
+    } finally {
+      setPreparingMeasurements(false);
+    }
+  }
+
   if (!plant) {
     return <div className="min-h-screen flex items-center justify-center text-gray-400">A carregar...</div>;
   }
 
   const totalRoomsArea = rooms.reduce((s, r) => s + Number(r.areaM2), 0);
   const totalRebarWeight = rebarSchedules.reduce((s, r) => s + Number(r.weightKg), 0);
-  const targetDoc = documents[0];
 
   // Lacunas de extracção: o utilizador pediu explicitamente para ser informado do que não foi
   // possível puxar automaticamente da planta, sem lhe perguntar como reformatar o ficheiro — por
@@ -161,8 +174,33 @@ export default function PlantReviewPage() {
       <div className="space-y-5 max-w-4xl">
         {error && <p className="text-sm text-red-600">{error}</p>}
 
+        <section className="card overflow-hidden border-t-4 border-t-brand-600">
+          <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-brand-700">Passo 2 de 4 · Confirmar dados</p>
+              <h2 className="mt-1 text-lg font-bold text-slate-900">A análise terminou. Reveja apenas o que precisa de confirmação.</h2>
+              <p className="mt-1 max-w-2xl text-sm text-slate-600">
+                O SIGA juntará esta planta às restantes disciplinas da obra. Ao continuar, abre directamente o diagnóstico de medição — sem passar pela criação manual de capítulos ou importação de Excel.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleContinueToMeasurements}
+              disabled={plant.processingStatus !== "concluido" || preparingMeasurements}
+              className="btn btn-primary shrink-0"
+            >
+              <IconWand className="h-4 w-4" />
+              {preparingMeasurements ? "A preparar..." : "Continuar para o diagnóstico"}
+            </button>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-5 py-3 text-xs text-slate-600">
+            <span>Tem outra disciplina? Adicione-a antes ou depois; os dados serão combinados automaticamente.</span>
+            <Link to={`/projectos/${plant.projectId}#plantas-do-projecto`} className="font-semibold text-brand-700 hover:underline">Adicionar outro projecto →</Link>
+          </div>
+        </section>
+
         <div className="card card-pad text-xs text-gray-500 leading-relaxed">
-          <p className="font-medium text-gray-700 mb-1">Como esta informação é usada</p>
+          <p className="font-medium text-gray-700 mb-1">Como os dados entram no cálculo</p>
           <p>
             Os dados extraídos abaixo não são escritos directamente no Mapa de Quantidades — servem para{" "}
             <strong>ajustar as quantidades dos itens-padrão já existentes</strong> (do capítulo de fundações ao de
@@ -248,12 +286,6 @@ export default function PlantReviewPage() {
               como um dado limpo neste tipo de ficheiro (só o desenho da cofragem, sem um valor de largura×altura
               isolado), pelo que não é seguro extraí-la automaticamente.
             </p>
-            {targetDoc && (
-              <Link to={`/documentos/${targetDoc.id}`} className="btn btn-primary btn-sm">
-                <IconWand className="w-3.5 h-3.5" />
-                Ir para o Mapa de Quantidades e usar o Assistente
-              </Link>
-            )}
           </section>
         )}
 
@@ -269,13 +301,6 @@ export default function PlantReviewPage() {
               casos ambíguos — reveja e corrija o piso de qualquer compartimento antes de continuar. Cada piso vira um
               piso próprio no Assistente de Medições; nenhum item é criado por compartimento.
             </p>
-            {targetDoc && (
-              <Link to={`/documentos/${targetDoc.id}`} className="btn btn-primary btn-sm mb-4">
-                <IconWand className="w-3.5 h-3.5" />
-                Confirmar e usar no Assistente
-              </Link>
-            )}
-
             <div className="space-y-4">
               {floorNames.map((floorName) => {
                 const floorRooms = roomsByFloor.get(floorName) ?? [];

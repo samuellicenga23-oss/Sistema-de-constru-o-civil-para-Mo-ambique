@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
-import { boqApi, type BudgetDocumentSummary, type BudgetRepriceResult, type LineItemNode, type MeasurementImportResult } from "../api/boq";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { boqApi, type BudgetDocumentSummary, type BudgetRepriceResult, type LineItemNode, type MeasurementImportResult, type Project } from "../api/boq";
 import { catalogApi, type CostComposition } from "../api/catalog";
 import { measurementApi, type MeasurementDashboard } from "../api/measurement";
 import { plantsApi, type Plant, type ExtractedRoom } from "../api/plants";
@@ -11,7 +11,7 @@ import MaterialsByPhaseModal from "../components/MaterialsByPhaseModal";
 import ConfirmDialog from "../components/ConfirmDialog";
 import Layout from "../components/Layout";
 import { SectionHeader } from "../components/WorkspaceUI";
-import { IconBack, IconChart, IconClipboard, IconDownload, IconPlus, IconRefresh, IconTrash, IconWand } from "../components/icons";
+import { IconBack, IconChart, IconClipboard, IconDoc, IconDownload, IconPlus, IconRefresh, IconTrash, IconWand } from "../components/icons";
 
 function money(value: number, currency: string) {
   return `${value.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`;
@@ -27,7 +27,9 @@ function countCompositionItems(items: LineItemNode[]): number {
 export default function BudgetDocumentPage() {
   const { documentId } = useParams<{ documentId: string }>();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [summary, setSummary] = useState<BudgetDocumentSummary | null>(null);
+  const [project, setProject] = useState<Project | null>(null);
   const [compositions, setCompositions] = useState<CostComposition[]>([]);
   const [dashboard, setDashboard] = useState<MeasurementDashboard | null>(null);
   const [newSectionName, setNewSectionName] = useState("");
@@ -44,6 +46,8 @@ export default function BudgetDocumentPage() {
   const [showRepriceConfirm, setShowRepriceConfirm] = useState(false);
   const [repricing, setRepricing] = useState(false);
   const [repriceResult, setRepriceResult] = useState<BudgetRepriceResult | null>(null);
+  const [plantContextLoading, setPlantContextLoading] = useState(true);
+  const [preparingAutomaticDocument, setPreparingAutomaticDocument] = useState(false);
 
   async function reload() {
     if (!documentId) return;
@@ -54,18 +58,25 @@ export default function BudgetDocumentPage() {
 
   useEffect(() => {
     if (!documentId) return;
+    setPlantContextLoading(true);
+    setStructuralPlant(null);
+    setArchitecturePlant(null);
+    setArchitectureRooms([]);
     boqApi
       .getBudgetDocumentSummary(documentId)
       .then(async (s) => {
         setSummary(s);
+        const projectData = await boqApi.getProject(s.document.projectId);
+        setProject(projectData);
         const [c, d, plants] = await Promise.all([
-          catalogApi.listCompositions(),
+          catalogApi.listCompositions(projectData.zoneId ?? undefined),
           measurementApi.dashboard(s.document.projectId, documentId),
           plantsApi.list(s.document.projectId),
         ]);
         setCompositions(c);
         setDashboard(d);
         const processed = plants.filter((p) => p.processingStatus === "concluido");
+        const newestFirst = [...processed].reverse();
 
         // A planta estrutural é escolhida pelo que ela TEM (resumo estrutural real), não só
         // pela etiqueta de disciplina escolhida ao carregar — o extractor lê o que encontrar no
@@ -73,8 +84,8 @@ export default function BudgetDocumentPage() {
         // com a disciplina trocada por engano (ex: carregado como "arquitectura") não pode
         // deixar de alimentar o Assistente só por causa da etiqueta errada.
         const structural =
-          processed.find((p) => p.discipline === "estrutura" && p.structuralSummary) ??
-          processed.find((p) => p.structuralSummary);
+          newestFirst.find((p) => p.discipline === "estrutura" && p.structuralSummary) ??
+          newestFirst.find((p) => p.structuralSummary);
         setStructuralPlant(structural ?? null);
 
         // Idem para compartimentos: procura em TODAS as plantas processadas (não só nas
@@ -82,7 +93,7 @@ export default function BudgetDocumentPage() {
         // evita que uma planta sem compartimentos (ex: um projecto estrutural mal etiquetado,
         // que o `.find` anterior escolhia por ser a primeira "arquitectura" da lista) bloqueie a
         // procura antes de chegar à planta que os tem mesmo.
-        for (const p of processed) {
+        for (const p of newestFirst) {
           const detail = await plantsApi.detail(p.id);
           if (detail.rooms.length > 0) {
             setArchitecturePlant(p);
@@ -91,8 +102,15 @@ export default function BudgetDocumentPage() {
           }
         }
       })
-      .catch((err) => setError(err.message));
+      .catch((err) => setError(err.message))
+      .finally(() => setPlantContextLoading(false));
   }, [documentId]);
+
+  useEffect(() => {
+    if (searchParams.get("assistente") !== "1" || !summary || plantContextLoading) return;
+    setShowWizard(true);
+    setSearchParams({}, { replace: true });
+  }, [searchParams, setSearchParams, summary, plantContextLoading]);
 
   async function handleAddSection(e: FormEvent) {
     e.preventDefault();
@@ -157,6 +175,24 @@ export default function BudgetDocumentPage() {
     }
   }
 
+  async function handlePrepareAutomaticDocument() {
+    if (!summary) return;
+    setPreparingAutomaticDocument(true);
+    setError(null);
+    try {
+      const { document } = await boqApi.prepareMeasurementWorkspace(summary.document.projectId);
+      if (document.id === summary.document.id) {
+        setShowWizard(true);
+      } else {
+        navigate(`/documentos/${document.id}?assistente=1`);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível preparar o mapa automático");
+    } finally {
+      setPreparingAutomaticDocument(false);
+    }
+  }
+
   if (!summary) {
     return <div className="min-h-screen flex items-center justify-center text-gray-400">A carregar...</div>;
   }
@@ -171,9 +207,13 @@ export default function BudgetDocumentPage() {
       subtitle={`Revisão ${document.revision ?? "-"} · ${currency} · IVA ${(Number(document.ivaRate) * 100).toFixed(0)}% · Contingências ${(Number(document.contingenciasRate) * 100).toFixed(0)}%`}
       actions={
         <>
-          <button onClick={() => setShowWizard(true)} className="btn btn-secondary btn-sm">
+          <button
+            onClick={() => compositionLinkedCount > 0 ? setShowWizard(true) : handlePrepareAutomaticDocument()}
+            disabled={preparingAutomaticDocument}
+            className="btn btn-secondary btn-sm"
+          >
             <IconWand className="w-3.5 h-3.5" />
-            Assistente de Medições
+            {compositionLinkedCount > 0 ? "Assistente de Medições" : preparingAutomaticDocument ? "A preparar..." : "Medir pelas plantas"}
           </button>
           <button onClick={() => setShowMaterialsByPhase(true)} className="btn btn-secondary btn-sm">
             <IconClipboard className="w-3.5 h-3.5" />
@@ -208,24 +248,27 @@ export default function BudgetDocumentPage() {
         <div className="space-y-5 min-w-0">
           {error && <p className="text-sm text-red-600">{error}</p>}
 
-          <section className="card card-pad border-l-4 border-l-brand-500">
+          <section className={`card card-pad border-l-4 ${compositionLinkedCount > 0 ? "border-l-brand-500" : "border-l-slate-300"}`}>
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-start gap-3">
-                <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-700">
-                  <IconRefresh className="h-4 w-4" />
+                <span className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${compositionLinkedCount > 0 ? "bg-brand-50 text-brand-700" : "bg-slate-100 text-slate-500"}`}>
+                  {compositionLinkedCount > 0 ? <IconRefresh className="h-4 w-4" /> : <IconDoc className="h-4 w-4" />}
                 </span>
                 <div>
-                  <h2 className="text-sm font-semibold text-slate-900">Preços ligados ao catálogo</h2>
+                  <h2 className="text-sm font-semibold text-slate-900">
+                    {compositionLinkedCount > 0 ? "Preços ligados ao catálogo" : "Documento com preços próprios"}
+                  </h2>
                   <p className="mt-1 max-w-2xl text-xs leading-relaxed text-slate-500">
-                    Os itens com composição guardam o preço do momento em que foram criados. Actualize-os quando adoptar novas
-                    cotações ou alterar a zona; quantidades e preços introduzidos manualmente não serão modificados.
+                    {compositionLinkedCount > 0
+                      ? "Os itens com composição guardam o preço do momento em que foram criados. Actualize-os quando adoptar novas cotações ou alterar a zona; quantidades e preços manuais não serão modificados."
+                      : "Este mapa foi importado ou preparado com preços independentes. O SIGA preserva-os exactamente como foram recebidos e não tenta substituir trabalhos por códigos parecidos."}
                   </p>
-                  <p className={`mt-2 text-xs font-medium ${compositionLinkedCount > 0 ? "text-slate-700" : "text-amber-700"}`}>
+                  <p className="mt-2 text-xs font-medium text-slate-700">
                     {compositionLinkedCount > 0
                       ? `${compositionLinkedCount} item(ns) deste documento estão ligados a composições.`
-                      : "Este documento usa apenas preços manuais; associe composições aos itens para receber actualizações do catálogo."}
+                      : "Para medir a partir das plantas, o sistema cria um mapa automático separado e mantém este documento intacto."}
                   </p>
-                  {document.status !== "rascunho" && (
+                  {compositionLinkedCount > 0 && document.status !== "rascunho" && (
                     <p className="mt-2 text-xs font-medium text-amber-700">
                       Documento protegido ({document.status}). Crie uma nova revisão para recalcular preços.
                     </p>
@@ -234,12 +277,12 @@ export default function BudgetDocumentPage() {
               </div>
               <button
                 type="button"
-                onClick={() => setShowRepriceConfirm(true)}
-                disabled={document.status !== "rascunho" || repricing || compositionLinkedCount === 0}
+                onClick={() => compositionLinkedCount > 0 ? setShowRepriceConfirm(true) : handlePrepareAutomaticDocument()}
+                disabled={compositionLinkedCount > 0 ? document.status !== "rascunho" || repricing : preparingAutomaticDocument}
                 className="btn btn-secondary btn-sm shrink-0"
               >
-                <IconRefresh className="h-3.5 w-3.5" />
-                Actualizar preços
+                {compositionLinkedCount > 0 ? <IconRefresh className="h-3.5 w-3.5" /> : <IconWand className="h-3.5 w-3.5" />}
+                {compositionLinkedCount > 0 ? "Actualizar preços" : preparingAutomaticDocument ? "A preparar..." : "Preparar medição pelas plantas"}
               </button>
             </div>
             {repriceResult && (
@@ -295,7 +338,12 @@ export default function BudgetDocumentPage() {
             </section>
           ))}
 
-          <section className="card overflow-hidden">
+          <details className="card overflow-hidden">
+            <summary className="cursor-pointer px-5 py-4 hover:bg-slate-50">
+              <span className="text-sm font-semibold text-slate-900">Opções manuais e importações</span>
+              <span className="ml-2 text-xs font-normal text-slate-500">Adicionar secções ou usar medições já preparadas em Excel</span>
+            </summary>
+          <section className="border-t border-slate-200">
             <SectionHeader title="Estrutura do orçamento" description="Adicione uma nova secção, edifício ou área da obra" />
             <form onSubmit={handleAddSection} className="flex gap-2 items-end p-5">
               <input
@@ -312,13 +360,14 @@ export default function BudgetDocumentPage() {
             </form>
           </section>
 
-          <section className="card overflow-hidden">
+          <section className="border-t border-slate-200">
             <SectionHeader title="Importar medições" description="Actualize quantidades a partir de um ficheiro Excel" />
             <div className="p-5">
             <p className="text-xs text-gray-500 mb-3 max-w-3xl">
               Já tem as quantidades medidas à mão (ex: pelo técnico da obra)? Carregue o ficheiro — o sistema lê a coluna
               "Item"/"Código" e "Quant." e aplica as quantidades directamente aos itens-padrão existentes (pelo código),
-              sem criar itens novos nem passar pelo Assistente. Os preços continuam a vir do catálogo.
+              sem criar itens novos nem passar pelo Assistente. Esta operação altera apenas quantidades; os preços e as
+              ligações de cada item são preservados.
             </p>
             <form onSubmit={handleImportMeasurements} className="flex gap-2 items-end flex-wrap">
               <div className="flex-1 min-w-[180px]">
@@ -358,6 +407,7 @@ export default function BudgetDocumentPage() {
             )}
             </div>
           </section>
+          </details>
         </div>
 
         {/* Coluna lateral: RESUMO fixo + execução */}
@@ -431,6 +481,8 @@ export default function BudgetDocumentPage() {
           structuralPlantName={structuralPlant?.originalFileName}
           architectureRooms={architectureRooms}
           architecturePlantName={architecturePlant?.originalFileName}
+          zoneId={project?.zoneId}
+          documentCurrency={document.currency}
           onClose={() => {
             setShowWizard(false);
             reload();

@@ -61,13 +61,6 @@ const quickEstimateSchema = z.object({
   waterSupplyPipeM: z.number().min(0).optional(),
   hydraulic: hydraulicSchema.optional(),
   septicTank: septicTankSchema.optional(),
-  prices: z
-    .object({
-      cementBagPrice: z.number().positive().optional(),
-      steelKgPrice: z.number().positive().optional(),
-      blockUnitPrice: z.number().positive().optional(),
-    })
-    .optional(),
 });
 
 export async function quickEstimateRoutes(app: FastifyInstance) {
@@ -81,9 +74,13 @@ export async function quickEstimateRoutes(app: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
 
     const sectionId = await getStandardSectionId(id);
-    if (!sectionId) return reply.code(400).send({ error: "Este documento ainda não tem nenhuma secção — crie a secção primeiro" });
+    if (!sectionId) {
+      return reply.code(409).send({
+        error: "Este documento não usa a estrutura automática do SIGA. Volte ao projecto e escolha «Preparar medições» para criar ou abrir um mapa compatível.",
+      });
+    }
 
-    const result = await applyQuickEstimate(id, sectionId, parsed.data, companyId);
+    const result = await applyQuickEstimate(id, sectionId, parsed.data);
     return result;
   });
 }

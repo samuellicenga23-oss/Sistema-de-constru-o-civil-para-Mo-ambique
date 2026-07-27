@@ -45,7 +45,6 @@ export type QuickEstimateInput = {
   waterSupplyPipeM?: number;
   hydraulic?: HydraulicInput;
   septicTank?: SepticTankInput;
-  prices?: { cementBagPrice?: number; steelKgPrice?: number; blockUnitPrice?: number };
 };
 
 export type QuickEstimateResult = {

@@ -92,6 +92,8 @@ export const boqApi = {
   getProject: (id: string) => request<Project>(`/projects/${id}`),
   createProject: (data: { name: string; client?: string; currency?: string; zoneId?: string | null }) =>
     request<Project & { defaultDocumentId?: string }>("/projects", { method: "POST", body: JSON.stringify(data) }),
+  prepareMeasurementWorkspace: (projectId: string) =>
+    request<{ document: BudgetDocument; created: boolean }>(`/projects/${projectId}/measurement-workspace`, { method: "POST" }),
   updateProject: (id: string, data: Partial<{ name: string; client: string; zoneId: string | null }>) =>
     request<Project>(`/projects/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteProject: (id: string) => request<{ ok: true }>(`/projects/${id}`, { method: "DELETE" }),

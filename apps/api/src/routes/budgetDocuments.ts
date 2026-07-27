@@ -70,6 +70,15 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     const { ivaRate, contingenciasRate, template, ...rest } = parsed.data;
 
+    // As composições do catálogo e os preços por zona são actualmente mantidos em MZN.
+    // Nunca criar uma estrutura automática rotulada USD sem uma taxa de câmbio explícita:
+    // documentos vazios/importados podem continuar noutras moedas e ficam independentes.
+    if (template === "padrao" && rest.currency !== "MZN") {
+      return reply.code(400).send({
+        error: "Os mapas automáticos ligados ao catálogo são criados em MZN. Para trabalhar noutra moeda, crie um documento vazio/importado ou faça uma conversão explícita.",
+      });
+    }
+
     const [document] = await db
       .insert(budgetDocuments)
       .values({ ...rest, projectId, ivaRate: ivaRate.toString(), contingenciasRate: contingenciasRate.toString() })

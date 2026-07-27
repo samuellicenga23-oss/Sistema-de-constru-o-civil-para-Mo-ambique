@@ -2,11 +2,11 @@ import { useEffect, useState, type FormEvent, type MouseEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { boqApi, type Project } from "../api/boq";
 import { catalogApi, type PriceZone } from "../api/catalog";
-import QuickEstimateWizard from "../components/QuickEstimateWizard";
+import { plantsApi } from "../api/plants";
 import Layout from "../components/Layout";
 import Modal from "../components/Modal";
 import ConfirmDialog from "../components/ConfirmDialog";
-import { IconFolder, IconPlus, IconTrash, IconWand } from "../components/icons";
+import { IconFolder, IconPlus, IconTrash } from "../components/icons";
 
 export default function ProjectsPage() {
   const navigate = useNavigate();
@@ -18,8 +18,8 @@ export default function ProjectsPage() {
   const [zoneId, setZoneId] = useState("");
   const [zones, setZones] = useState<PriceZone[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [freshDocumentId, setFreshDocumentId] = useState<string | null>(null);
-  const [showWizard, setShowWizard] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [createProgress, setCreateProgress] = useState("");
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [pendingDelete, setPendingDelete] = useState<{ id: string; name: string } | null>(null);
@@ -62,19 +62,39 @@ export default function ProjectsPage() {
 
   async function handleCreate(e: FormEvent) {
     e.preventDefault();
+    const form = e.currentTarget as HTMLFormElement;
+    const architectureFile = (form.elements.namedItem("architectureFile") as HTMLInputElement | null)?.files?.[0];
+    const structuralFile = (form.elements.namedItem("structuralFile") as HTMLInputElement | null)?.files?.[0];
     setError(null);
+    setCreating(true);
+    setCreateProgress("A criar projecto...");
+    let createdProjectId: string | null = null;
     try {
       const created = await boqApi.createProject({ name, client: client || undefined, currency, zoneId: zoneId || undefined });
-      // O projecto nasce com um Mapa de Quantidades padrão. Em vez de navegar logo para lá,
-      // oferece-se primeiro o Assistente de Medições para preencher as quantidades automaticamente
-      // — com opção de saltar directamente para o mapa.
-      if (created.defaultDocumentId) {
-        setFreshDocumentId(created.defaultDocumentId);
-      } else {
-        navigate(`/projectos/${created.id}`);
+      createdProjectId = created.id;
+
+      const uploadedPlants = [];
+      if (architectureFile) {
+        setCreateProgress("A analisar a planta de arquitectura...");
+        uploadedPlants.push(await plantsApi.upload(created.id, architectureFile, "arquitectura"));
       }
+      if (structuralFile) {
+        setCreateProgress("A analisar o projecto estrutural...");
+        uploadedPlants.push(await plantsApi.upload(created.id, structuralFile, "estrutura"));
+      }
+
+      // Com plantas, segue directamente para confirmar o que foi extraído; sem plantas, abre a
+      // obra no passo de carregamento. Nunca envia primeiro para a estrutura manual do orçamento.
+      navigate(uploadedPlants.length > 0 ? `/plantas/${uploadedPlants[0].id}` : `/projectos/${created.id}#plantas-do-projecto`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro ao criar projecto");
+      if (createdProjectId) {
+        navigate(`/projectos/${createdProjectId}?uploadErro=1`);
+      } else {
+        setError(err instanceof Error ? err.message : "Erro ao criar projecto");
+      }
+    } finally {
+      setCreating(false);
+      setCreateProgress("");
     }
   }
 
@@ -92,29 +112,8 @@ export default function ProjectsPage() {
       <div className="space-y-5 max-w-6xl">
         {error && <p className="text-sm text-red-600">{error}</p>}
 
-        {freshDocumentId && (
-          <section className="card card-pad bg-brand-50/60 border-brand-200 flex items-center justify-between gap-4 flex-wrap">
-            <div>
-              <h2 className="section-title mb-1">Projecto criado com sucesso</h2>
-              <p className="text-sm text-gray-600">
-                Quer preencher as quantidades automaticamente com o Assistente de Medições, ou prefere ir directamente para
-                o Mapa de Quantidades e preencher manualmente?
-              </p>
-            </div>
-            <div className="flex gap-2 shrink-0">
-              <button onClick={() => navigate(`/documentos/${freshDocumentId}`)} className="btn btn-secondary btn-sm">
-                Ir para o Mapa
-              </button>
-              <button onClick={() => setShowWizard(true)} className="btn btn-primary btn-sm">
-                <IconWand className="w-3.5 h-3.5" />
-                Usar Assistente
-              </button>
-            </div>
-          </section>
-        )}
-
         {showForm && (
-          <Modal title="Novo projecto" subtitle="Comece com os dados essenciais. Poderá completar o resto dentro da obra." onClose={() => setShowForm(false)} maxWidth="max-w-2xl">
+          <Modal title="Novo projecto" subtitle="Identifique a obra e, se já os tiver, carregue os projectos para iniciar a medição automaticamente." onClose={() => !creating && setShowForm(false)} maxWidth="max-w-2xl">
             <form onSubmit={handleCreate} className="grid gap-4 sm:grid-cols-2 items-end">
               <div className="sm:col-span-2">
                 <label className="label">Nome do projecto *</label>
@@ -142,16 +141,35 @@ export default function ProjectsPage() {
                   <option value="USD">USD</option>
                 </select>
               </div>
+              <div className="sm:col-span-2 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <div className="mb-3">
+                  <p className="text-sm font-semibold text-slate-900">Projectos técnicos (opcional)</p>
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    Pode carregar agora ou depois. O SIGA analisará os ficheiros e levará directamente à confirmação dos dados antes de medir.
+                  </p>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="label">Planta de arquitectura (PDF)</label>
+                    <input type="file" name="architectureFile" accept="application/pdf" disabled={creating} className="input py-1.5 file:mr-2 file:rounded-md file:border-0 file:bg-white file:px-2 file:py-1 file:text-xs" />
+                  </div>
+                  <div>
+                    <label className="label">Projecto estrutural (PDF)</label>
+                    <input type="file" name="structuralFile" accept="application/pdf" disabled={creating} className="input py-1.5 file:mr-2 file:rounded-md file:border-0 file:bg-white file:px-2 file:py-1 file:text-xs" />
+                  </div>
+                </div>
+              </div>
               <div className="sm:col-span-2 flex justify-end gap-2 border-t border-slate-200 pt-4">
-              <button type="button" onClick={() => setShowForm(false)} className="btn btn-secondary">Cancelar</button>
-              <button type="submit" className="btn btn-primary">
-                Criar
+              <button type="button" onClick={() => setShowForm(false)} disabled={creating} className="btn btn-secondary">Cancelar</button>
+              <button type="submit" disabled={creating} className="btn btn-primary min-w-44">
+                {creating ? createProgress : "Criar projecto"}
               </button>
               </div>
             </form>
             <p className="text-xs text-gray-500 mt-2">
               A zona determina que preços de material se aplicam (quando um material tem preço próprio nessa zona) —
-              defina/gira as zonas no Catálogo de Preços.
+              defina/gira as zonas no Catálogo de Preços. Os mapas automáticos de custo usam MZN, a moeda do catálogo;
+              documentos externos em USD continuam separados e não são convertidos silenciosamente.
             </p>
           </Modal>
         )}
@@ -210,17 +228,6 @@ export default function ProjectsPage() {
           </div>
         )}
       </div>
-
-      {showWizard && freshDocumentId && (
-        <QuickEstimateWizard
-          documentId={freshDocumentId}
-          onClose={() => {
-            setShowWizard(false);
-            navigate(`/documentos/${freshDocumentId}`);
-          }}
-          onApplied={() => {}}
-        />
-      )}
 
       {pendingDelete && (
         <ConfirmDialog

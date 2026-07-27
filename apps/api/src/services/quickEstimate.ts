@@ -1,7 +1,6 @@
 import { eq, and, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { budgetSections, lineItems, measurementLines, budgetDocuments } from "../db/schema.js";
-import { setMaterialPriceByName } from "./catalogClone.js";
 import { STANDARD_CHAPTERS } from "./boqTemplate.js";
 
 // Motor de estimativa rápida de medições: a partir de parâmetros simples do edifício
@@ -107,8 +106,6 @@ export type QuickEstimateInput = {
   // Opcional: só quando o projecto usa saneamento autónomo (sem ligação à rede pública de
   // esgotos) — dimensiona a fossa séptica e a vala/poço de infiltração a partir do nº de pessoas.
   septicTank?: SepticTankInput;
-  prices?: { cementBagPrice?: number; steelKgPrice?: number; blockUnitPrice?: number };
-
   // Ajustes avançados opcionais: itens que por omissão usam sempre um rácio genérico (nenhuma
   // planta dá estes dados directamente) — quando o utilizador souber o valor real para este
   // edifício, substitui o rácio e a origem passa a "medido" em vez de "estimativa".
@@ -499,7 +496,7 @@ function roofType_isFlat(roofType: RoofType) {
 // Encontra, dentro da secção-padrão do documento, os itens pelo código (1.1, 2.1, ...) e
 // substitui as suas medições por uma única linha calculada — mantendo tudo revisável depois
 // (o utilizador pode abrir "medições" no item e ajustar/adicionar linhas normalmente).
-export async function applyQuickEstimate(documentId: string, sectionId: string, input: QuickEstimateInput, companyId: string) {
+export async function applyQuickEstimate(documentId: string, sectionId: string, input: QuickEstimateInput) {
   const { byCode, summary, report } = computeQuantities(input);
   const reportByCode = new Map(report.map((r) => [r.code, r]));
 
@@ -527,12 +524,6 @@ export async function applyQuickEstimate(documentId: string, sectionId: string, 
     itemsUpdated++;
   }
 
-  if (input.prices) {
-    if (input.prices.cementBagPrice) await setMaterialPriceByName(companyId, "Cimento (saco 50kg)", input.prices.cementBagPrice);
-    if (input.prices.steelKgPrice) await setMaterialPriceByName(companyId, "Aço A400", input.prices.steelKgPrice);
-    if (input.prices.blockUnitPrice) await setMaterialPriceByName(companyId, "Bloco de cimento 20x20x40", input.prices.blockUnitPrice);
-  }
-
   await db
     .update(budgetDocuments)
     .set({ lastEstimateReport: { generatedAt: new Date().toISOString(), entries: report } })
@@ -542,6 +533,26 @@ export async function applyQuickEstimate(documentId: string, sectionId: string, 
 }
 
 export async function getStandardSectionId(documentId: string): Promise<string | null> {
-  const [section] = await db.select().from(budgetSections).where(eq(budgetSections.documentId, documentId)).limit(1);
-  return section?.id ?? null;
+  const sections = await db.select().from(budgetSections).where(eq(budgetSections.documentId, documentId));
+  if (sections.length === 0) return null;
+
+  // Um documento importado pode ter códigos como 1.1/2.1/3.1, mas com trabalhos completamente
+  // diferentes do modelo SIGA. Verifica também a descrição de itens sentinela para nunca aplicar
+  // quantidades automáticas no trabalho errado só porque o código coincide.
+  const sentinelCodes = ["1.1", "2.1", "3.2", "4.1", "11.1"];
+  const expectedByCode = new Map(
+    STANDARD_CHAPTERS.flatMap((chapter) => chapter.items).map((item) => [item.code, item.description]),
+  );
+
+  for (const section of sections) {
+    const items = await db
+      .select({ code: lineItems.code, description: lineItems.description })
+      .from(lineItems)
+      .where(and(eq(lineItems.sectionId, section.id), inArray(lineItems.code, sentinelCodes)));
+    const exactMatches = items.filter(
+      (item) => item.code && expectedByCode.get(item.code) === item.description,
+    ).length;
+    if (exactMatches >= 4) return section.id;
+  }
+  return null;
 }

@@ -125,3 +125,41 @@ consultar o estado do Git e as entradas mais recentes. Cada intervenção deve i
   shared/API/web aprovado.
 - **Persistência:** nenhuma migração de base de dados necessária.
 - **Produção:** ainda não publicada.
+
+## 2026-07-27 — Codex — Percurso directo dos projectos técnicos às medições
+
+- **Objectivo:** retirar a estrutura manual do caminho principal e transformar o processo em
+  projecto → análise dos PDFs → confirmação → diagnóstico de lacunas → medição/orçamento.
+- **Criação da obra:** o formulário de novo projecto aceita logo a planta de arquitectura e o
+  projecto estrutural. Quando há ficheiros, abre directamente a revisão do que foi extraído;
+  quando ainda não há, leva à área de carregamento, sem abrir o orçamento manual.
+- **Visão geral da obra:** novo percurso visual de quatro etapas com estado real, chamada de acção
+  única e acesso à última análise. O carregamento posterior também abre imediatamente a revisão.
+- **Revisão da planta:** apresenta a confirmação como passo 2, lista de forma explícita tudo o que
+  não pôde ser extraído e segue directamente para o diagnóstico das medições.
+- **Mapa automático seguro:** novo `POST /api/projects/:id/measurement-workspace` reutiliza apenas
+  um rascunho MZN com a estrutura SIGA compatível; documentos importados/manuais nunca são
+  escolhidos por coincidência de código. Quando necessário, cria o mapa automático em segundo
+  plano, sem expor a construção de capítulos ao utilizador.
+- **Compatibilidade:** a API valida códigos e descrições sentinela da estrutura padrão antes de
+  aplicar quantidades. Um documento incompatível devolve conflito orientado e permanece intacto.
+- **Moeda:** custos automáticos do catálogo deixam de poder ser rotulados como USD sem conversão.
+  Mapas automáticos usam MZN; documentos externos/manuais em USD continuam permitidos e separados.
+- **Custos no assistente:** removida a edição escondida do catálogo dentro da medição. O passo
+  “Custos” é só de leitura e mostra o preço efectivo de cimento, aço e bloco e a sua origem — zona
+  do projecto ou preço base aprovado.
+- **Nota anterior:** a mensagem laranja/vermelha sobre “apenas preços manuais” foi substituída por
+  um estado neutro “Documento com preços próprios”, que explica a preservação do documento e
+  oferece preparar uma medição automática separada.
+- **Opções avançadas:** criação manual de secções e importação Excel passaram para um bloco
+  recolhido. A importação declara correctamente que altera apenas quantidades e preserva preços e
+  ligações existentes.
+- **Validação funcional no browser:** confirmado o percurso da obra Dona Mayza desde “Preparar
+  medições” até ao diagnóstico; dados arquitectónicos pré-preenchidos, oito verificações de
+  prontidão, custos efectivos por zona/base, documento USD preservado e ausência da nota antiga.
+  Sem erros de consola.
+- **Validação técnica:** build completo de shared/API/web aprovado; 25 testes da API e 12 do
+  frontend aprovados. Três novos testes cobrem moeda MZN do mapa automático, recusa de estrutura
+  automática USD e protecção de documentos manuais incompatíveis.
+- **Persistência:** nenhuma migração de base de dados necessária.
+- **Produção:** ainda não publicada.

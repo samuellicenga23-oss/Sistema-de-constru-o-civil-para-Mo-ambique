@@ -4,7 +4,9 @@ import { eq, and, desc, count } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { projects, budgetDocuments, subscriptions } from "../db/schema.js";
 import { requireCompanyUser, requireRole } from "../auth/middleware.js";
+import { assertProjectOwned } from "../services/accessControl.js";
 import { generateStandardBoq } from "../services/boqTemplate.js";
+import { getStandardSectionId } from "../services/quickEstimate.js";
 import { CURRENCIES, getPlanDefinition } from "@sigo/shared";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista"] as const;
@@ -71,7 +73,10 @@ export async function projectRoutes(app: FastifyInstance) {
         projectId: project.id,
         title: "Mapa de Quantidades",
         revision: "0",
-        currency: rest.currency,
+        // O catálogo e as composições automáticas são actualmente mantidos em MZN. Um mapa
+        // automático nunca deve receber custos MZN e apresentá-los como USD; projectos cuja
+        // moeda de gestão é USD continuam a poder ter documentos manuais/importados em USD.
+        currency: "MZN",
         ivaRate: ivaRate.toString(),
         contingenciasRate: contingenciasRate.toString(),
       })
@@ -79,6 +84,41 @@ export async function projectRoutes(app: FastifyInstance) {
     await generateStandardBoq(document.id, companyId, project.zoneId);
 
     return reply.code(201).send({ ...project, defaultDocumentId: document.id });
+  });
+
+  // Resolve o mapa seguro para o percurso planta → diagnóstico → medição. Reutiliza um rascunho
+  // automático compatível; documentos importados/manuais nunca são escolhidos por acaso. Se não
+  // existir nenhum, cria um mapa padrão novo sem obrigar o utilizador a passar pela estrutura
+  // manual do orçamento.
+  app.post("/api/projects/:id/measurement-workspace", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const companyId = request.currentUser!.companyId!;
+    const project = await assertProjectOwned(id, companyId);
+    if (!project) return reply.code(404).send({ error: "Projecto não encontrado" });
+
+    const drafts = await db
+      .select()
+      .from(budgetDocuments)
+      .where(and(eq(budgetDocuments.projectId, id), eq(budgetDocuments.status, "rascunho"), eq(budgetDocuments.currency, "MZN")))
+      .orderBy(desc(budgetDocuments.createdAt));
+
+    for (const document of drafts) {
+      if (await getStandardSectionId(document.id)) return { document, created: false };
+    }
+
+    const [document] = await db
+      .insert(budgetDocuments)
+      .values({
+        projectId: id,
+        title: project.currency === "MZN" ? "Mapa de Quantidades" : "Mapa de Quantidades — Custos em MZN",
+        revision: `Auto ${drafts.length + 1}`,
+        currency: "MZN",
+        ivaRate: project.ivaRate,
+        contingenciasRate: project.contingenciasRate,
+      })
+      .returning();
+    await generateStandardBoq(document.id, companyId, project.zoneId);
+    return reply.code(201).send({ document, created: true });
   });
 
   app.put("/api/projects/:id", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {

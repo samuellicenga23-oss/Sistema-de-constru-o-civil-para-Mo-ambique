@@ -1,14 +1,14 @@
 import { useEffect, useState, type FormEvent, type MouseEvent } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { boqApi, type BudgetDocument, type Project } from "../api/boq";
 import { measurementApi, type MeasurementCertificate } from "../api/measurement";
 import { plantsApi, type Plant } from "../api/plants";
 import { catalogApi, type PriceZone } from "../api/catalog";
 import { suppliersApi } from "../api/suppliers";
 import Layout from "../components/Layout";
-import { InlineNotice, MetricCard, SectionHeader } from "../components/WorkspaceUI";
+import { MetricCard, SectionHeader } from "../components/WorkspaceUI";
 import ProjectWorkspaceNav from "../components/ProjectWorkspaceNav";
-import { IconBack, IconDoc, IconClipboard, IconMap, IconPlus, IconTrash, IconUpload } from "../components/icons";
+import { IconBack, IconDoc, IconClipboard, IconMap, IconPlus, IconTrash, IconUpload, IconWand } from "../components/icons";
 
 const PLANT_STATUS_BADGE: Record<Plant["processingStatus"], { label: string; cls: string }> = {
   pendente: { label: "Pendente", cls: "badge-gray" },
@@ -32,6 +32,8 @@ function todayStr() {
 
 export default function ProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [project, setProject] = useState<Project | null>(null);
   const [documents, setDocuments] = useState<BudgetDocument[]>([]);
   const [certificates, setCertificates] = useState<MeasurementCertificate[]>([]);
@@ -44,6 +46,7 @@ export default function ProjectDetailPage() {
   const [periodDate, setPeriodDate] = useState(todayStr());
   const [plantDiscipline, setPlantDiscipline] = useState<"arquitectura" | "estrutura">("arquitectura");
   const [uploading, setUploading] = useState(false);
+  const [preparingMeasurements, setPreparingMeasurements] = useState(false);
   const [reprocessingPlantId, setReprocessingPlantId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [costReadiness, setCostReadiness] = useState({ materials: 0, quoted: 0, zonePriced: 0, suppliers: 0, compositions: 0 });
@@ -116,13 +119,29 @@ export default function ProjectDetailPage() {
     setError(null);
     setUploading(true);
     try {
-      await plantsApi.upload(projectId, file, plantDiscipline);
+      const uploaded = await plantsApi.upload(projectId, file, plantDiscipline);
       fileInput.value = "";
       await reload();
+      navigate(`/plantas/${uploaded.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao carregar a planta");
+      await reload().catch(() => {});
     } finally {
       setUploading(false);
+    }
+  }
+
+  async function handlePrepareMeasurements() {
+    if (!projectId) return;
+    setPreparingMeasurements(true);
+    setError(null);
+    try {
+      const { document } = await boqApi.prepareMeasurementWorkspace(projectId);
+      navigate(`/documentos/${document.id}?assistente=1`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível preparar as medições");
+    } finally {
+      setPreparingMeasurements(false);
     }
   }
 
@@ -196,6 +215,11 @@ export default function ProjectDetailPage() {
     return <div className="min-h-screen flex items-center justify-center text-gray-400">A carregar...</div>;
   }
 
+  const completedPlants = plants.filter((plant) => plant.processingStatus === "concluido");
+  const failedPlants = plants.filter((plant) => plant.processingStatus === "erro");
+  const hasMeasuredBudget = documents.some((document) => document.lastEstimateReport?.entries?.length);
+  const latestCompletedPlant = completedPlants[completedPlants.length - 1];
+
   return (
     <Layout
       title={project.name}
@@ -209,19 +233,52 @@ export default function ProjectDetailPage() {
       <div className="grid gap-5 lg:grid-cols-2 max-w-7xl">
         <div className="lg:col-span-2"><ProjectWorkspaceNav projectId={projectId!} /></div>
         {error && <p className="text-sm text-red-600 lg:col-span-2">{error}</p>}
+        {searchParams.get("uploadErro") === "1" && (
+          <div className="lg:col-span-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            O projecto foi criado, mas um dos ficheiros não pôde ser analisado. O registo da obra está seguro; reveja abaixo o ficheiro com falha ou carregue-o novamente.
+          </div>
+        )}
 
-        <div className="lg:col-span-2">
-          <InlineNotice>
-            <strong>Próximo passo recomendado: </strong>
-            {documents.length === 0
-              ? "crie o primeiro Mapa de Quantidades para estruturar o orçamento da obra."
-              : plants.length === 0
-                ? "carregue as plantas do projecto para acelerar medições e manter a documentação centralizada."
-                : certificates.length === 0
-                  ? "quando a execução começar, crie o primeiro Auto de Medição para acompanhar o progresso."
-                  : "reveja o Diário de Obra, compras pendentes e movimentos financeiros antes de actualizar a medição."}
-          </InlineNotice>
-        </div>
+        <section className="card lg:col-span-2 overflow-hidden border-t-4 border-t-brand-600">
+          <SectionHeader
+            title="Da planta ao orçamento"
+            description="Um percurso único: carregar, confirmar o que foi lido, completar dados em falta e gerar as medições"
+            actions={
+              completedPlants.length > 0 ? (
+                <button onClick={handlePrepareMeasurements} disabled={preparingMeasurements} className="btn btn-primary btn-sm">
+                  <IconWand className="h-3.5 w-3.5" />
+                  {preparingMeasurements ? "A preparar..." : hasMeasuredBudget ? "Rever medições" : "Preparar medições"}
+                </button>
+              ) : (
+                <a href="#plantas-do-projecto" className="btn btn-primary btn-sm">
+                  <IconUpload className="h-3.5 w-3.5" /> Carregar plantas
+                </a>
+              )
+            }
+          />
+          <div className="grid gap-px bg-slate-200 sm:grid-cols-4">
+            {[
+              { label: "1. Identificar a obra", detail: "Projecto criado", done: true },
+              { label: "2. Carregar projectos", detail: plants.length ? `${plants.length} ficheiro(s)` : "Arquitectura, estrutura ou ambos", done: plants.length > 0 },
+              { label: "3. Confirmar dados", detail: failedPlants.length ? `${failedPlants.length} ficheiro(s) requerem atenção` : completedPlants.length ? "Dados prontos para revisão" : "A aguardar análise", done: completedPlants.length > 0 && failedPlants.length === 0 },
+              { label: "4. Medir e orçamentar", detail: hasMeasuredBudget ? "Medições geradas" : "Diagnóstico antes do cálculo", done: hasMeasuredBudget },
+            ].map((step) => (
+              <div key={step.label} className="bg-white p-4">
+                <div className="flex items-center gap-2">
+                  <span className={`grid h-6 w-6 place-items-center rounded-full text-xs font-bold ${step.done ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{step.done ? "✓" : "·"}</span>
+                  <p className="text-sm font-semibold text-slate-900">{step.label}</p>
+                </div>
+                <p className="mt-2 text-xs leading-5 text-slate-500">{step.detail}</p>
+              </div>
+            ))}
+          </div>
+          {latestCompletedPlant && (
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-5 py-3 text-xs text-slate-600">
+              <span>Último ficheiro analisado: <strong className="text-slate-800">{latestCompletedPlant.originalFileName}</strong></span>
+              <Link to={`/plantas/${latestCompletedPlant.id}`} className="font-semibold text-brand-700 hover:underline">Rever dados extraídos →</Link>
+            </div>
+          )}
+        </section>
 
         <div className="lg:col-span-2 grid gap-3 sm:grid-cols-3">
           <MetricCard label="Mapas de quantidades" value={documents.length} note="Documentos do projecto" />
@@ -296,28 +353,28 @@ export default function ProjectDetailPage() {
             ))}
             {documents.length === 0 && <li className="px-5 py-4 text-sm text-gray-400">Sem documentos ainda — crie o primeiro abaixo.</li>}
           </ul>
-          <form onSubmit={handleCreate} className="flex gap-2 items-end px-5 py-4 border-t border-gray-100 flex-wrap">
-            <div className="flex-1 min-w-[150px]">
-              <label className="label">Título do novo documento</label>
-              <input value={title} onChange={(e) => setTitle(e.target.value)} className="input" />
-            </div>
-            <div>
-              <label className="label">Modelo</label>
-              <select value={template} onChange={(e) => setTemplate(e.target.value as "padrao" | "vazio")} className="input">
-                <option value="padrao">Estrutura padrão (capítulos pré-definidos)</option>
-                <option value="vazio">Documento vazio</option>
-              </select>
-            </div>
-            <button type="submit" className="btn btn-primary">
-              <IconPlus className="w-4 h-4" />
-              Criar
-            </button>
-          </form>
+          <details className="border-t border-gray-100">
+            <summary className="cursor-pointer px-5 py-3 text-xs font-semibold text-slate-600 hover:bg-slate-50">Criar outro mapa ou revisão manual</summary>
+            <form onSubmit={handleCreate} className="flex gap-2 items-end px-5 pb-4 flex-wrap">
+              <div className="flex-1 min-w-[150px]">
+                <label className="label">Título do novo documento</label>
+                <input value={title} onChange={(e) => setTitle(e.target.value)} className="input" />
+              </div>
+              <div>
+                <label className="label">Modelo</label>
+                <select value={template} onChange={(e) => setTemplate(e.target.value as "padrao" | "vazio")} className="input">
+                  <option value="padrao">Estrutura SIGA ligada ao catálogo</option>
+                  <option value="vazio">Documento vazio/manual</option>
+                </select>
+              </div>
+              <button type="submit" className="btn btn-secondary"><IconPlus className="w-4 h-4" /> Criar</button>
+            </form>
+          </details>
         </section>
 
         {/* Plantas */}
-        <section className="card">
-          <SectionHeader title="Plantas e desenhos" description="Leitura automática de arquitectura e estrutura" actions={<IconMap className="w-4 h-4 text-blue-700" />} />
+        <section id="plantas-do-projecto" className="card scroll-mt-24">
+          <SectionHeader title="Projectos e desenhos" description="Carregue arquitectura, estrutura ou outras disciplinas disponíveis" actions={<IconMap className="w-4 h-4 text-blue-700" />} />
           <ul>
             {plants.map((p) => (
               <li key={p.id} className="table-row group">
@@ -359,7 +416,7 @@ export default function ProjectDetailPage() {
             ))}
             {plants.length === 0 && (
               <li className="px-5 py-4 text-sm text-gray-400">
-                Carregue um PDF vectorial do ArchiCAD — o sistema extrai compartimentos (áreas) e quadros de aço automaticamente.
+                Comece pela planta de arquitectura e adicione o projecto estrutural quando disponível. Cada ficheiro é analisado uma única vez e os resultados juntam-se no diagnóstico.
               </li>
             )}
           </ul>
@@ -377,7 +434,7 @@ export default function ProjectDetailPage() {
             </div>
             <button type="submit" disabled={uploading} className="btn btn-primary">
               <IconUpload className="w-4 h-4" />
-              {uploading ? "A processar..." : "Carregar"}
+              {uploading ? "A analisar..." : plants.length > 0 ? "Adicionar projecto" : "Carregar e analisar"}
             </button>
           </form>
         </section>
