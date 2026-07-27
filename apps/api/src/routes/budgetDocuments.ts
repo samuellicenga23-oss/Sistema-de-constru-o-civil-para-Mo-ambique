@@ -89,6 +89,96 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
     return getBudgetDocumentSummary(id);
   });
 
+  // Actualiza, de forma EXPLÍCITA, os snapshots de preço dos itens ligados a composições.
+  // Alterações no catálogo nunca devem reescrever silenciosamente um orçamento já emitido:
+  // o utilizador escolhe quando recalcular e documentos em revisão/aprovados ficam protegidos.
+  app.post("/api/budget-documents/:id/reprice", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const companyId = companyIdOf(request);
+    const document = await assertDocumentOwned(id, companyId);
+    if (!document) return reply.code(404).send({ error: "Documento não encontrado" });
+    if (document.status !== "rascunho") {
+      return reply.code(409).send({
+        error: "Só é possível actualizar preços num documento em rascunho. Crie uma nova revisão para preservar o documento submetido ou aprovado.",
+      });
+    }
+
+    const project = await assertProjectOwned(document.projectId, companyId);
+    if (!project) return reply.code(404).send({ error: "Projecto não encontrado" });
+
+    const candidates = await db
+      .select({
+        id: lineItems.id,
+        description: lineItems.description,
+        compositionId: lineItems.compositionId,
+        unitPrice: lineItems.unitPrice,
+      })
+      .from(lineItems)
+      .innerJoin(budgetSections, eq(lineItems.sectionId, budgetSections.id))
+      .where(eq(budgetSections.documentId, id));
+
+    const compositionItems = candidates.filter(
+      (item): item is typeof item & { compositionId: string } => item.compositionId !== null,
+    );
+    const computed: Array<{ id: string; previousUnitPrice: number | null; nextUnitPrice: number }> = [];
+    const issues: Array<{ lineItemId: string; description: string; reason: string }> = [];
+
+    for (const item of compositionItems) {
+      const composition = await assertCompositionVisible(item.compositionId, companyId);
+      if (!composition) {
+        issues.push({ lineItemId: item.id, description: item.description, reason: "Composição indisponível" });
+        continue;
+      }
+      try {
+        const breakdown = await computeCompositionUnitCost(item.compositionId, companyId, project.zoneId);
+        computed.push({
+          id: item.id,
+          previousUnitPrice: item.unitPrice !== null ? Number(item.unitPrice) : null,
+          nextUnitPrice: breakdown.unitCost,
+        });
+      } catch (error) {
+        issues.push({
+          lineItemId: item.id,
+          description: item.description,
+          reason: error instanceof Error ? error.message : "Não foi possível calcular a composição",
+        });
+      }
+    }
+
+    // Não deixa o documento parcialmente recalculado: primeiro valida todas as composições e
+    // só depois grava o lote completo numa transacção.
+    if (issues.length > 0) {
+      return reply.code(422).send({
+        error: `Faltam dados em ${issues.length} item(ns). Corrija as composições indicadas antes de actualizar o orçamento.`,
+        issues,
+      });
+    }
+
+    const changed = computed.filter(
+      (item) => item.previousUnitPrice === null || Math.abs(item.previousUnitPrice - item.nextUnitPrice) > 0.000001,
+    );
+    const previousSummary = await getBudgetDocumentSummary(id);
+
+    await db.transaction(async (tx) => {
+      for (const item of changed) {
+        await tx
+          .update(lineItems)
+          .set({ unitPrice: item.nextUnitPrice.toString(), origin: "composicao" })
+          .where(eq(lineItems.id, item.id));
+      }
+    });
+
+    const nextSummary = await getBudgetDocumentSummary(id);
+    return {
+      processed: computed.length,
+      updated: changed.length,
+      unchanged: computed.length - changed.length,
+      previousTotal: previousSummary?.total ?? 0,
+      newTotal: nextSummary?.total ?? 0,
+      zoneId: project.zoneId,
+    };
+  });
+
   app.put("/api/budget-documents/:id", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const companyId = companyIdOf(request);

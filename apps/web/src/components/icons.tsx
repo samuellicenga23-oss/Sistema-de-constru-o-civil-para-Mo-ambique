@@ -92,6 +92,17 @@ export function IconDownload(p: IconProps) {
   );
 }
 
+export function IconRefresh(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M20 7v5h-5" />
+      <path d="M4 17v-5h5" />
+      <path d="M6.1 9a7 7 0 0 1 11.5-2.6L20 9" />
+      <path d="m4 15 2.4 2.6A7 7 0 0 0 17.9 15" />
+    </Svg>
+  );
+}
+
 export function IconUpload(p: IconProps) {
   return (
     <Svg {...p}>

@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { boqApi, type BudgetDocumentSummary, type MeasurementImportResult } from "../api/boq";
+import { boqApi, type BudgetDocumentSummary, type BudgetRepriceResult, type LineItemNode, type MeasurementImportResult } from "../api/boq";
 import { catalogApi, type CostComposition } from "../api/catalog";
 import { measurementApi, type MeasurementDashboard } from "../api/measurement";
 import { plantsApi, type Plant, type ExtractedRoom } from "../api/plants";
@@ -8,12 +8,20 @@ import LineItemRow, { AddChildForm, BoqHeaderRow, BoqTableHead } from "../compon
 import QuickEstimateWizard from "../components/QuickEstimateWizard";
 import CalculationReportView from "../components/CalculationReportView";
 import MaterialsByPhaseModal from "../components/MaterialsByPhaseModal";
+import ConfirmDialog from "../components/ConfirmDialog";
 import Layout from "../components/Layout";
 import { SectionHeader } from "../components/WorkspaceUI";
-import { IconBack, IconChart, IconClipboard, IconDownload, IconPlus, IconTrash, IconWand } from "../components/icons";
+import { IconBack, IconChart, IconClipboard, IconDownload, IconPlus, IconRefresh, IconTrash, IconWand } from "../components/icons";
 
 function money(value: number, currency: string) {
   return `${value.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`;
+}
+
+function countCompositionItems(items: LineItemNode[]): number {
+  return items.reduce(
+    (total, item) => total + (item.compositionId ? 1 : 0) + countCompositionItems(item.children),
+    0,
+  );
 }
 
 export default function BudgetDocumentPage() {
@@ -33,6 +41,9 @@ export default function BudgetDocumentPage() {
   const [architectureRooms, setArchitectureRooms] = useState<ExtractedRoom[]>([]);
   const [importingMeasurements, setImportingMeasurements] = useState(false);
   const [importResult, setImportResult] = useState<MeasurementImportResult | null>(null);
+  const [showRepriceConfirm, setShowRepriceConfirm] = useState(false);
+  const [repricing, setRepricing] = useState(false);
+  const [repriceResult, setRepriceResult] = useState<BudgetRepriceResult | null>(null);
 
   async function reload() {
     if (!documentId) return;
@@ -128,12 +139,31 @@ export default function BudgetDocumentPage() {
     }
   }
 
+  async function handleReprice() {
+    if (!documentId) return;
+    setError(null);
+    setRepriceResult(null);
+    setRepricing(true);
+    try {
+      const result = await boqApi.repriceBudgetDocument(documentId);
+      setRepriceResult(result);
+      setShowRepriceConfirm(false);
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao actualizar os preços do orçamento");
+      setShowRepriceConfirm(false);
+    } finally {
+      setRepricing(false);
+    }
+  }
+
   if (!summary) {
     return <div className="min-h-screen flex items-center justify-center text-gray-400">A carregar...</div>;
   }
 
   const { document, sections, subtotal1, contingencias, subtotal2, iva, total } = summary;
   const currency = document.currency;
+  const compositionLinkedCount = sections.reduce((count, section) => count + countCompositionItems(section.items), 0);
 
   return (
     <Layout
@@ -177,6 +207,50 @@ export default function BudgetDocumentPage() {
         {/* Coluna principal: secções e itens */}
         <div className="space-y-5 min-w-0">
           {error && <p className="text-sm text-red-600">{error}</p>}
+
+          <section className="card card-pad border-l-4 border-l-brand-500">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-3">
+                <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-700">
+                  <IconRefresh className="h-4 w-4" />
+                </span>
+                <div>
+                  <h2 className="text-sm font-semibold text-slate-900">Preços ligados ao catálogo</h2>
+                  <p className="mt-1 max-w-2xl text-xs leading-relaxed text-slate-500">
+                    Os itens com composição guardam o preço do momento em que foram criados. Actualize-os quando adoptar novas
+                    cotações ou alterar a zona; quantidades e preços introduzidos manualmente não serão modificados.
+                  </p>
+                  <p className={`mt-2 text-xs font-medium ${compositionLinkedCount > 0 ? "text-slate-700" : "text-amber-700"}`}>
+                    {compositionLinkedCount > 0
+                      ? `${compositionLinkedCount} item(ns) deste documento estão ligados a composições.`
+                      : "Este documento usa apenas preços manuais; associe composições aos itens para receber actualizações do catálogo."}
+                  </p>
+                  {document.status !== "rascunho" && (
+                    <p className="mt-2 text-xs font-medium text-amber-700">
+                      Documento protegido ({document.status}). Crie uma nova revisão para recalcular preços.
+                    </p>
+                  )}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowRepriceConfirm(true)}
+                disabled={document.status !== "rascunho" || repricing || compositionLinkedCount === 0}
+                className="btn btn-secondary btn-sm shrink-0"
+              >
+                <IconRefresh className="h-3.5 w-3.5" />
+                Actualizar preços
+              </button>
+            </div>
+            {repriceResult && (
+              <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                <span className="font-semibold">Actualização concluída:</span>{" "}
+                {repriceResult.processed === 0
+                  ? "não existem itens ligados a composições neste documento."
+                  : `${repriceResult.updated} de ${repriceResult.processed} item(ns) alterado(s). Total: ${money(repriceResult.previousTotal, currency)} → ${money(repriceResult.newTotal, currency)}.`}
+              </div>
+            )}
+          </section>
 
           {sections.map((section) => (
             <section key={section.id} className="card overflow-hidden">
@@ -382,6 +456,17 @@ export default function BudgetDocumentPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {showRepriceConfirm && (
+        <ConfirmDialog
+          title="Actualizar preços do orçamento?"
+          message="O SIGA recalculará apenas os itens ligados a composições, usando os preços adoptados para a zona actual da obra. Quantidades e preços manuais permanecem iguais."
+          confirmLabel="Actualizar preços"
+          busy={repricing}
+          onConfirm={handleReprice}
+          onCancel={() => setShowRepriceConfirm(false)}
+        />
       )}
     </Layout>
   );

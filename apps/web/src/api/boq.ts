@@ -78,6 +78,15 @@ export type BudgetDocumentSummary = {
   total: number;
 };
 
+export type BudgetRepriceResult = {
+  processed: number;
+  updated: number;
+  unchanged: number;
+  previousTotal: number;
+  newTotal: number;
+  zoneId: string | null;
+};
+
 export const boqApi = {
   listProjects: () => request<Project[]>("/projects"),
   getProject: (id: string) => request<Project>(`/projects/${id}`),
@@ -93,6 +102,8 @@ export const boqApi = {
   deleteBudgetDocument: (id: string) => request<{ ok: true }>(`/budget-documents/${id}`, { method: "DELETE" }),
 
   getBudgetDocumentSummary: (id: string) => request<BudgetDocumentSummary>(`/budget-documents/${id}`),
+  repriceBudgetDocument: (id: string) =>
+    request<BudgetRepriceResult>(`/budget-documents/${id}/reprice`, { method: "POST" }),
 
   createSection: (documentId: string, data: { name: string; sortOrder?: number }) =>
     request<SectionNode>(`/budget-documents/${documentId}/sections`, { method: "POST", body: JSON.stringify(data) }),

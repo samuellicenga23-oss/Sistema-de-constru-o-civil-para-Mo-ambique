@@ -37,6 +37,19 @@ function emptyLine(materials: Material[]): PurchaseOrderLineInput {
   return { materialId: materials[0]?.id ?? "", quantity: 1, unitCost: 0 };
 }
 
+function preferredSupplierPrice(
+  prices: SupplierMaterialPrice[],
+  materialId: string,
+  zoneId: string | null | undefined,
+  currency: string | undefined,
+) {
+  const compatible = prices
+    .filter((price) => price.materialId === materialId && price.currency === currency)
+    .sort((a, b) => Number(a.unitCost) - Number(b.unitCost));
+  const exactZone = zoneId ? compatible.find((price) => price.zoneId === zoneId) : undefined;
+  return exactZone ?? compatible.find((price) => price.zoneId === null);
+}
+
 export default function ProjectPurchasingPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const [project, setProject] = useState<Project | null>(null);
@@ -91,15 +104,31 @@ export default function ProjectPurchasingPage() {
   // quando se escolhe um material já cadastrado no fornecedor (ver handleLineMaterialChange).
   useEffect(() => {
     if (!supplierId) return;
-    suppliersApi.listMaterialPrices(supplierId).then(setSupplierPrices).catch(() => setSupplierPrices([]));
-  }, [supplierId]);
+    suppliersApi
+      .listMaterialPrices(supplierId)
+      .then((prices) => {
+        setSupplierPrices(prices);
+        // Mudar o fornecedor é uma decisão explícita: reaplica a melhor cotação compatível
+        // (zona exacta primeiro, depois geral) e nunca mascara uma moeda diferente como MZN/USD.
+        setLines((current) =>
+          current.map((line) => {
+            const known = preferredSupplierPrice(prices, line.materialId, project?.zoneId, project?.currency);
+            return { ...line, unitCost: known ? Number(known.unitCost) : 0 };
+          }),
+        );
+      })
+      .catch(() => {
+        setSupplierPrices([]);
+        setLines((current) => current.map((line) => ({ ...line, unitCost: 0 })));
+      });
+  }, [supplierId, project?.zoneId, project?.currency]);
 
   function updateLine(index: number, patch: Partial<PurchaseOrderLineInput>) {
     setLines((prev) => prev.map((l, i) => (i === index ? { ...l, ...patch } : l)));
   }
 
   function handleLineMaterialChange(index: number, materialId: string) {
-    const known = supplierPrices.find((p) => p.materialId === materialId && (p.zoneId === null || p.zoneId === project?.zoneId));
+    const known = preferredSupplierPrice(supplierPrices, materialId, project?.zoneId, project?.currency);
     updateLine(index, { materialId, unitCost: known ? Number(known.unitCost) : 0 });
   }
 
@@ -198,6 +227,12 @@ export default function ProjectPurchasingPage() {
       <div className="space-y-5 max-w-7xl">
         <ProjectWorkspaceNav projectId={projectId!} />
         {error && <p className="text-sm text-red-600">{error}</p>}
+        {!project.zoneId && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <span className="font-semibold">Zona de preços em falta.</span> Enquanto a obra não tiver zona, as ordens só podem sugerir
+            cotações gerais do fornecedor. Defina a zona na página principal do projecto para usar cotações locais.
+          </div>
+        )}
 
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <MetricCard label="Materiais em stock" value={stockSummary.length} note="Itens com movimentos" />
@@ -263,6 +298,11 @@ export default function ProjectPurchasingPage() {
                       </option>
                     ))}
                   </select>
+                  {suppliers.length === 0 && (
+                    <Link to="/fornecedores" className="mt-1.5 inline-flex text-xs font-semibold text-brand-700 hover:underline">
+                      Abrir fornecedores e registar cotações →
+                    </Link>
+                  )}
                 </div>
                 <div>
                   <label className="label">Data</label>
@@ -276,14 +316,17 @@ export default function ProjectPurchasingPage() {
 
               <div className="space-y-2">
                 <label className="label">
-                  Linhas (materiais do Catálogo) — o preço sugere-se automaticamente se este fornecedor já tiver um preço
-                  cadastrado para o material
+                  Linhas do Catálogo — a sugestão respeita fornecedor, zona da obra e moeda; pode ser ajustada antes de criar a ordem
                 </label>
                 {materials.length === 0 ? (
                   <p className="text-xs text-gray-400">Sem materiais no Catálogo ainda — adicione materiais no Catálogo de Preços primeiro.</p>
                 ) : (
                   lines.map((line, i) => {
                     const material = materialById.get(line.materialId);
+                    const quotedPrice = preferredSupplierPrice(supplierPrices, line.materialId, project.zoneId, project.currency);
+                    const incompatibleCurrencies = Array.from(
+                      new Set(supplierPrices.filter((price) => price.materialId === line.materialId).map((price) => price.currency)),
+                    ).filter((currency) => currency !== project.currency);
                     return (
                       <div key={i} className="grid gap-2 sm:grid-cols-12 items-end">
                         <div className="sm:col-span-5">
@@ -316,7 +359,17 @@ export default function ProjectPurchasingPage() {
                             onChange={(e) => updateLine(i, { unitCost: Number(e.target.value) })}
                             className="input"
                           />
-                          {material && <span className="text-[11px] text-gray-400">por {material.unit}</span>}
+                          {quotedPrice ? (
+                            <span className="text-[11px] font-medium text-emerald-700">
+                              {quotedPrice.zoneId ? `Cotação para ${quotedPrice.zoneName ?? "a zona da obra"}` : "Cotação geral do fornecedor"} · por {material?.unit}
+                            </span>
+                          ) : incompatibleCurrencies.length > 0 ? (
+                            <span className="text-[11px] text-amber-700">
+                              Cotação em {incompatibleCurrencies.join("/")} não aplicada; introduza o preço em {project.currency}
+                            </span>
+                          ) : (
+                            <span className="text-[11px] text-gray-400">Sem cotação aplicável · por {material?.unit}</span>
+                          )}
                         </div>
                         <div className="sm:col-span-2 flex gap-2">
                           <button type="button" onClick={() => setLines((prev) => [...prev, emptyLine(materials)])} className="btn btn-secondary btn-sm">

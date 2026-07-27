@@ -99,3 +99,29 @@ consultar o estado do Git e as entradas mais recentes. Cada intervenção deve i
   PostgreSQL já existentes.
 - **Validação:** build completo de shared/API/web aprovado; 12 testes do frontend aprovados.
 - **Produção:** ainda não publicada.
+
+## 2026-07-27 — Codex — Fecho da cadeia catálogo, orçamento e compras
+
+- **Objectivo:** garantir que fornecedor, cotação, zona, catálogo, composição, orçamento, ordem de
+  compra e stock formam um fluxo controlado, sem preços implícitos ou alterações retroactivas.
+- **Orçamentos:** nova operação `POST /api/budget-documents/:id/reprice` recalcula apenas itens
+  associados a composições, usando a zona actual da obra. O lote é validado antes da gravação e
+  actualizado numa transacção; dados em falta impedem alterações parciais.
+- **Controlo documental:** o recálculo é sempre iniciado pelo utilizador e só funciona em rascunhos.
+  Documentos submetidos/aprovados mantêm o snapshot original e exigem nova revisão.
+- **Interface do orçamento:** novo painel explica a origem dos preços, conta itens ligados a
+  composições, desactiva a acção quando o documento só tem preços manuais, pede confirmação e
+  mostra quantos itens e qual total foram alterados.
+- **Compras por zona:** ao escolher fornecedor/material, a ordem usa primeiro a cotação da zona da
+  obra e depois a cotação geral. Entre opções equivalentes usa a mais económica.
+- **Segurança monetária:** uma cotação noutra moeda deixou de ser renomeada silenciosamente para a
+  moeda da obra; o sistema identifica a incompatibilidade e pede um preço convertido/manual.
+- **Orientação:** obras sem zona recebem aviso claro; empresas sem fornecedores recebem ligação
+  directa para registar fornecedor e cotações.
+- **Validação funcional:** login, cadeia de custos, confirmação de recálculo, compras e diagnóstico
+  de medições verificados no ambiente local. O diagnóstico apresentou 8 grupos de prontidão e
+  identificou explicitamente os dados estruturais e hidráulicos em falta.
+- **Validação técnica:** 22 testes da API e 12 testes do frontend aprovados; build completo de
+  shared/API/web aprovado.
+- **Persistência:** nenhuma migração de base de dados necessária.
+- **Produção:** ainda não publicada.
