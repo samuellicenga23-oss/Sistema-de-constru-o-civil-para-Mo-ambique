@@ -4,6 +4,7 @@ import { boqApi, type BudgetDocument, type Project } from "../api/boq";
 import { measurementApi, type MeasurementCertificate } from "../api/measurement";
 import { plantsApi, type Plant } from "../api/plants";
 import { catalogApi, type PriceZone } from "../api/catalog";
+import { suppliersApi } from "../api/suppliers";
 import Layout from "../components/Layout";
 import { InlineNotice, MetricCard, SectionHeader } from "../components/WorkspaceUI";
 import ProjectWorkspaceNav from "../components/ProjectWorkspaceNav";
@@ -44,6 +45,7 @@ export default function ProjectDetailPage() {
   const [plantDiscipline, setPlantDiscipline] = useState<"arquitectura" | "estrutura">("arquitectura");
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [costReadiness, setCostReadiness] = useState({ materials: 0, quoted: 0, zonePriced: 0, suppliers: 0, compositions: 0 });
 
   async function reload() {
     if (!projectId) return;
@@ -58,6 +60,18 @@ export default function ProjectDetailPage() {
     setCertificates(certs);
     setPlants(plantList);
     if (!selectedDocId && docs.length) setSelectedDocId(docs[0].id);
+    const [catalogMaterials, supplierList, compositionList] = await Promise.all([
+      catalogApi.listMaterials(proj.zoneId ?? undefined),
+      suppliersApi.list(),
+      catalogApi.listCompositions(proj.zoneId ?? undefined),
+    ]);
+    setCostReadiness({
+      materials: catalogMaterials.length,
+      quoted: catalogMaterials.filter((material) => material.marketPrice != null).length,
+      zonePriced: catalogMaterials.filter((material) => proj.zoneId ? material.zonePrice != null : Number(material.baseUnitCost) > 0).length,
+      suppliers: supplierList.length,
+      compositions: compositionList.length,
+    });
   }
 
   useEffect(() => {
@@ -72,6 +86,7 @@ export default function ProjectDetailPage() {
     try {
       const updated = await boqApi.updateProject(projectId, { zoneId: newZoneId || null });
       setProject(updated);
+      await reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao actualizar a zona");
     } finally {
@@ -220,6 +235,23 @@ export default function ProjectDetailPage() {
               </option>
             ))}
           </select>
+        </section>
+
+        <section className="card lg:col-span-2 overflow-hidden">
+          <SectionHeader title="Cadeia de custos da obra" description="A ordem usada pelo SIGA para transformar cotações de mercado em preços de orçamento" actions={<Link to="/catalogo" className="btn btn-secondary btn-sm">Abrir catálogo</Link>} />
+          <div className="grid gap-px bg-slate-200 sm:grid-cols-2 xl:grid-cols-4">
+            {[
+              { n: 1, title: "Zona da obra", value: project.zoneId ? "Definida" : "Em falta", detail: project.zoneId ? zones.find((zone) => zone.id === project.zoneId)?.name ?? "Zona seleccionada" : "Defina a zona antes de validar preços.", ok: Boolean(project.zoneId) },
+              { n: 2, title: "Fornecedores e cotações", value: `${costReadiness.quoted}/${costReadiness.materials}`, detail: `${costReadiness.suppliers} fornecedor(es); materiais com cotação aplicável.`, ok: costReadiness.suppliers > 0 && costReadiness.quoted > 0 },
+              { n: 3, title: "Preços adoptados", value: `${costReadiness.zonePriced}/${costReadiness.materials}`, detail: project.zoneId ? "Preços próprios da zona; restantes usam preço base." : "A aguardar zona para validar cobertura.", ok: Boolean(project.zoneId) && costReadiness.zonePriced === costReadiness.materials },
+              { n: 4, title: "Composições", value: String(costReadiness.compositions), detail: "Mão-de-obra + materiais + máquinas alimentam o orçamento.", ok: costReadiness.compositions > 0 },
+            ].map((item) => (
+              <div key={item.n} className="bg-white p-4">
+                <div className="flex items-center gap-2"><span className={`grid h-6 w-6 place-items-center rounded-full text-xs font-bold ${item.ok ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{item.ok ? "✓" : item.n}</span><p className="text-sm font-semibold text-slate-900">{item.title}</p></div>
+                <p className="mt-3 text-lg font-bold text-slate-900">{item.value}</p><p className="mt-1 text-xs leading-5 text-slate-500">{item.detail}</p>
+              </div>
+            ))}
+          </div>
         </section>
 
         {/* Mapas de Quantidades */}

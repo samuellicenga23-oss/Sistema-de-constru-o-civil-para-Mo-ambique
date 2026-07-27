@@ -446,12 +446,13 @@ export default function CatalogPage() {
               />
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[560px]">
+              <table className="w-full text-sm min-w-[820px]">
                 <thead>
                   <tr className="table-head-row">
                     <th className="py-2.5 px-5 font-medium">Material</th>
                     <th className="font-medium">Un</th>
                     <th className="text-right font-medium">{viewZoneId ? `Preço (${zones.find((z) => z.id === viewZoneId)?.name})` : "Preço base"}</th>
+                    <th className="text-left font-medium">Melhor cotação</th>
                     <th className="text-right font-medium">Factor imp.</th>
                     <th className="text-left font-medium">Unidade de compra</th>
                     <th className="text-right font-medium pr-5">Por zona</th>
@@ -468,6 +469,14 @@ export default function CatalogPage() {
                       <td className="text-right tabular-nums">
                         <EditablePrice value={m.zonePrice ?? m.baseUnitCost} suffix={m.currency} onSave={(v) => handleSaveMaterialPrice(m.id, v)} />
                         {viewZoneId && !m.zonePrice && <span className="text-xs text-gray-400 ml-1">(base)</span>}
+                      </td>
+                      <td>
+                        {m.marketPrice ? (
+                          <div className="flex items-center gap-2">
+                            <div><p className="font-medium text-slate-800 tabular-nums">{money(m.marketPrice)} {m.marketCurrency}</p><p className="text-[11px] text-slate-500">{m.marketSupplierName} · {m.marketPriceIsZoneSpecific ? "nesta zona" : "preço geral"}</p></div>
+                            <button type="button" onClick={() => handleSaveMaterialPrice(m.id, Number(m.marketPrice))} className="btn btn-secondary btn-sm">Adoptar</button>
+                          </div>
+                        ) : <span className="text-xs text-slate-400">Sem cotação</span>}
                       </td>
                       <td className="text-right tabular-nums text-gray-600">{money(m.importFactor)}×</td>
                       <td>
@@ -489,7 +498,7 @@ export default function CatalogPage() {
                   ))}
                   {filteredMaterials.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="py-6 text-center text-gray-400">
+                      <td colSpan={7} className="py-6 text-center text-gray-400">
                         Nenhum material corresponde à pesquisa.
                       </td>
                     </tr>

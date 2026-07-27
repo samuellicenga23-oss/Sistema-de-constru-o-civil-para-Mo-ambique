@@ -156,6 +156,7 @@ export default function QuickEstimateWizard({
   const hasStructuralFootings = !!structuralSummary && structuralSummary.footingsCount > 0;
   const hasArchitectureRooms = !!architectureRooms && architectureRooms.length > 0;
   const [step, setStep] = useState(0);
+  const [readinessAccepted, setReadinessAccepted] = useState(false);
   const [floors, setFloors] = useState<FloorForm[]>(
     hasArchitectureRooms ? floorsFromExtractedRooms(architectureRooms!) : [newFloor()]
   );
@@ -299,6 +300,19 @@ export default function QuickEstimateWizard({
       ? Number(slabThickness) > 0
       : Number(footingCount) > 0 && Number(footingAvgArea) > 0 && Number(footingAvgDepth) > 0);
 
+  const readinessChecks = [
+    { label: "Compartimentos e áreas por piso", ready: hasArchitectureRooms, impact: "Sem planta de arquitectura, indique manualmente todos os compartimentos e dimensões." },
+    { label: "Perímetro exterior e pé-direito", ready: floors.every((f) => Number(f.perimeter) > 0 && Number(f.ceilingHeight) > 0), impact: "Necessário para paredes, rebocos, pintura e revestimentos." },
+    { label: "Sapatas e fundações", ready: hasStructuralFootings, impact: "Sem planta estrutural, confirme quantidade, área e profundidade médias." },
+    { label: "Vigas estruturais", ready: Boolean(structuralSummary?.beamsConcreteVolumeM3), impact: "Sem volume real, o sistema usará um rácio genérico de betão." },
+    { label: "Lajes e espessuras", ready: Boolean(structuralSummary?.slabsAvgThicknessCm), impact: "Sem espessura real, o volume das lajes será estimado." },
+    { label: "Mapa de aço", ready: Boolean(structuralSummary?.totalSteelWeightKg), impact: "Sem quadro de armaduras, o peso será calculado por kg/m³ de betão." },
+    { label: "Redes hidráulicas e sanitárias", ready: Boolean(sewerPipe110M || sewerPipe40M || waterSupplyPipeM), impact: "Confirme comprimentos de tubagem; contagens de aparelhos não definem o traçado real." },
+    { label: "Preços críticos da obra", ready: Boolean(cementPrice && steelPrice && blockPrice), impact: "Sem confirmação, permanecem os preços do catálogo e da zona seleccionada." },
+  ];
+  const readyCount = readinessChecks.filter((item) => item.ready).length;
+  const readinessPercent = Math.round((readyCount / readinessChecks.length) * 100);
+
   function canProceed() {
     if (step === 0) return step1Valid;
     if (step === 1) return step2Valid;
@@ -385,7 +399,7 @@ export default function QuickEstimateWizard({
           </button>
         </div>
 
-        {!result && (
+        {!result && readinessAccepted && (
           <div className="flex items-center gap-1 px-5 py-3 border-b border-gray-100 overflow-x-auto">
             {STEPS.map((label, i) => (
               <div key={label} className="flex items-center gap-1 shrink-0">
@@ -406,7 +420,27 @@ export default function QuickEstimateWizard({
         <div className="p-5 overflow-y-auto flex-1">
           {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
 
-          {result ? (
+          {!result && !readinessAccepted ? (
+            <div className="space-y-5">
+              <div>
+                <div className="flex items-end justify-between gap-3">
+                  <div><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Diagnóstico antes de medir</p><h3 className="mt-1 text-xl font-bold text-slate-900">Prontidão dos dados: {readinessPercent}%</h3></div>
+                  <span className={`badge ${readinessPercent >= 75 ? "badge-green" : readinessPercent >= 45 ? "badge-yellow" : "badge-red"}`}>{readyCount} de {readinessChecks.length} confirmados</span>
+                </div>
+                <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100"><div className={`h-full ${readinessPercent >= 75 ? "bg-emerald-500" : readinessPercent >= 45 ? "bg-amber-500" : "bg-red-500"}`} style={{ width: `${readinessPercent}%` }} /></div>
+                <p className="mt-3 text-sm text-slate-600">O SIGA não vai esconder pressupostos. Veja primeiro o que já está confirmado, o que falta e onde uma estimativa genérica seria usada.</p>
+              </div>
+              <div className="divide-y divide-slate-200 rounded-xl border border-slate-200">
+                {readinessChecks.map((item) => (
+                  <div key={item.label} className="flex gap-3 p-3.5">
+                    <span className={`mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full text-xs font-bold ${item.ready ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{item.ready ? "✓" : "!"}</span>
+                    <div><p className="text-sm font-medium text-slate-900">{item.label}</p><p className="mt-0.5 text-xs text-slate-500">{item.ready ? "Dados disponíveis para o cálculo." : item.impact}</p></div>
+                  </div>
+                ))}
+              </div>
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"><strong>Pode continuar com estimativas,</strong> mas cada dado em falta ficará identificado no relatório final para revisão e ponderação do utilizador.</div>
+            </div>
+          ) : result ? (
             <div className="space-y-4">
               <div className="rounded-lg bg-green-50 border border-green-200 p-4">
                 <p className="font-medium text-green-800">
@@ -1047,6 +1081,11 @@ export default function QuickEstimateWizard({
               <button onClick={onClose} className="btn btn-primary">
                 Ver Mapa de Quantidades
               </button>
+            </>
+          ) : !readinessAccepted ? (
+            <>
+              <button onClick={onClose} className="btn btn-ghost">Cancelar</button>
+              <button onClick={() => setReadinessAccepted(true)} className="btn btn-primary">Rever e preencher dados</button>
             </>
           ) : (
             <>

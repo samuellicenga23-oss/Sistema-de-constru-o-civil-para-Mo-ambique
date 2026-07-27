@@ -74,3 +74,26 @@ consultar o estado do Git e as entradas mais recentes. Cada intervenção deve i
   contextual, não bloqueante e com estado de processamento.
 - **Validação:** 12 testes do frontend aprovados; build de produção aprovado.
 - **Produção:** ainda não publicada.
+
+## 2026-07-27 — Codex — Integração de custos e prontidão das medições
+
+- **Objectivo:** tornar explícita a cadeia fornecedor → material → zona → composição → orçamento
+  e impedir estimativas automáticas sem diagnóstico prévio dos dados em falta.
+- **Cotações:** a API do Catálogo passa a resolver a melhor cotação de fornecedor aplicável à
+  zona; cotações específicas da zona vencem cotações gerais e, no mesmo nível, vence o menor
+  preço.
+- **Segurança de custos:** a cotação é apresentada como sugestão de mercado e nunca substitui
+  silenciosamente o preço do Catálogo. O utilizador precisa seleccionar “Adoptar”; só então o
+  preço passa a alimentar composições e novos snapshots de orçamento.
+- **Catálogo:** materiais mostram fornecedor, cotação, âmbito geral/específico da zona e acção de
+  adopção.
+- **Obra:** novo painel “Cadeia de custos” mostra em ordem a zona, cobertura de cotações, cobertura
+  de preços adoptados e composições disponíveis.
+- **Medições:** o Assistente começa com diagnóstico de prontidão em oito grupos: compartimentos,
+  perímetros/pés-direitos, fundações, vigas, lajes, aço, redes hidráulicas e preços críticos.
+- **Transparência:** cada ausência explica o impacto e o rácio que seria usado; o utilizador pode
+  prosseguir conscientemente e os pressupostos continuam identificados no relatório final.
+- **Persistência:** nenhuma migração necessária; diagnóstico e cotações são derivados das relações
+  PostgreSQL já existentes.
+- **Validação:** build completo de shared/API/web aprovado; 12 testes do frontend aprovados.
+- **Produção:** ainda não publicada.

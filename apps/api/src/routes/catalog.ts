@@ -189,13 +189,57 @@ export async function catalogRoutes(app: FastifyInstance) {
     const rows = await db.select().from(materials).where(scopeFilter(materials.companyId, request));
     const deduped = dedupeByName(rows).sort((a, b) => a.name.localeCompare(b.name));
 
-    if (!zoneId) return deduped;
     const materialIds = deduped.map((m) => m.id);
-    const zonePrices = materialIds.length
+    const zonePrices = zoneId && materialIds.length
       ? await db.select().from(materialZonePrices).where(and(eq(materialZonePrices.zoneId, zoneId), inArray(materialZonePrices.materialId, materialIds)))
       : [];
     const zonePriceByMaterialId = new Map(zonePrices.map((p) => [p.materialId, p.unitCost]));
-    return deduped.map((m) => ({ ...m, zonePrice: zonePriceByMaterialId.get(m.id) ?? null }));
+
+    // Liga o mercado real ao catálogo: para cada material mostra a melhor cotação de fornecedor
+    // compatível com a zona seleccionada. Uma cotação específica da zona tem prioridade sobre uma
+    // cotação geral; dentro do mesmo nível escolhe-se a de menor preço. É uma sugestão explícita —
+    // nunca altera silenciosamente o preço usado nas composições/orçamentos.
+    const companyId = request.currentUser!.companyId;
+    const quoteRows = companyId && materialIds.length
+      ? await db
+          .select({
+            materialId: supplierMaterialPrices.materialId,
+            unitCost: supplierMaterialPrices.unitCost,
+            currency: supplierMaterialPrices.currency,
+            zoneId: supplierMaterialPrices.zoneId,
+            supplierId: suppliers.id,
+            supplierName: suppliers.name,
+          })
+          .from(supplierMaterialPrices)
+          .innerJoin(suppliers, eq(supplierMaterialPrices.supplierId, suppliers.id))
+          .where(and(
+            eq(suppliers.companyId, companyId),
+            inArray(supplierMaterialPrices.materialId, materialIds),
+            zoneId ? or(eq(supplierMaterialPrices.zoneId, zoneId), isNull(supplierMaterialPrices.zoneId)) : isNull(supplierMaterialPrices.zoneId),
+          ))
+      : [];
+    const bestQuoteByMaterialId = new Map<string, (typeof quoteRows)[number]>();
+    for (const quote of quoteRows) {
+      const current = bestQuoteByMaterialId.get(quote.materialId);
+      const quoteSpecific = zoneId != null && quote.zoneId === zoneId;
+      const currentSpecific = zoneId != null && current?.zoneId === zoneId;
+      if (!current || (quoteSpecific && !currentSpecific) || (quoteSpecific === currentSpecific && Number(quote.unitCost) < Number(current.unitCost))) {
+        bestQuoteByMaterialId.set(quote.materialId, quote);
+      }
+    }
+
+    return deduped.map((m) => {
+      const quote = bestQuoteByMaterialId.get(m.id);
+      return {
+        ...m,
+        zonePrice: zonePriceByMaterialId.get(m.id) ?? null,
+        marketPrice: quote?.unitCost ?? null,
+        marketCurrency: quote?.currency ?? null,
+        marketSupplierId: quote?.supplierId ?? null,
+        marketSupplierName: quote?.supplierName ?? null,
+        marketPriceIsZoneSpecific: Boolean(zoneId && quote?.zoneId === zoneId),
+      };
+    });
   });
 
   app.post("/api/catalog/materials", auth, async (request: FastifyRequest, reply: FastifyReply) => {

@@ -20,6 +20,13 @@ export type Material = {
   // Só vem preenchido quando `listMaterials` é chamado com um zoneId — preço próprio desta
   // zona, se existir; null = usa o preço base.
   zonePrice?: string | null;
+  // Melhor cotação de fornecedor aplicável à zona pedida. É apenas uma sugestão de mercado;
+  // só passa a alimentar composições quando o utilizador a adoptar explicitamente no Catálogo.
+  marketPrice?: string | null;
+  marketCurrency?: string | null;
+  marketSupplierId?: string | null;
+  marketSupplierName?: string | null;
+  marketPriceIsZoneSpecific?: boolean;
   // Unidade de compra de mercado (ex: "Camião 10m³"), quando difere da unidade de medida —
   // null = compra-se directamente na unidade de medida, sem conversão.
   purchasePackageLabel: string | null;
