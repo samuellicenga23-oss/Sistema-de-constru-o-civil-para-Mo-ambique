@@ -101,10 +101,23 @@ body {
 
   /* Tabelas */
   .table-head-row {
-    @apply text-left text-[11px] uppercase tracking-wider text-gray-400 border-b border-gray-200;
+    @apply text-left text-[11px] uppercase tracking-wider text-slate-500 bg-slate-50 border-b border-slate-200;
   }
   .table-row {
-    @apply border-b border-slate-100 last:border-0 hover:bg-brand-50/40 transition-colors;
+    @apply border-b border-slate-100 last:border-0 hover:bg-blue-50/35 transition-colors;
+  }
+
+  .workspace-tabs {
+    @apply flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-100 p-1 overflow-x-auto;
+  }
+  .workspace-tab {
+    @apply whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-white hover:text-slate-900;
+  }
+  .workspace-tab-active {
+    @apply bg-white text-slate-900 shadow-sm;
+  }
+  .toolbar {
+    @apply flex flex-wrap items-end justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm;
   }
 
   /* Badges de estado */

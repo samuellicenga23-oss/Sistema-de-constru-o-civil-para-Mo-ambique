@@ -19,6 +19,7 @@ export default function ProjectsPage() {
   const [freshDocumentId, setFreshDocumentId] = useState<string | null>(null);
   const [showWizard, setShowWizard] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState("");
 
   async function reload() {
     setProjects(await boqApi.listProjects());
@@ -31,6 +32,9 @@ export default function ProjectsPage() {
   }, []);
 
   const zoneName = (id: string | null) => zones.find((z) => z.id === id)?.name;
+  const filteredProjects = projects.filter((project) =>
+    `${project.name} ${project.client ?? ""} ${zoneName(project.zoneId) ?? ""}`.toLocaleLowerCase("pt").includes(query.toLocaleLowerCase("pt")),
+  );
 
   async function handleDelete(e: MouseEvent, id: string, name: string) {
     e.preventDefault();
@@ -73,7 +77,7 @@ export default function ProjectsPage() {
         </button>
       }
     >
-      <div className="space-y-5 max-w-4xl">
+      <div className="space-y-5 max-w-6xl">
         {error && <p className="text-sm text-red-600">{error}</p>}
 
         {freshDocumentId && (
@@ -138,6 +142,20 @@ export default function ProjectsPage() {
           </section>
         )}
 
+        {!loading && projects.length > 0 && (
+          <div className="toolbar">
+            <div className="min-w-[240px] flex-1 max-w-md">
+              <label className="label">Pesquisar projectos</label>
+              <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} className="input" placeholder="Nome, cliente ou zona" />
+            </div>
+            <div className="flex items-center gap-6 px-2 text-sm">
+              <div><span className="block text-xs text-slate-400">Total</span><strong className="text-slate-900">{projects.length}</strong></div>
+              <div><span className="block text-xs text-slate-400">Em MZN</span><strong className="text-slate-900">{projects.filter((p) => p.currency === "MZN").length}</strong></div>
+              <div><span className="block text-xs text-slate-400">Em USD</span><strong className="text-slate-900">{projects.filter((p) => p.currency === "USD").length}</strong></div>
+            </div>
+          </div>
+        )}
+
         {loading ? (
           <p className="text-sm text-gray-400 py-8 text-center">A carregar...</p>
         ) : projects.length === 0 && !showForm ? (
@@ -150,14 +168,19 @@ export default function ProjectsPage() {
             </button>
           </div>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2">
-            {projects.map((p) => (
-              <Link key={p.id} to={`/projectos/${p.id}`} className="card card-pad hover:border-brand-400 hover:shadow-md transition-all group relative">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="w-10 h-10 rounded-lg bg-brand-100 text-brand-700 flex items-center justify-center">
-                    <IconFolder className="w-5 h-5" />
-                  </div>
-                  <span className="flex items-center gap-1.5">
+          <div className="card overflow-hidden">
+            <div className="hidden sm:grid grid-cols-[minmax(0,1fr)_minmax(10rem,0.7fr)_10rem_6rem] gap-4 px-5 py-2.5 table-head-row border-x-0 border-t-0">
+              <span>Projecto</span><span>Dono da obra</span><span>Zona</span><span>Moeda</span>
+            </div>
+            {filteredProjects.map((p) => (
+              <Link key={p.id} to={`/projectos/${p.id}`} className="group grid sm:grid-cols-[minmax(0,1fr)_minmax(10rem,0.7fr)_10rem_6rem] items-center gap-3 sm:gap-4 border-b border-slate-100 px-5 py-4 last:border-0 hover:bg-blue-50/40">
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className="w-9 h-9 shrink-0 rounded-lg bg-blue-50 text-blue-700 flex items-center justify-center"><IconFolder className="w-4.5 h-4.5" /></div>
+                  <div className="min-w-0"><p className="font-semibold text-slate-900 truncate group-hover:text-blue-700">{p.name}</p><p className="sm:hidden text-xs text-slate-500 mt-0.5">{p.client || "Sem cliente definido"}</p></div>
+                </div>
+                <span className="hidden sm:block truncate text-sm text-slate-600">{p.client || "—"}</span>
+                <span className="hidden sm:block truncate text-sm text-slate-500">{zoneName(p.zoneId) || "—"}</span>
+                <span className="flex items-center justify-between gap-2">
                     <span className="badge badge-gray">{p.currency}</span>
                     <button
                       onClick={(e) => handleDelete(e, p.id, p.name)}
@@ -166,13 +189,10 @@ export default function ProjectsPage() {
                     >
                       <IconTrash className="w-3.5 h-3.5" />
                     </button>
-                  </span>
-                </div>
-                <p className="font-semibold text-gray-900 mt-3 group-hover:text-brand-800 transition-colors">{p.name}</p>
-                {p.client && <p className="text-sm text-gray-500 mt-0.5">{p.client}</p>}
-                {zoneName(p.zoneId) && <p className="muted mt-0.5">Zona: {zoneName(p.zoneId)}</p>}
+                </span>
               </Link>
             ))}
+            {filteredProjects.length === 0 && <p className="px-5 py-10 text-center text-sm text-slate-500">Nenhum projecto corresponde à pesquisa.</p>}
           </div>
         )}
       </div>

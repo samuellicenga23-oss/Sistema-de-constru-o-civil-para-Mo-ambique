@@ -9,6 +9,7 @@ import QuickEstimateWizard from "../components/QuickEstimateWizard";
 import CalculationReportView from "../components/CalculationReportView";
 import MaterialsByPhaseModal from "../components/MaterialsByPhaseModal";
 import Layout from "../components/Layout";
+import { SectionHeader } from "../components/WorkspaceUI";
 import { IconBack, IconChart, IconClipboard, IconDownload, IconPlus, IconTrash, IconWand } from "../components/icons";
 
 function money(value: number, currency: string) {
@@ -178,11 +179,10 @@ export default function BudgetDocumentPage() {
           {error && <p className="text-sm text-red-600">{error}</p>}
 
           {sections.map((section) => (
-            <section key={section.id} className="card">
-              <div className="flex items-center justify-between px-5 pt-4 pb-2 border-b border-gray-100">
-                <h2 className="section-title text-base">{section.name}</h2>
-                <span className="text-sm font-bold text-brand-800 tabular-nums">{money(section.total, currency)}</span>
-              </div>
+            <section key={section.id} className="card overflow-hidden">
+              <SectionHeader title={section.name} description={`${section.items.length} capítulo(s) ou item(ns)`} actions={
+                <span className="text-sm font-bold text-slate-900 tabular-nums">{money(section.total, currency)}</span>
+              } />
 
               <div className="px-3 py-2 overflow-x-auto">
                 {section.items.length === 0 ? (
@@ -221,9 +221,9 @@ export default function BudgetDocumentPage() {
             </section>
           ))}
 
-          <section className="card card-pad">
-            <h2 className="section-title mb-3">Nova secção / edifício</h2>
-            <form onSubmit={handleAddSection} className="flex gap-2 items-end">
+          <section className="card overflow-hidden">
+            <SectionHeader title="Estrutura do orçamento" description="Adicione uma nova secção, edifício ou área da obra" />
+            <form onSubmit={handleAddSection} className="flex gap-2 items-end p-5">
               <input
                 required
                 placeholder="ex: Edifício Principal, Preliminares e Gerais, Arranjos Exteriores"
@@ -238,9 +238,10 @@ export default function BudgetDocumentPage() {
             </form>
           </section>
 
-          <section className="card card-pad">
-            <h2 className="section-title mb-1">Importar medições de um Excel</h2>
-            <p className="text-xs text-gray-500 mb-3">
+          <section className="card overflow-hidden">
+            <SectionHeader title="Importar medições" description="Actualize quantidades a partir de um ficheiro Excel" />
+            <div className="p-5">
+            <p className="text-xs text-gray-500 mb-3 max-w-3xl">
               Já tem as quantidades medidas à mão (ex: pelo técnico da obra)? Carregue o ficheiro — o sistema lê a coluna
               "Item"/"Código" e "Quant." e aplica as quantidades directamente aos itens-padrão existentes (pelo código),
               sem criar itens novos nem passar pelo Assistente. Os preços continuam a vir do catálogo.
@@ -281,41 +282,42 @@ export default function BudgetDocumentPage() {
                 )}
               </div>
             )}
+            </div>
           </section>
         </div>
 
         {/* Coluna lateral: RESUMO fixo + execução */}
         <div className="space-y-5">
-          <section className="card overflow-hidden xl:sticky xl:top-24">
-            <div className="bg-gradient-to-br from-brand-800 to-brand-950 text-white p-5">
-              <h2 className="font-semibold mb-3 text-sm uppercase tracking-wider text-brand-200">Resumo do Orçamento</h2>
+          <section className="card overflow-hidden xl:sticky xl:top-24 border-t-4 border-t-[#e86f25]">
+            <div className="bg-white p-5">
+              <h2 className="font-semibold mb-4 text-sm text-slate-900">Resumo do orçamento</h2>
               <dl className="space-y-1.5 text-sm">
                 {sections.map((s) => (
-                  <div key={s.id} className="flex justify-between text-brand-100">
+                  <div key={s.id} className="flex justify-between text-slate-600">
                     <dt className="truncate pr-2">{s.name}</dt>
                     <dd className="tabular-nums shrink-0">{money(s.total, "")}</dd>
                   </div>
                 ))}
-                <div className="flex justify-between border-t border-white/20 pt-2 mt-2">
+                <div className="flex justify-between border-t border-slate-200 pt-2 mt-2 text-slate-700">
                   <dt>Subtotal</dt>
                   <dd className="tabular-nums">{money(subtotal1, "")}</dd>
                 </div>
-                <div className="flex justify-between text-brand-200">
+                <div className="flex justify-between text-slate-500">
                   <dt>Contingências ({(Number(document.contingenciasRate) * 100).toFixed(0)}%)</dt>
                   <dd className="tabular-nums">{money(contingencias, "")}</dd>
                 </div>
-                <div className="flex justify-between">
+                <div className="flex justify-between text-slate-700">
                   <dt>Subtotal 2</dt>
                   <dd className="tabular-nums">{money(subtotal2, "")}</dd>
                 </div>
-                <div className="flex justify-between text-brand-200">
+                <div className="flex justify-between text-slate-500">
                   <dt>IVA ({(Number(document.ivaRate) * 100).toFixed(0)}%)</dt>
                   <dd className="tabular-nums">{money(iva, "")}</dd>
                 </div>
               </dl>
-              <div className="flex justify-between items-baseline border-t border-white/20 pt-3 mt-3">
-                <span className="text-sm font-medium">Valor Total</span>
-                <span className="text-xl font-bold tabular-nums">{money(total, currency)}</span>
+              <div className="flex justify-between items-baseline border-t border-slate-300 pt-3 mt-3">
+                <span className="text-sm font-semibold text-slate-700">Valor total</span>
+                <span className="text-xl font-bold tabular-nums text-slate-950">{money(total, currency)}</span>
               </div>
             </div>
 

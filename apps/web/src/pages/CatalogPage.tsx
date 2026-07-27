@@ -213,22 +213,20 @@ export default function CatalogPage() {
 
   return (
     <Layout title="Catálogo de Preços" subtitle="Composições de custo, mão-de-obra e materiais — a base de todos os orçamentos">
-      <div className="space-y-5 max-w-5xl">
+      <div className="space-y-5 max-w-7xl">
         {error && <p className="text-sm text-red-600">{error}</p>}
         {message && <p className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">{message}</p>}
 
         {/* Separadores */}
-        <div className="flex gap-1 border-b border-gray-200">
+        <div className="workspace-tabs">
           {TABS.map((t) => (
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
-              className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                tab === t.id ? "border-brand-700 text-brand-800" : "border-transparent text-gray-500 hover:text-gray-800"
-              }`}
+              className={`workspace-tab ${tab === t.id ? "workspace-tab-active" : ""}`}
             >
               {t.label}
-              <span className="ml-1.5 text-xs text-gray-400">
+              <span className="ml-1.5 rounded-full bg-slate-200/70 px-1.5 py-0.5 text-[10px] text-slate-600">
                 (
                 {t.id === "composicoes"
                   ? compositions.length
@@ -244,7 +242,7 @@ export default function CatalogPage() {
         </div>
 
         {(tab === "composicoes" || tab === "materiais") && (
-          <div className="flex items-center gap-2 -mt-2">
+          <div className="toolbar !items-center !py-3">
             <label className="text-xs text-gray-500 font-medium">A ver preços da zona:</label>
             <select value={viewZoneId} onChange={(e) => handleViewZoneChange(e.target.value)} className="input input-sm w-auto">
               <option value="">Preço base (sem zona)</option>
@@ -263,14 +261,14 @@ export default function CatalogPage() {
         )}
 
         {tab === "composicoes" && (
-          <section className="card">
-            <div className="px-5 pt-4 pb-3 border-b border-gray-100 space-y-3">
+          <section className="card overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-200 space-y-3 bg-slate-50/60">
               <p className="text-xs text-gray-500 max-w-lg">
                 Preço unitário = mão-de-obra + materiais + máquinas por unidade de trabalho. Clique numa composição para
                 abrir o editor completo. Qualquer preço pode ser ajustado directamente — a sua empresa fica sempre com a
                 sua própria versão, sem afectar as outras empresas.
               </p>
-              <div className="flex flex-wrap items-end gap-3 justify-between">
+              <div className="flex flex-wrap items-end gap-3 justify-between border-t border-slate-200 pt-3">
                 <input
                   type="search"
                   placeholder="Pesquisar composição por nome ou categoria..."

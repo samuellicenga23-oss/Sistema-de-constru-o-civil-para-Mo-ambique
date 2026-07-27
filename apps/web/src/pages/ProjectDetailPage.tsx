@@ -5,6 +5,7 @@ import { measurementApi, type MeasurementCertificate } from "../api/measurement"
 import { plantsApi, type Plant } from "../api/plants";
 import { catalogApi, type PriceZone } from "../api/catalog";
 import Layout from "../components/Layout";
+import { MetricCard, SectionHeader } from "../components/WorkspaceUI";
 import { IconBack, IconDoc, IconClipboard, IconMap, IconPlus, IconTrash, IconUpload, IconChart } from "../components/icons";
 
 const PLANT_STATUS_BADGE: Record<Plant["processingStatus"], { label: string; cls: string }> = {
@@ -187,8 +188,14 @@ export default function ProjectDetailPage() {
         </>
       }
     >
-      <div className="grid gap-5 lg:grid-cols-2 max-w-6xl">
+      <div className="grid gap-5 lg:grid-cols-2 max-w-7xl">
         {error && <p className="text-sm text-red-600 lg:col-span-2">{error}</p>}
+
+        <div className="lg:col-span-2 grid gap-3 sm:grid-cols-3">
+          <MetricCard label="Mapas de quantidades" value={documents.length} note="Documentos do projecto" />
+          <MetricCard label="Plantas" value={plants.length} note="Ficheiros carregados" tone="info" />
+          <MetricCard label="Autos de medição" value={certificates.length} note="Registos de execução" tone="positive" />
+        </div>
 
         {/* Zona de preço */}
         <section className="card card-pad lg:col-span-2 flex items-center justify-between gap-3 flex-wrap">
@@ -216,10 +223,7 @@ export default function ProjectDetailPage() {
 
         {/* Mapas de Quantidades */}
         <section className="card">
-          <div className="flex items-center gap-2 px-5 pt-4 pb-2 border-b border-gray-100">
-            <IconDoc className="w-4 h-4 text-brand-700" />
-            <h2 className="section-title text-base">Mapas de Quantidades</h2>
-          </div>
+          <SectionHeader title="Mapas de quantidades" description="Orçamentos e revisões deste projecto" actions={<IconDoc className="w-4 h-4 text-blue-700" />} />
           <ul>
             {documents.map((d) => (
               <li key={d.id} className="table-row group">
@@ -264,10 +268,7 @@ export default function ProjectDetailPage() {
 
         {/* Plantas */}
         <section className="card">
-          <div className="flex items-center gap-2 px-5 pt-4 pb-2 border-b border-gray-100">
-            <IconMap className="w-4 h-4 text-brand-700" />
-            <h2 className="section-title text-base">Plantas — leitura automática</h2>
-          </div>
+          <SectionHeader title="Plantas e desenhos" description="Leitura automática de arquitectura e estrutura" actions={<IconMap className="w-4 h-4 text-blue-700" />} />
           <ul>
             {plants.map((p) => (
               <li key={p.id} className="table-row group">
@@ -330,10 +331,7 @@ export default function ProjectDetailPage() {
         {/* Autos de Medição */}
         {documents.length > 0 && (
           <section className="card lg:col-span-2">
-            <div className="flex items-center gap-2 px-5 pt-4 pb-2 border-b border-gray-100">
-              <IconClipboard className="w-4 h-4 text-brand-700" />
-              <h2 className="section-title text-base">Autos de Medição (execução da obra)</h2>
-            </div>
+            <SectionHeader title="Autos de medição" description="Execução física e certificação dos trabalhos" actions={<IconClipboard className="w-4 h-4 text-blue-700" />} />
             <div className="grid md:grid-cols-2">
               <ul className="md:border-r border-gray-100">
                 {certificates.map((c) => (

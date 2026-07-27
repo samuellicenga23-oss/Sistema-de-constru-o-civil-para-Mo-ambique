@@ -11,6 +11,7 @@ import {
   type StockSummaryLine,
 } from "../api/purchasing";
 import Layout from "../components/Layout";
+import { MetricCard, SectionHeader } from "../components/WorkspaceUI";
 import { IconBack, IconPlus, IconTrash } from "../components/icons";
 
 const STATUS_LABELS: Record<PurchaseOrder["status"], string> = {
@@ -193,14 +194,19 @@ export default function ProjectPurchasingPage() {
         </Link>
       }
     >
-      <div className="space-y-5 max-w-6xl">
+      <div className="space-y-5 max-w-7xl">
         {error && <p className="text-sm text-red-600">{error}</p>}
+
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <MetricCard label="Materiais em stock" value={stockSummary.length} note="Itens com movimentos" />
+          <MetricCard label="Ordens de compra" value={orders.length} note="Total registado" />
+          <MetricCard label="Por aprovar" value={orders.filter((order) => order.status === "rascunho").length} tone="warning" />
+          <MetricCard label="Recebidas" value={orders.filter((order) => order.status === "recebido").length} tone="positive" />
+        </div>
 
         {/* Stock actual */}
         <section className="card">
-          <div className="px-5 pt-4 pb-2 border-b border-gray-100">
-            <h2 className="section-title text-base">Stock Actual</h2>
-          </div>
+          <SectionHeader title="Stock actual" description="Saldo disponível e valor acumulado das entradas" />
           <div className="overflow-x-auto">
             <table className="w-full text-sm min-w-[480px]">
               <thead>
@@ -236,13 +242,11 @@ export default function ProjectPurchasingPage() {
 
         {/* Ordens de compra */}
         <section className="card">
-          <div className="flex items-center justify-between px-5 pt-4 pb-2 border-b border-gray-100">
-            <h2 className="section-title text-base">Ordens de Compra</h2>
+          <SectionHeader title="Ordens de compra" description="Aprovação, recepção e entrada automática em stock" actions={
             <button onClick={() => setShowOrderForm((s) => !s)} className="btn btn-secondary btn-sm">
-              <IconPlus className="w-3.5 h-3.5" />
-              Nova ordem
+              <IconPlus className="w-3.5 h-3.5" /> Nova ordem
             </button>
-          </div>
+          } />
 
           {showOrderForm && (
             <form onSubmit={handleCreateOrder} className="px-5 py-4 border-b border-gray-100 space-y-3">
@@ -336,7 +340,7 @@ export default function ProjectPurchasingPage() {
 
           <div className="divide-y divide-gray-100">
             {orders.map((o) => (
-              <div key={o.id} className="px-5 py-4">
+              <div key={o.id} className="px-5 py-4 hover:bg-slate-50/70 transition-colors">
                 <div className="flex items-center justify-between flex-wrap gap-2">
                   <div>
                     <span className="font-medium text-gray-900">{o.supplierName}</span>{" "}
@@ -390,9 +394,7 @@ export default function ProjectPurchasingPage() {
 
         {/* Movimentos de stock manuais */}
         <section className="card">
-          <div className="px-5 pt-4 pb-2 border-b border-gray-100">
-            <h2 className="section-title text-base">Registar Movimento de Stock (manual)</h2>
-          </div>
+          <SectionHeader title="Movimentos de stock" description="Entradas e saídas manuais não associadas a ordens de compra" />
           <form onSubmit={handleCreateMovement} className="grid gap-3 sm:grid-cols-4 items-end px-5 py-4 border-b border-gray-100">
             <div>
               <label className="label">Tipo</label>

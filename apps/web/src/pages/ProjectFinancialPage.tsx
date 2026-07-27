@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { boqApi, type Project } from "../api/boq";
 import { financialApi, type FinancialEntry, type FinancialSummary } from "../api/financial";
 import Layout from "../components/Layout";
+import { MetricCard, SectionHeader } from "../components/WorkspaceUI";
 import { IconBack, IconPlus, IconTrash } from "../components/icons";
 
 const CATEGORY_SUGGESTIONS_DESPESA = ["Mão-de-obra", "Materiais", "Equipamento", "Subcontratação", "Transporte", "Outros"];
@@ -112,35 +113,17 @@ export default function ProjectFinancialPage() {
         </Link>
       }
     >
-      <div className="space-y-5 max-w-6xl">
+      <div className="space-y-5 max-w-7xl">
         {error && <p className="text-sm text-red-600">{error}</p>}
 
         {/* Indicadores */}
         <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
-          <div className="card card-pad">
-            <p className="text-[11px] text-gray-400 uppercase tracking-wide">Valor Contratado</p>
-            <p className="text-lg font-bold text-gray-900 mt-1">{fmt(summary.valorContratado, currency)}</p>
-          </div>
-          <div className="card card-pad">
-            <p className="text-[11px] text-gray-400 uppercase tracking-wide">Valor Recebido</p>
-            <p className="text-lg font-bold text-green-700 mt-1">{fmt(summary.valorRecebido, currency)}</p>
-          </div>
-          <div className="card card-pad">
-            <p className="text-[11px] text-gray-400 uppercase tracking-wide">Custo Realizado</p>
-            <p className="text-lg font-bold text-red-600 mt-1">{fmt(summary.custoRealizado, currency)}</p>
-          </div>
-          <div className="card card-pad">
-            <p className="text-[11px] text-gray-400 uppercase tracking-wide">Saldo (margem realizada)</p>
-            <p className={`text-lg font-bold mt-1 ${summary.saldo >= 0 ? "text-green-700" : "text-red-600"}`}>{fmt(summary.saldo, currency)}</p>
-          </div>
-          <div className="card card-pad">
-            <p className="text-[11px] text-gray-400 uppercase tracking-wide">Contas a Receber</p>
-            <p className="text-lg font-bold text-brand-800 mt-1">{fmt(summary.contasAReceber, currency)}</p>
-          </div>
-          <div className="card card-pad">
-            <p className="text-[11px] text-gray-400 uppercase tracking-wide">Contas a Pagar</p>
-            <p className="text-lg font-bold text-amber-700 mt-1">{fmt(summary.contasAPagar, currency)}</p>
-          </div>
+          <MetricCard label="Valor contratado" value={fmt(summary.valorContratado, currency)} />
+          <MetricCard label="Valor recebido" value={fmt(summary.valorRecebido, currency)} tone="positive" />
+          <MetricCard label="Custo realizado" value={fmt(summary.custoRealizado, currency)} tone="negative" />
+          <MetricCard label="Margem realizada" value={fmt(summary.saldo, currency)} tone={summary.saldo >= 0 ? "positive" : "negative"} />
+          <MetricCard label="Contas a receber" value={fmt(summary.contasAReceber, currency)} tone="info" />
+          <MetricCard label="Contas a pagar" value={fmt(summary.contasAPagar, currency)} tone="warning" />
         </div>
         <p className="text-xs text-gray-400 -mt-3">
           A margem realizada é sempre valor recebido − custo pago (dinheiro real); o Mapa de Quantidades não distingue
@@ -150,9 +133,7 @@ export default function ProjectFinancialPage() {
         {/* Fluxo de caixa mensal */}
         {summary.fluxoCaixaMensal.length > 0 && (
           <section className="card">
-            <div className="px-5 pt-4 pb-2 border-b border-gray-100">
-              <h2 className="section-title text-base">Fluxo de Caixa Mensal</h2>
-            </div>
+            <SectionHeader title="Fluxo de caixa mensal" description="Receitas e despesas efectivamente pagas por mês" />
             <div className="overflow-x-auto">
               <table className="w-full text-sm min-w-[480px]">
                 <thead>
@@ -181,9 +162,9 @@ export default function ProjectFinancialPage() {
         )}
 
         {/* Novo lançamento */}
-        <section className="card card-pad">
-          <h2 className="section-title mb-3">Novo lançamento</h2>
-          <form onSubmit={handleCreate} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6 items-end">
+        <section className="card overflow-hidden">
+          <SectionHeader title="Novo lançamento" description="Registe uma receita ou despesa desta obra" />
+          <form onSubmit={handleCreate} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6 items-end p-5">
             <div>
               <label className="label">Tipo</label>
               <select value={type} onChange={(e) => setType(e.target.value as "receita" | "despesa")} className="input">
@@ -225,9 +206,7 @@ export default function ProjectFinancialPage() {
 
         {/* Lista de lançamentos */}
         <section className="card">
-          <div className="px-5 pt-4 pb-2 border-b border-gray-100">
-            <h2 className="section-title text-base">Lançamentos</h2>
-          </div>
+          <SectionHeader title="Lançamentos" description={`${entries.length} movimento(s) registado(s)`} />
           <div className="overflow-x-auto">
             <table className="w-full text-sm min-w-[640px]">
               <thead>

@@ -29,3 +29,21 @@ consultar o estado do Git e as entradas mais recentes. Cada intervenção deve i
   removidos brilhos, elevação excessiva, gradientes decorativos e linguagem promocional no produto.
 - **Validação:** 12 testes do frontend aprovados; build de produção aprovado.
 - **Produção:** ainda não publicada.
+
+## 2026-07-27 — Codex — Renovação das áreas operacionais
+
+- **Âmbito:** Projectos, detalhe do projecto, Catálogo, Financeiro, Compras/Armazém e Mapas de
+  Quantidades.
+- **Base comum:** novos componentes `SectionHeader`, `MetricCard` e `InlineNotice`, além de tabs e
+  barras de ferramentas reutilizáveis.
+- **Projectos:** pesquisa por nome/cliente/zona, indicadores de carteira e lista tabular responsiva.
+- **Detalhe do projecto:** indicadores de documentos, plantas e autos; secções com cabeçalhos
+  operacionais consistentes.
+- **Catálogo:** separadores compactos, maior largura útil e barra de contexto de preços por zona.
+- **Financeiro:** seis indicadores normalizados, fluxo de caixa e formulários com hierarquia clara.
+- **Compras:** indicadores de stock e ordens, destaque para pendências e organização do fluxo de
+  aprovação/recepção.
+- **Documentos:** cabeçalhos de secção, importação organizada e resumo orçamental sóbrio com total
+  destacado.
+- **Validação:** 12 testes do frontend aprovados; build de produção aprovado.
+- **Produção:** ainda não publicada.
