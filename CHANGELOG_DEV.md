@@ -275,3 +275,23 @@ consultar o estado do Git e as entradas mais recentes. Cada intervenção deve i
   três planos. Cronograma, selecção, editor WBS e PDF A3 verificados sem erros de consola.
 - **Persistência:** nenhuma nova migração; `parent_id` já fazia parte da migração `0022`.
 - **Produção:** ainda não publicada; as alterações permanecem na branch de trabalho para revisão.
+
+## 2026-07-27 — Codex — Publicação do website e cronograma na produção
+
+- **GitHub:** a branch `codex/siga-visual-refresh` foi integrada por fast-forward no `main`, sem
+  conflitos ou commits paralelos por incorporar. Versão funcional publicada: `0814f4f`.
+- **VPS:** checkout `/home/sigo/htdocs/sud30s.org` actualizado para o `main`, build completo de
+  shared/API/web concluído e API recarregada no PM2 com estado `online`.
+- **Base de dados:** backup anterior ao deploy guardado em
+  `/home/sigo/backups/sigo-predeploy-20260727-fa41876.dump`; migração `0022` aplicada com sucesso.
+- **Preservação do servidor:** a diferença local do `package-lock.json`, causada pelo npm da VPS,
+  foi guardada em `/home/sigo/backups/package-lock-predeploy-fa41876.patch` antes de restaurar o
+  ficheiro versionado e actualizar por fast-forward.
+- **Plant-service:** o serviço permaneceu activo; a única diferença de Python desta publicação era
+  o título interno `SIGO` → `SIGA`, sem alteração de processamento ou API, pelo que não exigiu
+  interrupção funcional.
+- **Validação:** `http://127.0.0.1:4100/api/health` e `https://sud30s.org/api/health` responderam
+  `status: ok`; página pública, três planos, contactos e ecrã de login foram verificados no domínio
+  HTTPS sem erros de consola.
+- **Produção:** `https://sud30s.org` está publicada com o novo website público e o sistema privado
+  em `/painel`.
