@@ -5,6 +5,7 @@ import type { StructuralSummary } from "../api/plants";
 import type { ExtractedRoom } from "../api/plants";
 import { IconBack, IconPlus, IconTrash, IconWand } from "./icons";
 import CalculationReportView from "./CalculationReportView";
+import ModalPortal from "./ModalPortal";
 
 type RoomForm = { key: string; name: string; type: "seco" | "humido"; length: string; width: string };
 type FloorForm = { key: string; label?: string; ceilingHeight: string; perimeter: string; rooms: RoomForm[] };
@@ -395,7 +396,8 @@ export default function QuickEstimateWizard({
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-gray-900/50 flex items-center justify-center p-4">
+    <ModalPortal>
+      <div className="fixed inset-0 z-50 bg-gray-900/50 flex items-center justify-center p-4">
       <div className="card w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 bg-gradient-to-r from-brand-800 to-brand-900 text-white">
           <div className="flex items-center gap-2">
@@ -1152,6 +1154,7 @@ export default function QuickEstimateWizard({
           )}
         </div>
       </div>
-    </div>
+      </div>
+    </ModalPortal>
   );
 }

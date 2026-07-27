@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import ModalPortal from "./ModalPortal";
 
 export default function Modal({
   title,
@@ -14,7 +15,8 @@ export default function Modal({
   maxWidth?: string;
 }) {
   return (
-    <div className="fixed inset-0 z-50 bg-gray-900/50 flex items-center justify-center p-4" onClick={onClose}>
+    <ModalPortal>
+      <div className="fixed inset-0 z-50 bg-gray-900/50 flex items-center justify-center p-4" onClick={onClose}>
       <div
         className={`card card-pad w-full ${maxWidth} max-h-[85vh] overflow-y-auto`}
         onClick={(e) => e.stopPropagation()}
@@ -30,6 +32,7 @@ export default function Modal({
         </div>
         {children}
       </div>
-    </div>
+      </div>
+    </ModalPortal>
   );
 }

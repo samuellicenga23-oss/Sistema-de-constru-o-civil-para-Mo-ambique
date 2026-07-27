@@ -9,6 +9,7 @@ import QuickEstimateWizard from "../components/QuickEstimateWizard";
 import CalculationReportView from "../components/CalculationReportView";
 import MaterialsByPhaseModal from "../components/MaterialsByPhaseModal";
 import ConfirmDialog from "../components/ConfirmDialog";
+import ModalPortal from "../components/ModalPortal";
 import Layout from "../components/Layout";
 import { SectionHeader } from "../components/WorkspaceUI";
 import { IconBack, IconChart, IconClipboard, IconDoc, IconDownload, IconPlus, IconRefresh, IconTrash, IconWand } from "../components/icons";
@@ -496,8 +497,9 @@ export default function BudgetDocumentPage() {
       )}
 
       {showReport && document.lastEstimateReport && (
-        <div className="fixed inset-0 z-50 bg-gray-900/50 flex items-center justify-center p-4">
-          <div className="w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
+        <ModalPortal>
+          <div className="fixed inset-0 z-50 bg-gray-900/50 flex items-center justify-center p-4">
+            <div className="w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
             <div className="flex justify-end mb-2">
               <button onClick={() => setShowReport(false)} className="btn btn-ghost btn-sm !text-white hover:!bg-white/10">
                 Fechar ✕
@@ -506,8 +508,9 @@ export default function BudgetDocumentPage() {
             <div className="overflow-y-auto">
               <CalculationReportView entries={document.lastEstimateReport.entries} generatedAt={document.lastEstimateReport.generatedAt} />
             </div>
+            </div>
           </div>
-        </div>
+        </ModalPortal>
       )}
 
       {showRepriceConfirm && (

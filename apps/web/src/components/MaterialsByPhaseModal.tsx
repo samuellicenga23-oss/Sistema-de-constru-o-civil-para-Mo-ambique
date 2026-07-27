@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { materialsByPhaseApi, type PhaseReport } from "../api/materialsByPhase";
 import { IconDownload } from "./icons";
+import ModalPortal from "./ModalPortal";
 
 function fmt(n: number) {
   return n.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 3 });
@@ -28,8 +29,9 @@ export default function MaterialsByPhaseModal({ documentId, onClose }: { documen
   }, [documentId]);
 
   return (
-    <div className="fixed inset-0 z-50 bg-gray-900/50 flex items-center justify-center p-4">
-      <div className="w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+    <ModalPortal>
+      <div className="fixed inset-0 z-50 bg-gray-900/50 flex items-center justify-center p-4">
+        <div className="w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
         <div className="flex justify-between items-center mb-2">
           <div className="flex gap-2">
             <a href={`/api/budget-documents/${documentId}/materials-by-phase/export.xlsx`} className="btn btn-secondary btn-sm !bg-white/10 !text-white hover:!bg-white/20">
@@ -138,7 +140,8 @@ export default function MaterialsByPhaseModal({ documentId, onClose }: { documen
             </section>
           ))}
         </div>
+        </div>
       </div>
-    </div>
+    </ModalPortal>
   );
 }

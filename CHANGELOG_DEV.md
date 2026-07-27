@@ -163,3 +163,21 @@ consultar o estado do Git e as entradas mais recentes. Cada intervenção deve i
   automática USD e protecção de documentos manuais incompatíveis.
 - **Persistência:** nenhuma migração de base de dados necessária.
 - **Produção:** ainda não publicada.
+
+## 2026-07-27 — Codex — Correcção dos modais em páginas longas
+
+- **Problema observado:** ao escolher “Preparar medição pelas plantas” ou abrir o Assistente num
+  Mapa de Quantidades longo, a camada escura aparecia, mas o painel ficava centrado fora da área
+  visível e escondido por baixo do cabeçalho.
+- **Causa:** a animação aplicada ao conteúdo principal cria um contexto próprio de posicionamento
+  e empilhamento; os painéis `position: fixed` deixavam de usar directamente o viewport.
+- **Correcção:** novo `ModalPortal` renderiza os painéis no `body`, acima da aplicação e separado
+  da altura do orçamento. Aplicado ao Assistente de Medições, Materiais por Fase, Relatório de
+  Cálculos, diálogos de confirmação, formulários genéricos e mudança de palavra-passe.
+- **Regressão:** o teste de componentes confirma que a camada modal é montada directamente no
+  `body`, impedindo que volte a ficar presa dentro do conteúdo animado.
+- **Validação funcional:** reproduzido no documento `281c6729-1347-4e4e-ac78-5f54d4751994`;
+  depois da correcção, o Assistente ficou entre 36 px e 684 px num viewport de 720 px, com
+  cabeçalho, conteúdo e acções visíveis. Sem erros de consola.
+- **Validação técnica:** 12 testes do frontend e build completo de shared/API/web aprovados.
+- **Produção:** ainda não publicada.

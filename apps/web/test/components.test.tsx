@@ -54,7 +54,11 @@ describe("ConfirmDialog", () => {
     const onCancel = vi.fn();
     render(<ConfirmDialog title="Remover?" message="Tem a certeza?" onConfirm={onConfirm} onCancel={onCancel} />);
 
-    expect(screen.getByText("Remover?")).toBeInTheDocument();
+    const title = screen.getByText("Remover?");
+    expect(title).toBeInTheDocument();
+    // Os modais precisam de sair do <main> animado. Caso contrário, em páginas longas o
+    // `position: fixed` passa a usar a altura do conteúdo e o painel fica fora do viewport.
+    expect(title.closest(".fixed")?.parentElement).toBe(document.body);
     fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
     expect(onCancel).toHaveBeenCalledTimes(1);
 

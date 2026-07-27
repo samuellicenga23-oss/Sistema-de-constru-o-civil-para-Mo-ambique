@@ -2,6 +2,8 @@
 // páginas (bloqueia a thread do browser inteira, não é estilável, e em alguns browsers móveis
 // aparece de forma inconsistente). Uso: montar condicionalmente com estado local, ex.
 //   {confirming && <ConfirmDialog title="Remover?" message="..." danger onConfirm={...} onCancel={() => setConfirming(false)} />}
+import ModalPortal from "./ModalPortal";
+
 export default function ConfirmDialog({
   title,
   message,
@@ -22,8 +24,9 @@ export default function ConfirmDialog({
   onCancel: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-50 bg-gray-900/50 flex items-center justify-center p-4">
-      <div className="card card-pad w-full max-w-sm">
+    <ModalPortal>
+      <div className="fixed inset-0 z-50 bg-gray-900/50 flex items-center justify-center p-4">
+        <div className="card card-pad w-full max-w-sm">
         <h2 className="text-lg font-bold text-gray-900 mb-1">{title}</h2>
         <p className="text-sm text-gray-600 mb-4">{message}</p>
         <div className="flex gap-2">
@@ -39,7 +42,8 @@ export default function ConfirmDialog({
             {busy ? "A processar..." : confirmLabel}
           </button>
         </div>
+        </div>
       </div>
-    </div>
+    </ModalPortal>
   );
 }

@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { api, ApiError } from "../api/client";
+import ModalPortal from "./ModalPortal";
 
 export default function ChangePasswordModal({ onClose }: { onClose: () => void }) {
   const [currentPassword, setCurrentPassword] = useState("");
@@ -28,8 +29,9 @@ export default function ChangePasswordModal({ onClose }: { onClose: () => void }
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-gray-900/50 flex items-center justify-center p-4">
-      <div className="card card-pad w-full max-w-sm">
+    <ModalPortal>
+      <div className="fixed inset-0 z-50 bg-gray-900/50 flex items-center justify-center p-4">
+        <div className="card card-pad w-full max-w-sm">
         <h2 className="text-lg font-bold text-gray-900 mb-1">Mudar palavra-passe</h2>
         {done ? (
           <>
@@ -66,7 +68,8 @@ export default function ChangePasswordModal({ onClose }: { onClose: () => void }
             </div>
           </form>
         )}
+        </div>
       </div>
-    </div>
+    </ModalPortal>
   );
 }
