@@ -5,6 +5,7 @@ build/
 .env.local
 .env.test
 *.log
+*.log.error
 uploads/
 .venv/
 __pycache__/
