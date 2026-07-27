@@ -47,3 +47,14 @@ consultar o estado do Git e as entradas mais recentes. Cada intervenção deve i
   destacado.
 - **Validação:** 12 testes do frontend aprovados; build de produção aprovado.
 - **Produção:** ainda não publicada.
+
+## 2026-07-27 — Codex — Nova navegação lateral
+
+- **Referências:** Linear (interface 2026), Shopify Polaris e nova navegação Atlassian/Jira.
+- **Direcção:** sidebar neutra e secundária ao conteúdo, em vez do bloco azul-marinho dominante.
+- **Alterações:** fundo claro, largura reduzida, modo recolhido, marca compacta, empresa mostrada como
+  contexto de trabalho, itens agrupados em Trabalho/Operações/Administração, rótulos mais curtos,
+  estado activo discreto com acento laranja e perfil integrado no rodapé.
+- **Mobile:** gaveta lateral actualizada para a mesma linguagem clara.
+- **Validação:** 12 testes do frontend aprovados; build de produção aprovado.
+- **Produção:** ainda não publicada.
