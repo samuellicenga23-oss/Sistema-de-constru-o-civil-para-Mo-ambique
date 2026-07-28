@@ -57,6 +57,9 @@ export type ScheduleTaskInput = Partial<{
   lagDays: number;
 }>;
 
+export type SchedulePaper = "auto" | "A3" | "A2" | "A1";
+export type SchedulePrintScale = "fit" | 100 | 85 | 70 | 55;
+
 export const scheduleApi = {
   get: (projectId: string) => request<ProjectSchedule>(`/projects/${projectId}/schedule`),
   generate: (projectId: string, data: { budgetDocumentId: string; startDate: string; totalDurationDays: number }) =>
@@ -65,5 +68,8 @@ export const scheduleApi = {
     request<ScheduleTask>(`/projects/${projectId}/schedule/tasks`, { method: "POST", body: JSON.stringify(data) }),
   updateTask: (id: string, data: ScheduleTaskInput) => request<ScheduleTask>(`/schedule/tasks/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteTask: (id: string) => request<{ ok: true }>(`/schedule/tasks/${id}`, { method: "DELETE" }),
-  exportPdfUrl: (projectId: string) => `/api/projects/${projectId}/schedule/export.pdf`,
+  exportPdfUrl: (projectId: string, options: { paper: SchedulePaper; scale: SchedulePrintScale }) => {
+    const query = new URLSearchParams({ paper: options.paper, scale: String(options.scale) });
+    return `/api/projects/${projectId}/schedule/export.pdf?${query.toString()}`;
+  },
 };

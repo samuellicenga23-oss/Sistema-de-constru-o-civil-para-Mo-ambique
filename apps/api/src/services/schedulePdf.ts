@@ -3,13 +3,56 @@ import type { getProjectSchedule } from "./scheduleEngine.js";
 
 type Schedule = Awaited<ReturnType<typeof getProjectSchedule>>;
 type ProjectHeader = { name: string; client: string | null; currency: string };
+export type SchedulePaper = "A3" | "A2" | "A1";
+export type SchedulePrintRequest = { paper?: "auto" | SchedulePaper; scale?: "fit" | number };
+export type ResolvedSchedulePrintOptions = { paper: SchedulePaper; scale: number; scalePercent: number; automaticPaper: boolean; fitsSingleSheet: boolean };
+type SchedulePrintSummary = { tasks: readonly unknown[]; startDate: string | null; endDate: string | null };
 
 const DAY_MS = 86_400_000;
+const PAPER_HEIGHT_MM: Record<SchedulePaper, number> = { A3: 297, A2: 420, A1: 594 };
 const esc = (value: unknown) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
 const dateLabel = (value: string) => new Intl.DateTimeFormat("pt-PT", { day: "2-digit", month: "short", year: "2-digit", timeZone: "UTC" }).format(new Date(`${value}T00:00:00Z`));
 const money = (value: number, currency: string) => new Intl.NumberFormat("pt-PT", { style: "currency", currency, maximumFractionDigits: 0 }).format(value);
+const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
-export function buildScheduleHtml(project: ProjectHeader, schedule: Schedule) {
+function calendarDays(start: string | null, end: string | null) {
+  if (!start || !end) return 1;
+  return Math.max(1, Math.round((new Date(`${end}T00:00:00Z`).getTime() - new Date(`${start}T00:00:00Z`).getTime()) / DAY_MS) + 1);
+}
+
+/** Escolhe a menor folha que mantém uma leitura confortável; uma escolha manual é sempre respeitada. */
+export function resolveSchedulePrintOptions(schedule: SchedulePrintSummary, request: SchedulePrintRequest = {}): ResolvedSchedulePrintOptions {
+  const rows = Math.max(1, schedule.tasks.length);
+  const spanDays = calendarDays(schedule.startDate, schedule.endDate);
+  const estimatedContentHeight = 70 + rows * 7.1;
+  const automaticPaper = !request.paper || request.paper === "auto";
+  let paper: SchedulePaper;
+
+  if (!automaticPaper) {
+    paper = request.paper as SchedulePaper;
+  } else if (rows <= 32 && spanDays <= 365) {
+    paper = "A3";
+  } else if (rows <= 70 && spanDays <= 730) {
+    paper = "A2";
+  } else {
+    paper = "A1";
+  }
+
+  const naturalFit = (PAPER_HEIGHT_MM[paper] - 22) / estimatedContentHeight;
+  const scale = request.scale === undefined || request.scale === "fit"
+    ? clamp(naturalFit, 0.2, 1)
+    : clamp(request.scale / 100, 0.2, 1);
+
+  return {
+    paper,
+    scale: Number(scale.toFixed(3)),
+    scalePercent: Math.round(scale * 100),
+    automaticPaper,
+    fitsSingleSheet: naturalFit >= scale - 0.01,
+  };
+}
+
+export function buildScheduleHtml(project: ProjectHeader, schedule: Schedule, print: ResolvedSchedulePrintOptions) {
   const startMs = new Date(`${schedule.startDate}T00:00:00Z`).getTime();
   const endMs = new Date(`${schedule.endDate}T00:00:00Z`).getTime();
   const span = Math.max(DAY_MS, endMs - startMs + DAY_MS);
@@ -30,26 +73,27 @@ export function buildScheduleHtml(project: ProjectHeader, schedule: Schedule) {
       ? Math.max(1, ((new Date(`${task.baselineEndDate}T00:00:00Z`).getTime() - new Date(`${task.baselineStartDate}T00:00:00Z`).getTime() + DAY_MS) / span) * 100)
       : width;
     const statusLabel = { nao_iniciado: "Não iniciado", em_curso: "Em curso", bloqueado: "Bloqueado", concluido: "Concluído" }[task.status] ?? task.status;
+    const children = task.isSummary ? schedule.tasks.filter((child) => child.parentId === task.id).length : 0;
     return `<tr class="${task.isSummary ? "summary-row" : task.parentId ? "child-row" : ""}">
-      <td class="code">${esc(task.code)}</td><td class="task"><strong>${task.parentId ? '<i class="branch"></i>' : ""}${esc(task.name)}</strong><small>${task.isSummary ? "Actividade principal · " : task.parentId ? "Subactividade · " : ""}${esc(statusLabel)}</small></td>
+      <td class="code">${esc(task.code)}</td><td class="task"><strong>${task.parentId ? '<i class="branch"></i>' : ""}${esc(task.name)}</strong><small>${task.isSummary ? `${children} subactividade${children === 1 ? "" : "s"} · resumo calculado` : task.parentId ? `Subactividade · ${esc(statusLabel)}` : esc(statusLabel)}</small></td>
       <td>${dateLabel(task.startDate)}</td><td>${dateLabel(task.endDate)}</td><td class="num">${task.durationDays} d</td><td class="num">${task.progress.toFixed(0)}%</td>
       <td class="gantt"><div class="gridlines">${monthMarkers.map((marker) => `<i style="left:${marker.left}%"></i>`).join("")}</div><span class="baseline" style="left:${baselineLeft}%;width:${baselineWidth}%"></span><span class="bar ${task.status} ${task.isSummary ? "summary-bar" : ""}" style="left:${left}%;width:${width}%"><b style="width:${Math.min(100, task.progress)}%"></b></span></td>
     </tr>`;
   }).join("");
 
   return `<!doctype html><html><head><meta charset="utf-8"><style>
-    @page{size:A3 landscape;margin:10mm 11mm 12mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#162033;margin:0;font-size:8.5px}
-    header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #17233b;padding-bottom:5mm;margin-bottom:4mm}.brand{display:flex;gap:3mm;align-items:center}.mark{width:11mm;height:11mm;border-radius:3mm;background:#ef6c23;color:white;font:bold 17px Arial;display:grid;place-items:center}.brand h1{font-size:20px;letter-spacing:4px;margin:0}.brand p,.meta p{margin:1mm 0;color:#667085}.title{text-align:center}.title h2{font-size:16px;margin:0 0 1mm}.title p{margin:0;color:#667085}.meta{text-align:right}
-    .metrics{display:flex;gap:4mm;margin-bottom:4mm}.metric{border:1px solid #d9e0ea;border-radius:2mm;padding:2.5mm 4mm;min-width:38mm}.metric span{display:block;color:#667085;text-transform:uppercase;font-size:7px;letter-spacing:.5px}.metric strong{font-size:13px}.progress{height:2mm;background:#e7ebf1;border-radius:5px;overflow:hidden;margin-top:1mm}.progress i{display:block;height:100%;background:#ef6c23}
-    table{width:100%;border-collapse:collapse;table-layout:fixed}thead{display:table-header-group}th{background:#17233b;color:white;text-align:left;padding:2.3mm 1.8mm;font-size:7px;text-transform:uppercase;letter-spacing:.45px}td{border-bottom:1px solid #e3e7ed;padding:2.3mm 1.8mm;vertical-align:middle}tbody tr:nth-child(even){background:#f8fafc}tr{break-inside:avoid}.summary-row{background:#e9eef6!important}.summary-row td{border-top:1px solid #c4cfdf;border-bottom:1px solid #c4cfdf;font-weight:bold}.summary-row .task small{color:#52627a}.child-row .task{padding-left:5mm}.branch{display:inline-block;width:4mm;height:2.5mm;border-left:1px solid #aab5c5;border-bottom:1px solid #aab5c5;margin-right:2mm;vertical-align:2px}.code{width:18mm;color:#3156a3;font-weight:bold}.summary-row .code{color:#17233b}.task{width:62mm}.task small{display:block;color:#77839a;font-weight:normal;margin-top:.6mm}.num{text-align:right;width:17mm}.gantt{position:relative;width:auto;height:9mm;overflow:hidden}.gridlines{position:absolute;inset:0}.gridlines i{position:absolute;top:0;bottom:0;border-left:1px dashed #d7dce5}.baseline{position:absolute;height:1mm;top:1.2mm;background:#a4adbc;border-radius:2px}.bar{position:absolute;height:4mm;top:3mm;background:#cdd5e1;border-radius:1mm;overflow:hidden}.bar b{display:block;height:100%;background:#2f67d7}.bar.summary-bar{height:2.5mm;top:3.7mm;background:#9dacbf}.bar.summary-bar b{background:#17233b}.bar.concluido b{background:#138c69}.bar.bloqueado{background:#f1d4d4}.bar.bloqueado b{background:#c64242}
-    .months{margin-left:131mm;height:6mm;position:relative;border-bottom:1px solid #d9e0ea}.months span{position:absolute;font-weight:bold;color:#667085;transform:translateX(-50%)}footer{position:fixed;bottom:0;left:0;right:0;display:flex;justify-content:space-between;color:#77839a;font-size:7px}.legend{display:flex;gap:4mm;align-items:center;margin-top:3mm;color:#667085}.legend i{display:inline-block;width:7mm;height:2mm;margin-right:1mm;vertical-align:middle;background:#2f67d7}.legend .base{height:1mm;background:#a4adbc}.legend .done{background:#138c69}
+    @page{size:${print.paper} landscape;margin:10mm 11mm 12mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#162033;margin:0;font-size:8.5px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #17233b;padding-bottom:5mm;margin-bottom:4mm;break-inside:avoid}.brand{display:flex;gap:3mm;align-items:center}.mark{width:11mm;height:11mm;border-radius:3mm;background:#ef6c23;color:white;font:bold 17px Arial;display:grid;place-items:center}.brand h1{font-size:20px;letter-spacing:4px;margin:0}.brand p,.meta p{margin:1mm 0;color:#667085}.title{text-align:center}.title h2{font-size:16px;margin:0 0 1mm}.title p{margin:0;color:#667085}.meta{text-align:right}
+    .metrics{display:flex;gap:4mm;margin-bottom:4mm;break-inside:avoid}.metric{border:1px solid #d9e0ea;border-radius:2mm;padding:2.5mm 4mm;min-width:38mm}.metric span{display:block;color:#667085;text-transform:uppercase;font-size:7px;letter-spacing:.5px}.metric strong{font-size:13px}.progress{height:2mm;background:#e7ebf1;border-radius:5px;overflow:hidden;margin-top:1mm}.progress i{display:block;height:100%;background:#ef6c23}
+    table{width:100%;border-collapse:collapse;table-layout:fixed}thead{display:table-header-group}th{background:#17233b;color:white;text-align:left;padding:2.3mm 1.8mm;font-size:7px;text-transform:uppercase;letter-spacing:.45px}td{border-bottom:1px solid #e3e7ed;padding:2.1mm 1.8mm;vertical-align:middle}tbody tr:nth-child(even){background:#f8fafc}tr{break-inside:avoid}.summary-row{background:#e9eef6!important}.summary-row td{border-top:1px solid #b9c6d8;border-bottom:1px solid #b9c6d8;font-weight:bold}.summary-row .task small{color:#52627a}.child-row .task{padding-left:5mm}.branch{display:inline-block;width:4mm;height:3mm;border-left:1px solid #9aa8bb;border-bottom:1px solid #9aa8bb;margin-right:2mm;vertical-align:2px}.code{width:16mm;color:#3156a3;font-weight:bold}.summary-row .code{color:#17233b}.task{width:72mm}.task small{display:block;color:#77839a;font-weight:normal;margin-top:.6mm}.num{text-align:right;width:17mm}.gantt{position:relative;width:auto;height:8.5mm;overflow:hidden}.gridlines{position:absolute;inset:0}.gridlines i{position:absolute;top:0;bottom:0;border-left:1px dashed #d7dce5}.baseline{position:absolute;height:.8mm;top:1.2mm;background:#9faabc;border-radius:2px}.bar{position:absolute;height:3.8mm;top:3mm;background:#cdd5e1;border-radius:1mm;overflow:hidden}.bar b{display:block;height:100%;background:#2f67d7}.bar.summary-bar{height:2.2mm;top:3.7mm;background:#9dacbf;border-radius:0}.bar.summary-bar:before,.bar.summary-bar:after{content:"";position:absolute;top:-.7mm;width:1.4mm;height:3.5mm;background:#17233b}.bar.summary-bar:before{left:0}.bar.summary-bar:after{right:0}.bar.summary-bar b{background:#17233b}.bar.concluido b{background:#138c69}.bar.bloqueado{background:#f1d4d4}.bar.bloqueado b{background:#c64242}
+    .months{margin-left:146mm;height:6mm;position:relative;border-bottom:1px solid #d9e0ea;break-inside:avoid}.months span{position:absolute;font-weight:bold;color:#667085;transform:translateX(-50%)}footer{position:fixed;bottom:0;left:0;right:0;display:flex;justify-content:space-between;color:#77839a;font-size:7px}.legend{display:flex;gap:4mm;align-items:center;margin-top:3mm;color:#667085;break-inside:avoid}.legend i{display:inline-block;width:7mm;height:2mm;margin-right:1mm;vertical-align:middle;background:#2f67d7}.legend .base{height:1mm;background:#a4adbc}.legend .done{background:#138c69}
   </style></head><body>
     <header><div class="brand"><div class="mark">S</div><div><h1>SIGA</h1><p>GESTÃO INTELIGENTE DE OBRAS</p></div></div><div class="title"><h2>CRONOGRAMA DE EXECUÇÃO</h2><p>${esc(project.name)}${project.client ? ` · Dono da obra: ${esc(project.client)}` : ""}</p></div><div class="meta"><strong>Planeamento base</strong><p>${dateLabel(schedule.startDate!)} — ${dateLabel(schedule.endDate!)}</p><p>Actualizado em ${new Intl.DateTimeFormat("pt-PT", { dateStyle: "medium" }).format(new Date())}</p></div></header>
     <div class="metrics"><div class="metric"><span>Progresso físico</span><strong>${schedule.overallProgress.toFixed(1)}%</strong><div class="progress"><i style="width:${Math.min(100, schedule.overallProgress)}%"></i></div></div><div class="metric"><span>Prazo útil</span><strong>${workingCalendarDays(schedule.startDate!, schedule.endDate!)} dias</strong></div><div class="metric"><span>Valor planeado</span><strong>${money(schedule.plannedValue, project.currency)}</strong></div><div class="metric"><span>Valor medido</span><strong>${money(schedule.executedValue, project.currency)}</strong></div></div>
     <div class="months">${monthMarkers.map((marker) => `<span style="left:${marker.left}%">${esc(marker.label)}</span>`).join("")}</div>
-    <table><colgroup><col style="width:18mm"><col style="width:62mm"><col style="width:23mm"><col style="width:23mm"><col style="width:17mm"><col style="width:17mm"><col></colgroup><thead><tr><th>WBS</th><th>Tarefa / estado</th><th>Início</th><th>Fim</th><th>Duração</th><th>Execução</th><th>Linha temporal</th></tr></thead><tbody>${rows}</tbody></table>
-    <div class="legend"><span><i class="base"></i>Linha de base</span><span><i></i>Execução em curso</span><span><i class="done"></i>Concluído</span></div>
-    <footer><span>SIGA · Cronograma integrado ao Mapa de Quantidades, Diário de Obra e Autos de Medição</span><span>Formato A3 · WBS, subactividades, linha de base e progresso real</span></footer>
+    <table><colgroup><col style="width:16mm"><col style="width:72mm"><col style="width:23mm"><col style="width:23mm"><col style="width:17mm"><col style="width:17mm"><col></colgroup><thead><tr><th>WBS</th><th>Tarefa / estado</th><th>Início</th><th>Fim</th><th>Duração</th><th>Execução</th><th>Linha temporal</th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="legend"><span><i class="base"></i>Linha de base</span><span><i></i>Execução em curso</span><span><i class="done"></i>Concluído</span><span>Actividades-resumo agregam as subactividades</span></div>
+    <footer><span>SIGA · Cronograma integrado ao orçamento, Diário de Obra e Autos de Medição</span><span>${print.paper} paisagem · escala ${print.scalePercent}% · WBS e progresso real</span></footer>
   </body></html>`;
 }
 
@@ -64,13 +108,15 @@ function workingCalendarDays(start: string, end: string) {
   return days;
 }
 
-export async function buildSchedulePdf(project: ProjectHeader, schedule: Schedule) {
+export async function buildSchedulePdf(project: ProjectHeader, schedule: Schedule, request: SchedulePrintRequest = {}) {
   if (!schedule.tasks.length || !schedule.startDate || !schedule.endDate) throw new Error("O cronograma ainda não tem tarefas");
+  const options = resolveSchedulePrintOptions(schedule, request);
   const browser = await puppeteer.launch({ args: ["--no-sandbox", "--disable-setuid-sandbox"] });
   try {
     const page = await browser.newPage();
-    await page.setContent(buildScheduleHtml(project, schedule), { waitUntil: "networkidle0" });
-    return Buffer.from(await page.pdf({ format: "A3", landscape: true, printBackground: true, margin: { top: "10mm", bottom: "12mm", left: "11mm", right: "11mm" } }));
+    await page.setContent(buildScheduleHtml(project, schedule, options), { waitUntil: "networkidle0" });
+    const buffer = Buffer.from(await page.pdf({ format: options.paper, landscape: true, printBackground: true, scale: options.scale, margin: { top: "10mm", bottom: "12mm", left: "11mm", right: "11mm" } }));
+    return { buffer, options };
   } finally {
     await browser.close();
   }

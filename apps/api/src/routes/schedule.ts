@@ -9,6 +9,13 @@ import { addWorkingDays, generateSchedule, getProjectSchedule, getTaskDependency
 import { buildSchedulePdf } from "../services/schedulePdf.js";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista", "engenheiro_fiscal"] as const;
+const scheduleExportQuery = z.object({
+  paper: z.enum(["auto", "A3", "A2", "A1"]).default("auto"),
+  scale: z.preprocess(
+    (value) => value === undefined || value === "fit" ? "fit" : Number(value),
+    z.union([z.literal("fit"), z.number().min(20).max(100)]),
+  ),
+});
 const taskInput = z.object({
   parentId: z.string().uuid().nullable().optional(),
   code: z.string().min(1).max(30),
@@ -166,11 +173,18 @@ export async function scheduleRoutes(app: FastifyInstance) {
 
   app.get("/api/projects/:projectId/schedule/export.pdf", { preHandler: requireCompanyUser }, async (request, reply) => {
     const { projectId } = request.params as { projectId: string };
+    const parsed = scheduleExportQuery.safeParse(request.query);
+    if (!parsed.success) return reply.code(400).send({ error: "Formato ou escala de impressão inválidos" });
     const project = await assertProjectOwned(projectId, companyIdOf(request));
     if (!project) return reply.code(404).send({ error: "Projecto não encontrado" });
     const schedule = await getProjectSchedule(projectId);
     if (!schedule.tasks.length) return reply.code(409).send({ error: "O cronograma ainda não tem tarefas" });
-    const buffer = await buildSchedulePdf(project, schedule);
-    return reply.header("Content-Type", "application/pdf").header("Content-Disposition", `attachment; filename="Cronograma-${project.name.replace(/[^\p{L}\p{N}\- ]/gu, "")}-A3.pdf"`).send(buffer);
+    const { buffer, options } = await buildSchedulePdf(project, schedule, parsed.data);
+    return reply
+      .header("Content-Type", "application/pdf")
+      .header("X-SIGA-Schedule-Paper", options.paper)
+      .header("X-SIGA-Schedule-Scale", String(options.scalePercent))
+      .header("Content-Disposition", `attachment; filename="Cronograma-${project.name.replace(/[^\p{L}\p{N}\- ]/gu, "")}-${options.paper}-${options.scalePercent}pct.pdf"`)
+      .send(buffer);
   });
 }

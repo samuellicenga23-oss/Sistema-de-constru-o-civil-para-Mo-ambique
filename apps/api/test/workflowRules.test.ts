@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { validateMeasuredQuantity } from "../src/services/measurementEngine.js";
 import { addWorkingDays, allocateDurations, allocateDurationsWithMinimums } from "../src/services/scheduleEngine.js";
+import { resolveSchedulePrintOptions } from "../src/services/schedulePdf.js";
 import { calculateProcurementQuantity } from "../src/services/procurementEngine.js";
 
 describe("Regras dos Autos de Medição", () => {
@@ -31,6 +32,17 @@ describe("Regras do Cronograma", () => {
     expect(durations.reduce((sum, value) => sum + value, 0)).toBe(12);
     expect(durations[0]).toBeGreaterThanOrEqual(8);
     expect(durations[1]).toBeGreaterThanOrEqual(2);
+  });
+
+  it("escolhe a folha pela densidade e respeita uma folha manual com ajuste de escala", () => {
+    const compact = resolveSchedulePrintOptions({ tasks: Array(20), startDate: "2026-01-01", endDate: "2026-10-01" });
+    const complex = resolveSchedulePrintOptions({ tasks: Array(90), startDate: "2026-01-01", endDate: "2028-06-01" });
+    const forcedA3 = resolveSchedulePrintOptions({ tasks: Array(90), startDate: "2026-01-01", endDate: "2028-06-01" }, { paper: "A3", scale: "fit" });
+
+    expect(compact.paper).toBe("A3");
+    expect(complex.paper).toBe("A1");
+    expect(forcedA3.paper).toBe("A3");
+    expect(forcedA3.scalePercent).toBeLessThan(100);
   });
 });
 

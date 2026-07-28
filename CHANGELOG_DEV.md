@@ -295,3 +295,32 @@ consultar o estado do Git e as entradas mais recentes. Cada intervenção deve i
   HTTPS sem erros de consola.
 - **Produção:** `https://sud30s.org` está publicada com o novo website público e o sistema privado
   em `/painel`.
+
+## 2026-07-28 — Codex — Website editorial e cronograma adaptativo
+
+- **Branch:** `codex/siga-visual-refresh`.
+- **Referências:** Procore, Fieldwire, PlanRadar, Buildertrend e orientação oficial do Microsoft
+  Project para grelha Gantt, tarefas-resumo, subtarefas, níveis de detalhe e escala temporal.
+- **Website público:** a página deixou a sequência linear de cartões e passou a apresentar uma
+  demonstração navegável do produto em Custos, Planeamento e Execução, casos por perfil
+  (Construtora, Fiscalização e Dono da obra), cadeia de decisão, planos mensais/anuais e FAQ.
+- **Conversão:** planos e contactos anteriores foram preservados; o selector anual calcula e
+  explica o desconto de 15%, e os pedidos continuam a abrir WhatsApp ou email já preenchidos.
+- **Partilha social:** criada a capa `og-siga-v2.png`, coerente com a nova mensagem “Da estimativa
+  à obra, tudo ligado”, e actualizados os metadados Open Graph.
+- **Cronograma:** a grelha WBS passou a usar linhas compactas, árvore visual contínua para
+  subactividades, fases-resumo claramente diferenciadas, controlo global para expandir/recolher,
+  escala temporal compacta/normal/detalhada, linha do dia e editor organizado por contexto.
+- **PDF adaptativo:** o utilizador pode escolher folha automática, A3, A2 ou A1 e ajustar todo o
+  cronograma à folha ou usar escala manual de 100%, 85%, 70% ou 55%. No modo automático, a API
+  escolhe a menor folha confortável conforme número de tarefas e duração; o nome do ficheiro e os
+  cabeçalhos indicam folha e escala efectivas.
+- **Regressão:** novo teste cobre selecção A3/A2/A1 e redução de escala em cronogramas densos.
+- **Validação funcional:** website revisto no browser em desktop e 390 px; abas, menu móvel e
+  alternância mensal/anual confirmados. Cronograma revisto com fase e subactividade reais;
+  recolher/expandir confirmado e PDF A2 a 70% gerado com sucesso.
+- **Validação técnica:** build completo de shared/API/web aprovado; 32 testes da API e 12 do
+  frontend aprovados.
+- **Persistência:** nenhuma migração de base de dados necessária.
+- **Produção:** pronta para publicação após confirmação de que o `main` remoto não recebeu uma
+  alteração paralela.
