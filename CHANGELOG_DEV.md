@@ -470,3 +470,8 @@ publicação.
 - **Validação:** 9 testes Python aprovados, incluindo carimbo incorrecto, ausência de título normalizado e propagação de pisos;
   resposta FastAPI validada com o documento real; build completo, 38 testes da API e 12 do frontend
   aprovados.
+- **Produção:** publicada em `https://sud30s.org` no commit `ea17641`; backup criado em
+  `/home/sigo/backups/sigo-predeploy-20260728-ea17641.dump`, migração `0026` aplicada, leitor
+  reiniciado sob supervisão do systemd, API recarregada e saúde interna/HTTPS confirmada. O anexo
+  usado na validação não existia na base de produção com o nome exacto, pelo que não foi associado
+  automaticamente a uma obra potencialmente errada.
