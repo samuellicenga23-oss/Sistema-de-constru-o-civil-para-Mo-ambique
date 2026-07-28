@@ -6,6 +6,17 @@ import Layout from "../components/Layout";
 import { IconBack, IconWand } from "../components/icons";
 
 const UNASSIGNED_FLOOR = "Piso não identificado";
+const SECTION_STYLES = {
+  arquitectura: "border-blue-200 bg-blue-50 text-blue-900",
+  estrutura: "border-slate-300 bg-slate-50 text-slate-900",
+  hidrossanitario: "border-cyan-200 bg-cyan-50 text-cyan-900",
+  electricidade: "border-amber-200 bg-amber-50 text-amber-900",
+  outro: "border-gray-200 bg-gray-50 text-gray-800",
+} as const;
+
+function pageRange(startPage: number, endPage: number) {
+  return startPage === endPage ? `Página ${startPage}` : `Páginas ${startPage}–${endPage}`;
+}
 
 // Ordena os pisos por senso comum de construção: térreo primeiro, depois pisos numerados a
 // subir, depois zonas especiais (anexo, cobertura), e por fim o que não foi identificado.
@@ -123,32 +134,36 @@ export default function PlantReviewPage() {
   // possível puxar automaticamente da planta, sem lhe perguntar como reformatar o ficheiro — por
   // isso listamos factos concretos (o quê não foi encontrado) e nunca pedimos para reenviar nada.
   const gaps: string[] = [];
+  const detectedDisciplines = new Set(plant.documentAnalysis?.sections.map((section) => section.discipline));
+  const hasArchitecture = detectedDisciplines.size > 0 ? detectedDisciplines.has("arquitectura") : plant.discipline === "arquitectura";
+  const hasStructure = detectedDisciplines.size > 0 ? detectedDisciplines.has("estrutura") : plant.discipline === "estrutura";
   if (plant.processingStatus === "erro") {
     gaps.push(
       plant.errorMessage
         ? `Não foi possível processar este ficheiro: ${plant.errorMessage}.`
         : "Não foi possível processar este ficheiro."
     );
-  } else if (plant.discipline === "estrutura") {
-    const s = plant.structuralSummary;
-    if (!s) {
-      gaps.push(
-        "Não foi possível identificar nenhum elemento estrutural (sapatas, pilares ou vigas) nesta planta — o formato deste desenho ainda não é reconhecido pelo sistema."
-      );
-    } else {
-      if (s.footingsCount === 0) gaps.push("Não foram identificadas sapatas/fundações.");
-      if (s.columnsCount === 0) gaps.push("Não foram identificados pilares.");
-      if (s.beamsCount === 0) gaps.push("Não foram identificadas vigas.");
-      if (s.slabsCount === 0) gaps.push("Não foi identificada armadura de laje/cobertura.");
-      if (s.totalSteelWeightKg === 0 && rebarSchedules.length === 0 && (s.footingsCount > 0 || s.columnsCount > 0 || s.beamsCount > 0)) {
+  } else {
+    if (hasStructure) {
+      const s = plant.structuralSummary;
+      if (!s) {
         gaps.push(
-          "Não foi possível determinar o peso total de aço — este desenho não parece incluir resumos de peso por elemento, apenas posições/comprimentos de varões."
+          "Não foi possível identificar nenhum elemento estrutural (sapatas, pilares ou vigas) nesta planta — o formato deste desenho ainda não é reconhecido pelo sistema."
         );
+      } else {
+        if (s.footingsCount === 0) gaps.push("Não foram identificadas sapatas/fundações.");
+        if (s.columnsCount === 0) gaps.push("Não foram identificados pilares.");
+        if (s.beamsCount === 0) gaps.push("Não foram identificadas vigas.");
+        if (s.slabsCount === 0) gaps.push("Não foi identificada armadura de laje/cobertura.");
+        if (s.totalSteelWeightKg === 0 && rebarSchedules.length === 0 && (s.footingsCount > 0 || s.columnsCount > 0 || s.beamsCount > 0)) {
+          gaps.push(
+            "Não foi possível determinar o peso total de aço — este desenho não parece incluir resumos de peso por elemento, apenas posições/comprimentos de varões."
+          );
+        }
       }
     }
-  } else if (plant.discipline === "arquitectura") {
-    if (rooms.length === 0) {
-      gaps.push("Não foram identificados compartimentos (áreas) nesta planta.");
+    if (hasArchitecture && rooms.length === 0) {
+      gaps.push("Não foram identificados compartimentos (áreas) nas páginas de arquitectura.");
     }
   }
 
@@ -180,7 +195,7 @@ export default function PlantReviewPage() {
               <p className="text-xs font-semibold uppercase tracking-wide text-brand-700">Passo 2 de 4 · Confirmar dados</p>
               <h2 className="mt-1 text-lg font-bold text-slate-900">A análise terminou. Reveja apenas o que precisa de confirmação.</h2>
               <p className="mt-1 max-w-2xl text-sm text-slate-600">
-                O SIGO juntará esta planta às restantes disciplinas da obra. Ao continuar, abre directamente o diagnóstico de medição — sem passar pela criação manual de capítulos ou importação de Excel.
+                O SIGO organizou este ficheiro por disciplina e juntará os dados encontrados ao diagnóstico de medição — sem criação manual de capítulos ou importação de Excel.
               </p>
             </div>
             <button
@@ -198,6 +213,38 @@ export default function PlantReviewPage() {
             <Link to={`/projectos/${plant.projectId}#plantas-do-projecto`} className="font-semibold text-brand-700 hover:underline">Adicionar outro projecto →</Link>
           </div>
         </section>
+
+        {plant.documentAnalysis && (
+          <section className="card overflow-hidden">
+            <div className="border-b border-slate-200 px-5 py-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Leitura do documento</p>
+              <div className="mt-1 flex flex-wrap items-baseline justify-between gap-2">
+                <h2 className="section-title">
+                  {plant.documentAnalysis.isMultiDiscipline ? "Projecto completo separado automaticamente" : "Disciplina identificada automaticamente"}
+                </h2>
+                <span className="text-xs text-slate-500">{plant.documentAnalysis.pageCount} páginas no ficheiro original</span>
+              </div>
+              <p className="mt-1 text-sm text-slate-600">
+                O PDF original foi preservado. O SIGO organiza as folhas por especialidade antes de medir; os dados quantitativos apresentados abaixo dependem do que foi efectivamente reconhecido em cada secção.
+              </p>
+            </div>
+            <div className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-3">
+              {plant.documentAnalysis.sections.map((section, index) => (
+                <div key={`${section.discipline}-${section.startPage}-${index}`} className={`rounded-lg border p-3 ${SECTION_STYLES[section.discipline]}`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-bold">{section.label}</p>
+                      <p className="mt-0.5 text-xs opacity-75">{pageRange(section.startPage, section.endPage)} · {section.pageCount} página(s)</p>
+                      <p className="mt-1 text-[10px] font-semibold uppercase tracking-wide opacity-70">Secção organizada</p>
+                    </div>
+                    <span className="rounded-full bg-white/70 px-2 py-0.5 text-[10px] font-semibold tabular-nums">{Math.round(section.confidence * 100)}%</span>
+                  </div>
+                  {section.evidence.length > 0 && <p className="mt-2 text-[11px] leading-relaxed opacity-75">Reconhecido por {section.evidence.slice(0, 2).join(" e ")}.</p>}
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         <div className="card card-pad text-xs text-gray-500 leading-relaxed">
           <p className="font-medium text-gray-700 mb-1">Como os dados entram no cálculo</p>

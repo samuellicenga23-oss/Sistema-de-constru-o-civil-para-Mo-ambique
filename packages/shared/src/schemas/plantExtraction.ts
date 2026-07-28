@@ -61,11 +61,39 @@ export const extractedStaircaseSchema = z.object({
 export type ExtractedStaircase = z.infer<typeof extractedStaircaseSchema>;
 export type StructuralSummary = z.infer<typeof structuralSummarySchema>;
 
+export const documentDisciplineSchema = z.enum([
+  "arquitectura",
+  "estrutura",
+  "hidrossanitario",
+  "electricidade",
+  "outro",
+]);
+export type DocumentDiscipline = z.infer<typeof documentDisciplineSchema>;
+
+export const documentSectionSchema = z.object({
+  discipline: documentDisciplineSchema,
+  label: z.string().min(1),
+  startPage: z.number().int().positive(),
+  endPage: z.number().int().positive(),
+  pageCount: z.number().int().positive(),
+  confidence: z.number().min(0).max(1),
+  evidence: z.array(z.string()),
+});
+export type DocumentSection = z.infer<typeof documentSectionSchema>;
+
+export const documentAnalysisSchema = z.object({
+  pageCount: z.number().int().nonnegative(),
+  isMultiDiscipline: z.boolean(),
+  sections: z.array(documentSectionSchema),
+});
+export type DocumentAnalysis = z.infer<typeof documentAnalysisSchema>;
+
 export const plantParseResultSchema = z.object({
   metadata: plantMetadataSchema,
   rooms: z.array(extractedRoomSchema),
   rebarSchedules: z.array(extractedRebarLineSchema),
   staircases: z.array(extractedStaircaseSchema),
   structuralSummary: structuralSummarySchema.nullable(),
+  documentAnalysis: documentAnalysisSchema,
 });
 export type PlantParseResult = z.infer<typeof plantParseResultSchema>;

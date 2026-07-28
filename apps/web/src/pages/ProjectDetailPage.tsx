@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent, type MouseEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { boqApi, type BudgetDocument, type Project } from "../api/boq";
 import { measurementApi, type MeasurementCertificate } from "../api/measurement";
-import { plantsApi, type Plant, type PlantProcessingProgress } from "../api/plants";
+import { plantsApi, type Plant, type PlantProcessingProgress, type PlantUploadDiscipline } from "../api/plants";
 import { catalogApi, type PriceZone } from "../api/catalog";
 import { suppliersApi } from "../api/suppliers";
 import Layout from "../components/Layout";
@@ -22,6 +22,10 @@ const DOC_STATUS_BADGE: Record<string, string> = {
   submetido: "badge-brand",
   aprovado: "badge-green",
 };
+
+function sectionPages(startPage: number, endPage: number) {
+  return startPage === endPage ? `p. ${startPage}` : `pp. ${startPage}–${endPage}`;
+}
 
 // Nunca usar toISOString().slice(0,10) para a data de hoje — converte para UTC e "recua"
 // um dia à noite em fusos horários positivos como Moçambique (UTC+2).
@@ -44,7 +48,7 @@ export default function ProjectDetailPage() {
   const [template, setTemplate] = useState<"padrao" | "vazio">("padrao");
   const [selectedDocId, setSelectedDocId] = useState("");
   const [periodDate, setPeriodDate] = useState(todayStr());
-  const [plantDiscipline, setPlantDiscipline] = useState<"arquitectura" | "estrutura">("arquitectura");
+  const [plantDiscipline, setPlantDiscipline] = useState<PlantUploadDiscipline>("auto");
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<PlantProcessingProgress | null>(null);
   const [preparingMeasurements, setPreparingMeasurements] = useState(false);
@@ -384,8 +388,18 @@ export default function ProjectDetailPage() {
               <li key={p.id} className="table-row group">
                 {p.processingStatus === "concluido" ? (
                   <Link to={`/plantas/${p.id}`} className="flex items-center justify-between px-5 py-3">
-                    <span className="font-medium text-gray-900 truncate pr-2">{p.originalFileName}</span>
+                    <span className="min-w-0 pr-3">
+                      <span className="block font-medium text-gray-900 truncate">{p.originalFileName}</span>
+                      {p.documentAnalysis && (
+                        <span className="mt-0.5 block truncate text-[11px] text-slate-500">
+                          {p.documentAnalysis.isMultiDiscipline ? "Projecto completo" : p.documentAnalysis.sections[0]?.label ?? "PDF"}
+                          {` · ${p.documentAnalysis.pageCount} páginas`}
+                          {p.documentAnalysis.sections.map((section) => ` · ${section.label} ${sectionPages(section.startPage, section.endPage)}`).join("")}
+                        </span>
+                      )}
+                    </span>
                     <span className="flex items-center gap-2 shrink-0">
+                      {p.documentAnalysis?.isMultiDiscipline && <span className="badge badge-brand">{p.documentAnalysis.sections.length} secções</span>}
                       <span className={`badge ${PLANT_STATUS_BADGE[p.processingStatus].cls}`}>{PLANT_STATUS_BADGE[p.processingStatus].label}</span>
                       <button
                         onClick={(e) => handleDeletePlant(e, p.id, p.originalFileName)}
@@ -420,15 +434,16 @@ export default function ProjectDetailPage() {
             ))}
             {plants.length === 0 && (
               <li className="px-5 py-4 text-sm text-gray-400">
-                Comece pela planta de arquitectura e adicione o projecto estrutural quando disponível. Cada ficheiro é analisado uma única vez e os resultados juntam-se no diagnóstico.
+                Carregue um projecto completo ou ficheiros separados. O SIGO identifica as disciplinas e organiza as páginas automaticamente antes do diagnóstico.
               </li>
             )}
           </ul>
           <form onSubmit={handleUploadPlant} className="flex gap-2 items-end px-5 py-4 border-t border-gray-100 flex-wrap">
             {uploading && uploadProgress && <div className="w-full rounded-xl border border-blue-100 bg-blue-50/70 p-4 mb-2" aria-live="polite"><div className="flex justify-between gap-4"><div><p className="text-sm font-semibold text-blue-950">{uploadProgress.processingStage ?? "A analisar o PDF"}</p><p className="text-xs text-blue-800/70">{uploadProgress.processingCurrentPage && uploadProgress.processingTotalPages ? `Página ${uploadProgress.processingCurrentPage} de ${uploadProgress.processingTotalPages}` : "O ficheiro está a ser preparado para leitura."}</p></div><strong className="text-xl tabular-nums text-blue-950">{uploadProgress.processingProgress}%</strong></div><div className="mt-3 h-2.5 overflow-hidden rounded-full bg-blue-100" role="progressbar" aria-valuenow={uploadProgress.processingProgress} aria-valuemin={0} aria-valuemax={100}><div className="h-full rounded-full bg-blue-600 transition-[width] duration-300" style={{ width: `${uploadProgress.processingProgress}%` }} /></div></div>}
             <div>
-              <label className="label">Disciplina</label>
-              <select value={plantDiscipline} onChange={(e) => setPlantDiscipline(e.target.value as "arquitectura" | "estrutura")} className="input">
+              <label className="label">Modo de leitura</label>
+              <select value={plantDiscipline} onChange={(e) => setPlantDiscipline(e.target.value as PlantUploadDiscipline)} className="input">
+                <option value="auto">Detectar automaticamente</option>
                 <option value="arquitectura">Arquitectura</option>
                 <option value="estrutura">Estrutura</option>
               </select>

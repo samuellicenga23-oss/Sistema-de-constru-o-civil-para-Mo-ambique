@@ -14,6 +14,7 @@ import {
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
+import type { DocumentAnalysis } from "@sigo/shared";
 
 export const userRoleEnum = pgEnum("user_role", [
   "super_admin",
@@ -460,6 +461,9 @@ export const plants = pgTable("plants", {
     slabsAvgThicknessCm: number;
     totalSteelWeightKg: number;
   } | null>(),
+  // Organização virtual de PDFs completos: mantém o original intacto e regista os intervalos
+  // de páginas reconhecidos como arquitectura, estrutura, hidrossanitário, electricidade, etc.
+  documentAnalysis: jsonb("document_analysis").$type<DocumentAnalysis | null>(),
   uploadedAt: timestamp("uploaded_at").notNull().defaultNow(),
 });
 

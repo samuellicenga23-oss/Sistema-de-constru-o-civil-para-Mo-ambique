@@ -109,12 +109,196 @@ class PlantMetadata:
 
 
 @dataclass
+class DocumentSection:
+    discipline: str
+    label: str
+    start_page: int
+    end_page: int
+    page_count: int
+    confidence: float
+    evidence: list[str] = field(default_factory=list)
+
+
+@dataclass
+class DocumentAnalysis:
+    page_count: int
+    is_multi_discipline: bool
+    sections: list[DocumentSection] = field(default_factory=list)
+
+
+@dataclass
+class PageClassification:
+    page: int
+    discipline: str
+    confidence: float
+    evidence: list[str] = field(default_factory=list)
+
+
+@dataclass
 class ParseResult:
     metadata: PlantMetadata
     rooms: list[Room] = field(default_factory=list)
     rebar_schedules: list[RebarLine] = field(default_factory=list)
     staircases: list[Staircase] = field(default_factory=list)
     structural_summary: StructuralSummary | None = None
+    document_analysis: DocumentAnalysis | None = None
+
+
+DOCUMENT_DISCIPLINE_LABELS = {
+    "arquitectura": "Arquitectura",
+    "estrutura": "Estrutura",
+    "hidrossanitario": "Hidrossanitário",
+    "electricidade": "Electricidade",
+    "outro": "Documentação geral",
+}
+
+# A classificação não confia num único campo do carimbo. Em projectos reais, as pranchas de
+# água/drenagem podem conservar por engano "Especialidade: ARQUITECTURA". Sinais do conteúdo
+# técnico têm por isso peso superior ao carimbo genérico.
+DOCUMENT_DISCIPLINE_PATTERNS: dict[str, list[tuple[int, re.Pattern, str]]] = {
+    "arquitectura": [
+        (5, re.compile(r"planta\s+(?:cotada|dimensionada|mobil(?:i)?ada|baixa|de\s+piso)", re.IGNORECASE), "tipo de planta arquitectónica"),
+        (4, re.compile(r"projecto\s+arquit(?:et[oô]nico|ect[oó]nico)", re.IGNORECASE), "título de projecto arquitectónico"),
+        (3, re.compile(r"especialidade\s*:?\s*arquitectura", re.IGNORECASE), "carimbo de arquitectura"),
+        (2, re.compile(r"\bal[çc]ados?\b|\bplanta\s+de\s+implanta[çc][ãa]o\b", re.IGNORECASE), "conteúdo arquitectónico"),
+    ],
+    "estrutura": [
+        (12, re.compile(r"especialidade\s*:?\s*estrutura", re.IGNORECASE), "carimbo de estrutura"),
+        (10, re.compile(r"projecto\s+estrutural", re.IGNORECASE), "título de projecto estrutural"),
+        (8, re.compile(r"quadro\s+de\s+(?:pilares|elementos\s+de\s+funda[çc][ãa]o)|pormenor\s+de\s+vigas", re.IGNORECASE), "quadro estrutural"),
+        (7, re.compile(r"planta\s+de\s+(?:funda[çc][ãa]o|elementos\s+estruturais)|armadura\s+(?:inferior|superior|longitudinal)", re.IGNORECASE), "prancha estrutural"),
+    ],
+    "hidrossanitario": [
+        (14, re.compile(r"projecto\s+hidrossanit[áa]rio", re.IGNORECASE), "título de projecto hidrossanitário"),
+        (12, re.compile(r"projecto\s+de\s+abastecimento\s+de\s+[áa]gua\s+e\s+saneamento", re.IGNORECASE), "título de água e saneamento"),
+        (12, re.compile(r"\bHID\s*[.\-]?\s*\d+\b", re.IGNORECASE), "código de prancha HID"),
+        (10, re.compile(r"abastecimento\s+de\s+[áa]gua|drenagem\s+de\s+[áa]guas?|saneamento\s*[–—-]?\s*[áa]guas", re.IGNORECASE), "rede de água/drenagem"),
+        (7, re.compile(r"rede\s+de\s+(?:abastecimento|drenagem)|fossa\s+s[ée]ptica|[áa]guas?\s+(?:residuais|pluviais)|contador\s+de\s+[áa]gua|termoaquecedor", re.IGNORECASE), "elementos hidrossanitários"),
+    ],
+    "electricidade": [
+        (14, re.compile(r"projecto\s+el[ée]ctrico", re.IGNORECASE), "título de projecto eléctrico"),
+        (12, re.compile(r"\bEL(?:EC|E|T)\s*[.\-]?\s*\d+\b", re.IGNORECASE), "código de prancha eléctrica"),
+        (11, re.compile(r"instala[çc][ãa]o\s+el[ée]ctrica|planta\s+de\s+(?:ilumina[çc][ãa]o|tomadas)", re.IGNORECASE), "planta eléctrica"),
+        (7, re.compile(r"quadro\s+el[ée]ctrico|circuitos?\s+el[ée]ctricos?|pontos?\s+de\s+(?:luz|tomada)", re.IGNORECASE), "elementos eléctricos"),
+    ],
+}
+
+
+def _page_discipline_scores(text: str) -> tuple[dict[str, int], dict[str, list[str]]]:
+    scores = {discipline: 0 for discipline in DOCUMENT_DISCIPLINE_PATTERNS}
+    evidence: dict[str, list[str]] = {discipline: [] for discipline in DOCUMENT_DISCIPLINE_PATTERNS}
+    for discipline, patterns in DOCUMENT_DISCIPLINE_PATTERNS.items():
+        for weight, pattern, label in patterns:
+            if pattern.search(text):
+                scores[discipline] += weight
+                if label not in evidence[discipline]:
+                    evidence[discipline].append(label)
+    return scores, evidence
+
+
+def classify_document_pages(
+    page_texts: list[str],
+    page_hints: dict[int, list[tuple[str, int, str]]] | None = None,
+) -> list[PageClassification]:
+    """Classifica o documento inteiro, favorecendo continuidade sem esconder mudanças reais."""
+    if not page_texts:
+        return []
+    disciplines = list(DOCUMENT_DISCIPLINE_PATTERNS)
+    observations = [_page_discipline_scores(text) for text in page_texts]
+    for page, hints in (page_hints or {}).items():
+        if page < 1 or page > len(observations):
+            continue
+        scores, evidence = observations[page - 1]
+        for discipline, weight, label in hints:
+            if discipline not in scores:
+                continue
+            scores[discipline] += weight
+            if label not in evidence[discipline]:
+                evidence[discipline].append(label)
+    if not any(max(scores.values(), default=0) > 0 for scores, _ in observations):
+        return [PageClassification(page=index + 1, discipline="outro", confidence=0.4) for index in range(len(page_texts))]
+
+    # Viterbi simples: mudar de especialidade tem um custo. Duas páginas com um carimbo antigo
+    # não partem uma secção; uma capa/título técnico forte ultrapassa imediatamente esse custo.
+    transition_penalty = 8
+    paths: list[dict[str, tuple[float, str | None]]] = []
+    first_scores, _ = observations[0]
+    paths.append({discipline: (float(first_scores[discipline]), None) for discipline in disciplines})
+    for page_index in range(1, len(page_texts)):
+        scores, _ = observations[page_index]
+        current: dict[str, tuple[float, str | None]] = {}
+        previous = paths[-1]
+        for discipline in disciplines:
+            candidates = [
+                (previous[previous_discipline][0] - (0 if previous_discipline == discipline else transition_penalty), previous_discipline)
+                for previous_discipline in disciplines
+            ]
+            best_score, best_previous = max(candidates, key=lambda candidate: candidate[0])
+            current[discipline] = (best_score + scores[discipline], best_previous)
+        paths.append(current)
+
+    last_discipline = max(paths[-1], key=lambda discipline: paths[-1][discipline][0])
+    selected = [last_discipline]
+    for page_index in range(len(page_texts) - 1, 0, -1):
+        previous = paths[page_index][selected[-1]][1]
+        selected.append(previous or selected[-1])
+    selected.reverse()
+
+    classifications: list[PageClassification] = []
+    for page_index, discipline in enumerate(selected):
+        scores, evidence_by_discipline = observations[page_index]
+        ordered_scores = sorted(scores.values(), reverse=True)
+        selected_score = scores[discipline]
+        second_score = next((score for score in ordered_scores if score < selected_score), 0)
+        if selected_score == 0:
+            confidence = 0.68
+            evidence = ["continuidade com as páginas adjacentes"]
+        else:
+            margin = max(selected_score - second_score, 0)
+            confidence = min(0.99, 0.7 + selected_score / 60 + margin / 80)
+            evidence = evidence_by_discipline[discipline][:3]
+        classifications.append(
+            PageClassification(
+                page=page_index + 1,
+                discipline=discipline,
+                confidence=round(confidence, 2),
+                evidence=evidence,
+            )
+        )
+    return classifications
+
+
+def build_document_analysis(classifications: list[PageClassification]) -> DocumentAnalysis:
+    if not classifications:
+        return DocumentAnalysis(page_count=0, is_multi_discipline=False)
+    sections: list[DocumentSection] = []
+    start = 0
+    while start < len(classifications):
+        discipline = classifications[start].discipline
+        end = start
+        while end + 1 < len(classifications) and classifications[end + 1].discipline == discipline:
+            end += 1
+        section_pages = classifications[start : end + 1]
+        evidence_counts = Counter(item for page in section_pages for item in page.evidence)
+        evidence = [item for item, _ in evidence_counts.most_common(3)]
+        sections.append(
+            DocumentSection(
+                discipline=discipline,
+                label=DOCUMENT_DISCIPLINE_LABELS[discipline],
+                start_page=section_pages[0].page,
+                end_page=section_pages[-1].page,
+                page_count=len(section_pages),
+                confidence=round(sum(page.confidence for page in section_pages) / len(section_pages), 2),
+                evidence=evidence,
+            )
+        )
+        start = end + 1
+    recognized = {section.discipline for section in sections if section.discipline != "outro"}
+    return DocumentAnalysis(
+        page_count=len(classifications),
+        is_multi_discipline=len(recognized) > 1,
+        sections=sections,
+    )
 
 
 # Etiquetas de área usadas por diferentes programas/gabinetes: ArchiCAD costuma exportar
@@ -357,6 +541,8 @@ def _room_identity(raw_name: str) -> tuple[str, str | None] | None:
         return None
     if ROOM_NAME_REJECT_PATTERN.search(name):
         return None
+    if AREA_ONLY_PATTERN.match(name):
+        return None
     # Linhas de eixos, cotas, níveis, portas/janelas e referências técnicas não são nomes de
     # compartimento. A lista é estrutural (forma), não uma lista fechada de nomes possíveis.
     if re.fullmatch(r"[A-Z]{0,3}\d+(?:\s*[=\-/]\s*[A-Z]{0,3}\d+)*", name, re.IGNORECASE):
@@ -584,6 +770,19 @@ def dedupe_rooms(rooms: list[Room], page_priorities: dict[int, int] | None = Non
         return []
     priorities = page_priorities or {}
     canonical_page = _duplicate_page_map(rooms, priorities)
+
+    # Se duas páginas equivalentes repetem o mesmo compartimento e apenas a prancha cotada traz
+    # o piso, propaga-se essa informação para a cópia de apresentação antes de agrupar. Sem isto,
+    # "Sala / piso desconhecido" e "Sala / Piso Térreo" apareciam como dois ambientes distintos.
+    known_floors: dict[tuple[int, tuple[str, str, float]], Counter] = defaultdict(Counter)
+    for room in rooms:
+        if room.floor:
+            known_floors[(canonical_page.get(room.page, room.page), _room_signature(room))][room.floor] += 1
+    for room in rooms:
+        if room.floor is None:
+            floor_counts = known_floors.get((canonical_page.get(room.page, room.page), _room_signature(room)))
+            if floor_counts:
+                room.floor = floor_counts.most_common(1)[0][0]
 
     # Compartimentos numerados são únicos dentro do piso. Sem número, a área também faz parte da
     # identidade e só se cruza entre páginas que foram reconhecidas como duas representações da
@@ -958,6 +1157,38 @@ def parse_pdf(file_bytes: bytes, progress_callback=None) -> ParseResult:
         if progress_callback:
             progress_callback(page_number, doc.page_count)
 
+    # Conteúdo já extraído é também evidência. Isto mantém a leitura robusta quando um gabinete
+    # entrega pranchas sem capa, sem código normalizado e até sem o campo "Especialidade".
+    page_hints: dict[int, list[tuple[str, int, str]]] = defaultdict(list)
+    for page in {room.page for room in rooms + fallback_rooms}:
+        page_hints[page].append(("arquitectura", 7, "compartimentos e áreas reconhecidos"))
+    for page in {line.page for line in rebar_schedules}:
+        page_hints[page].append(("estrutura", 11, "armaduras reconhecidas"))
+    for page in {
+        item.page
+        for collection in (footings, column_groups, beam_spans, staircases, slabs)
+        for item in collection
+    }:
+        page_hints[page].append(("estrutura", 8, "elementos estruturais reconhecidos"))
+
+    classifications = classify_document_pages(document_text_parts, page_hints)
+    document_analysis = build_document_analysis(classifications)
+    architecture_pages = {page.page for page in classifications if page.discipline == "arquitectura"}
+    structure_pages = {page.page for page in classifications if page.discipline == "estrutura"}
+
+    # A extracção é feita enquanto cada página é lida para manter o progresso real; depois da
+    # classificação global retêm-se os resultados da especialidade certa. Isto evita que uma
+    # planta hidrossanitária que reutiliza o fundo arquitectónico duplique compartimentos, ou que
+    # números de uma memória descritiva sejam confundidos com armaduras.
+    rooms = [room for room in rooms if room.page in architecture_pages]
+    fallback_rooms = [room for room in fallback_rooms if room.page in architecture_pages]
+    rebar_schedules = [line for line in rebar_schedules if line.page in structure_pages]
+    footings = [item for item in footings if item.page in structure_pages]
+    column_groups = [item for item in column_groups if item.page in structure_pages]
+    beam_spans = [item for item in beam_spans if item.page in structure_pages]
+    staircases = [item for item in staircases if item.page in structure_pages]
+    slabs = [item for item in slabs if item.page in structure_pages]
+
     default_floor = detect_document_default_floor("\n".join(document_text_parts))
     selected_rooms = rooms if rooms else fallback_rooms
     if default_floor:
@@ -973,4 +1204,5 @@ def parse_pdf(file_bytes: bytes, progress_callback=None) -> ParseResult:
         rebar_schedules=rebar_schedules,
         staircases=staircases,
         structural_summary=structural_summary,
+        document_analysis=document_analysis,
     )

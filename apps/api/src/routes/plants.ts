@@ -83,7 +83,13 @@ export async function processPlantFile(plantId: string, buffer: Buffer, filename
   if (!parseResult) throw new Error("plant-service terminou sem devolver resultados");
   const parsed = plantParseResultSchema.parse(parseResult);
 
-  await setPlantProgress(plantId, 88, "A organizar os dados encontrados");
+  await setPlantProgress(
+    plantId,
+    88,
+    parsed.documentAnalysis.isMultiDiscipline
+      ? `A separar ${parsed.documentAnalysis.sections.length} secções do projecto`
+      : "A organizar os dados encontrados",
+  );
 
   await db.delete(extractedRooms).where(eq(extractedRooms.plantId, plantId));
   await db.delete(extractedRebarSchedules).where(eq(extractedRebarSchedules.plantId, plantId));
@@ -113,12 +119,20 @@ export async function processPlantFile(plantId: string, buffer: Buffer, filename
   }
 
   await setPlantProgress(plantId, 96, "A validar compartimentos e elementos estruturais");
+  const detectedDisciplines = new Set(parsed.documentAnalysis.sections.map((section) => section.discipline));
+  const detectedPrimaryDiscipline = detectedDisciplines.has("arquitectura")
+    ? "arquitectura"
+    : detectedDisciplines.has("estrutura")
+      ? "estrutura"
+      : undefined;
   await db.update(plants).set({
     processingStatus: "concluido",
     processingProgress: 100,
     processingStage: "Análise concluída",
     processingUpdatedAt: new Date(),
     structuralSummary: parsed.structuralSummary ?? null,
+    documentAnalysis: parsed.documentAnalysis,
+    ...(detectedPrimaryDiscipline ? { discipline: detectedPrimaryDiscipline } : {}),
   }).where(eq(plants.id, plantId));
 }
 
@@ -145,7 +159,7 @@ export async function plantRoutes(app: FastifyInstance) {
     const clientPlantIdValue = typeof clientPlantIdField === "object" && "value" in clientPlantIdField ? String(clientPlantIdField.value) : "";
     const parsedClientPlantId = clientPlantIdSchema.safeParse(clientPlantIdValue);
     if (!parsedClientPlantId.success) return reply.code(400).send({ error: "Identificador de acompanhamento inválido" });
-    if (!PLANT_DISCIPLINES.includes(discipline as any)) {
+    if (discipline !== "auto" && !PLANT_DISCIPLINES.includes(discipline as any)) {
       return reply.code(400).send({ error: "Disciplina inválida" });
     }
 
@@ -167,7 +181,9 @@ export async function plantRoutes(app: FastifyInstance) {
       .values({
         id: parsedClientPlantId.data,
         projectId,
-        discipline: discipline as (typeof PLANT_DISCIPLINES)[number],
+        // "auto" é modo de entrada, não uma disciplina física da BD. A classificação final
+        // corrige este valor depois da leitura e guarda todas as secções em documentAnalysis.
+        discipline: discipline === "auto" ? "arquitectura" : discipline as (typeof PLANT_DISCIPLINES)[number],
         filePath,
         originalFileName: data.filename,
         processingStatus: "processando",

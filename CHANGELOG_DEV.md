@@ -445,3 +445,28 @@ publicação.
   de base de dados. Serviço Python reiniciado sob supervisão do systemd, API recompilada/recarregada
   e o ficheiro arquitectónico da Cyntia já existente foi reprocessado: 13 compartimentos,
   `226,246 m²`, `Piso Térreo`.
+
+## 2026-07-28 — Codex — Separação inteligente de projectos completos
+
+- **Caso real:** o ficheiro `Projecto Completo Mano Ndjinga.pdf`, com 110 páginas, reúne arquitectura,
+  hidrossanitário e estrutura no mesmo PDF. Algumas folhas de água e drenagem mantêm erradamente
+  `Especialidade: ARQUITECTURA` no carimbo, pelo que o título isolado não é uma fonte fiável.
+- **Classificação:** o leitor analisa todas as páginas como sequência e combina títulos, códigos de
+  prancha, vocabulário técnico, conteúdo desenhado e continuidade entre folhas. Sinais inequívocos
+  como `HID.1`, abastecimento e drenagem prevalecem sobre um carimbo genérico ou incorrecto.
+- **Separação virtual:** o original é preservado e o SIGO guarda intervalos por especialidade, sem
+  duplicar fisicamente o ficheiro: Arquitectura páginas `1–23`, Hidrossanitário `24–53` e Estrutura
+  `54–110`, com confiança e evidências visíveis para revisão do utilizador.
+- **Fluxo:** o carregamento aceita agora `Detectar automaticamente`, tanto na criação de uma obra
+  como na área de plantas. O utilizador pode enviar um projecto completo ou continuar a enviar
+  arquitectura e estrutura separadamente; os dois caminhos convergem no mesmo diagnóstico.
+- **Medições:** apenas páginas arquitectónicas alimentam compartimentos e apenas páginas estruturais
+  alimentam armaduras e elementos, evitando falsos positivos entre especialidades. Plantas gerais e
+  cotadas equivalentes partilham a identificação de piso antes da deduplicação.
+- **Persistência:** migração `0026_confused_psynapse.sql` adiciona a análise documental estruturada
+  às plantas. O comando `plant:reprocess` passa a aceitar UUID ou nome exacto do ficheiro.
+- **Resultado real:** 23 compartimentos em `Piso Térreo` e `Piso Superior`, `493,320 m²`; 29 sapatas,
+  29 pilares, 56 vigas, 121 linhas de armadura e `17 259 kg` de aço reconhecidos no PDF completo.
+- **Validação:** 9 testes Python aprovados, incluindo carimbo incorrecto, ausência de título normalizado e propagação de pisos;
+  resposta FastAPI validada com o documento real; build completo, 38 testes da API e 12 do frontend
+  aprovados.

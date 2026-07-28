@@ -1,0 +1,1 @@
+ALTER TABLE "plants" ADD COLUMN "document_analysis" jsonb;

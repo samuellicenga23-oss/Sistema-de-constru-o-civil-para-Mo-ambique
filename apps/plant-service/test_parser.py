@@ -4,6 +4,8 @@ import fitz
 
 from parser import (
     Room,
+    build_document_analysis,
+    classify_document_pages,
     dedupe_rooms,
     extract_room_list_fallback,
     extract_rooms,
@@ -98,6 +100,48 @@ S = 12,35 m2
         self.assertEqual(len(result.rooms), 1)
         self.assertEqual(result.rooms[0].name, "Sala de Estar")
         self.assertEqual(result.rooms[0].floor, "Piso Térreo")
+
+    def test_separates_complete_project_even_with_wrong_hydro_stamp(self):
+        texts = [
+            "Projecto Arquitetónico\nPlanta Cotada Piso Térreo",
+            "Especialidade: ARQUITECTURA\nPlanta Cotada Piso Superior",
+            "Projecto Hidrossanitário\nEspecialidade: ARQUITECTURA\nHID.1\nABASTECIMENTO DE ÁGUA",
+            "Especialidade: ARQUITECTURA\nPlanta de Piso\nHID.2\nESPECIFICAÇÕES TÉCNICAS",
+            "Projecto Estrutural\nEspecialidade: ESTRUTURA\nPLANTA DE FUNDAÇÃO",
+        ]
+
+        analysis = build_document_analysis(classify_document_pages(texts))
+
+        self.assertTrue(analysis.is_multi_discipline)
+        self.assertEqual(
+            [(section.discipline, section.start_page, section.end_page) for section in analysis.sections],
+            [("arquitectura", 1, 2), ("hidrossanitario", 3, 4), ("estrutura", 5, 5)],
+        )
+
+    def test_uses_extracted_content_when_sheet_has_no_standard_title(self):
+        classifications = classify_document_pages(
+            ["Gabinete XPTO\nFolha 01", "Desenho sem carimbo normalizado", "Notas gerais"],
+            {2: [("arquitectura", 7, "compartimentos e áreas reconhecidos")]},
+        )
+
+        self.assertEqual([page.discipline for page in classifications], ["arquitectura"] * 3)
+        self.assertIn("compartimentos e áreas reconhecidos", classifications[1].evidence)
+
+    def test_duplicate_general_plan_inherits_floor_from_dimensioned_plan(self):
+        rooms = dedupe_rooms(
+            [
+                Room("Sala", None, 24.0, 1, None),
+                Room("Cozinha", None, 12.0, 1, None),
+                Room("W.C", None, 4.0, 1, None),
+                Room("Sala", None, 24.0, 2, "Piso Térreo"),
+                Room("Cozinha", None, 12.0, 2, "Piso Térreo"),
+                Room("W.C", None, 4.0, 2, "Piso Térreo"),
+            ],
+            {1: 3, 2: 4},
+        )
+
+        self.assertEqual(len(rooms), 3)
+        self.assertTrue(all(room.floor == "Piso Térreo" for room in rooms))
 
 
 if __name__ == "__main__":

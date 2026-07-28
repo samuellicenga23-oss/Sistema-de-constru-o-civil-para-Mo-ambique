@@ -17,6 +17,23 @@ export type StructuralSummary = {
   totalSteelWeightKg: number;
 };
 
+export type DocumentDiscipline = "arquitectura" | "estrutura" | "hidrossanitario" | "electricidade" | "outro";
+export type DocumentSection = {
+  discipline: DocumentDiscipline;
+  label: string;
+  startPage: number;
+  endPage: number;
+  pageCount: number;
+  confidence: number;
+  evidence: string[];
+};
+export type DocumentAnalysis = {
+  pageCount: number;
+  isMultiDiscipline: boolean;
+  sections: DocumentSection[];
+};
+export type PlantUploadDiscipline = "auto" | "arquitectura" | "estrutura";
+
 export type Plant = {
   id: string;
   projectId: string;
@@ -31,6 +48,7 @@ export type Plant = {
   processingUpdatedAt: string;
   errorMessage: string | null;
   structuralSummary: StructuralSummary | null;
+  documentAnalysis: DocumentAnalysis | null;
   uploadedAt: string;
 };
 
@@ -77,7 +95,7 @@ export type ExtractedRebarLine = {
 export const plantsApi = {
   list: (projectId: string) => request<Plant[]>(`/projects/${projectId}/plants`),
 
-  upload: async (projectId: string, file: File, discipline: "arquitectura" | "estrutura", onProgress?: (progress: PlantProcessingProgress) => void) => {
+  upload: async (projectId: string, file: File, discipline: PlantUploadDiscipline, onProgress?: (progress: PlantProcessingProgress) => void) => {
     const plantId = crypto.randomUUID();
     const form = new FormData();
     form.append("clientPlantId", plantId);

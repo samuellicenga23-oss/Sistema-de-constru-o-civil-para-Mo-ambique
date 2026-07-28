@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent, type MouseEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { boqApi, type Project } from "../api/boq";
 import { catalogApi, type PriceZone } from "../api/catalog";
-import { plantsApi, type PlantProcessingProgress } from "../api/plants";
+import { plantsApi, type PlantProcessingProgress, type PlantUploadDiscipline } from "../api/plants";
 import Layout from "../components/Layout";
 import Modal from "../components/Modal";
 import ConfirmDialog from "../components/ConfirmDialog";
@@ -73,15 +73,22 @@ export default function ProjectsPage() {
   async function handleCreate(e: FormEvent) {
     e.preventDefault();
     const form = e.currentTarget as HTMLFormElement;
+    const completeFile = (form.elements.namedItem("completeProjectFile") as HTMLInputElement | null)?.files?.[0];
     const architectureFile = (form.elements.namedItem("architectureFile") as HTMLInputElement | null)?.files?.[0];
     const structuralFile = (form.elements.namedItem("structuralFile") as HTMLInputElement | null)?.files?.[0];
     setError(null);
+    if (completeFile && (architectureFile || structuralFile)) {
+      setError("Escolha o projecto completo ou os ficheiros separados — não é necessário enviar os dois formatos ao mesmo tempo.");
+      return;
+    }
     setCreating(true);
     setCreateProgress("A criar projecto...");
-    const technicalFiles = [
-      architectureFile ? { file: architectureFile, discipline: "arquitectura" as const, label: "planta de arquitectura" } : null,
-      structuralFile ? { file: structuralFile, discipline: "estrutura" as const, label: "projecto estrutural" } : null,
-    ].filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+    const technicalFiles: { file: File; discipline: PlantUploadDiscipline; label: string }[] = completeFile
+      ? [{ file: completeFile, discipline: "auto", label: "projecto completo" }]
+      : [
+          architectureFile ? { file: architectureFile, discipline: "arquitectura" as const, label: "planta de arquitectura" } : null,
+          structuralFile ? { file: structuralFile, discipline: "estrutura" as const, label: "projecto estrutural" } : null,
+        ].filter((entry): entry is NonNullable<typeof entry> => entry !== null);
     if (technicalFiles.length) setAnalysisProgress({ percent: 1, filePercent: 0, stage: "A criar o projecto", fileName: technicalFiles[0].file.name, currentFile: 1, totalFiles: technicalFiles.length, currentPage: null, totalPages: null });
     let createdProjectId: string | null = null;
     try {
@@ -172,9 +179,15 @@ export default function ProjectsPage() {
                 <div className="mb-3">
                   <p className="text-sm font-semibold text-slate-900">Projectos técnicos (opcional)</p>
                   <p className="mt-0.5 text-xs text-slate-500">
-                    Pode carregar agora ou depois. O SIGO analisará os ficheiros e levará directamente à confirmação dos dados antes de medir.
+                    Pode enviar um único PDF completo. O SIGO separará automaticamente arquitectura, estrutura, hidrossanitário e electricidade quando existirem.
                   </p>
                 </div>
+                <div className="mb-4 rounded-lg border border-blue-200 bg-white p-3">
+                  <label className="label">Projecto completo ou conjunto de especialidades (PDF)</label>
+                  <input type="file" name="completeProjectFile" accept="application/pdf" disabled={creating} className="input py-1.5 file:mr-2 file:rounded-md file:border-0 file:bg-blue-50 file:px-2 file:py-1 file:text-xs file:text-blue-800" />
+                  <p className="mt-1.5 text-[11px] text-slate-500">Recomendado quando recebeu todas as pranchas num único ficheiro. O original será preservado.</p>
+                </div>
+                <div className="mb-3 flex items-center gap-3 text-[11px] font-semibold uppercase tracking-wide text-slate-400"><span className="h-px flex-1 bg-slate-200" /><span>ou carregue separadamente</span><span className="h-px flex-1 bg-slate-200" /></div>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div>
                     <label className="label">Planta de arquitectura (PDF)</label>

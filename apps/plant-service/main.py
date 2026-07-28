@@ -83,16 +83,34 @@ class StructuralSummaryOut(BaseModel):
     totalSteelWeightKg: float
 
 
+class DocumentSectionOut(BaseModel):
+    discipline: str
+    label: str
+    startPage: int
+    endPage: int
+    pageCount: int
+    confidence: float
+    evidence: list[str]
+
+
+class DocumentAnalysisOut(BaseModel):
+    pageCount: int
+    isMultiDiscipline: bool
+    sections: list[DocumentSectionOut]
+
+
 class ParseResponse(BaseModel):
     metadata: MetadataOut
     rooms: list[RoomOut]
     rebarSchedules: list[RebarLineOut]
     staircases: list[StaircaseOut]
     structuralSummary: StructuralSummaryOut | None
+    documentAnalysis: DocumentAnalysisOut
 
 
 def build_parse_response(result) -> ParseResponse:
     summary = result.structural_summary
+    document_analysis = result.document_analysis
     return ParseResponse(
         metadata=MetadataOut(**result.metadata.__dict__),
         rooms=[RoomOut(name=r.name, number=r.number, areaM2=r.area_m2, page=r.page, floor=r.floor) for r in result.rooms],
@@ -122,6 +140,22 @@ def build_parse_response(result) -> ParseResponse:
         )
         if summary
         else None,
+        documentAnalysis=DocumentAnalysisOut(
+            pageCount=document_analysis.page_count,
+            isMultiDiscipline=document_analysis.is_multi_discipline,
+            sections=[
+                DocumentSectionOut(
+                    discipline=section.discipline,
+                    label=section.label,
+                    startPage=section.start_page,
+                    endPage=section.end_page,
+                    pageCount=section.page_count,
+                    confidence=section.confidence,
+                    evidence=section.evidence,
+                )
+                for section in document_analysis.sections
+            ],
+        ),
     )
 
 
