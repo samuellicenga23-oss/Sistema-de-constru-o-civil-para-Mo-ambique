@@ -42,7 +42,7 @@ function loginErrorUrl(code: string): string {
 }
 
 const loginSchema = z.object({
-  email: z.string().email(),
+  email: z.string().trim().toLowerCase().email(),
   password: z.string().min(1),
 });
 
@@ -82,6 +82,9 @@ export async function authRoutes(app: FastifyInstance) {
       if (!user || !passwordOk) {
         return reply.code(401).send({ error: "Credenciais inválidas" });
       }
+      if (!user.isActive) {
+        return reply.code(403).send({ error: "Esta conta foi desactivada. Contacte o administrador da sua empresa." });
+      }
 
       if (user.companyId) {
         const [sub] = await db
@@ -108,6 +111,8 @@ export async function authRoutes(app: FastifyInstance) {
         role: user.role,
         avatarUrl: user.avatarUrl,
         lastLoginAt,
+        isActive: user.isActive,
+        mustChangePassword: user.mustChangePassword,
         preferredLanguage: user.preferredLanguage,
         createdAt: user.createdAt,
       };
@@ -193,6 +198,9 @@ export async function authRoutes(app: FastifyInstance) {
       if (!user) {
         return reply.redirect(loginErrorUrl("conta_google_nao_encontrada"));
       }
+      if (!user.isActive) {
+        return reply.redirect(loginErrorUrl("conta_desactivada"));
+      }
 
       if (user.companyId) {
         const [sub] = await db
@@ -252,6 +260,8 @@ export async function authRoutes(app: FastifyInstance) {
       role: updated.role,
       avatarUrl: updated.avatarUrl,
       lastLoginAt: updated.lastLoginAt,
+      isActive: updated.isActive,
+      mustChangePassword: updated.mustChangePassword,
       preferredLanguage: updated.preferredLanguage,
       createdAt: updated.createdAt,
     };
@@ -320,7 +330,7 @@ export async function authRoutes(app: FastifyInstance) {
     }
 
     const newHash = await hashPassword(newPassword);
-    await db.update(users).set({ passwordHash: newHash }).where(eq(users.id, userId));
+    await db.update(users).set({ passwordHash: newHash, mustChangePassword: false }).where(eq(users.id, userId));
     await deleteAllSessionsForUser(userId);
 
     const session = await createSession(userId);

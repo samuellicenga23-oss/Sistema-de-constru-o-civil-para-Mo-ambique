@@ -18,7 +18,7 @@ const createCompanySchema = z.object({
   address: z.string().optional(),
   defaultCurrency: z.enum(CURRENCIES).default("MZN"),
   adminName: z.string().min(1),
-  adminEmail: z.string().email(),
+  adminEmail: z.string().trim().toLowerCase().email(),
   adminPassword: z.string().min(8, "A password deve ter pelo menos 8 caracteres"),
 });
 
@@ -78,6 +78,7 @@ export async function companyRoutes(app: FastifyInstance) {
         email: adminEmail,
         passwordHash,
         role: "admin_empresa",
+        mustChangePassword: true,
       })
       .returning();
 

@@ -145,7 +145,7 @@ export default function ProjectsPage() {
                 <div className="mb-3">
                   <p className="text-sm font-semibold text-slate-900">Projectos técnicos (opcional)</p>
                   <p className="mt-0.5 text-xs text-slate-500">
-                    Pode carregar agora ou depois. O SIGA analisará os ficheiros e levará directamente à confirmação dos dados antes de medir.
+                    Pode carregar agora ou depois. O SIGO analisará os ficheiros e levará directamente à confirmação dos dados antes de medir.
                   </p>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">

@@ -76,7 +76,7 @@ export async function quickEstimateRoutes(app: FastifyInstance) {
     const sectionId = await getStandardSectionId(id);
     if (!sectionId) {
       return reply.code(409).send({
-        error: "Este documento não usa a estrutura automática do SIGA. Volte ao projecto e escolha «Preparar medições» para criar ou abrir um mapa compatível.",
+        error: "Este documento não usa a estrutura automática do SIGO. Volte ao projecto e escolha «Preparar medições» para criar ou abrir um mapa compatível.",
       });
     }
 

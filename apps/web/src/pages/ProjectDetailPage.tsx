@@ -311,7 +311,7 @@ export default function ProjectDetailPage() {
         </section>
 
         <section className="card lg:col-span-2 overflow-hidden">
-          <SectionHeader title="Cadeia de custos da obra" description="A ordem usada pelo SIGA para transformar cotações de mercado em preços de orçamento" actions={<Link to="/catalogo" className="btn btn-secondary btn-sm">Abrir catálogo</Link>} />
+          <SectionHeader title="Cadeia de custos da obra" description="A ordem usada pelo SIGO para transformar cotações de mercado em preços de orçamento" actions={<Link to="/catalogo" className="btn btn-secondary btn-sm">Abrir catálogo</Link>} />
           <div className="grid gap-px bg-slate-200 sm:grid-cols-2 xl:grid-cols-4">
             {[
               { n: 1, title: "Zona da obra", value: project.zoneId ? "Definida" : "Em falta", detail: project.zoneId ? zones.find((zone) => zone.id === project.zoneId)?.name ?? "Zona seleccionada" : "Defina a zona antes de validar preços.", ok: Boolean(project.zoneId) },
@@ -363,7 +363,7 @@ export default function ProjectDetailPage() {
               <div>
                 <label className="label">Modelo</label>
                 <select value={template} onChange={(e) => setTemplate(e.target.value as "padrao" | "vazio")} className="input">
-                  <option value="padrao">Estrutura SIGA ligada ao catálogo</option>
+                  <option value="padrao">Estrutura SIGO ligada ao catálogo</option>
                   <option value="vazio">Documento vazio/manual</option>
                 </select>
               </div>

@@ -39,7 +39,7 @@ function buildHtml(entry: SiteDiaryEntry, project: ProjectRow, links?: DiaryLink
 </head>
 <body>
   <h1>Diário de Obra — ${escapeHtml(project.name)}</h1>
-  <div class="meta">SIGA · Registo de ${escapeHtml(entry.date)} · gerado em ${generatedAt}</div>
+  <div class="meta">SIGO · Registo de ${escapeHtml(entry.date)} · gerado em ${generatedAt}</div>
 
   <h2>Condições do dia</h2>
   <div class="grid">

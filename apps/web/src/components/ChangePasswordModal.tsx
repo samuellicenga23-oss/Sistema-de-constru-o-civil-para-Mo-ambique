@@ -2,7 +2,7 @@ import { useState, type FormEvent } from "react";
 import { api, ApiError } from "../api/client";
 import ModalPortal from "./ModalPortal";
 
-export default function ChangePasswordModal({ onClose }: { onClose: () => void }) {
+export default function ChangePasswordModal({ onClose, onSuccess }: { onClose: () => void; onSuccess?: () => void | Promise<void> }) {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -20,6 +20,7 @@ export default function ChangePasswordModal({ onClose }: { onClose: () => void }
     setSaving(true);
     try {
       await api.changePassword(currentPassword, newPassword);
+      await onSuccess?.();
       setDone(true);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Erro ao mudar a password");

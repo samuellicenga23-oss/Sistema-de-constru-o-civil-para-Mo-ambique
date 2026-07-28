@@ -131,9 +131,10 @@ export default function ProfilePage() {
   const plan = company?.subscription ? getPlanDefinition(company.subscription.plan) : null;
 
   return (
-    <Layout title="Perfil">
+    <Layout title="Perfil" subtitle="Dados pessoais, segurança e sessões activas">
       <div className="space-y-5 max-w-2xl">
         {error && <p className="text-sm text-red-600">{error}</p>}
+        {user.mustChangePassword && <div className="rounded-xl border border-amber-300 bg-amber-50 px-5 py-4"><p className="font-semibold text-amber-950">Proteja o seu acesso antes de continuar</p><p className="mt-1 text-sm leading-6 text-amber-800">Está a usar uma palavra-passe temporária definida pelo administrador. Escolha agora uma palavra-passe pessoal; as restantes áreas ficam disponíveis logo depois.</p><button onClick={() => setShowChangePassword(true)} className="btn btn-primary mt-3">Definir a minha palavra-passe</button></div>}
 
         <section className="card card-pad">
           <h2 className="section-title mb-4">Dados pessoais</h2>
@@ -279,7 +280,7 @@ export default function ProfilePage() {
         </section>
       </div>
 
-      {showChangePassword && <ChangePasswordModal onClose={() => setShowChangePassword(false)} />}
+      {showChangePassword && <ChangePasswordModal onClose={() => setShowChangePassword(false)} onSuccess={refreshUser} />}
     </Layout>
   );
 }

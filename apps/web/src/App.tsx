@@ -29,6 +29,9 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     return <LoadingState fullScreen />;
   }
   if (!user) return <Navigate to="/login" replace />;
+  if (user.mustChangePassword && location.pathname !== "/perfil") {
+    return <Navigate to="/perfil?password=required" replace />;
+  }
   // Antes só o menu escondia páginas que o perfil não devia usar — a rota em si continuava
   // acessível escrevendo o URL directamente. Agora bloqueia aqui também (o backend já recusava
   // as chamadas de escrita/leitura correspondentes, isto só evita mostrar um ecrã vazio/quebrado).

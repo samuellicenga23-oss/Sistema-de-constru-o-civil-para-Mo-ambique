@@ -180,7 +180,7 @@ export default function PlantReviewPage() {
               <p className="text-xs font-semibold uppercase tracking-wide text-brand-700">Passo 2 de 4 · Confirmar dados</p>
               <h2 className="mt-1 text-lg font-bold text-slate-900">A análise terminou. Reveja apenas o que precisa de confirmação.</h2>
               <p className="mt-1 max-w-2xl text-sm text-slate-600">
-                O SIGA juntará esta planta às restantes disciplinas da obra. Ao continuar, abre directamente o diagnóstico de medição — sem passar pela criação manual de capítulos ou importação de Excel.
+                O SIGO juntará esta planta às restantes disciplinas da obra. Ao continuar, abre directamente o diagnóstico de medição — sem passar pela criação manual de capítulos ou importação de Excel.
               </p>
             </div>
             <button

@@ -71,8 +71,8 @@ export default function SuperAdminPage() {
   }
 
   return (
-    <Layout title="Painel da Plataforma">
-      <div className="space-y-5 max-w-4xl">
+    <Layout title="Painel da Plataforma" subtitle="Empresas, planos, capacidade e estado dos serviços SIGO">
+      <div className="space-y-5 max-w-6xl">
         {error && <p className="text-sm text-red-600">{error}</p>}
 
         {stats && (

@@ -438,7 +438,7 @@ export default function QuickEstimateWizard({
                   <span className={`badge ${readinessPercent >= 75 ? "badge-green" : readinessPercent >= 45 ? "badge-yellow" : "badge-red"}`}>{readyCount} de {readinessChecks.length} confirmados</span>
                 </div>
                 <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100"><div className={`h-full ${readinessPercent >= 75 ? "bg-emerald-500" : readinessPercent >= 45 ? "bg-amber-500" : "bg-red-500"}`} style={{ width: `${readinessPercent}%` }} /></div>
-                <p className="mt-3 text-sm text-slate-600">O SIGA não vai esconder pressupostos. Veja primeiro o que já está confirmado, o que falta e onde uma estimativa genérica seria usada.</p>
+                <p className="mt-3 text-sm text-slate-600">O SIGO não vai esconder pressupostos. Veja primeiro o que já está confirmado, o que falta e onde uma estimativa genérica seria usada.</p>
               </div>
               <div className="divide-y divide-slate-200 rounded-xl border border-slate-200">
                 {readinessChecks.map((item) => (
@@ -1010,7 +1010,7 @@ export default function QuickEstimateWizard({
 
                   {documentCurrency !== "MZN" && (
                     <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-                      O catálogo automático está em MZN. Para evitar uma conversão silenciosa, o SIGA vai preparar um
+                      O catálogo automático está em MZN. Para evitar uma conversão silenciosa, o SIGO vai preparar um
                       mapa automático separado em MZN e preservar este documento em {documentCurrency}.
                     </div>
                   )}

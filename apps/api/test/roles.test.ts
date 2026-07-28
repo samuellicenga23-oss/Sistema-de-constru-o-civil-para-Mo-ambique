@@ -50,10 +50,41 @@ describe("Permissões por perfil", () => {
       payload: { name: "Novo", email: "novo@test.local", password: "password123", role: "visualizador" },
     });
     expect(createRes.statusCode).toBe(201);
-    const created = createRes.json() as { id: string };
+    const created = createRes.json() as { id: string; mustChangePassword: boolean };
+    expect(created.mustChangePassword).toBe(true);
 
     const deleteRes = await app.inject({ method: "DELETE", url: `/api/users/${created.id}`, headers: { cookie } });
     expect(deleteRes.statusCode).toBe(200);
+  });
+
+  it("protege o último administrador activo da empresa", async () => {
+    const company = await createCompany("Empresa Administrador Único");
+    const admin = await createUser(company.id, "admin_empresa", "only-admin@test.local");
+    const cookie = await loginCookie(app, "only-admin@test.local");
+
+    const res = await app.inject({
+      method: "PATCH",
+      url: `/api/users/${admin.id}`,
+      headers: { cookie },
+      payload: { isActive: false },
+    });
+    expect(res.statusCode).toBe(400);
+    expect((res.json() as { error: string }).error).toContain("próprio perfil");
+  });
+
+  it("administrador suspende outro acesso e termina as suas sessões", async () => {
+    const company = await createCompany("Empresa Suspensão");
+    await createUser(company.id, "admin_empresa", "manager@test.local");
+    const member = await createUser(company.id, "engenheiro_fiscal", "field@test.local");
+    const managerCookie = await loginCookie(app, "manager@test.local");
+    const memberCookie = await loginCookie(app, "field@test.local");
+
+    const suspend = await app.inject({ method: "PATCH", url: `/api/users/${member.id}`, headers: { cookie: managerCookie }, payload: { isActive: false } });
+    expect(suspend.statusCode).toBe(200);
+    expect((suspend.json() as { isActive: boolean }).isActive).toBe(false);
+
+    const me = await app.inject({ method: "GET", url: "/api/auth/me", headers: { cookie: memberCookie } });
+    expect(me.statusCode).toBe(401);
   });
 
   it("orcamentista não consegue gerir utilizadores da empresa", async () => {

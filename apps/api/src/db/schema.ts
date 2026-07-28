@@ -5,6 +5,7 @@ import {
   text,
   numeric,
   integer,
+  boolean,
   timestamp,
   pgEnum,
   date,
@@ -82,6 +83,12 @@ export const users = pgTable("users", {
   googleId: varchar("google_id", { length: 255 }).unique(),
   avatarUrl: text("avatar_url"),
   lastLoginAt: timestamp("last_login_at"),
+  // Contas desactivadas deixam imediatamente de autenticar, mas permanecem na base de dados
+  // para conservar autoria, aprovações e restantes referências históricas da obra.
+  isActive: boolean("is_active").notNull().default(true),
+  // O administrador entrega uma credencial temporária; no primeiro acesso (ou após uma
+  // reposição) o utilizador é conduzido ao Perfil para escolher a sua própria palavra-passe.
+  mustChangePassword: boolean("must_change_password").notNull().default(false),
   // Guardado já para quando houver internacionalização real (Fase 1 do documento diz
   // "futuramente") — hoje não muda nada no comportamento da aplicação.
   preferredLanguage: varchar("preferred_language", { length: 10 }).notNull().default("pt"),

@@ -1,4 +1,4 @@
-# Registo de desenvolvimento — SIGA
+# Registo de desenvolvimento — SIGO
 
 Este ficheiro coordena o trabalho paralelo entre Codex e Claude. Antes de iniciar uma alteração,
 consultar o estado do Git e as entradas mais recentes. Cada intervenção deve indicar branch,
@@ -332,7 +332,32 @@ consultar o estado do Git e as entradas mais recentes. Cada intervenção deve i
 - **VPS:** `/home/sigo/htdocs/sud30s.org` actualizado por fast-forward, build completo concluído e
   processo `sigo-api` recarregado no PM2 com estado `online`.
 - **Base de dados:** nenhuma migração necessária e nenhum dado de produção alterado por esta
-  publicação.
+publicação.
+
+## 2026-07-28 — Codex — Identidade SIGO, planos anuais e governação de acessos
+
+- **Branch:** `codex/siga-visual-refresh` (mantida para compatibilidade com o trabalho já publicado).
+- **Identidade:** nome público corrigido para **SIGO — Sistema Integrado de Gestão de Obras** na
+  landing page, login, navegação, PWA, serviços e exportações PDF; identificadores técnicos
+  `@sigo/*` permanecem inalterados.
+- **Landing:** contacto WhatsApp corrigido para `+258 86 638 4194`; a vista anual passa a mostrar o
+  total efectivo por ano com 15% de desconto e a poupança anual, em vez do equivalente mensal;
+  novo cartão social Open Graph `og-sigo-v3.png`.
+- **Gestão de utilizadores:** novo painel de equipa com pesquisa, filtros, consumo do plano, estado,
+  último acesso, método de autenticação, edição de nome/perfil, suspensão/reactivação e redefinição
+  de palavra-passe temporária.
+- **Segurança:** contas suspensas deixam imediatamente de autenticar e perdem as sessões activas;
+  novos acessos e palavras-passe redefinidas exigem troca no primeiro acesso; o próprio utilizador
+  não pode alterar o seu perfil/estado e a empresa não pode ficar sem administrador activo.
+- **Histórico:** utilizadores que já entraram deixam de ser eliminados; são desactivados para manter
+  autoria, aprovações e referências das obras.
+- **Contexto entre módulos:** o Painel apresenta agora a ordem operacional preços/composições →
+  orçamento → cronograma → compras/campo → Autos/financeiro.
+- **Persistência:** migração `0023_tricky_nocturne.sql` adiciona `users.is_active` e
+  `users.must_change_password`, com valores seguros para as contas existentes.
+- **Validação:** build completo aprovado; 35 testes da API e 12 testes do frontend aprovados;
+  landing, preços anuais, WhatsApp e gestão da equipa verificados no navegador local.
+- **Produção:** pendente nesta entrada; actualizar após o deploy na VPS.
 - **Validação:** a API interna respondeu `status: ok`; o novo website foi confirmado em
   `https://sud30s.org` com a mensagem, navegação e demonstração novas, sem erros de consola.
 - **Produção:** revisão disponível em `https://sud30s.org`; sistema privado continua em `/painel`.

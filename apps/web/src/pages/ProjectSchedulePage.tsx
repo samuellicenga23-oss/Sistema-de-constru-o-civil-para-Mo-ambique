@@ -225,7 +225,7 @@ export default function ProjectSchedulePage() {
 
         {selected && <TaskEditor task={selected} tasks={schedule.tasks} onSaved={reload} onDeleted={async () => { setSelectedId(null); await reload(); }} setError={setError} />}
       </>}
-      {!schedule.tasks.length && !setupOpen && <div className="card card-pad py-14 text-center"><IconChart className="mx-auto mb-3 h-10 w-10 text-blue-600" /><h3 className="text-lg font-semibold">Transforme o orçamento num plano executável</h3><p className="mx-auto mt-2 max-w-xl text-sm text-slate-500">O SIGA cria a WBS com actividades e subactividades, distribui o prazo pelo peso financeiro e estabelece a linha de base. Depois, Diário e Autos alimentam o progresso real.</p><button onClick={() => setSetupOpen(true)} className="btn btn-primary mt-5">Configurar cronograma</button></div>}
+      {!schedule.tasks.length && !setupOpen && <div className="card card-pad py-14 text-center"><IconChart className="mx-auto mb-3 h-10 w-10 text-blue-600" /><h3 className="text-lg font-semibold">Transforme o orçamento num plano executável</h3><p className="mx-auto mt-2 max-w-xl text-sm text-slate-500">O SIGO cria a WBS com actividades e subactividades, distribui o prazo pelo peso financeiro e estabelece a linha de base. Depois, Diário e Autos alimentam o progresso real.</p><button onClick={() => setSetupOpen(true)} className="btn btn-primary mt-5">Configurar cronograma</button></div>}
     </div>
   </Layout>;
 }

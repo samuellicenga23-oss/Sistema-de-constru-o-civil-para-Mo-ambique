@@ -4,7 +4,7 @@ import { api, type CurrentUser, ApiError } from "../api/client";
 type AuthContextValue = {
   user: CurrentUser | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<CurrentUser>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
 };
@@ -26,6 +26,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function login(email: string, password: string) {
     const loggedInUser = await api.login(email, password);
     setUser(loggedInUser);
+    return loggedInUser;
   }
 
   async function logout() {

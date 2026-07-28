@@ -2,26 +2,59 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { eq, and, desc, count } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { users, subscriptions } from "../db/schema.js";
+import { users, subscriptions, sessions } from "../db/schema.js";
 import { requireRole } from "../auth/middleware.js";
 import { hashPassword } from "../auth/password.js";
 import { getPlanDefinition } from "@sigo/shared";
 
 const createUserSchema = z.object({
-  name: z.string().min(1),
-  email: z.string().email(),
+  name: z.string().trim().min(2),
+  email: z.string().trim().toLowerCase().email(),
   password: z.string().min(8, "A password deve ter pelo menos 8 caracteres"),
   role: z.enum(["admin_empresa", "orcamentista", "engenheiro_fiscal", "visualizador"]),
 });
+
+const updateUserSchema = z.object({
+  name: z.string().trim().min(2).optional(),
+  role: z.enum(["admin_empresa", "orcamentista", "engenheiro_fiscal", "visualizador"]).optional(),
+  isActive: z.boolean().optional(),
+}).refine((data) => Object.keys(data).length > 0, "Indique pelo menos uma alteração");
+
+const resetPasswordSchema = z.object({
+  password: z.string().min(8, "A password deve ter pelo menos 8 caracteres"),
+});
+
+async function activeAdminCount(companyId: string) {
+  const [{ value }] = await db
+    .select({ value: count() })
+    .from(users)
+    .where(and(eq(users.companyId, companyId), eq(users.role, "admin_empresa"), eq(users.isActive, true)));
+  return value;
+}
+
+function publicUser(user: typeof users.$inferSelect) {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    isActive: user.isActive,
+    mustChangePassword: user.mustChangePassword,
+    lastLoginAt: user.lastLoginAt,
+    hasGoogleLogin: Boolean(user.googleId),
+    createdAt: user.createdAt,
+  };
+}
 
 // Gestão de utilizadores dentro da própria empresa — só admin_empresa.
 export async function userRoutes(app: FastifyInstance) {
   app.get("/api/users", { preHandler: requireRole("admin_empresa") }, async (request) => {
     const companyId = request.currentUser!.companyId!;
-    return db
-      .select({ id: users.id, name: users.name, email: users.email, role: users.role, createdAt: users.createdAt })
+    const rows = await db
+      .select()
       .from(users)
       .where(eq(users.companyId, companyId));
+    return rows.map(publicUser);
   });
 
   app.post("/api/users", { preHandler: requireRole("admin_empresa") }, async (request, reply) => {
@@ -53,10 +86,50 @@ export async function userRoutes(app: FastifyInstance) {
     const passwordHash = await hashPassword(password);
     const [user] = await db
       .insert(users)
-      .values({ companyId, name, email, passwordHash, role })
+      .values({ companyId, name, email, passwordHash, role, mustChangePassword: true })
       .returning();
 
-    return reply.code(201).send({ id: user.id, name: user.name, email: user.email, role: user.role });
+    return reply.code(201).send(publicUser(user));
+  });
+
+  app.patch("/api/users/:id", { preHandler: requireRole("admin_empresa") }, async (request, reply) => {
+    const parsed = updateUserSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+
+    const companyId = request.currentUser!.companyId!;
+    const { id } = request.params as { id: string };
+    const [target] = await db.select().from(users).where(and(eq(users.id, id), eq(users.companyId, companyId))).limit(1);
+    if (!target) return reply.code(404).send({ error: "Utilizador não encontrado" });
+
+    if (id === request.currentUser!.id && (parsed.data.role !== undefined || parsed.data.isActive !== undefined)) {
+      return reply.code(400).send({ error: "Não pode alterar o seu próprio perfil de acesso ou estado" });
+    }
+    const removesActiveAdmin = target.role === "admin_empresa" && target.isActive
+      && ((parsed.data.role !== undefined && parsed.data.role !== "admin_empresa") || parsed.data.isActive === false);
+    if (removesActiveAdmin && await activeAdminCount(companyId) <= 1) {
+      return reply.code(400).send({ error: "A empresa deve manter pelo menos um administrador activo" });
+    }
+
+    const [updated] = await db.update(users).set(parsed.data).where(eq(users.id, target.id)).returning();
+    if (parsed.data.isActive === false) await db.delete(sessions).where(eq(sessions.userId, target.id));
+    return publicUser(updated);
+  });
+
+  app.post("/api/users/:id/reset-password", { preHandler: requireRole("admin_empresa") }, async (request, reply) => {
+    const parsed = resetPasswordSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    const companyId = request.currentUser!.companyId!;
+    const { id } = request.params as { id: string };
+    if (id === request.currentUser!.id) {
+      return reply.code(400).send({ error: "Use o seu Perfil para alterar a própria palavra-passe" });
+    }
+    const [target] = await db.select().from(users).where(and(eq(users.id, id), eq(users.companyId, companyId))).limit(1);
+    if (!target) return reply.code(404).send({ error: "Utilizador não encontrado" });
+
+    const passwordHash = await hashPassword(parsed.data.password);
+    const [updated] = await db.update(users).set({ passwordHash, mustChangePassword: true }).where(eq(users.id, target.id)).returning();
+    await db.delete(sessions).where(eq(sessions.userId, target.id));
+    return publicUser(updated);
   });
 
   app.delete("/api/users/:id", { preHandler: requireRole("admin_empresa") }, async (request, reply) => {
@@ -65,7 +138,15 @@ export async function userRoutes(app: FastifyInstance) {
     if (id === request.currentUser!.id) {
       return reply.code(400).send({ error: "Não pode eliminar o seu próprio utilizador" });
     }
-    await db.delete(users).where(and(eq(users.id, id), eq(users.companyId, companyId)));
+    const [target] = await db.select().from(users).where(and(eq(users.id, id), eq(users.companyId, companyId))).limit(1);
+    if (!target) return reply.code(404).send({ error: "Utilizador não encontrado" });
+    if (target.lastLoginAt) {
+      return reply.code(409).send({ error: "Este utilizador já tem histórico. Desactive a conta para preservar os registos da obra." });
+    }
+    if (target.role === "admin_empresa" && target.isActive && await activeAdminCount(companyId) <= 1) {
+      return reply.code(400).send({ error: "A empresa deve manter pelo menos um administrador activo" });
+    }
+    await db.delete(users).where(eq(users.id, target.id));
     return { ok: true };
   });
 }

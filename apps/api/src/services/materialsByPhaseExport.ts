@@ -80,7 +80,7 @@ function buildHtml(documentTitle: string, result: MaterialsByPhaseResult): strin
 </head>
 <body>
   <h1>Materiais por Fase — ${escapeHtml(documentTitle)}</h1>
-  <div class="meta">SIGA · gerado em ${generatedAt}</div>
+  <div class="meta">SIGO · gerado em ${generatedAt}</div>
   <div class="grand-total">Valor total dos materiais: ${money(result.grandTotal, result.currency)}</div>
   ${phasesHtml || `<p class="empty">Nenhum item medido ainda — sem materiais a listar.</p>`}
 </body>

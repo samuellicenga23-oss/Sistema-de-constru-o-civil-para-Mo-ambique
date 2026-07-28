@@ -537,7 +537,7 @@ export async function getStandardSectionId(documentId: string): Promise<string |
   if (sections.length === 0) return null;
 
   // Um documento importado pode ter códigos como 1.1/2.1/3.1, mas com trabalhos completamente
-  // diferentes do modelo SIGA. Verifica também a descrição de itens sentinela para nunca aplicar
+  // diferentes do modelo SIGO. Verifica também a descrição de itens sentinela para nunca aplicar
   // quantidades automáticas no trabalho errado só porque o código coincide.
   const sentinelCodes = ["1.1", "2.1", "3.2", "4.1", "11.1"];
   const expectedByCode = new Map(

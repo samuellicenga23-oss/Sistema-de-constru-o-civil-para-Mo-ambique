@@ -262,7 +262,7 @@ export default function BudgetDocumentPage() {
                   <p className="mt-1 max-w-2xl text-xs leading-relaxed text-slate-500">
                     {compositionLinkedCount > 0
                       ? "Os itens com composição guardam o preço do momento em que foram criados. Actualize-os quando adoptar novas cotações ou alterar a zona; quantidades e preços manuais não serão modificados."
-                      : "Este mapa foi importado ou preparado com preços independentes. O SIGA preserva-os exactamente como foram recebidos e não tenta substituir trabalhos por códigos parecidos."}
+                      : "Este mapa foi importado ou preparado com preços independentes. O SIGO preserva-os exactamente como foram recebidos e não tenta substituir trabalhos por códigos parecidos."}
                   </p>
                   <p className="mt-2 text-xs font-medium text-slate-700">
                     {compositionLinkedCount > 0
@@ -516,7 +516,7 @@ export default function BudgetDocumentPage() {
       {showRepriceConfirm && (
         <ConfirmDialog
           title="Actualizar preços do orçamento?"
-          message="O SIGA recalculará apenas os itens ligados a composições, usando os preços adoptados para a zona actual da obra. Quantidades e preços manuais permanecem iguais."
+          message="O SIGO recalculará apenas os itens ligados a composições, usando os preços adoptados para a zona actual da obra. Quantidades e preços manuais permanecem iguais."
           confirmLabel="Actualizar preços"
           busy={repricing}
           onConfirm={handleReprice}

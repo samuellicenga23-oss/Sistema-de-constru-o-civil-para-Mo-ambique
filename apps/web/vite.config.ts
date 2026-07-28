@@ -28,13 +28,13 @@ export default defineConfig({
       },
       manifest: {
         lang: "pt",
-        name: "SIGA — Gestão inteligente de obras",
-        short_name: "SIGA",
+        name: "SIGO — Sistema Integrado de Gestão de Obras",
+        short_name: "SIGO",
         description: "Mapas de quantidades, orçamentos, autos de medição e catálogo de custos para construção civil.",
         theme_color: "#4338ca",
         background_color: "#f4f5f7",
         display: "standalone",
-        start_url: "/",
+        start_url: "/painel",
         icons: [
           { src: "/icon-192.png", sizes: "192x192", type: "image/png" },
           { src: "/icon-512.png", sizes: "512x512", type: "image/png" },

@@ -8,7 +8,8 @@ const GOOGLE_ERROR_MESSAGES: Record<string, string> = {
   google_nao_configurado: "O login com Google não está disponível neste momento.",
   falha_google: "Não foi possível confirmar a sua conta Google. Tente novamente.",
   email_google_nao_verificado: "O seu email Google não está verificado.",
-  conta_google_nao_encontrada: "Não existe nenhuma conta SIGA com este email. Peça ao administrador da sua empresa para a criar primeiro.",
+  conta_google_nao_encontrada: "Não existe nenhuma conta SIGO com este email. Peça ao administrador da sua empresa para a criar primeiro.",
+  conta_desactivada: "Esta conta foi desactivada. Contacte o administrador da sua empresa.",
   subscricao_suspensa: "A subscrição da sua empresa está suspensa. Contacte o suporte.",
 };
 
@@ -39,8 +40,8 @@ export default function LoginPage() {
     setError(null);
     setSubmitting(true);
     try {
-      await login(email, password);
-      navigate("/painel");
+      const loggedInUser = await login(email, password);
+      navigate(loggedInUser.mustChangePassword ? "/perfil?password=required" : loggedInUser.role === "super_admin" ? "/admin" : "/painel");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Erro ao entrar");
     } finally {
@@ -55,8 +56,8 @@ export default function LoginPage() {
         <Link to="/" className="flex items-center gap-3">
           <span className="grid h-10 w-10 place-items-center rounded-lg bg-[#e86f25] text-white text-lg font-black">S</span>
           <div>
-            <p className="text-2xl font-black tracking-[0.2em]">SIGA</p>
-            <p className="text-[10px] uppercase tracking-[0.22em] text-slate-400">Gestão inteligente de obras</p>
+            <p className="text-2xl font-black tracking-[0.2em]">SIGO</p>
+            <p className="text-[9px] uppercase tracking-[0.14em] text-slate-400">Sistema Integrado de Gestão de Obras</p>
           </div>
         </Link>
         <div className="max-w-lg">
@@ -80,10 +81,10 @@ export default function LoginPage() {
       <div className="flex items-center justify-center bg-[#f4f6f8] px-6 py-12">
         <div className="w-full max-w-md">
           <div className="lg:hidden text-center mb-6">
-            <p className="text-2xl font-black tracking-[0.18em] text-brand-950">SIGA</p>
+            <p className="text-2xl font-black tracking-[0.18em] text-brand-950">SIGO</p>
           </div>
           <div className="rounded-xl border border-slate-200 bg-white p-7 md:p-9 shadow-sm">
-            <h2 className="text-2xl font-bold tracking-tight text-slate-900">Entrar no SIGA</h2>
+            <h2 className="text-2xl font-bold tracking-tight text-slate-900">Entrar no SIGO</h2>
             <p className="text-sm text-slate-500 mt-1 mb-7">Utilize as credenciais da sua empresa.</p>
 
             <form onSubmit={handleSubmit} className="space-y-4">

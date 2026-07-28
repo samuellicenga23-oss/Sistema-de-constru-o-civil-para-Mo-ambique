@@ -38,6 +38,15 @@ describe("Login", () => {
     expect((res.json() as { email: string }).email).toBe("user2@test.local");
   });
 
+  it("uma conta desactivada não consegue iniciar sessão", async () => {
+    const company = await createCompany("Empresa Inactiva");
+    const user = await createUser(company.id, "visualizador", "inactive@test.local", "password123");
+    await sql`UPDATE users SET is_active = false WHERE id = ${user.id}`;
+
+    const res = await app.inject({ method: "POST", url: "/api/auth/login", payload: { email: "inactive@test.local", password: "password123" } });
+    expect(res.statusCode).toBe(403);
+  });
+
   // Rate limit por IP real (trustProxy) — 10 tentativas por minuto na mesma rota, tal como
   // configurado em routes/auth.ts. Todos os pedidos injectados aqui partilham o mesmo IP
   // simulado, por isso o 11º tem de ser bloqueado.

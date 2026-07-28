@@ -8,6 +8,8 @@ export type CurrentUser = {
   role: "super_admin" | "admin_empresa" | "orcamentista" | "engenheiro_fiscal" | "visualizador";
   avatarUrl: string | null;
   lastLoginAt: string | null;
+  isActive: boolean;
+  mustChangePassword: boolean;
   preferredLanguage: string;
   createdAt: string;
 };
@@ -28,8 +30,6 @@ export const api = {
   logout: () => request<{ ok: true }>("/auth/logout", { method: "POST" }),
   changePassword: (currentPassword: string, newPassword: string) =>
     request<{ ok: true }>("/auth/change-password", { method: "POST", body: JSON.stringify({ currentPassword, newPassword }) }),
-  listUsers: () =>
-    request<Array<{ id: string; name: string; email: string; role: string; createdAt: string }>>("/users"),
   updateProfile: (data: { name?: string; preferredLanguage?: string }) =>
     request<CurrentUser>("/auth/me", { method: "PATCH", body: JSON.stringify(data) }),
   uploadAvatar: async (file: File) => {

@@ -96,7 +96,7 @@ export default function Layout({
           ) : (
             <div className="flex items-center gap-3">
               <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[#e86f25] text-white font-black">S</span>
-              {!sidebarCollapsed && <div><p className="text-base font-black tracking-[0.14em] text-slate-900">SIGA</p><p className="text-[9px] uppercase tracking-[0.16em] text-slate-400">Gestão de obras</p></div>}
+              {!sidebarCollapsed && <div><p className="text-base font-black tracking-[0.14em] text-slate-900">SIGO</p><p className="max-w-[150px] text-[8px] uppercase leading-3 tracking-[0.11em] text-slate-400">Sistema Integrado de Gestão de Obras</p></div>}
             </div>
           )}
           {!sidebarCollapsed && <button onClick={() => setSidebarCollapsed(true)} className="grid h-8 w-8 place-items-center rounded-md text-slate-400 hover:bg-slate-200/70 hover:text-slate-700" title="Recolher menu"><IconClose className="h-4 w-4" /></button>}
@@ -160,7 +160,7 @@ export default function Layout({
           <button onClick={() => setDrawerOpen(true)} aria-label="Abrir menu" className="text-brand-200 hover:text-white -ml-1 p-1">
             <IconMenu className="w-5 h-5" />
           </button>
-          <p className="font-black tracking-[0.18em]">SIGA</p>
+          <p className="font-black tracking-[0.18em]">SIGO</p>
           <Link to="/perfil" aria-label="Perfil">
             {user?.avatarUrl ? (
               <img src={user.avatarUrl} alt={user.name} className="w-7 h-7 rounded-full object-cover" />
@@ -177,7 +177,7 @@ export default function Layout({
             <div className="absolute inset-0 bg-gray-900/50" onClick={() => setDrawerOpen(false)} />
             <div className="relative w-72 max-w-[80vw] bg-[#f8f8f9] text-slate-700 flex flex-col shadow-xl">
               <div className="px-4 py-4 flex items-center justify-between border-b border-slate-200">
-                <p className="text-lg font-black tracking-[0.18em] text-slate-900">SIGA</p>
+                <p className="text-lg font-black tracking-[0.18em] text-slate-900">SIGO</p>
                 <button onClick={() => setDrawerOpen(false)} aria-label="Fechar menu" className="text-slate-500 hover:text-slate-900 p-1">
                   <IconClose className="w-5 h-5" />
                 </button>

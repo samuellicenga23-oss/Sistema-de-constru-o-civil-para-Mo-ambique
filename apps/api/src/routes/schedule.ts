@@ -182,8 +182,8 @@ export async function scheduleRoutes(app: FastifyInstance) {
     const { buffer, options } = await buildSchedulePdf(project, schedule, parsed.data);
     return reply
       .header("Content-Type", "application/pdf")
-      .header("X-SIGA-Schedule-Paper", options.paper)
-      .header("X-SIGA-Schedule-Scale", String(options.scalePercent))
+      .header("X-SIGO-Schedule-Paper", options.paper)
+      .header("X-SIGO-Schedule-Scale", String(options.scalePercent))
       .header("Content-Disposition", `attachment; filename="Cronograma-${project.name.replace(/[^\p{L}\p{N}\- ]/gu, "")}-${options.paper}-${options.scalePercent}pct.pdf"`)
       .send(buffer);
   });

@@ -13,6 +13,8 @@ export type SessionUser = {
   role: UserRole;
   avatarUrl: string | null;
   lastLoginAt: Date | null;
+  isActive: boolean;
+  mustChangePassword: boolean;
   preferredLanguage: string;
   createdAt: Date;
 };
@@ -38,12 +40,14 @@ export async function getSessionUser(sessionId: string): Promise<SessionUser | n
       role: users.role,
       avatarUrl: users.avatarUrl,
       lastLoginAt: users.lastLoginAt,
+      isActive: users.isActive,
+      mustChangePassword: users.mustChangePassword,
       preferredLanguage: users.preferredLanguage,
       createdAt: users.createdAt,
     })
     .from(sessions)
     .innerJoin(users, eq(sessions.userId, users.id))
-    .where(and(eq(sessions.id, sessionId), gt(sessions.expiresAt, new Date())))
+    .where(and(eq(sessions.id, sessionId), gt(sessions.expiresAt, new Date()), eq(users.isActive, true)))
     .limit(1);
   return rows[0] ?? null;
 }

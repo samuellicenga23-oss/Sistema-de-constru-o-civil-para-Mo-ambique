@@ -1,22 +1,15 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { useSearchParams } from "react-router-dom";
 import { companiesApi, type Company, type Subscription, type CompanyUpdateInput } from "../api/companies";
-import { usersApi, type CompanyUser, type CompanyUserRole } from "../api/users";
+import { usersApi } from "../api/users";
 import { useAuth } from "../auth/AuthContext";
 import Layout from "../components/Layout";
 import LoadingState from "../components/LoadingState";
-import ConfirmDialog from "../components/ConfirmDialog";
-import { IconPlus, IconTrash, IconUsers } from "../components/icons";
+import TeamAccessPanel from "../components/TeamAccessPanel";
 import { CURRENCIES, getPlanDefinition } from "@sigo/shared";
 
 const STATUS_LABELS: Record<string, string> = { trial: "Trial", activo: "Activo", suspenso: "Suspenso" };
 const STATUS_BADGE: Record<string, string> = { trial: "badge-yellow", activo: "badge-green", suspenso: "badge-red" };
-
-const ROLE_LABELS: Record<CompanyUserRole, string> = {
-  admin_empresa: "Administrador",
-  orcamentista: "Orçamentista",
-  engenheiro_fiscal: "Engenheiro/Fiscal",
-  visualizador: "Visualizador",
-};
 
 type Tab = "geral" | "logotipo" | "calculo" | "subscricao" | "utilizadores";
 const TABS: Array<{ id: Tab; label: string }> = [
@@ -26,10 +19,6 @@ const TABS: Array<{ id: Tab; label: string }> = [
   { id: "subscricao", label: "Subscrição" },
   { id: "utilizadores", label: "Utilizadores" },
 ];
-
-function fmtDate(iso: string) {
-  return new Date(iso).toLocaleDateString("pt-MZ");
-}
 
 // Campos de texto simples reaproveitados nos separadores "Dados gerais" — cada um é só
 // {chave, rótulo}, para não repetir o mesmo bloco de label+input onze vezes.
@@ -46,8 +35,10 @@ const GENERAL_FIELDS: Array<{ key: keyof CompanyUpdateInput; label: string; plac
 
 export default function CompanySettingsPage() {
   const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const canEdit = user?.role === "admin_empresa";
-  const [tab, setTab] = useState<Tab>("geral");
+  const requestedTab = searchParams.get("tab") as Tab | null;
+  const [tab, setTab] = useState<Tab>(requestedTab && TABS.some((item) => item.id === requestedTab) ? requestedTab : "geral");
   const [company, setCompany] = useState<Company | null>(null);
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [form, setForm] = useState<Record<string, string>>({});
@@ -56,16 +47,7 @@ export default function CompanySettingsPage() {
   const [saved, setSaved] = useState(false);
   const [uploading, setUploading] = useState(false);
 
-  const [users, setUsers] = useState<CompanyUser[]>([]);
-  const [showUserForm, setShowUserForm] = useState(false);
-  const [newUserName, setNewUserName] = useState("");
-  const [newUserEmail, setNewUserEmail] = useState("");
-  const [newUserPassword, setNewUserPassword] = useState("");
-  const [newUserRole, setNewUserRole] = useState<CompanyUserRole>("orcamentista");
-  const [userError, setUserError] = useState<string | null>(null);
-  const [savingUser, setSavingUser] = useState(false);
-  const [deletingUser, setDeletingUser] = useState<{ id: string; name: string } | null>(null);
-  const [deletingBusy, setDeletingBusy] = useState(false);
+  const [userCount, setUserCount] = useState(0);
 
   async function reload() {
     const data = await companiesApi.me();
@@ -90,7 +72,7 @@ export default function CompanySettingsPage() {
   }
 
   async function reloadUsers() {
-    setUsers(await usersApi.list());
+    setUserCount((await usersApi.list()).length);
   }
 
   useEffect(() => {
@@ -163,54 +145,20 @@ export default function CompanySettingsPage() {
     }
   }
 
-  async function handleCreateUser(e: FormEvent) {
-    e.preventDefault();
-    setUserError(null);
-    setSavingUser(true);
-    try {
-      await usersApi.create({ name: newUserName, email: newUserEmail, password: newUserPassword, role: newUserRole });
-      setNewUserName("");
-      setNewUserEmail("");
-      setNewUserPassword("");
-      setNewUserRole("orcamentista");
-      setShowUserForm(false);
-      await reloadUsers();
-    } catch (err) {
-      setUserError(err instanceof Error ? err.message : "Erro ao criar utilizador");
-    } finally {
-      setSavingUser(false);
-    }
-  }
-
-  async function handleDeleteUser() {
-    if (!deletingUser) return;
-    setUserError(null);
-    setDeletingBusy(true);
-    try {
-      await usersApi.delete(deletingUser.id);
-      await reloadUsers();
-      setDeletingUser(null);
-    } catch (err) {
-      setUserError(err instanceof Error ? err.message : "Erro ao remover utilizador");
-    } finally {
-      setDeletingBusy(false);
-    }
-  }
-
   if (!company) {
     return <LoadingState fullScreen />;
   }
 
   return (
-    <Layout title="Definições da Empresa">
-      <div className="max-w-2xl">
+    <Layout title="Definições da Empresa" subtitle="Identidade, parâmetros de cálculo, subscrição e acessos da equipa">
+      <div className="max-w-6xl">
         {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
 
-        <div className="flex gap-1 border-b border-gray-200 mb-5 overflow-x-auto">
+        <div className="mb-5 flex flex-wrap gap-1 border-b border-gray-200">
           {TABS.map((t) => (
             <button
               key={t.id}
-              onClick={() => setTab(t.id)}
+              onClick={() => { setTab(t.id); setSearchParams(t.id === "geral" ? {} : { tab: t.id }); }}
               className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition-colors ${
                 tab === t.id ? "border-brand-700 text-brand-800" : "border-transparent text-gray-500 hover:text-gray-800"
               }`}
@@ -367,107 +315,19 @@ export default function CompanySettingsPage() {
                 return plan ? (
                   <span className="text-sm text-gray-700">
                     Plano <span className="font-semibold">{plan.label}</span> — {plan.maxUsers ? `até ${plan.maxUsers} utilizador(es)` : "utilizadores ilimitados"} (
-                    {users.length} em uso), {plan.maxProjects ? `até ${plan.maxProjects} projectos` : "projectos ilimitados"}
+                    {userCount} em uso), {plan.maxProjects ? `até ${plan.maxProjects} projectos` : "projectos ilimitados"}
                   </span>
                 ) : null;
               })()}
             </div>
-            <p className="text-xs text-gray-400 mt-2">Para mudar de plano, contacte o suporte do SIGA.</p>
+            <p className="text-xs text-gray-400 mt-2">Para mudar de plano, contacte o suporte do SIGO.</p>
           </section>
         )}
 
         {tab === "utilizadores" && (
-          <section className="card">
-            {canEdit ? (
-              <>
-                <div className="flex items-center justify-between px-5 pt-4 pb-2 border-b border-gray-100">
-                  <div className="flex items-center gap-2">
-                    <IconUsers className="w-4 h-4 text-brand-700" />
-                    <h2 className="section-title text-base">Utilizadores da Equipa</h2>
-                  </div>
-                  <button onClick={() => setShowUserForm((s) => !s)} className="btn btn-secondary btn-sm">
-                    <IconPlus className="w-3.5 h-3.5" />
-                    Adicionar
-                  </button>
-                </div>
-
-                {userError && <p className="text-sm text-red-600 px-5 pt-3">{userError}</p>}
-
-                {showUserForm && (
-                  <form onSubmit={handleCreateUser} className="grid gap-3 sm:grid-cols-2 px-5 py-4 border-b border-gray-100">
-                    <div>
-                      <label className="label">Nome</label>
-                      <input required value={newUserName} onChange={(e) => setNewUserName(e.target.value)} className="input" />
-                    </div>
-                    <div>
-                      <label className="label">Email</label>
-                      <input required type="email" value={newUserEmail} onChange={(e) => setNewUserEmail(e.target.value)} className="input" />
-                    </div>
-                    <div>
-                      <label className="label">Palavra-passe inicial (mín. 8 caracteres)</label>
-                      <input required minLength={8} type="password" value={newUserPassword} onChange={(e) => setNewUserPassword(e.target.value)} className="input" />
-                    </div>
-                    <div>
-                      <label className="label">Perfil</label>
-                      <select value={newUserRole} onChange={(e) => setNewUserRole(e.target.value as CompanyUserRole)} className="input">
-                        {(Object.keys(ROLE_LABELS) as CompanyUserRole[]).map((r) => (
-                          <option key={r} value={r}>
-                            {ROLE_LABELS[r]}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="sm:col-span-2">
-                      <button type="submit" disabled={savingUser} className="btn btn-primary">
-                        {savingUser ? "A criar..." : "Criar utilizador"}
-                      </button>
-                    </div>
-                  </form>
-                )}
-
-                <ul>
-                  {users.map((u) => (
-                    <li key={u.id} className="table-row group flex items-center justify-between px-5 py-3">
-                      <div className="min-w-0">
-                        <p className="font-medium text-gray-900 truncate">{u.name}</p>
-                        <p className="muted truncate">{u.email}</p>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <span className="badge badge-gray">{ROLE_LABELS[u.role]}</span>
-                        <span className="muted hidden sm:inline">desde {fmtDate(u.createdAt)}</span>
-                        {u.id !== user?.id && (
-                          <button
-                            onClick={() => setDeletingUser({ id: u.id, name: u.name })}
-                            className="icon-btn-danger opacity-0 pointer-coarse:opacity-100 group-hover:opacity-100 transition-opacity"
-                            title="Remover utilizador"
-                          >
-                            <IconTrash className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </div>
-                    </li>
-                  ))}
-                  {users.length === 0 && <li className="px-5 py-4 text-sm text-gray-400">Ainda não há mais ninguém na equipa.</li>}
-                </ul>
-              </>
-            ) : (
-              <p className="p-5 muted">Só um administrador da empresa pode gerir a equipa.</p>
-            )}
-          </section>
+          canEdit ? <TeamAccessPanel maxUsers={getPlanDefinition(subscription?.plan ?? "free")?.maxUsers ?? null} onCountChange={setUserCount} /> : <section className="card card-pad"><p className="muted">Só um administrador da empresa pode gerir a equipa.</p></section>
         )}
       </div>
-
-      {deletingUser && (
-        <ConfirmDialog
-          title="Remover utilizador"
-          message={`Remover "${deletingUser.name}" da equipa? Esta acção não pode ser desfeita.`}
-          confirmLabel="Remover"
-          danger
-          busy={deletingBusy}
-          onConfirm={handleDeleteUser}
-          onCancel={() => setDeletingUser(null)}
-        />
-      )}
     </Layout>
   );
 }

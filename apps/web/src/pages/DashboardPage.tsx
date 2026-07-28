@@ -29,6 +29,14 @@ function MoneyByCurrency({ totals }: { totals: CurrencyTotals }) {
 const CERT_STATUS_LABELS: Record<string, string> = { rascunho: "Rascunho", submetido: "Submetido", aprovado: "Aprovado" };
 const CERT_STATUS_TONE: Record<string, string> = { rascunho: "badge-gray", submetido: "badge-yellow", aprovado: "badge-green" };
 
+const OPERATION_FLOW = [
+  { step: "01", label: "Preços e composições", detail: "Base de custo", to: "/catalogo" },
+  { step: "02", label: "Projectos e orçamento", detail: "Quantidades e margem", to: "/projectos" },
+  { step: "03", label: "Cronograma", detail: "Prazo e necessidades", to: "/projectos" },
+  { step: "04", label: "Compras e campo", detail: "Execução real", to: "/projectos" },
+  { step: "05", label: "Autos e financeiro", detail: "Validação e resultado", to: "/projectos" },
+];
+
 function StatCard({ label, value, icon, tint }: { label: string; value: string | number; icon: ReactNode; tint: string }) {
   return (
     <div className="card card-pad">
@@ -78,6 +86,7 @@ export default function DashboardPage() {
   return (
     <Layout
       title="Visão geral"
+      subtitle="Custos, planeamento, compras, execução e medição numa única cadeia de decisão"
       actions={
         <Link to="/projectos" className="btn btn-primary btn-sm">
           <IconPlus className="w-3.5 h-3.5" />
@@ -102,6 +111,11 @@ export default function DashboardPage() {
               </p>
             </div>
         </div>
+
+        <section className="card overflow-hidden">
+          <div className="border-b border-slate-200 px-5 py-4"><p className="text-[10px] font-bold uppercase tracking-[0.14em] text-brand-700">Fluxo integrado da obra</p><h2 className="mt-1 text-sm font-semibold text-slate-900">Cada módulo recebe informação do anterior e devolve controlo ao seguinte</h2></div>
+          <div className="grid gap-px bg-slate-200 md:grid-cols-5">{OPERATION_FLOW.map((item, index) => <Link key={item.step} to={item.to} className="group relative bg-white px-4 py-4 hover:bg-blue-50/60"><div className="flex items-center gap-2"><span className="text-[10px] font-black text-[#d85f18]">{item.step}</span>{index < OPERATION_FLOW.length - 1 && <span className="ml-auto text-slate-300 group-hover:text-blue-500">→</span>}</div><p className="mt-2 text-xs font-semibold text-slate-900">{item.label}</p><p className="mt-1 text-[10px] text-slate-500">{item.detail}</p></Link>)}</div>
+        </section>
 
         {data && (
           <>
