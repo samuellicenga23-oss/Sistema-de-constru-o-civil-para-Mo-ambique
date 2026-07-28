@@ -410,4 +410,7 @@ publicação.
   alterar resultados de plantas existentes.
 - **Validação:** build completo aprovado; 38 testes da API e 12 do frontend aprovados; parser Python
   validado com PDF sintético de três páginas e eventos reais `1/3`, `2/3`, `3/3`.
-- **Produção:** pronta para publicação depois da verificação final do `main` remoto.
+- **Produção:** publicada em `https://sud30s.org` no commit `fcdfaa3`; backup PostgreSQL criado em
+  `/home/sigo/backups/sigo-predeploy-20260728-fcdfaa3.dump`, migração `0025` aplicada, serviço de
+  plantas reiniciado sob supervisão do systemd, nova rota de progresso confirmada, API recarregada
+  e saúde interna/HTTPS validada.
