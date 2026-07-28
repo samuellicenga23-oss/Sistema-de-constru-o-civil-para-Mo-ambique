@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { eq } from "drizzle-orm";
 import { db } from "./index.js";
-import { plants } from "./schema.js";
+import { extractedRooms, plants } from "./schema.js";
 import { processPlantFile } from "../routes/plants.js";
 
 async function main() {
@@ -28,7 +28,14 @@ async function main() {
   try {
     const buffer = await readFile(plant.filePath);
     await processPlantFile(plant.id, buffer, plant.originalFileName ?? "planta.pdf");
-    console.log(`Planta ${plant.id} reprocessada com sucesso.`);
+    const rooms = await db.select({ areaM2: extractedRooms.areaM2, floor: extractedRooms.floor })
+      .from(extractedRooms)
+      .where(eq(extractedRooms.plantId, plant.id));
+    const totalArea = rooms.reduce((sum, room) => sum + Number(room.areaM2), 0);
+    const floors = [...new Set(rooms.map((room) => room.floor).filter(Boolean))];
+    console.log(
+      `Planta ${plant.id} reprocessada: ${rooms.length} compartimento(s), ${totalArea.toFixed(3)} m², pisos: ${floors.join(", ") || "não atribuídos"}.`,
+    );
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erro desconhecido";
     await db
