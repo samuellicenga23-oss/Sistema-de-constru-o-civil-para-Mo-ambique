@@ -169,6 +169,13 @@
       "when": 1785236534390,
       "tag": "0023_tricky_nocturne",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1785238565721,
+      "tag": "0024_dark_micromacro",
+      "breakpoints": true
     }
   ]
 }

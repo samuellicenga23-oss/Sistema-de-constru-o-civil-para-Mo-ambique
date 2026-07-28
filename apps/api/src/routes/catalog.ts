@@ -54,18 +54,35 @@ function dedupeByName<T extends { name: string; companyId: string | null }>(rows
 }
 
 const labourCategorySchema = z.object({
+  code: z.string().trim().max(50).nullable().optional(),
   name: z.string().min(1),
   monthlySalary: z.number().positive(),
+  productiveHoursPerMonth: z.number().positive().nullable().optional(),
+  socialChargesPct: z.number().min(0).max(200).default(0),
+  complementaryCostsPct: z.number().min(0).max(200).default(0),
   currency: z.enum(CURRENCIES).default("MZN"),
+  sourceName: z.string().trim().max(180).nullable().optional(),
+  sourceReference: z.string().trim().max(2000).nullable().optional(),
+  effectiveDate: z.string().date().nullable().optional(),
+  isActive: z.boolean().default(true),
 });
 const labourCategoryUpdateSchema = labourCategorySchema.partial();
 
 const materialSchema = z.object({
+  code: z.string().trim().max(50).nullable().optional(),
   name: z.string().min(1),
+  category: z.string().trim().min(1).max(100).default("Outros"),
+  specification: z.string().trim().max(2000).nullable().optional(),
   unit: z.enum(UNITS),
   baseUnitCost: z.number().nonnegative(),
   importFactor: z.number().positive().default(1),
+  defaultWastePct: z.number().min(0).max(100).default(0),
   currency: z.enum(CURRENCIES).default("MZN"),
+  priceSourceName: z.string().trim().max(180).nullable().optional(),
+  sourceReference: z.string().trim().max(2000).nullable().optional(),
+  priceDate: z.string().date().nullable().optional(),
+  includesVat: z.boolean().default(false),
+  isActive: z.boolean().default(true),
   // Unidade de compra de mercado (ex: "Camião 10m³", "Saco 20kg") — null/omitido = sem
   // conversão, mostra-se apenas na unidade de medida (ex: água, local; materiais ao peso solto).
   purchasePackageLabel: z.string().min(1).nullable().optional(),
@@ -105,7 +122,14 @@ export async function catalogRoutes(app: FastifyInstance) {
 
     const companyId = targetCompanyId(request);
     const { workingDaysPerMonth, workingHoursPerDay } = await getCompanyWorkingParams(companyId);
-    const hourlyRate = computeHourlyRate(parsed.data.monthlySalary, workingDaysPerMonth, workingHoursPerDay);
+    const hourlyRate = computeHourlyRate(
+      parsed.data.monthlySalary,
+      workingDaysPerMonth,
+      workingHoursPerDay,
+      parsed.data.productiveHoursPerMonth,
+      parsed.data.socialChargesPct,
+      parsed.data.complementaryCostsPct
+    );
 
     const [row] = await db
       .insert(labourCategories)
@@ -113,6 +137,9 @@ export async function catalogRoutes(app: FastifyInstance) {
         ...parsed.data,
         companyId,
         monthlySalary: parsed.data.monthlySalary.toString(),
+        productiveHoursPerMonth: parsed.data.productiveHoursPerMonth?.toString() ?? null,
+        socialChargesPct: parsed.data.socialChargesPct.toString(),
+        complementaryCostsPct: parsed.data.complementaryCostsPct.toString(),
         hourlyRate: hourlyRate.toString(),
       })
       .returning();
@@ -142,14 +169,36 @@ export async function catalogRoutes(app: FastifyInstance) {
 
     const monthlySalary = parsed.data.monthlySalary ?? Number(target.monthlySalary);
     let hourlyRate = Number(target.hourlyRate);
-    if (parsed.data.monthlySalary !== undefined) {
+    if (
+      parsed.data.monthlySalary !== undefined
+      || parsed.data.productiveHoursPerMonth !== undefined
+      || parsed.data.socialChargesPct !== undefined
+      || parsed.data.complementaryCostsPct !== undefined
+    ) {
       const { workingDaysPerMonth, workingHoursPerDay } = await getCompanyWorkingParams(target.companyId);
-      hourlyRate = computeHourlyRate(monthlySalary, workingDaysPerMonth, workingHoursPerDay);
+      hourlyRate = computeHourlyRate(
+        monthlySalary,
+        workingDaysPerMonth,
+        workingHoursPerDay,
+        parsed.data.productiveHoursPerMonth === undefined ? Number(target.productiveHoursPerMonth) || null : parsed.data.productiveHoursPerMonth,
+        parsed.data.socialChargesPct ?? Number(target.socialChargesPct),
+        parsed.data.complementaryCostsPct ?? Number(target.complementaryCostsPct)
+      );
     }
 
     const [row] = await db
       .update(labourCategories)
-      .set({ ...parsed.data, monthlySalary: monthlySalary.toString(), hourlyRate: hourlyRate.toString() })
+      .set({
+        ...parsed.data,
+        monthlySalary: monthlySalary.toString(),
+        productiveHoursPerMonth: parsed.data.productiveHoursPerMonth === undefined
+          ? undefined
+          : parsed.data.productiveHoursPerMonth?.toString() ?? null,
+        socialChargesPct: parsed.data.socialChargesPct?.toString(),
+        complementaryCostsPct: parsed.data.complementaryCostsPct?.toString(),
+        hourlyRate: hourlyRate.toString(),
+        updatedAt: new Date(),
+      })
       .where(eq(labourCategories.id, target.id))
       .returning();
     return row;
@@ -193,7 +242,13 @@ export async function catalogRoutes(app: FastifyInstance) {
     const zonePrices = zoneId && materialIds.length
       ? await db.select().from(materialZonePrices).where(and(eq(materialZonePrices.zoneId, zoneId), inArray(materialZonePrices.materialId, materialIds)))
       : [];
-    const zonePriceByMaterialId = new Map(zonePrices.map((p) => [p.materialId, p.unitCost]));
+    const zonePriceByMaterialId = new Map(zonePrices.map((p) => [p.materialId, p]));
+    const [selectedZone] = zoneId
+      ? await db.select().from(priceZones).where(and(eq(priceZones.id, zoneId), scopeFilter(priceZones.companyId, request))).limit(1)
+      : [undefined];
+    const zoneFallbackFactor = selectedZone
+      ? (1 + Number(selectedZone.materialAdjustmentPct) / 100) * (1 + Number(selectedZone.defaultTransportPct) / 100)
+      : 1;
 
     // Liga o mercado real ao catálogo: para cada material mostra a melhor cotação de fornecedor
     // compatível com a zona seleccionada. Uma cotação específica da zona tem prioridade sobre uma
@@ -230,9 +285,16 @@ export async function catalogRoutes(app: FastifyInstance) {
 
     return deduped.map((m) => {
       const quote = bestQuoteByMaterialId.get(m.id);
+      const explicitZonePrice = zonePriceByMaterialId.get(m.id);
+      const effectiveBeforeImport = explicitZonePrice ? Number(explicitZonePrice.unitCost) : Number(m.baseUnitCost) * zoneFallbackFactor;
+      const effectiveUnitCost = effectiveBeforeImport * Number(m.importFactor);
       return {
         ...m,
-        zonePrice: zonePriceByMaterialId.get(m.id) ?? null,
+        zonePrice: explicitZonePrice?.unitCost ?? null,
+        zonePriceSourceName: explicitZonePrice?.sourceName ?? null,
+        zonePriceEffectiveDate: explicitZonePrice?.effectiveDate ?? null,
+        effectiveUnitCost,
+        priceBasis: explicitZonePrice ? "zone_specific" : selectedZone ? "zone_adjusted_base" : "base",
         marketPrice: quote?.unitCost ?? null,
         marketCurrency: quote?.currency ?? null,
         marketSupplierId: quote?.supplierId ?? null,
@@ -253,6 +315,7 @@ export async function catalogRoutes(app: FastifyInstance) {
         companyId,
         baseUnitCost: parsed.data.baseUnitCost.toString(),
         importFactor: parsed.data.importFactor.toString(),
+        defaultWastePct: parsed.data.defaultWastePct.toString(),
         purchasePackageQty: parsed.data.purchasePackageQty != null ? parsed.data.purchasePackageQty.toString() : null,
       })
       .returning();
@@ -284,7 +347,9 @@ export async function catalogRoutes(app: FastifyInstance) {
         ...parsed.data,
         baseUnitCost: parsed.data.baseUnitCost !== undefined ? parsed.data.baseUnitCost.toString() : undefined,
         importFactor: parsed.data.importFactor !== undefined ? parsed.data.importFactor.toString() : undefined,
+        defaultWastePct: parsed.data.defaultWastePct !== undefined ? parsed.data.defaultWastePct.toString() : undefined,
         purchasePackageQty: parsed.data.purchasePackageQty !== undefined ? (parsed.data.purchasePackageQty != null ? parsed.data.purchasePackageQty.toString() : null) : undefined,
+        updatedAt: new Date(),
       })
       .where(eq(materials.id, target.id))
       .returning();

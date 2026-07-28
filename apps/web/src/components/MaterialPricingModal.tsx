@@ -17,6 +17,8 @@ export default function MaterialPricingModal({ material, onClose, onChanged }: {
   const [newSupplierId, setNewSupplierId] = useState("");
   const [newZoneId, setNewZoneId] = useState("");
   const [newUnitCost, setNewUnitCost] = useState("");
+  const [editingZoneId, setEditingZoneId] = useState<string | null>(null);
+  const [zoneDraft, setZoneDraft] = useState({ unitCost: "", sourceName: "", sourceReference: "", effectiveDate: "", includesVat: false, transportIncluded: true });
 
   async function reload() {
     const [zns, zps, sups, matSuppliers] = await Promise.all([
@@ -38,7 +40,15 @@ export default function MaterialPricingModal({ material, onClose, onChanged }: {
   }, [material.id]);
 
   async function handleSaveZonePrice(zoneId: string, unitCost: number) {
-    await catalogApi.setMaterialZonePrice(material.id, zoneId, unitCost);
+    const existing = zonePrices.find((price) => price.zoneId === zoneId);
+    await catalogApi.setMaterialZonePrice(material.id, zoneId, {
+      unitCost,
+      sourceName: existing?.sourceName ?? null,
+      sourceReference: existing?.sourceReference ?? null,
+      effectiveDate: existing?.effectiveDate ?? null,
+      includesVat: existing?.includesVat ?? false,
+      transportIncluded: existing?.transportIncluded ?? true,
+    });
     await reload();
     onChanged();
   }
@@ -47,6 +57,34 @@ export default function MaterialPricingModal({ material, onClose, onChanged }: {
     await catalogApi.deleteMaterialZonePrice(material.id, zoneId);
     await reload();
     onChanged();
+  }
+
+  function openZoneEditor(zoneId: string) {
+    const existing = zonePrices.find((price) => price.zoneId === zoneId);
+    setEditingZoneId(zoneId);
+    setZoneDraft({
+      unitCost: existing?.unitCost ?? material.baseUnitCost,
+      sourceName: existing?.sourceName ?? "",
+      sourceReference: existing?.sourceReference ?? "",
+      effectiveDate: existing?.effectiveDate ?? "",
+      includesVat: existing?.includesVat ?? material.includesVat,
+      transportIncluded: existing?.transportIncluded ?? true,
+    });
+  }
+
+  async function saveZoneDocumentation(e: FormEvent) {
+    e.preventDefault();
+    if (!editingZoneId) return;
+    await catalogApi.setMaterialZonePrice(material.id, editingZoneId, {
+      unitCost: Number(zoneDraft.unitCost),
+      sourceName: zoneDraft.sourceName.trim() || null,
+      sourceReference: zoneDraft.sourceReference.trim() || null,
+      effectiveDate: zoneDraft.effectiveDate || null,
+      includesVat: zoneDraft.includesVat,
+      transportIncluded: zoneDraft.transportIncluded,
+    });
+    setEditingZoneId(null);
+    await reload(); onChanged();
   }
 
   async function handleAddSupplierPrice(e: FormEvent) {
@@ -89,7 +127,7 @@ export default function MaterialPricingModal({ material, onClose, onChanged }: {
                 <tr className="table-head-row">
                   <th className="text-left py-2 px-3 font-medium">Zona</th>
                   <th className="text-right font-medium">Preço</th>
-                  <th className="w-10"></th>
+                  <th className="w-36"></th>
                 </tr>
               </thead>
               <tbody>
@@ -102,7 +140,8 @@ export default function MaterialPricingModal({ material, onClose, onChanged }: {
                         <EditablePrice value={override?.unitCost ?? material.baseUnitCost} suffix={material.currency} onSave={(v) => handleSaveZonePrice(z.id, v)} />
                         {!override && <span className="text-[11px] text-gray-400 ml-1">(base)</span>}
                       </td>
-                      <td className="text-right pr-2">
+                      <td className="text-right pr-2 whitespace-nowrap">
+                        <button type="button" onClick={() => openZoneEditor(z.id)} className="btn btn-ghost btn-sm">documentar</button>
                         {override && (
                           <button onClick={() => handleRemoveZonePrice(z.id)} className="icon-btn-danger" title="Remover preço desta zona">
                             <IconTrash className="w-3 h-3" />
@@ -116,6 +155,7 @@ export default function MaterialPricingModal({ material, onClose, onChanged }: {
             </table>
           </div>
         )}
+        {editingZoneId && <form onSubmit={saveZoneDocumentation} className="mt-3 rounded-xl border border-blue-100 bg-blue-50/60 p-4 space-y-3"><div className="flex items-center justify-between"><p className="text-sm font-semibold text-blue-950">Preço específico · {zones.find((z) => z.id === editingZoneId)?.name}</p><button type="button" onClick={() => setEditingZoneId(null)} className="text-xs text-slate-500">fechar</button></div><div className="grid grid-cols-2 gap-3"><div><label className="label">Preço por {material.unit}</label><input required min="0" type="number" step="any" className="input" value={zoneDraft.unitCost} onChange={(e) => setZoneDraft({ ...zoneDraft, unitCost: e.target.value })} /></div><div><label className="label">Data efectiva</label><input type="date" className="input" value={zoneDraft.effectiveDate} onChange={(e) => setZoneDraft({ ...zoneDraft, effectiveDate: e.target.value })} /></div><div className="col-span-2"><label className="label">Fonte</label><input className="input" value={zoneDraft.sourceName} onChange={(e) => setZoneDraft({ ...zoneDraft, sourceName: e.target.value })} placeholder="Fornecedor, boletim de preços ou estudo de mercado" /></div><div className="col-span-2"><label className="label">Referência</label><input className="input" value={zoneDraft.sourceReference} onChange={(e) => setZoneDraft({ ...zoneDraft, sourceReference: e.target.value })} placeholder="N.º da cotação, documento ou URL" /></div></div><div className="flex flex-wrap items-center justify-between gap-3"><div className="flex gap-4 text-xs"><label className="flex items-center gap-2"><input type="checkbox" checked={zoneDraft.includesVat} onChange={(e) => setZoneDraft({ ...zoneDraft, includesVat: e.target.checked })} /> Inclui IVA</label><label className="flex items-center gap-2"><input type="checkbox" checked={zoneDraft.transportIncluded} onChange={(e) => setZoneDraft({ ...zoneDraft, transportIncluded: e.target.checked })} /> Inclui transporte</label></div><button className="btn btn-primary btn-sm">Guardar preço documentado</button></div></form>}
       </section>
 
       <section>

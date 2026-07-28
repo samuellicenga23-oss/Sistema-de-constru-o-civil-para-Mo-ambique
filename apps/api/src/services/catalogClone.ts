@@ -20,7 +20,21 @@ export async function cloneLabourCategoryForCompany(sourceId: string, companyId:
   if (!source) return null;
   const [copy] = await db
     .insert(labourCategories)
-    .values({ companyId, name: source.name, monthlySalary: source.monthlySalary, hourlyRate: source.hourlyRate, currency: source.currency })
+    .values({
+      companyId,
+      code: source.code,
+      name: source.name,
+      monthlySalary: source.monthlySalary,
+      productiveHoursPerMonth: source.productiveHoursPerMonth,
+      socialChargesPct: source.socialChargesPct,
+      complementaryCostsPct: source.complementaryCostsPct,
+      hourlyRate: source.hourlyRate,
+      currency: source.currency,
+      sourceName: source.sourceName,
+      sourceReference: source.sourceReference,
+      effectiveDate: source.effectiveDate,
+      isActive: source.isActive,
+    })
     .returning();
   return copy;
 }
@@ -32,11 +46,20 @@ export async function cloneMaterialForCompany(sourceId: string, companyId: strin
     .insert(materials)
     .values({
       companyId,
+      code: source.code,
       name: source.name,
+      category: source.category,
+      specification: source.specification,
       unit: source.unit,
       baseUnitCost: source.baseUnitCost,
       importFactor: source.importFactor,
+      defaultWastePct: source.defaultWastePct,
       currency: source.currency,
+      priceSourceName: source.priceSourceName,
+      sourceReference: source.sourceReference,
+      priceDate: source.priceDate,
+      includesVat: source.includesVat,
+      isActive: source.isActive,
       purchasePackageLabel: source.purchasePackageLabel,
       purchasePackageQty: source.purchasePackageQty,
     })
@@ -77,7 +100,24 @@ export async function cloneCompositionForCompany(sourceId: string, companyId: st
 
   const [copy] = await db
     .insert(costCompositions)
-    .values({ companyId, name: source.name, category: source.category, outputUnit: source.outputUnit, currency: source.currency })
+    .values({
+      companyId,
+      code: source.code,
+      name: source.name,
+      category: source.category,
+      description: source.description,
+      measurementCriteria: source.measurementCriteria,
+      executionNotes: source.executionNotes,
+      outputUnit: source.outputUnit,
+      currency: source.currency,
+      auxiliaryCostPct: source.auxiliaryCostPct,
+      indirectCostPct: source.indirectCostPct,
+      profitMarginPct: source.profitMarginPct,
+      version: source.version,
+      sourceName: source.sourceName,
+      sourceReference: source.sourceReference,
+      isActive: source.isActive,
+    })
     .returning();
 
   const [labourLines, materialLines, equipmentLines] = await Promise.all([
@@ -86,13 +126,13 @@ export async function cloneCompositionForCompany(sourceId: string, companyId: st
     db.select().from(compositionEquipmentLines).where(eq(compositionEquipmentLines.compositionId, sourceId)),
   ]);
   if (labourLines.length) {
-    await db.insert(compositionLabourLines).values(labourLines.map((l) => ({ compositionId: copy.id, labourCategoryId: l.labourCategoryId, qtyPerUnit: l.qtyPerUnit })));
+    await db.insert(compositionLabourLines).values(labourLines.map((l) => ({ compositionId: copy.id, labourCategoryId: l.labourCategoryId, qtyPerUnit: l.qtyPerUnit, notes: l.notes })));
   }
   if (materialLines.length) {
-    await db.insert(compositionMaterialLines).values(materialLines.map((l) => ({ compositionId: copy.id, materialId: l.materialId, qtyPerUnit: l.qtyPerUnit })));
+    await db.insert(compositionMaterialLines).values(materialLines.map((l) => ({ compositionId: copy.id, materialId: l.materialId, qtyPerUnit: l.qtyPerUnit, wastePct: l.wastePct, notes: l.notes })));
   }
   if (equipmentLines.length) {
-    await db.insert(compositionEquipmentLines).values(equipmentLines.map((l) => ({ compositionId: copy.id, equipmentId: l.equipmentId, qtyPerUnit: l.qtyPerUnit })));
+    await db.insert(compositionEquipmentLines).values(equipmentLines.map((l) => ({ compositionId: copy.id, equipmentId: l.equipmentId, qtyPerUnit: l.qtyPerUnit, notes: l.notes })));
   }
   return copy;
 }

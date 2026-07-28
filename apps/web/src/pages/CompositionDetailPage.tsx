@@ -44,7 +44,7 @@ async function buildSupplierSummaryByRefId<TLine extends { refId: string; name: 
 }
 
 // Linha editável do editor: recurso escolhido + rendimento/consumo por unidade de saída.
-type EditableLine = { refId: string; qtyPerUnit: number };
+type EditableLine = { refId: string; qtyPerUnit: number; wastePct?: number; notes?: string | null };
 
 function LineEditor({
   title,
@@ -55,6 +55,8 @@ function LineEditor({
   optionCost,
   fallback,
   hint,
+  supportsWaste = false,
+  optionDefaultWaste,
 }: {
   title: string;
   unitLabel: string;
@@ -69,6 +71,8 @@ function LineEditor({
   // Texto opcional mostrado por baixo do nome do recurso — usado nos Materiais para indicar se há
   // fornecedores cadastrados com preço (ver GET /api/catalog/materials/:id/suppliers).
   hint?: (refId: string) => string | null;
+  supportsWaste?: boolean;
+  optionDefaultWaste?: (refId: string) => number;
 }) {
   const [newRefId, setNewRefId] = useState("");
   const [newQty, setNewQty] = useState("");
@@ -84,10 +88,14 @@ function LineEditor({
     return fallback.get(refId)?.unitCost ?? 0;
   }
 
-  const subtotal = lines.reduce((sum, l) => sum + l.qtyPerUnit * resolveCost(l.refId), 0);
+  const subtotal = lines.reduce((sum, l) => sum + l.qtyPerUnit * (1 + Number(l.wastePct ?? 0) / 100) * resolveCost(l.refId), 0);
 
   function updateQty(refId: string, qty: number) {
     setLines(lines.map((l) => (l.refId === refId ? { ...l, qtyPerUnit: qty } : l)));
+  }
+
+  function updateWaste(refId: string, wastePct: number) {
+    setLines(lines.map((l) => (l.refId === refId ? { ...l, wastePct } : l)));
   }
 
   function removeLine(refId: string) {
@@ -96,7 +104,7 @@ function LineEditor({
 
   function addLine() {
     if (!newRefId || !newQty) return;
-    setLines([...lines, { refId: newRefId, qtyPerUnit: Number(newQty) }]);
+    setLines([...lines, { refId: newRefId, qtyPerUnit: Number(newQty), wastePct: supportsWaste ? optionDefaultWaste?.(newRefId) ?? 0 : undefined }]);
     setNewRefId("");
     setNewQty("");
   }
@@ -112,6 +120,7 @@ function LineEditor({
           <tr className="table-head-row">
             <th className="py-1.5 font-medium">Recurso</th>
             <th className="w-32 font-medium">{unitLabel}</th>
+            {supportsWaste && <th className="w-24 font-medium">Perda</th>}
             <th className="w-28 text-right font-medium">Custo unitário</th>
             <th className="w-28 text-right font-medium">Subtotal</th>
             <th className="w-8"></th>
@@ -120,6 +129,7 @@ function LineEditor({
         <tbody>
           {lines.map((l) => {
             const cost = resolveCost(l.refId);
+            const effectiveQty = l.qtyPerUnit * (1 + Number(l.wastePct ?? 0) / 100);
             return (
               <tr key={l.refId} className="table-row">
                 <td className="py-1.5">
@@ -135,8 +145,9 @@ function LineEditor({
                     className="input input-sm w-24"
                   />
                 </td>
+                {supportsWaste && <td><div className="flex items-center gap-1"><input type="number" min="0" max="100" step="any" value={l.wastePct ?? 0} onChange={(e) => updateWaste(l.refId, Number(e.target.value))} className="input input-sm w-16" /><span className="text-xs text-slate-400">%</span></div></td>}
                 <td className="text-right tabular-nums text-gray-600">{money(cost)}</td>
-                <td className="text-right tabular-nums font-medium">{money(l.qtyPerUnit * cost)}</td>
+                <td className="text-right tabular-nums font-medium">{money(effectiveQty * cost)}</td>
                 <td className="text-right">
                   <button onClick={() => removeLine(l.refId)} className="icon-btn-danger">
                     <IconTrash className="w-3.5 h-3.5" />
@@ -147,7 +158,7 @@ function LineEditor({
           })}
           {lines.length === 0 && (
             <tr>
-              <td colSpan={5} className="py-3 text-gray-400 text-xs text-center">
+              <td colSpan={supportsWaste ? 6 : 5} className="py-3 text-gray-400 text-xs text-center">
                 Sem recursos nesta secção.
               </td>
             </tr>
@@ -184,7 +195,17 @@ export default function CompositionDetailPage() {
   const [materials, setMaterials] = useState<Material[]>([]);
   const [equipment, setEquipment] = useState<Equipment[]>([]);
   const [name, setName] = useState("");
+  const [code, setCode] = useState("");
   const [category, setCategory] = useState("");
+  const [description, setDescription] = useState("");
+  const [measurementCriteria, setMeasurementCriteria] = useState("");
+  const [executionNotes, setExecutionNotes] = useState("");
+  const [auxiliaryCostPct, setAuxiliaryCostPct] = useState("0");
+  const [indirectCostPct, setIndirectCostPct] = useState("0");
+  const [profitMarginPct, setProfitMarginPct] = useState("0");
+  const [sourceName, setSourceName] = useState("");
+  const [sourceReference, setSourceReference] = useState("");
+  const [isActive, setIsActive] = useState(true);
   const [labourLines, setLabourLines] = useState<EditableLine[]>([]);
   const [materialLines, setMaterialLines] = useState<EditableLine[]>([]);
   const [equipmentLines, setEquipmentLines] = useState<EditableLine[]>([]);
@@ -206,11 +227,21 @@ export default function CompositionDetailPage() {
       catalogApi.listEquipment(),
     ]);
     setDetail(d);
+    setCode(d.code ?? "");
     setName(d.name);
     setCategory(d.category);
-    setLabourLines(d.labourLines.map((l) => ({ refId: l.refId, qtyPerUnit: Number(l.qtyPerUnit) })));
-    setMaterialLines(d.materialLines.map((l) => ({ refId: l.refId, qtyPerUnit: Number(l.qtyPerUnit) })));
-    setEquipmentLines(d.equipmentLines.map((l) => ({ refId: l.refId, qtyPerUnit: Number(l.qtyPerUnit) })));
+    setDescription(d.description ?? "");
+    setMeasurementCriteria(d.measurementCriteria ?? "");
+    setExecutionNotes(d.executionNotes ?? "");
+    setAuxiliaryCostPct(d.auxiliaryCostPct);
+    setIndirectCostPct(d.indirectCostPct);
+    setProfitMarginPct(d.profitMarginPct);
+    setSourceName(d.sourceName ?? "");
+    setSourceReference(d.sourceReference ?? "");
+    setIsActive(d.isActive);
+    setLabourLines(d.labourLines.map((l) => ({ refId: l.refId, qtyPerUnit: Number(l.qtyPerUnit), notes: l.notes })));
+    setMaterialLines(d.materialLines.map((l) => ({ refId: l.refId, qtyPerUnit: Number(l.qtyPerUnit), wastePct: Number(l.wastePct ?? 0), notes: l.notes })));
+    setEquipmentLines(d.equipmentLines.map((l) => ({ refId: l.refId, qtyPerUnit: Number(l.qtyPerUnit), notes: l.notes })));
     // Reserva: nome/custo de cada recurso tal como o backend os resolveu para ESTA
     // composição — cobre o caso de o id já não aparecer na lista geral (deduplicada).
     setLabourFallback(new Map(d.labourLines.map((l) => [l.refId, { name: l.name, unitCost: Number(l.unitCost) }])));
@@ -249,10 +280,20 @@ export default function CompositionDetailPage() {
     setMessage(null);
     try {
       const result = await catalogApi.updateComposition(id, {
+        code: code.trim() || null,
         name,
         category: category || "Outros",
+        description: description.trim() || null,
+        measurementCriteria: measurementCriteria.trim() || null,
+        executionNotes: executionNotes.trim() || null,
         outputUnit: detail.outputUnit,
         currency: detail.currency,
+        auxiliaryCostPct: Number(auxiliaryCostPct),
+        indirectCostPct: Number(indirectCostPct),
+        profitMarginPct: Number(profitMarginPct),
+        sourceName: sourceName.trim() || null,
+        sourceReference: sourceReference.trim() || null,
+        isActive,
         labourLines,
         materialLines,
         equipmentLines,
@@ -290,13 +331,17 @@ export default function CompositionDetailPage() {
   const materialCost = materialLines.reduce((s, l) => {
     const mat = materials.find((o) => o.id === l.refId);
     const cost = mat ? Number(mat.baseUnitCost) * Number(mat.importFactor) : materialFallback.get(l.refId)?.unitCost ?? 0;
-    return s + l.qtyPerUnit * cost;
+    return s + l.qtyPerUnit * (1 + Number(l.wastePct ?? 0) / 100) * cost;
   }, 0);
   const equipmentCost = equipmentLines.reduce(
     (s, l) => s + l.qtyPerUnit * Number(equipment.find((o) => o.id === l.refId)?.hourlyCost ?? equipmentFallback.get(l.refId)?.unitCost ?? 0),
     0
   );
-  const unitCost = labourCost + materialCost + equipmentCost;
+  const directCost = labourCost + materialCost + equipmentCost;
+  const auxiliaryCost = directCost * Number(auxiliaryCostPct || 0) / 100;
+  const indirectCost = (directCost + auxiliaryCost) * Number(indirectCostPct || 0) / 100;
+  const profit = (directCost + auxiliaryCost + indirectCost) * Number(profitMarginPct || 0) / 100;
+  const unitCost = directCost + auxiliaryCost + indirectCost + profit;
 
   return (
     <Layout
@@ -315,7 +360,9 @@ export default function CompositionDetailPage() {
           {message && <p className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">{message}</p>}
 
           <section className="card card-pad">
-            <div className="grid sm:grid-cols-2 gap-3">
+            <div className="flex items-start justify-between gap-4 mb-4"><div><p className="text-[11px] font-semibold uppercase tracking-wide text-brand-700">Ficha técnica · revisão {detail.version}</p><h2 className="text-lg font-bold text-slate-900">Identificação e critérios</h2></div><label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} /> Disponível</label></div>
+            <div className="grid sm:grid-cols-[10rem_1fr_1fr] gap-3">
+              <div><label className="label">Código</label><input value={code} onChange={(e) => setCode(e.target.value)} className="input" placeholder="COMP-BET-001" /></div>
               <div>
                 <label className="label">Nome da composição</label>
                 <input value={name} onChange={(e) => setName(e.target.value)} className="input" />
@@ -325,6 +372,9 @@ export default function CompositionDetailPage() {
                 <input value={category} onChange={(e) => setCategory(e.target.value)} className="input" placeholder="ex: Betões, Aços e Cofragens" />
               </div>
             </div>
+            <div className="grid sm:grid-cols-2 gap-3 mt-3"><div><label className="label">Descrição / âmbito</label><textarea value={description} onChange={(e) => setDescription(e.target.value)} className="input min-h-20" placeholder="O que está incluído e excluído neste serviço" /></div><div><label className="label">Critério de medição e pagamento</label><textarea value={measurementCriteria} onChange={(e) => setMeasurementCriteria(e.target.value)} className="input min-h-20" placeholder={`Como é medida e aceite cada ${detail.outputUnit}`} /></div></div>
+            <div className="grid sm:grid-cols-2 gap-3 mt-3"><div><label className="label">Condições de execução</label><textarea value={executionNotes} onChange={(e) => setExecutionNotes(e.target.value)} className="input min-h-16" placeholder="Método, equipa, equipamento, acessos e premissas" /></div><div><label className="label">Fonte técnica</label><input value={sourceName} onChange={(e) => setSourceName(e.target.value)} className="input" placeholder="Caderno de encargos / SINAPI / composição própria" /><input value={sourceReference} onChange={(e) => setSourceReference(e.target.value)} className="input mt-2" placeholder="Referência, norma, URL ou observação" /></div></div>
+            <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4"><p className="text-xs font-semibold text-slate-700 mb-3">Formação do preço</p><div className="grid grid-cols-3 gap-3"><div><label className="label">Auxiliares (%)</label><input min="0" max="100" type="number" step="any" value={auxiliaryCostPct} onChange={(e) => setAuxiliaryCostPct(e.target.value)} className="input" /></div><div><label className="label">Indirectos (%)</label><input min="0" max="100" type="number" step="any" value={indirectCostPct} onChange={(e) => setIndirectCostPct(e.target.value)} className="input" /></div><div><label className="label">Margem (%)</label><input min="0" max="100" type="number" step="any" value={profitMarginPct} onChange={(e) => setProfitMarginPct(e.target.value)} className="input" /></div></div><p className="mt-2 text-[11px] text-slate-500">O custo directo permanece separado. Auxiliares, indirectos e margem são aplicados em sequência e ficam visíveis no orçamento.</p></div>
             <div className="flex justify-between items-center mt-4">
               <button onClick={handleDelete} className="btn btn-ghost btn-sm text-red-600 hover:bg-red-50">
                 <IconTrash className="w-3.5 h-3.5" />
@@ -341,7 +391,7 @@ export default function CompositionDetailPage() {
             unitLabel={`h / ${detail.outputUnit}`}
             lines={labourLines}
             setLines={setLabourLines}
-            options={labourCategories}
+            options={labourCategories.filter((item) => item.isActive)}
             optionCost={(refId) => Number(labourCategories.find((o) => o.id === refId)?.hourlyRate ?? 0)}
             fallback={labourFallback}
             hint={(refId) => formatSupplierHint(supplierSummaryByLabour, refId)}
@@ -351,13 +401,15 @@ export default function CompositionDetailPage() {
             unitLabel={`qtd / ${detail.outputUnit}`}
             lines={materialLines}
             setLines={setMaterialLines}
-            options={materials}
+            options={materials.filter((item) => item.isActive)}
             optionCost={(refId) => {
               const mat = materials.find((o) => o.id === refId);
               return Number(mat?.baseUnitCost ?? 0) * Number(mat?.importFactor ?? 1);
             }}
             fallback={materialFallback}
             hint={(refId) => formatSupplierHint(supplierSummaryByMaterial, refId)}
+            supportsWaste
+            optionDefaultWaste={(refId) => Number(materials.find((o) => o.id === refId)?.defaultWastePct ?? 0)}
           />
           <LineEditor
             title="Máquinas / Equipamento"
@@ -388,12 +440,21 @@ export default function CompositionDetailPage() {
                   <dt>Máquinas</dt>
                   <dd className="tabular-nums">{money(equipmentCost)}</dd>
                 </div>
+                <div className="flex justify-between border-t border-white/15 pt-2 mt-2 text-white"><dt>Custo directo</dt><dd className="tabular-nums font-semibold">{money(directCost)}</dd></div>
+                <div className="flex justify-between text-brand-200"><dt>Auxiliares ({money(auxiliaryCostPct)}%)</dt><dd className="tabular-nums">{money(auxiliaryCost)}</dd></div>
+                <div className="flex justify-between text-brand-200"><dt>Indirectos ({money(indirectCostPct)}%)</dt><dd className="tabular-nums">{money(indirectCost)}</dd></div>
+                <div className="flex justify-between text-brand-200"><dt>Margem ({money(profitMarginPct)}%)</dt><dd className="tabular-nums">{money(profit)}</dd></div>
               </dl>
               <div className="flex justify-between items-baseline border-t border-white/20 pt-3 mt-3">
                 <span className="text-sm font-medium">por {detail.outputUnit}</span>
                 <span className="text-xl font-bold tabular-nums">{money(unitCost)} MZN</span>
               </div>
             </div>
+          </section>
+          <section className="card card-pad">
+            <div className="flex items-center justify-between"><p className="text-sm font-semibold text-slate-800">Qualidade da composição</p><span className={`badge ${detail.isReady ? "badge-green" : "badge-yellow"}`}>{detail.qualityScore}%</span></div>
+            {detail.qualityWarnings.length ? <ul className="mt-3 space-y-2">{detail.qualityWarnings.map((warning) => <li key={warning} className="flex gap-2 text-xs leading-5 text-amber-800"><span>•</span><span>{warning}</span></li>)}</ul> : <p className="mt-2 text-xs text-emerald-700">A composição tem os dados essenciais para uso.</p>}
+            <p className="mt-3 border-t border-slate-100 pt-3 text-[11px] leading-4 text-slate-500">A validação é recalculada depois de gravar. Itens já emitidos mantêm o preço original; novos itens usam esta revisão.</p>
           </section>
           <div className="card card-pad text-xs text-gray-500 leading-relaxed">
             <p className="font-medium text-gray-700 mb-1">Como funciona</p>

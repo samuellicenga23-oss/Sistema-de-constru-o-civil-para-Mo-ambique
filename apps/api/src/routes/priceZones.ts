@@ -36,8 +36,37 @@ function dedupeByName<T extends { name: string; companyId: string | null }>(rows
   return Array.from(byName.values());
 }
 
-const zoneSchema = z.object({ name: z.string().min(1) });
-const zonePriceSchema = z.object({ unitCost: z.number().nonnegative() });
+const zoneSchema = z.object({
+  name: z.string().trim().min(1).max(100),
+  province: z.string().trim().max(100).nullable().optional(),
+  district: z.string().trim().max(100).nullable().optional(),
+  description: z.string().trim().max(2000).nullable().optional(),
+  materialAdjustmentPct: z.number().min(-100).max(500).default(0),
+  labourAdjustmentPct: z.number().min(-100).max(500).default(0),
+  equipmentAdjustmentPct: z.number().min(-100).max(500).default(0),
+  defaultTransportPct: z.number().min(0).max(500).default(0),
+  sourceName: z.string().trim().max(180).nullable().optional(),
+  sourceReference: z.string().trim().max(2000).nullable().optional(),
+  effectiveDate: z.string().date().nullable().optional(),
+});
+const zonePriceSchema = z.object({
+  unitCost: z.number().nonnegative(),
+  sourceName: z.string().trim().max(180).nullable().optional(),
+  sourceReference: z.string().trim().max(2000).nullable().optional(),
+  effectiveDate: z.string().date().nullable().optional(),
+  includesVat: z.boolean().default(false),
+  transportIncluded: z.boolean().default(true),
+});
+
+function serializeZoneInput(data: z.infer<typeof zoneSchema>) {
+  return {
+    ...data,
+    materialAdjustmentPct: data.materialAdjustmentPct.toString(),
+    labourAdjustmentPct: data.labourAdjustmentPct.toString(),
+    equipmentAdjustmentPct: data.equipmentAdjustmentPct.toString(),
+    defaultTransportPct: data.defaultTransportPct.toString(),
+  };
+}
 
 export async function priceZoneRoutes(app: FastifyInstance) {
   const auth = { preHandler: requireRole(...CATALOG_ROLES) };
@@ -52,7 +81,7 @@ export async function priceZoneRoutes(app: FastifyInstance) {
     const parsed = zoneSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     const companyId = targetCompanyId(request);
-    const [row] = await db.insert(priceZones).values({ ...parsed.data, companyId }).returning();
+    const [row] = await db.insert(priceZones).values({ ...serializeZoneInput(parsed.data), companyId }).returning();
     return reply.code(201).send(row);
   });
 
@@ -71,12 +100,33 @@ export async function priceZoneRoutes(app: FastifyInstance) {
     if (!target && companyId) {
       const [source] = await db.select().from(priceZones).where(eq(priceZones.id, id)).limit(1);
       if (!source) return reply.code(404).send({ error: "Zona não encontrada" });
-      const [copy] = await db.insert(priceZones).values({ companyId, name: source.name }).returning();
+      const [copy] = await db.insert(priceZones).values({
+        companyId,
+        name: source.name,
+        province: source.province,
+        district: source.district,
+        description: source.description,
+        materialAdjustmentPct: source.materialAdjustmentPct,
+        labourAdjustmentPct: source.labourAdjustmentPct,
+        equipmentAdjustmentPct: source.equipmentAdjustmentPct,
+        defaultTransportPct: source.defaultTransportPct,
+        sourceName: source.sourceName,
+        sourceReference: source.sourceReference,
+        effectiveDate: source.effectiveDate,
+      }).returning();
       target = copy;
     }
     if (!target) return reply.code(404).send({ error: "Zona não encontrada" });
 
-    const [row] = await db.update(priceZones).set(parsed.data).where(eq(priceZones.id, target.id)).returning();
+    const update = parsed.data;
+    const [row] = await db.update(priceZones).set({
+      ...update,
+      materialAdjustmentPct: update.materialAdjustmentPct?.toString(),
+      labourAdjustmentPct: update.labourAdjustmentPct?.toString(),
+      equipmentAdjustmentPct: update.equipmentAdjustmentPct?.toString(),
+      defaultTransportPct: update.defaultTransportPct?.toString(),
+      updatedAt: new Date(),
+    }).where(eq(priceZones.id, target.id)).returning();
     return row;
   });
 
@@ -123,12 +173,13 @@ export async function priceZoneRoutes(app: FastifyInstance) {
       .where(and(eq(materialZonePrices.materialId, material.id), eq(materialZonePrices.zoneId, zoneId)))
       .limit(1);
 
-    const unitCost = parsed.data.unitCost.toString();
+    const { unitCost: numericUnitCost, ...metadata } = parsed.data;
+    const unitCost = numericUnitCost.toString();
     if (existing) {
-      const [row] = await db.update(materialZonePrices).set({ unitCost }).where(eq(materialZonePrices.id, existing.id)).returning();
+      const [row] = await db.update(materialZonePrices).set({ unitCost, ...metadata, updatedAt: new Date() }).where(eq(materialZonePrices.id, existing.id)).returning();
       return row;
     }
-    const [row] = await db.insert(materialZonePrices).values({ materialId: material.id, zoneId, unitCost }).returning();
+    const [row] = await db.insert(materialZonePrices).values({ materialId: material.id, zoneId, unitCost, ...metadata }).returning();
     return reply.code(201).send(row);
   });
 

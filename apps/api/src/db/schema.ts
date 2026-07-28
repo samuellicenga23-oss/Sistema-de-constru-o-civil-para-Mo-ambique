@@ -114,10 +114,19 @@ export const labourCategories = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     companyId: uuid("company_id").references(() => companies.id, { onDelete: "cascade" }),
+    code: varchar("code", { length: 50 }),
     name: varchar("name", { length: 150 }).notNull(),
     monthlySalary: numeric("monthly_salary", { precision: 14, scale: 2 }).notNull(),
+    productiveHoursPerMonth: numeric("productive_hours_per_month", { precision: 8, scale: 2 }),
+    socialChargesPct: numeric("social_charges_pct", { precision: 7, scale: 3 }).notNull().default("0"),
+    complementaryCostsPct: numeric("complementary_costs_pct", { precision: 7, scale: 3 }).notNull().default("0"),
     hourlyRate: numeric("hourly_rate", { precision: 14, scale: 4 }).notNull(),
     currency: currencyEnum("currency").notNull().default("MZN"),
+    sourceName: varchar("source_name", { length: 180 }),
+    sourceReference: text("source_reference"),
+    effectiveDate: date("effective_date"),
+    isActive: boolean("is_active").notNull().default(true),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },
   // Impede duas clonagens em corrida (dois pedidos simultâneos a clonar a mesma categoria
   // partilhada para a mesma empresa) — companyId NULL nunca colide consigo próprio em Postgres
@@ -131,11 +140,21 @@ export const materials = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     companyId: uuid("company_id").references(() => companies.id, { onDelete: "cascade" }),
+    code: varchar("code", { length: 50 }),
     name: varchar("name", { length: 200 }).notNull(),
+    category: varchar("category", { length: 100 }).notNull().default("Outros"),
+    specification: text("specification"),
     unit: unitEnum("unit").notNull(),
     baseUnitCost: numeric("base_unit_cost", { precision: 14, scale: 4 }).notNull(),
     importFactor: numeric("import_factor", { precision: 6, scale: 4 }).notNull().default("1.0"),
+    defaultWastePct: numeric("default_waste_pct", { precision: 7, scale: 3 }).notNull().default("0"),
     currency: currencyEnum("currency").notNull().default("MZN"),
+    priceSourceName: varchar("price_source_name", { length: 180 }),
+    sourceReference: text("source_reference"),
+    priceDate: date("price_date"),
+    includesVat: boolean("includes_vat").notNull().default(false),
+    isActive: boolean("is_active").notNull().default(true),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
     // Embalagem/unidade de compra de mercado, quando difere da unidade de medida usada nas
     // composições (ex: areia medida em m3 nas composições, mas vendida por camião de Xm3) — ambos
     // nullable: null = compra-se directamente na unidade de medida, sem conversão (ex: água, local;
@@ -154,6 +173,17 @@ export const priceZones = pgTable("price_zones", {
   id: uuid("id").primaryKey().defaultRandom(),
   companyId: uuid("company_id").references(() => companies.id, { onDelete: "cascade" }),
   name: varchar("name", { length: 100 }).notNull(),
+  province: varchar("province", { length: 100 }),
+  district: varchar("district", { length: 100 }),
+  description: text("description"),
+  materialAdjustmentPct: numeric("material_adjustment_pct", { precision: 7, scale: 3 }).notNull().default("0"),
+  labourAdjustmentPct: numeric("labour_adjustment_pct", { precision: 7, scale: 3 }).notNull().default("0"),
+  equipmentAdjustmentPct: numeric("equipment_adjustment_pct", { precision: 7, scale: 3 }).notNull().default("0"),
+  defaultTransportPct: numeric("default_transport_pct", { precision: 7, scale: 3 }).notNull().default("0"),
+  sourceName: varchar("source_name", { length: 180 }),
+  sourceReference: text("source_reference"),
+  effectiveDate: date("effective_date"),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
 // Preço de um material numa zona específica — substitui materials.baseUnitCost quando o
@@ -165,6 +195,12 @@ export const materialZonePrices = pgTable("material_zone_prices", {
   materialId: uuid("material_id").notNull().references(() => materials.id, { onDelete: "cascade" }),
   zoneId: uuid("zone_id").notNull().references(() => priceZones.id, { onDelete: "cascade" }),
   unitCost: numeric("unit_cost", { precision: 14, scale: 4 }).notNull(),
+  sourceName: varchar("source_name", { length: 180 }),
+  sourceReference: text("source_reference"),
+  effectiveDate: date("effective_date"),
+  includesVat: boolean("includes_vat").notNull().default(false),
+  transportIncluded: boolean("transport_included").notNull().default(true),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
 export const equipment = pgTable(
@@ -183,10 +219,22 @@ export const equipment = pgTable(
 export const costCompositions = pgTable("cost_compositions", {
   id: uuid("id").primaryKey().defaultRandom(),
   companyId: uuid("company_id").references(() => companies.id, { onDelete: "cascade" }),
+  code: varchar("code", { length: 50 }),
   name: varchar("name", { length: 200 }).notNull(),
   category: varchar("category", { length: 100 }).notNull().default("Outros"),
+  description: text("description"),
+  measurementCriteria: text("measurement_criteria"),
+  executionNotes: text("execution_notes"),
   outputUnit: unitEnum("output_unit").notNull(),
   currency: currencyEnum("currency").notNull().default("MZN"),
+  auxiliaryCostPct: numeric("auxiliary_cost_pct", { precision: 7, scale: 3 }).notNull().default("0"),
+  indirectCostPct: numeric("indirect_cost_pct", { precision: 7, scale: 3 }).notNull().default("0"),
+  profitMarginPct: numeric("profit_margin_pct", { precision: 7, scale: 3 }).notNull().default("0"),
+  version: integer("version").notNull().default(1),
+  sourceName: varchar("source_name", { length: 180 }),
+  sourceReference: text("source_reference"),
+  isActive: boolean("is_active").notNull().default(true),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
 export const compositionLabourLines = pgTable("composition_labour_lines", {
@@ -194,6 +242,7 @@ export const compositionLabourLines = pgTable("composition_labour_lines", {
   compositionId: uuid("composition_id").notNull().references(() => costCompositions.id, { onDelete: "cascade" }),
   labourCategoryId: uuid("labour_category_id").notNull().references(() => labourCategories.id),
   qtyPerUnit: numeric("qty_per_unit", { precision: 14, scale: 6 }).notNull(),
+  notes: text("notes"),
 });
 
 export const compositionMaterialLines = pgTable("composition_material_lines", {
@@ -201,6 +250,8 @@ export const compositionMaterialLines = pgTable("composition_material_lines", {
   compositionId: uuid("composition_id").notNull().references(() => costCompositions.id, { onDelete: "cascade" }),
   materialId: uuid("material_id").notNull().references(() => materials.id),
   qtyPerUnit: numeric("qty_per_unit", { precision: 14, scale: 6 }).notNull(),
+  wastePct: numeric("waste_pct", { precision: 7, scale: 3 }).notNull().default("0"),
+  notes: text("notes"),
 });
 
 export const compositionEquipmentLines = pgTable("composition_equipment_lines", {
@@ -208,6 +259,7 @@ export const compositionEquipmentLines = pgTable("composition_equipment_lines", 
   compositionId: uuid("composition_id").notNull().references(() => costCompositions.id, { onDelete: "cascade" }),
   equipmentId: uuid("equipment_id").notNull().references(() => equipment.id),
   qtyPerUnit: numeric("qty_per_unit", { precision: 14, scale: 6 }).notNull(),
+  notes: text("notes"),
 });
 
 export const workItemTemplates = pgTable("work_item_templates", {

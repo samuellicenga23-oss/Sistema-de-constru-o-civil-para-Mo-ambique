@@ -73,6 +73,7 @@ export async function costCompositionRoutes(app: FastifyInstance) {
           id: compositionLabourLines.id,
           refId: compositionLabourLines.labourCategoryId,
           qtyPerUnit: compositionLabourLines.qtyPerUnit,
+          notes: compositionLabourLines.notes,
           name: labourCategories.name,
           unitCost: labourCategories.hourlyRate,
         })
@@ -84,6 +85,8 @@ export async function costCompositionRoutes(app: FastifyInstance) {
           id: compositionMaterialLines.id,
           refId: compositionMaterialLines.materialId,
           qtyPerUnit: compositionMaterialLines.qtyPerUnit,
+          wastePct: compositionMaterialLines.wastePct,
+          notes: compositionMaterialLines.notes,
           name: materials.name,
           unitCost: materials.baseUnitCost,
           importFactor: materials.importFactor,
@@ -97,6 +100,7 @@ export async function costCompositionRoutes(app: FastifyInstance) {
           id: compositionEquipmentLines.id,
           refId: compositionEquipmentLines.equipmentId,
           qtyPerUnit: compositionEquipmentLines.qtyPerUnit,
+          notes: compositionEquipmentLines.notes,
           name: equipment.name,
           unitCost: equipment.hourlyCost,
         })
@@ -187,7 +191,13 @@ export async function costCompositionRoutes(app: FastifyInstance) {
     const { labourLines, materialLines, equipmentLines, ...data } = parsed.data;
     const companyId = targetCompanyId(request);
 
-    const [composition] = await db.insert(costCompositions).values({ ...data, companyId }).returning();
+    const [composition] = await db.insert(costCompositions).values({
+      ...data,
+      companyId,
+      auxiliaryCostPct: data.auxiliaryCostPct.toString(),
+      indirectCostPct: data.indirectCostPct.toString(),
+      profitMarginPct: data.profitMarginPct.toString(),
+    }).returning();
 
     if (labourLines.length) {
       await db.insert(compositionLabourLines).values(
@@ -195,6 +205,7 @@ export async function costCompositionRoutes(app: FastifyInstance) {
           compositionId: composition.id,
           labourCategoryId: l.refId,
           qtyPerUnit: l.qtyPerUnit.toString(),
+          notes: l.notes ?? null,
         }))
       );
     }
@@ -204,6 +215,8 @@ export async function costCompositionRoutes(app: FastifyInstance) {
           compositionId: composition.id,
           materialId: l.refId,
           qtyPerUnit: l.qtyPerUnit.toString(),
+          wastePct: (l.wastePct ?? 0).toString(),
+          notes: l.notes ?? null,
         }))
       );
     }
@@ -213,6 +226,7 @@ export async function costCompositionRoutes(app: FastifyInstance) {
           compositionId: composition.id,
           equipmentId: l.refId,
           qtyPerUnit: l.qtyPerUnit.toString(),
+          notes: l.notes ?? null,
         }))
       );
     }
@@ -246,24 +260,31 @@ export async function costCompositionRoutes(app: FastifyInstance) {
     const { labourLines, materialLines, equipmentLines, ...data } = parsed.data;
     const targetId = target.id;
 
-    await db.update(costCompositions).set(data).where(eq(costCompositions.id, targetId));
+    await db.update(costCompositions).set({
+      ...data,
+      auxiliaryCostPct: data.auxiliaryCostPct.toString(),
+      indirectCostPct: data.indirectCostPct.toString(),
+      profitMarginPct: data.profitMarginPct.toString(),
+      version: target.version + 1,
+      updatedAt: new Date(),
+    }).where(eq(costCompositions.id, targetId));
     await db.delete(compositionLabourLines).where(eq(compositionLabourLines.compositionId, targetId));
     await db.delete(compositionMaterialLines).where(eq(compositionMaterialLines.compositionId, targetId));
     await db.delete(compositionEquipmentLines).where(eq(compositionEquipmentLines.compositionId, targetId));
 
     if (labourLines.length) {
       await db.insert(compositionLabourLines).values(
-        labourLines.map((l) => ({ compositionId: targetId, labourCategoryId: l.refId, qtyPerUnit: l.qtyPerUnit.toString() }))
+        labourLines.map((l) => ({ compositionId: targetId, labourCategoryId: l.refId, qtyPerUnit: l.qtyPerUnit.toString(), notes: l.notes ?? null }))
       );
     }
     if (materialLines.length) {
       await db.insert(compositionMaterialLines).values(
-        materialLines.map((l) => ({ compositionId: targetId, materialId: l.refId, qtyPerUnit: l.qtyPerUnit.toString() }))
+        materialLines.map((l) => ({ compositionId: targetId, materialId: l.refId, qtyPerUnit: l.qtyPerUnit.toString(), wastePct: (l.wastePct ?? 0).toString(), notes: l.notes ?? null }))
       );
     }
     if (equipmentLines.length) {
       await db.insert(compositionEquipmentLines).values(
-        equipmentLines.map((l) => ({ compositionId: targetId, equipmentId: l.refId, qtyPerUnit: l.qtyPerUnit.toString() }))
+        equipmentLines.map((l) => ({ compositionId: targetId, equipmentId: l.refId, qtyPerUnit: l.qtyPerUnit.toString(), notes: l.notes ?? null }))
       );
     }
 

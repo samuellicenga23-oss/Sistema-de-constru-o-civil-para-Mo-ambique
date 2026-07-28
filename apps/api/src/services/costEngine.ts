@@ -10,6 +10,7 @@ import {
   materials,
   equipment,
   materialZonePrices,
+  priceZones,
 } from "../db/schema.js";
 
 // Resolve pelo NOME (não pelo id fixado na linha da composição) qual é a linha "visível" da
@@ -41,9 +42,33 @@ export function companyScope(companyIdColumn: AnyPgColumn, companyId: string | n
 export function computeHourlyRate(
   monthlySalary: number,
   workingDaysPerMonth: number,
-  workingHoursPerDay: number
+  workingHoursPerDay: number,
+  productiveHoursPerMonth?: number | null,
+  socialChargesPct = 0,
+  complementaryCostsPct = 0
 ): number {
-  return monthlySalary / (workingDaysPerMonth * workingHoursPerDay);
+  const productiveHours = productiveHoursPerMonth && productiveHoursPerMonth > 0
+    ? productiveHoursPerMonth
+    : workingDaysPerMonth * workingHoursPerDay;
+  const baseHourlyRate = monthlySalary / productiveHours;
+  return baseHourlyRate * (1 + (socialChargesPct + complementaryCostsPct) / 100);
+}
+
+export function calculateCompositionTotals(input: {
+  labourCost: number;
+  materialCost: number;
+  equipmentCost: number;
+  auxiliaryCostPct?: number;
+  indirectCostPct?: number;
+  profitMarginPct?: number;
+}) {
+  const directCost = input.labourCost + input.materialCost + input.equipmentCost;
+  const auxiliaryCost = directCost * ((input.auxiliaryCostPct ?? 0) / 100);
+  const costBeforeIndirects = directCost + auxiliaryCost;
+  const indirectCost = costBeforeIndirects * ((input.indirectCostPct ?? 0) / 100);
+  const costBeforeProfit = costBeforeIndirects + indirectCost;
+  const profit = costBeforeProfit * ((input.profitMarginPct ?? 0) / 100);
+  return { directCost, auxiliaryCost, indirectCost, profit, unitCost: costBeforeProfit + profit };
 }
 
 export type CompositionCostBreakdown = {
@@ -51,7 +76,14 @@ export type CompositionCostBreakdown = {
   labourCost: number;
   materialCost: number;
   equipmentCost: number;
+  directCost: number;
+  auxiliaryCost: number;
+  indirectCost: number;
+  profit: number;
   unitCost: number;
+  qualityScore: number;
+  qualityWarnings: string[];
+  isReady: boolean;
 };
 
 export type CompositionMaterialQuantityLine = {
@@ -59,6 +91,8 @@ export type CompositionMaterialQuantityLine = {
   name: string;
   unit: string;
   qtyPerUnit: number;
+  baseQtyPerUnit: number;
+  wastePct: number;
   // Custo efectivo por unidade de MEDIDA (já inclui preço de zona quando existir + factor de
   // importação) — value = quantidade_medida × unitCost, mesma semântica de computeCompositionUnitCost.
   unitCost: number;
@@ -91,6 +125,7 @@ export async function getCompositionMaterialQuantities(
   const materialLinesRaw = await db
     .select({
       qtyPerUnit: compositionMaterialLines.qtyPerUnit,
+      wastePct: compositionMaterialLines.wastePct,
       name: materials.name,
       unit: materials.unit,
       baseUnitCost: materials.baseUnitCost,
@@ -122,24 +157,33 @@ export async function getCompositionMaterialQuantities(
     : new Map();
 
   let zoneCostByMaterialId = new Map<string, number>();
+  let materialZoneFactor = 1;
   if (zoneId && resolvedMaterials.size) {
-    const materialIds = Array.from(resolvedMaterials.values(), (m) => m.id);
-    const zonePrices = await db
-      .select({ materialId: materialZonePrices.materialId, unitCost: materialZonePrices.unitCost })
-      .from(materialZonePrices)
-      .where(and(eq(materialZonePrices.zoneId, zoneId), inArray(materialZonePrices.materialId, materialIds)));
-    zoneCostByMaterialId = new Map(zonePrices.map((p) => [p.materialId, Number(p.unitCost)]));
+    const [zone] = await db.select().from(priceZones).where(and(eq(priceZones.id, zoneId), companyScope(priceZones.companyId, requestingCompanyId))).limit(1);
+    if (zone) {
+      materialZoneFactor = (1 + Number(zone.materialAdjustmentPct) / 100)
+        * (1 + Number(zone.defaultTransportPct) / 100);
+      const materialIds = Array.from(resolvedMaterials.values(), (m) => m.id);
+      const zonePrices = await db
+        .select({ materialId: materialZonePrices.materialId, unitCost: materialZonePrices.unitCost })
+        .from(materialZonePrices)
+        .where(and(eq(materialZonePrices.zoneId, zoneId), inArray(materialZonePrices.materialId, materialIds)));
+      zoneCostByMaterialId = new Map(zonePrices.map((p) => [p.materialId, Number(p.unitCost)]));
+    }
   }
 
   return materialLinesRaw.map((l) => {
     const resolved = resolvedMaterials.get(l.name);
-    const unitCost = (resolved && zoneCostByMaterialId.get(resolved.id)) ?? Number(resolved?.baseUnitCost ?? l.baseUnitCost);
+    const explicitZoneCost = resolved ? zoneCostByMaterialId.get(resolved.id) : undefined;
+    const unitCost = explicitZoneCost ?? Number(resolved?.baseUnitCost ?? l.baseUnitCost) * materialZoneFactor;
     const importFactor = Number(resolved?.importFactor ?? l.importFactor);
     return {
       materialId: resolved?.id ?? "",
       name: l.name,
       unit: resolved?.unit ?? l.unit,
-      qtyPerUnit: Number(l.qtyPerUnit),
+      baseQtyPerUnit: Number(l.qtyPerUnit),
+      wastePct: Number(l.wastePct),
+      qtyPerUnit: Number(l.qtyPerUnit) * (1 + Number(l.wastePct) / 100),
       unitCost: unitCost * importFactor,
       currency: resolved?.currency ?? l.currency,
       purchasePackageLabel: resolved?.purchasePackageLabel ?? null,
@@ -168,6 +212,14 @@ export async function computeCompositionUnitCost(
   if (!composition) throw new Error("Composição de custo não encontrada");
   const scope = requestingCompanyId;
 
+  const [zone] = zoneId
+    ? await db.select().from(priceZones).where(and(eq(priceZones.id, zoneId), companyScope(priceZones.companyId, requestingCompanyId))).limit(1)
+    : [undefined];
+  const labourZoneFactor = 1 + Number(zone?.labourAdjustmentPct ?? 0) / 100;
+  const equipmentZoneFactor = 1 + Number(zone?.equipmentAdjustmentPct ?? 0) / 100;
+  const materialZoneFactor = (1 + Number(zone?.materialAdjustmentPct ?? 0) / 100)
+    * (1 + Number(zone?.defaultTransportPct ?? 0) / 100);
+
   const labourLinesRaw = await db
     .select({ qtyPerUnit: compositionLabourLines.qtyPerUnit, name: labourCategories.name, hourlyRate: labourCategories.hourlyRate })
     .from(compositionLabourLines)
@@ -177,6 +229,7 @@ export async function computeCompositionUnitCost(
   const materialLinesRaw = await db
     .select({
       qtyPerUnit: compositionMaterialLines.qtyPerUnit,
+      wastePct: compositionMaterialLines.wastePct,
       name: materials.name,
       baseUnitCost: materials.baseUnitCost,
       importFactor: materials.importFactor,
@@ -205,7 +258,7 @@ export async function computeCompositionUnitCost(
     : new Map();
 
   let zoneCostByMaterialId = new Map<string, number>();
-  if (zoneId && resolvedMaterials.size) {
+  if (zoneId && zone && resolvedMaterials.size) {
     const materialIds = Array.from(resolvedMaterials.values(), (m) => m.id);
     const zonePrices = await db
       .select({ materialId: materialZonePrices.materialId, unitCost: materialZonePrices.unitCost })
@@ -236,24 +289,57 @@ export async function computeCompositionUnitCost(
 
   const labourCost = labourLinesRaw.reduce((sum, l) => {
     const hourlyRate = resolvedLabour.get(l.name)?.hourlyRate ?? l.hourlyRate;
-    return sum + Number(l.qtyPerUnit) * Number(hourlyRate);
+    return sum + Number(l.qtyPerUnit) * Number(hourlyRate) * labourZoneFactor;
   }, 0);
   const materialCost = materialLinesRaw.reduce((sum, l) => {
     const resolved = resolvedMaterials.get(l.name);
-    const unitCost = (resolved && zoneCostByMaterialId.get(resolved.id)) ?? Number(resolved?.baseUnitCost ?? l.baseUnitCost);
+    const explicitZoneCost = resolved ? zoneCostByMaterialId.get(resolved.id) : undefined;
+    const unitCost = explicitZoneCost ?? Number(resolved?.baseUnitCost ?? l.baseUnitCost) * materialZoneFactor;
     const importFactor = Number(resolved?.importFactor ?? l.importFactor);
-    return sum + Number(l.qtyPerUnit) * unitCost * importFactor;
+    const wasteFactor = 1 + Number(l.wastePct) / 100;
+    return sum + Number(l.qtyPerUnit) * wasteFactor * unitCost * importFactor;
   }, 0);
   const equipmentCost = equipmentLinesRaw.reduce((sum, l) => {
     const hourlyCost = resolvedEquipment.get(l.name)?.hourlyCost ?? l.hourlyCost;
-    return sum + Number(l.qtyPerUnit) * Number(hourlyCost);
+    return sum + Number(l.qtyPerUnit) * Number(hourlyCost) * equipmentZoneFactor;
   }, 0);
+
+  const totals = calculateCompositionTotals({
+    labourCost,
+    materialCost,
+    equipmentCost,
+    auxiliaryCostPct: Number(composition.auxiliaryCostPct),
+    indirectCostPct: Number(composition.indirectCostPct),
+    profitMarginPct: Number(composition.profitMarginPct),
+  });
+
+  const qualityWarnings: string[] = [];
+  const lineCount = labourLinesRaw.length + materialLinesRaw.length + equipmentLinesRaw.length;
+  if (lineCount === 0) qualityWarnings.push("A composição ainda não tem recursos associados.");
+  if (!composition.code) qualityWarnings.push("Defina um código para rastrear esta composição.");
+  if (!composition.measurementCriteria) qualityWarnings.push("Registe o critério de medição e pagamento.");
+  if (!composition.sourceName) qualityWarnings.push("Indique a fonte técnica ou metodologia usada.");
+  if (totals.directCost <= 0) qualityWarnings.push("O custo directo calculado é zero.");
+  if (zone && resolvedMaterials.size > zoneCostByMaterialId.size) {
+    qualityWarnings.push("Alguns materiais não têm preço próprio nesta zona; foi aplicado o ajuste geral da zona.");
+  }
+  let qualityScore = 100;
+  if (lineCount === 0) qualityScore -= 40;
+  if (!composition.code) qualityScore -= 10;
+  if (!composition.measurementCriteria) qualityScore -= 15;
+  if (!composition.sourceName) qualityScore -= 10;
+  if (totals.directCost <= 0) qualityScore -= 25;
+  if (zone && resolvedMaterials.size > zoneCostByMaterialId.size) qualityScore -= 5;
+  qualityScore = Math.max(0, qualityScore);
 
   return {
     compositionId,
     labourCost,
     materialCost,
     equipmentCost,
-    unitCost: labourCost + materialCost + equipmentCost,
+    ...totals,
+    qualityScore,
+    qualityWarnings,
+    isReady: lineCount > 0 && totals.directCost > 0 && qualityScore >= 50,
   };
 }

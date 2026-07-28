@@ -362,3 +362,28 @@ publicação.
 - **Validação:** a API interna respondeu `status: ok`; o novo website foi confirmado em
   `https://sud30s.org` com a mensagem, navegação e demonstração novas, sem erros de consola.
 - **Produção:** revisão disponível em `https://sud30s.org`; sistema privado continua em `/painel`.
+
+## 2026-07-28 — Codex — Engenharia de custos e catálogo auditável
+
+- **Branch:** `codex/siga-visual-refresh` (sincronizada com `origin/main` antes da intervenção).
+- **Pesquisa:** estrutura funcional contrastada com SINAPI/CAIXA e IBGE, RICS NRM, Autodesk Build,
+  Procore, CYPE e publicações oficiais do INE de Moçambique sobre preços de insumos de construção.
+- **Materiais:** nova ficha técnica com código, categoria, especificação, unidade de medição e de
+  compra, conteúdo da embalagem, perda padrão, factor de importação, origem/data do preço, IVA,
+  referência documental, estado activo e preço efectivo explicado.
+- **Mão-de-obra:** custo/hora passa a considerar horas produtivas, encargos sociais e custos
+  complementares, mantendo compatibilidade com a fórmula anterior quando esses dados não estão
+  definidos; cada categoria suporta código, fonte, vigência e activação.
+- **Zonas:** província, distrito, âmbito e fonte passam a acompanhar os factores de materiais,
+  transporte, mão-de-obra e equipamento. Preços específicos documentados prevalecem; na ausência
+  deles, o motor aplica os factores gerais da zona ao preço base de forma explícita.
+- **Composições:** nova revisão numerada, código, descrição, critério de medição/pagamento,
+  condições de execução, fonte, perdas por material e separação entre custo directo, auxiliares,
+  indirectos e margem. Um indicador de qualidade mostra o que falta antes do uso comercial.
+- **Integração:** a explosão de materiais usada por compras/stock passa a considerar a perda da
+  composição; documentos existentes mantêm os snapshots de preço já gravados.
+- **Persistência:** migração `0024_dark_micromacro.sql` adiciona os metadados técnicos e financeiros
+  sem remover ou recalcular dados existentes.
+- **Validação:** build completo aprovado; 38 testes da API e 12 do frontend aprovados, incluindo
+  regressões para custo horário carregado e formação sequencial do preço.
+- **Produção:** pronta para publicação depois da verificação final do `main` remoto.
