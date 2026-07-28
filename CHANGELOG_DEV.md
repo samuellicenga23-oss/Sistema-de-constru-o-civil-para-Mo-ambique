@@ -357,7 +357,8 @@ publicação.
   `users.must_change_password`, com valores seguros para as contas existentes.
 - **Validação:** build completo aprovado; 35 testes da API e 12 testes do frontend aprovados;
   landing, preços anuais, WhatsApp e gestão da equipa verificados no navegador local.
-- **Produção:** pendente nesta entrada; actualizar após o deploy na VPS.
+- **Produção:** publicada em `https://sud30s.org` no commit `05cde21`; backup PostgreSQL criado
+  antes da migração, migração aplicada, PM2 reiniciado e API/landing verificadas via HTTPS.
 - **Validação:** a API interna respondeu `status: ok`; o novo website foi confirmado em
   `https://sud30s.org` com a mensagem, navegação e demonstração novas, sem erros de consola.
 - **Produção:** revisão disponível em `https://sud30s.org`; sistema privado continua em `/painel`.
