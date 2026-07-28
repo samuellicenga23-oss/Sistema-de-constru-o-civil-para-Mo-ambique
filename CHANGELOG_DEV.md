@@ -324,3 +324,15 @@ consultar o estado do Git e as entradas mais recentes. Cada intervenção deve i
 - **Persistência:** nenhuma migração de base de dados necessária.
 - **Produção:** pronta para publicação após confirmação de que o `main` remoto não recebeu uma
   alteração paralela.
+
+## 2026-07-28 — Codex — Publicação da revisão editorial e PDF adaptativo
+
+- **GitHub:** `main` e `codex/siga-visual-refresh` actualizados com a versão funcional `9cc9032`;
+  o `main` remoto estava exactamente em `44b84a8`, sem alterações paralelas do Claude por integrar.
+- **VPS:** `/home/sigo/htdocs/sud30s.org` actualizado por fast-forward, build completo concluído e
+  processo `sigo-api` recarregado no PM2 com estado `online`.
+- **Base de dados:** nenhuma migração necessária e nenhum dado de produção alterado por esta
+  publicação.
+- **Validação:** a API interna respondeu `status: ok`; o novo website foi confirmado em
+  `https://sud30s.org` com a mensagem, navegação e demonstração novas, sem erros de consola.
+- **Produção:** revisão disponível em `https://sud30s.org`; sistema privado continua em `/painel`.
