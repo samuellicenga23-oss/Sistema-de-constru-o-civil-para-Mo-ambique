@@ -10,6 +10,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed": "tsx src/db/seed.ts",
+    "plant:reprocess": "tsx src/db/reprocessPlant.ts",
     "bootstrap:admin": "tsx src/db/bootstrapAdmin.ts",
     "test": "vitest run"
   },

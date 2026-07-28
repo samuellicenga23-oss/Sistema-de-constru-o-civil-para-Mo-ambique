@@ -32,7 +32,7 @@ async function setPlantProgress(
 // Chama o plant-service e grava o resultado — partilhado entre o upload inicial e o
 // reprocessamento (mesmo ficheiro em disco, útil quando a lógica de extracção melhora e não se
 // quer obrigar o utilizador a carregar o PDF outra vez).
-async function processPlantFile(plantId: string, buffer: Buffer, filename: string): Promise<void> {
+export async function processPlantFile(plantId: string, buffer: Buffer, filename: string): Promise<void> {
   await setPlantProgress(plantId, 20, "A preparar o PDF para leitura");
   const form = new FormData();
   form.append("file", new Blob([new Uint8Array(buffer)], { type: "application/pdf" }), filename);

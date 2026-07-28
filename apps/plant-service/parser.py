@@ -7,6 +7,8 @@ confirmado por análise real de um projecto de exemplo (Projecto Completo Gil.pd
 Reconstrução geométrica de paredes a partir de cotas/linhas fica fora de âmbito (ver plano).
 """
 import re
+import unicodedata
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
 import fitz  # PyMuPDF
@@ -115,9 +117,52 @@ class ParseResult:
     structural_summary: StructuralSummary | None = None
 
 
-# Nome do compartimento (maiúsculas, acentos incluídos) + número opcional + "A: 21,74 m²"
+# Etiquetas de área usadas por diferentes programas/gabinetes: ArchiCAD costuma exportar
+# "A:" ou "CA:", Revit/AutoCAD aparecem frequentemente como "Área", "Area", "S" ou
+# "Superfície". O formato anterior exigia NOME EM MAIÚSCULAS + "A:" e, por isso, ignorava
+# plantas perfeitamente legíveis como "Suite 2 / CA: 22,400 m2".
+AREA_UNIT_PATTERN = r"(?:m\s*[²2]|sqm|sq\.?\s*m)"
+AREA_LABEL_PATTERN = (
+    r"(?:C\s*\.?\s*A|ÁREA(?:\s+(?:ÚTIL|BRUTA))?|AREA(?:\s+(?:UTIL|BRUTA))?|"
+    r"SUP(?:ERF[ÍI]CIE)?|S|A)"
+)
 ROOM_PATTERN = re.compile(
-    r"([A-ZÀ-Ÿ][A-ZÀ-Ÿ0-9°ºª\.\s]{1,40}?)\s+(\d{1,3})?\s*A[:=]\s*(\d+[.,]\d+)\s*m[²2]"
+    rf"(?im)^[ \t•·\-–—]*"
+    rf"(?P<name>[^\n\r:;]{{2,80}}?)[ \t]*(?:\r?\n[ \t]*)?"
+    rf"(?<!\w)(?P<label>{AREA_LABEL_PATTERN})(?!\w)[ \t]*[:=\.\-]?[ \t]*"
+    rf"(?P<area>\d{{1,4}}(?:[.,]\d{{1,4}})?)[ \t]*{AREA_UNIT_PATTERN}[ \t]*$"
+)
+
+# Uma etiqueta de ambiente pode estar separada da área em blocos diferentes, ou a área pode
+# vir sem prefixo (ex: Revit: "12.45 m²"). Esta expressão é propositadamente estrita e só
+# aceita uma linha composta pela área; a associação ao nome é depois feita pelas coordenadas
+# reais da página em ``extract_rooms_spatial``.
+AREA_ONLY_PATTERN = re.compile(
+    rf"(?i)^\s*(?:(?:{AREA_LABEL_PATTERN})(?!\w)\s*[:=\.\-]?\s*)?"
+    rf"(?P<area>\d{{1,4}}(?:[.,]\d{{1,4}})?)\s*{AREA_UNIT_PATTERN}\s*$"
+)
+
+# Último recurso para PDFs que não colocam etiquetas de área na planta, mas incluem um quadro
+# ou uma memória descritiva com uma lista explícita de ambientes. Só é usado quando nenhuma
+# área etiquetada/tabela foi encontrada no documento inteiro, evitando misturar a área da
+# memória com uma revisão mais recente desenhada na planta.
+ROOM_VOCABULARY = (
+    r"sala(?:\s+de\s+(?:estar|jantar))?|quarto|suite|suíte|cozinha|copa|corredor|hall|"
+    r"w\.?\s*c\.?|wc|casa\s+de\s+banho|banho|lavabo|despensa|arrumo|arrecada[çc][ãa]o|"
+    r"lavandaria|área\s+de\s+servi[çc]o|area\s+de\s+servico|varanda|terra[çc]o|garagem|"
+    r"escritório|escritorio|biblioteca|closet|vestíbulo|vestibulo|escada|floreira|"
+    r"living|bedroom|kitchen|bathroom|toilet|corridor|lobby|laundry|pantry|garage|balcony"
+)
+ROOM_LIST_PATTERN = re.compile(
+    rf"(?im)^[ \t•·\-–—]*(?P<name>(?:{ROOM_VOCABULARY})[^\n;:]{{0,60}}?)\s+"
+    rf"(?P<area>\d{{1,4}}(?:[.,]\d{{1,4}})?)\s*{AREA_UNIT_PATTERN}\s*[;.]?\s*$"
+)
+
+ROOM_NAME_REJECT_PATTERN = re.compile(
+    r"^(?:fase|especialidade|propriet[aá]ri[oa]|projectou|conte[uú]do|nome\s+do\s+desenho|"
+    r"layout\s+id|revision|revis[aã]o|escala|n[uú]mero|legenda|observa[çc][õo]es|"
+    r"planta|projecto|projeto|al[çc]ado|corte|pormenor|detalhe|gspublisherversion)\b",
+    re.IGNORECASE,
 )
 
 # Formato alternativo (tabela nativa do ArchiCAD "Rooms by stories" exportada a PDF): uma
@@ -170,7 +215,7 @@ SLAB_REF_LINE = re.compile(r"^L\d+$")
 FLOOR_LABEL_PATTERNS: list[tuple[re.Pattern, str | None, int]] = [
     (re.compile(r"anexo", re.IGNORECASE), "Anexo", 3),
     (re.compile(r"cobertura", re.IGNORECASE), "Cobertura", 2),
-    (re.compile(r"t[ée]rreo|r[ée]s\s*-?\s*do\s*-?\s*ch[ãa]o", re.IGNORECASE), "Piso Térreo", 1),
+    (re.compile(r"t[ée]rreo|r[ée]s\s*-?\s*do\s*-?\s*ch[ãa]o|ground\s+floor|piso\s*(?:zero|0)", re.IGNORECASE), "Piso Térreo", 1),
     (re.compile(r"piso\s*superior", re.IGNORECASE), "Piso Superior", 1),
     # Ordinais por extenso (ex: "Segundo Piso" nas folhas de armadura de lajes) — mapeados
     # para o mesmo formato "Nº Piso" usado pelo padrão numérico, para ordenarem em conjunto.
@@ -192,6 +237,18 @@ def detect_floor_label(text: str) -> tuple[str | None, int]:
     return None, 0
 
 
+def detect_document_default_floor(text: str) -> str | None:
+    """Infere piso apenas quando o documento declara inequivocamente que a obra tem um só."""
+    if re.search(
+        r"\b(?:piso\s+[úu]nico|moradia\s+t[ée]rrea|edif[ií]cio\s+t[ée]rreo|"
+        r"single[\s-]+stor(?:e)?y|single[\s-]+floor)\b",
+        text,
+        re.IGNORECASE,
+    ):
+        return "Piso Térreo"
+    return None
+
+
 # Tipo de folha de arquitectura, lido do campo "Conteúdo" da legenda (ex: "PLANTA COTADA PISO
 # TÉRREO", "PLANTA MOBILADA PISO SUPERIOR") — um projecto tipicamente tem as duas variantes por
 # piso (cotada = com cotas/dimensões; mobilada/mobiliada = com mobiliário desenhado), mostrando a
@@ -201,10 +258,15 @@ def detect_floor_label(text: str) -> tuple[str | None, int]:
 # tipicamente um apontamento da cotagem, não do mobiliário), a de-duplicação por número falha
 # silenciosamente a apanhar o duplicado, inflacionando a área total do piso.
 PLAN_TYPE_PATTERNS: list[tuple[re.Pattern, str]] = [
-    (re.compile(r"planta\s+cotada", re.IGNORECASE), "cotada"),
-    (re.compile(r"planta\s+mobil(?:i)?ada", re.IGNORECASE), "mobiliada"),
+    (re.compile(r"planta\s+(?:cotada|dimensionada)|dimensioned\s+floor\s+plan", re.IGNORECASE), "cotada"),
+    (re.compile(r"planta\s+(?:de\s+)?mob[ií]l(?:ia|iada|ada)|furniture\s+plan", re.IGNORECASE), "mobiliada"),
     (re.compile(r"planta\s+de\s+implanta[çc][ãa]o", re.IGNORECASE), "implantacao"),
     (re.compile(r"planta\s+de\s+localiza[çc][ãa]o", re.IGNORECASE), "localizacao"),
+    (re.compile(r"planta\s+(?:de\s+)?funda[çc][ãa]o|foundation\s+plan", re.IGNORECASE), "fundacao"),
+    (re.compile(r"planta\s+(?:de\s+)?cobertura|roof\s+plan", re.IGNORECASE), "cobertura"),
+    (re.compile(r"\bal[çc]ados?\b|\belevations?\b", re.IGNORECASE), "alcados"),
+    (re.compile(r"\bcortes?\b|\bsections?\b", re.IGNORECASE), "cortes"),
+    (re.compile(r"planta\s+(?:de\s+)?piso|planta\s+baixa|floor\s+plan", re.IGNORECASE), "geral"),
 ]
 
 
@@ -220,7 +282,17 @@ def detect_plan_type(text: str) -> str | None:
 # (legenda em formato diferente, ou projecto que não distingue "cotada"/"mobilada" e só tem um
 # tipo de planta): nesse caso continua-se a extrair, tal como antes desta alteração, para não
 # fazer desaparecer silenciosamente todos os compartimentos de projectos sem essa legenda.
-ROOM_EXCLUDED_PLAN_TYPES = {"mobiliada", "implantacao", "localizacao"}
+ROOM_EXCLUDED_PLAN_TYPES = {
+    "mobiliada",
+    "implantacao",
+    "localizacao",
+    "fundacao",
+    "cobertura",
+    "alcados",
+    "cortes",
+}
+
+ROOM_PAGE_PRIORITY = {"cotada": 4, "geral": 3, None: 2}
 
 # Achado real (projecto "Fernando Gore Chaera", Chimoio): folhas de OUTRA especialidade
 # (hidráulica, eléctrica, drenagem, estrutura) redesenham as mesmas paredes/compartimentos como
@@ -272,6 +344,34 @@ def _to_float(value: str) -> float:
     return float(value.replace(",", "."))
 
 
+def _normalise_key(value: str) -> str:
+    decomposed = unicodedata.normalize("NFKD", value)
+    ascii_value = "".join(char for char in decomposed if not unicodedata.combining(char))
+    return re.sub(r"[^A-Z0-9]+", " ", ascii_value.upper()).strip()
+
+
+def _room_identity(raw_name: str) -> tuple[str, str | None] | None:
+    name = re.sub(r"^[\s•·\-–—]+|[\s:;,.\-–—]+$", "", raw_name)
+    name = re.sub(r"\s+", " ", name).strip()
+    if not name or len(name) < 2 or len(name) > 80 or not re.search(r"[A-Za-zÀ-ÿ]", name):
+        return None
+    if ROOM_NAME_REJECT_PATTERN.search(name):
+        return None
+    # Linhas de eixos, cotas, níveis, portas/janelas e referências técnicas não são nomes de
+    # compartimento. A lista é estrutural (forma), não uma lista fechada de nomes possíveis.
+    if re.fullmatch(r"[A-Z]{0,3}\d+(?:\s*[=\-/]\s*[A-Z]{0,3}\d+)*", name, re.IGNORECASE):
+        return None
+    if re.search(r"(?:^|\s)[+±-]?\d+[.,]\d+(?:\s*m)?$", name):
+        return None
+
+    # "Quarto 2" / "Suite 01": preserva o tipo como nome e o identificador em coluna própria.
+    # Não separa anos/números embebidos em nomes longos sem um espaço final inequívoco.
+    numbered = re.match(r"^(?P<name>.+?)[\s#-]+(?P<number>\d{1,3})$", name)
+    if numbered and re.search(r"[A-Za-zÀ-ÿ]", numbered.group("name")):
+        return numbered.group("name").strip(), numbered.group("number")
+    return name, None
+
+
 def extract_metadata(text: str) -> PlantMetadata:
     values: dict[str, str | None] = {}
     for field_name, pattern in METADATA_LABELS.items():
@@ -287,13 +387,85 @@ def extract_rooms(text: str, page_number: int) -> list[Room]:
     floor_label, _ = detect_floor_label(text)
     rooms = []
     for match in ROOM_PATTERN.finditer(text):
-        name = re.sub(r"\s+", " ", match.group(1)).strip()
-        # Filtra falsos positivos onde o "nome" capturado é demasiado curto/genérico
-        if len(name) < 3:
+        identity = _room_identity(match.group("name"))
+        if not identity:
             continue
-        number = match.group(2)
-        area = _to_float(match.group(3))
+        name, number = identity
+        area = _to_float(match.group("area"))
+        if not 0.1 <= area <= 10_000:
+            continue
         rooms.append(Room(name=name, number=number, area_m2=area, page=page_number, floor=floor_label))
+    return rooms
+
+
+def _positioned_text_lines(page) -> list[tuple[float, float, float, float, str]]:
+    lines: list[tuple[float, float, float, float, str]] = []
+    page_dict = page.get_text("dict")
+    for block in page_dict.get("blocks", []):
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            text = "".join(span.get("text", "") for span in line.get("spans", []))
+            text = re.sub(r"\s+", " ", text).strip()
+            if not text:
+                continue
+            x0, y0, x1, y1 = line.get("bbox", (0.0, 0.0, 0.0, 0.0))
+            lines.append((float(x0), float(y0), float(x1), float(y1), text))
+    return lines
+
+
+def extract_rooms_spatial(page, page_number: int) -> list[Room]:
+    """Associa área e ambiente pela sua posição, independentemente da ordem interna do PDF."""
+    floor_label, _ = detect_floor_label(page.get_text())
+    lines = _positioned_text_lines(page)
+    rooms: list[Room] = []
+
+    for area_index, (ax0, ay0, ax1, ay1, area_text) in enumerate(lines):
+        area_match = AREA_ONLY_PATTERN.match(area_text)
+        if not area_match:
+            continue
+        area = _to_float(area_match.group("area"))
+        if not 0.1 <= area <= 10_000:
+            continue
+
+        area_centre = (ax0 + ax1) / 2
+        candidates: list[tuple[float, tuple[str, str | None]]] = []
+        for name_index, (nx0, ny0, nx1, ny1, name_text) in enumerate(lines):
+            if name_index == area_index or AREA_ONLY_PATTERN.match(name_text):
+                continue
+            # Os tags de compartimento habituais colocam o nome imediatamente acima da área.
+            vertical_gap = ay0 - ny1
+            if vertical_gap < -2 or vertical_gap > 42:
+                continue
+            name_centre = (nx0 + nx1) / 2
+            horizontal_gap = abs(area_centre - name_centre)
+            if horizontal_gap > max(120.0, (ax1 - ax0) * 1.75):
+                continue
+            identity = _room_identity(name_text)
+            if not identity:
+                continue
+            # A distância vertical domina; o alinhamento horizontal desempata. Uma pequena
+            # penalização por largura evita escolher uma frase comprida da legenda.
+            score = max(vertical_gap, 0) + horizontal_gap * 0.18 + max(len(name_text) - 45, 0)
+            candidates.append((score, identity))
+
+        if candidates:
+            _, (name, number) = min(candidates, key=lambda candidate: candidate[0])
+            rooms.append(Room(name=name, number=number, area_m2=area, page=page_number, floor=floor_label))
+    return rooms
+
+
+def extract_room_list_fallback(text: str, page_number: int) -> list[Room]:
+    floor_label, _ = detect_floor_label(text)
+    rooms: list[Room] = []
+    for match in ROOM_LIST_PATTERN.finditer(text):
+        identity = _room_identity(match.group("name"))
+        if not identity:
+            continue
+        name, number = identity
+        area = _to_float(match.group("area"))
+        if 0.1 <= area <= 10_000:
+            rooms.append(Room(name=name, number=number, area_m2=area, page=page_number, floor=floor_label))
     return rooms
 
 
@@ -358,50 +530,126 @@ def extract_room_schedule(text: str, page_number: int) -> list[Room]:
     return rooms
 
 
-def dedupe_rooms(rooms: list[Room]) -> list[Room]:
-    # O mesmo compartimento aparece frequentemente em mais do que uma folha "planta cotada" do
-    # mesmo piso (ex: uma folha por zona da casa) — a de-duplicação junta essas repetições. O
-    # número do compartimento por si só NÃO é uma chave segura entre pisos diferentes: cada piso
-    # tipicamente recomeça a sua própria numeração (ex: "01" no Piso Térreo E "01" no Piso
-    # Superior são dois compartimentos físicos distintos) — juntar por número sem o piso fazia um
-    # destes dois desaparecer silenciosamente, apanhado directamente num projecto real de dois
-    # pisos. Por isso a chave inclui sempre o piso detectado (ou "" quando nenhum piso foi
-    # identificado nessa ocorrência — ocorrências sem piso só se juntam entre si, nunca com uma
-    # ocorrência que tenha piso identificado).
-    #
-    # O nome do compartimento por vezes vem contaminado com rótulos de eixos da grelha do desenho
-    # (ex: "A2 A2 QUARTO 01" em vez de "QUARTO 01", quando o texto do compartimento aparece perto
-    # de referências de eixo na peça desenhada) — por isso não é a chave, só se escolhe entre as
-    # ocorrências do grupo já formado por (piso, número) a versão mais limpa (mais curta).
-    #
-    # As duas decisões — que NOME mostrar e que PISO atribuir — são resolvidas em separado:
-    # o nome mais limpo (mais curto) entre as ocorrências, e o piso da ocorrência cuja
-    # etiqueta é mais específica (ex: "Anexo" vence uma legenda combinada de "Piso Térreo").
-    # Nem sempre a etiqueta mais específica é a correcta (ex: um compartimento do piso térreo
-    # que também aparece como referência de contexto numa folha de "Anexo") — por isso esta
-    # atribuição fica sempre revisável no ecrã de confirmação antes de entrar no Assistente.
-    groups: dict[tuple[str, str], list[Room]] = {}
-    for room in rooms:
-        floor_key = (room.floor or "").strip().upper()
-        item_key = room.number if room.number else f"__{room.name.strip().upper()}"
-        groups.setdefault((floor_key, item_key), []).append(room)
+def _room_signature(room: Room) -> tuple[str, str, float]:
+    return (_normalise_key(room.name), room.number or "", round(room.area_m2, 2))
 
-    deduped = []
-    for group in groups.values():
-        cleanest = min(group, key=lambda r: len(r.name.strip()))
-        best_floor_room = max(group, key=lambda r: detect_floor_label(r.floor or "")[1])
-        perimeter = next((r.perimeter_m for r in group if r.perimeter_m is not None), None)
-        deduped.append(
-            Room(
-                name=re.sub(r"\s+", " ", cleanest.name).strip(),
-                number=cleanest.number,
-                area_m2=cleanest.area_m2,
-                page=best_floor_room.page,
-                floor=best_floor_room.floor,
-                perimeter_m=perimeter,
+
+def _duplicate_page_map(rooms: list[Room], page_priorities: dict[int, int]) -> dict[int, int]:
+    """Agrupa representações equivalentes da mesma planta sem confundir folhas parciais."""
+    by_page: dict[int, Counter] = defaultdict(Counter)
+    for room in rooms:
+        by_page[room.page][_room_signature(room)] += 1
+
+    pages = sorted(by_page)
+    parent = {page: page for page in pages}
+
+    def find(page: int) -> int:
+        while parent[page] != page:
+            parent[page] = parent[parent[page]]
+            page = parent[page]
+        return page
+
+    def union(left: int, right: int) -> None:
+        left_root, right_root = find(left), find(right)
+        if left_root != right_root:
+            parent[right_root] = left_root
+
+    for index, left in enumerate(pages):
+        for right in pages[index + 1 :]:
+            left_count, right_count = by_page[left], by_page[right]
+            smaller_size = min(sum(left_count.values()), sum(right_count.values()))
+            if smaller_size < 3:
+                continue
+            overlap = sum((left_count & right_count).values())
+            # Duas pranchas são equivalentes quando pelo menos 80% da mais pequena coincide.
+            # Isso apanha "Planta de Piso" + "Planta Cotada", mas não funde duas zonas parciais
+            # do mesmo piso que só partilham ocasionalmente um corredor ou instalação sanitária.
+            if overlap / smaller_size >= 0.8:
+                union(left, right)
+
+    clusters: dict[int, list[int]] = defaultdict(list)
+    for page in pages:
+        clusters[find(page)].append(page)
+
+    canonical: dict[int, int] = {}
+    for cluster_pages in clusters.values():
+        best = max(cluster_pages, key=lambda page: (page_priorities.get(page, 1), len(by_page[page]), page))
+        for page in cluster_pages:
+            canonical[page] = best
+    return canonical
+
+
+def dedupe_rooms(rooms: list[Room], page_priorities: dict[int, int] | None = None) -> list[Room]:
+    if not rooms:
+        return []
+    priorities = page_priorities or {}
+    canonical_page = _duplicate_page_map(rooms, priorities)
+
+    # Compartimentos numerados são únicos dentro do piso. Sem número, a área também faz parte da
+    # identidade e só se cruza entre páginas que foram reconhecidas como duas representações da
+    # mesma planta. Assim, três "W.C" com áreas diferentes continuam a ser três; e até dois W.C
+    # realmente iguais na mesma planta são preservados pela contagem máxima por página original.
+    groups: dict[tuple, list[Room]] = defaultdict(list)
+    for room in rooms:
+        floor_key = _normalise_key(room.floor or "")
+        if room.number and floor_key:
+            # O número não é global nem sequer único por piso em todos os gabinetes: a planta
+            # Cyntia contém simultaneamente "Quarto 1" e "Suite 1". Nome/tipo + número é a
+            # identidade segura; usar só "1" fundia dois compartimentos reais.
+            key = ("numbered", floor_key, _normalise_key(room.name), room.number)
+        else:
+            key = (
+                "positioned",
+                canonical_page.get(room.page, room.page),
+                floor_key,
+                _normalise_key(room.name),
+                room.number or "",
+                round(room.area_m2, 2),
             )
+        groups[key].append(room)
+
+    deduped: list[Room] = []
+    for group in groups.values():
+        occurrences_by_page: dict[int, list[Room]] = defaultdict(list)
+        for room in group:
+            occurrences_by_page[room.page].append(room)
+        selected_page, selected = max(
+            occurrences_by_page.items(),
+            key=lambda item: (len(item[1]), priorities.get(item[0], 1), item[0]),
         )
-    return deduped
+        for occurrence in selected:
+            cleanest = min(group, key=lambda room: len(room.name.strip()))
+            best_floor = max(group, key=lambda room: detect_floor_label(room.floor or "")[1])
+            perimeter = next((room.perimeter_m for room in group if room.perimeter_m is not None), None)
+            deduped.append(
+                Room(
+                    name=re.sub(r"\s+", " ", cleanest.name).strip(),
+                    number=occurrence.number,
+                    area_m2=occurrence.area_m2,
+                    page=selected_page,
+                    floor=best_floor.floor or occurrence.floor,
+                    perimeter_m=perimeter,
+                )
+            )
+    return sorted(deduped, key=lambda room: ((room.floor or ""), room.page, room.name, room.number or "", room.area_m2))
+
+
+def merge_page_room_sources(*sources: list[Room]) -> list[Room]:
+    """Combina métodos sem duplicar o mesmo tag lido por texto e por coordenadas."""
+    merged: list[Room] = []
+    known_signatures: set[tuple[str, str, float]] = set()
+    for source in sources:
+        source_by_signature: dict[tuple[str, str, float], list[Room]] = defaultdict(list)
+        for room in source:
+            source_by_signature[_room_signature(room)].append(room)
+        for signature, candidates in source_by_signature.items():
+            if signature in known_signatures:
+                continue
+            # Mantém todas as ocorrências deste método: duas casas de banho iguais na mesma
+            # página são dois compartimentos legítimos, não dois resultados repetidos.
+            merged.extend(candidates)
+            known_signatures.add(signature)
+    return merged
 
 
 def extract_rebar_schedules(text: str, page_number: int) -> list[RebarLine]:
@@ -665,6 +913,9 @@ def parse_pdf(file_bytes: bytes, progress_callback=None) -> ParseResult:
     doc = fitz.open(stream=file_bytes, filetype="pdf")
     metadata = PlantMetadata()
     rooms: list[Room] = []
+    fallback_rooms: list[Room] = []
+    document_text_parts: list[str] = []
+    room_page_priorities: dict[int, int] = {}
     rebar_schedules: list[RebarLine] = []
     footings: list[Footing] = []
     column_groups: list[ColumnGroup] = []
@@ -676,6 +927,7 @@ def parse_pdf(file_bytes: bytes, progress_callback=None) -> ParseResult:
         page = doc[page_index]
         text = page.get_text()
         page_number = page_index + 1
+        document_text_parts.append(text)
 
         if not metadata.especialidade:
             page_metadata = extract_metadata(text)
@@ -687,8 +939,16 @@ def parse_pdf(file_bytes: bytes, progress_callback=None) -> ParseResult:
         # sempre repete o número do compartimento (ver is_room_area_page), o que faz o duplicado
         # escapar à de-duplicação e inflacionar a área total do piso.
         if is_room_area_page(text):
-            rooms.extend(extract_rooms(text, page_number))
-            rooms.extend(extract_room_schedule(text, page_number))
+            plan_type = detect_plan_type(text)
+            room_page_priorities[page_number] = ROOM_PAGE_PRIORITY.get(plan_type, 1)
+            rooms.extend(
+                merge_page_room_sources(
+                    extract_rooms(text, page_number),
+                    extract_rooms_spatial(page, page_number),
+                    extract_room_schedule(text, page_number),
+                )
+            )
+            fallback_rooms.extend(extract_room_list_fallback(text, page_number))
         rebar_schedules.extend(extract_rebar_schedules(text, page_number))
         footings.extend(extract_footings(text, page_number))
         column_groups.extend(extract_column_groups(text, page_number))
@@ -698,11 +958,18 @@ def parse_pdf(file_bytes: bytes, progress_callback=None) -> ParseResult:
         if progress_callback:
             progress_callback(page_number, doc.page_count)
 
+    default_floor = detect_document_default_floor("\n".join(document_text_parts))
+    selected_rooms = rooms if rooms else fallback_rooms
+    if default_floor:
+        for room in selected_rooms:
+            if room.floor is None:
+                room.floor = default_floor
+
     doc.close()
     structural_summary = build_structural_summary(footings, column_groups, beam_spans, rebar_schedules, staircases, slabs)
     return ParseResult(
         metadata=metadata,
-        rooms=dedupe_rooms(rooms),
+        rooms=dedupe_rooms(selected_rooms, room_page_priorities),
         rebar_schedules=rebar_schedules,
         staircases=staircases,
         structural_summary=structural_summary,

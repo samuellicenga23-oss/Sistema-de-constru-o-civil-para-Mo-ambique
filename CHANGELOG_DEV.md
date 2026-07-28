@@ -414,3 +414,31 @@ publicação.
   `/home/sigo/backups/sigo-predeploy-20260728-fcdfaa3.dump`, migração `0025` aplicada, serviço de
   plantas reiniciado sob supervisão do systemd, nova rota de progresso confirmada, API recarregada
   e saúde interna/HTTPS validada.
+
+## 2026-07-28 — Codex — Leitura adaptativa de compartimentos arquitectónicos
+
+- **Caso real:** o ficheiro `Cyntia Projecto 2021 Arquitetura.pdf` terminava o processamento, mas
+  não apresentava compartimentos porque os tags usam nomes em formato normal (ex.: `Suite 2`) e
+  áreas no padrão ArchiCAD `CA: 22,400 m2`; o leitor anterior exigia nomes em maiúsculas e `A:`.
+- **Etiquetas:** a extracção passa a reconhecer `A`, `CA`, `Área`, `Area`, `S`, `Sup` e
+  `Superfície`, vírgula ou ponto decimal, `m²`, `m2` e variantes inglesas de unidade.
+- **Posicionamento:** além da ordem textual interna do PDF, o leitor associa o nome à área pelas
+  coordenadas da página. Isso cobre desenhos em que o programa grava primeiro a área e depois o
+  nome, embora visualmente o nome esteja acima.
+- **Variações de projecto:** reconhece plantas gerais, cotadas/dimensionadas e títulos em
+  português/inglês; exclui fundação, cobertura, mobiliário, implantação, localização, alçados e
+  cortes quando identificados. Em projectos declarados de piso único, atribui `Piso Térreo` sem
+  pedir uma confirmação artificial.
+- **Fonte alternativa:** listas explícitas de ambientes na memória descritiva são usadas apenas se
+  nenhuma área etiquetada ou tabela for encontrada, evitando misturar valores antigos com a
+  revisão desenhada.
+- **Deduplicação:** duas representações equivalentes da mesma planta são comparadas pelo conjunto
+  de ambientes e é preferida a prancha cotada. Repetições legítimas são preservadas: três `W.C`
+  continuam a ser três e `Quarto 1` nunca é fundido com `Suite 1`.
+- **Resultado Cyntia:** 13 compartimentos reconhecidos na Planta Cotada, todos no Piso Térreo,
+  com área desenhada total de `226,246 m²`; as três instalações sanitárias foram mantidas.
+- **Operação:** criado comando interno `plant:reprocess` para reaplicar leitores melhorados a PDFs
+  já armazenados, sem novo upload e usando a mesma validação/gravação da API.
+- **Validação:** 6 testes Python novos aprovados; 38 testes da API, 12 do frontend e build completo
+  aprovados. O próprio PDF da Cyntia foi renderizado e confrontado visualmente com o resultado.
+- **Produção:** pronta para publicação; sem migração de base de dados.
