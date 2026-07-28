@@ -441,4 +441,7 @@ publicação.
   já armazenados, sem novo upload e usando a mesma validação/gravação da API.
 - **Validação:** 6 testes Python novos aprovados; 38 testes da API, 12 do frontend e build completo
   aprovados. O próprio PDF da Cyntia foi renderizado e confrontado visualmente com o resultado.
-- **Produção:** pronta para publicação; sem migração de base de dados.
+- **Produção:** publicada em `https://sud30s.org` nos commits `6a6fd06` e `05e21cd`, sem migração
+  de base de dados. Serviço Python reiniciado sob supervisão do systemd, API recompilada/recarregada
+  e o ficheiro arquitectónico da Cyntia já existente foi reprocessado: 13 compartimentos,
+  `226,246 m²`, `Piso Térreo`.
