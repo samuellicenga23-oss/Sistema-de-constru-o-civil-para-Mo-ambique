@@ -1,7 +1,10 @@
+import asyncio
+import json
 import os
 
 from fastapi import FastAPI, File, Header, HTTPException, UploadFile
 from pydantic import BaseModel
+from fastapi.responses import StreamingResponse
 
 from parser import parse_pdf
 
@@ -88,19 +91,7 @@ class ParseResponse(BaseModel):
     structuralSummary: StructuralSummaryOut | None
 
 
-@app.post("/parse", response_model=ParseResponse)
-async def parse(
-    file: UploadFile = File(...),
-    x_internal_token: str | None = Header(default=None, alias="X-Internal-Token"),
-):
-    if PLANT_SERVICE_TOKEN and x_internal_token != PLANT_SERVICE_TOKEN:
-        raise HTTPException(401, "Não autorizado")
-    if file.content_type != "application/pdf" and not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(400, "Só é suportado PDF vectorial (DWG fica para quando houver um ficheiro de exemplo)")
-
-    file_bytes = await file.read()
-    result = parse_pdf(file_bytes)
-
+def build_parse_response(result) -> ParseResponse:
     summary = result.structural_summary
     return ParseResponse(
         metadata=MetadataOut(**result.metadata.__dict__),
@@ -132,3 +123,63 @@ async def parse(
         if summary
         else None,
     )
+
+
+@app.post("/parse", response_model=ParseResponse)
+async def parse(
+    file: UploadFile = File(...),
+    x_internal_token: str | None = Header(default=None, alias="X-Internal-Token"),
+):
+    if PLANT_SERVICE_TOKEN and x_internal_token != PLANT_SERVICE_TOKEN:
+        raise HTTPException(401, "Não autorizado")
+    if file.content_type != "application/pdf" and not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(400, "Só é suportado PDF vectorial (DWG fica para quando houver um ficheiro de exemplo)")
+
+    file_bytes = await file.read()
+    result = parse_pdf(file_bytes)
+
+    return build_parse_response(result)
+
+
+@app.post("/parse-stream")
+async def parse_stream(
+    file: UploadFile = File(...),
+    x_internal_token: str | None = Header(default=None, alias="X-Internal-Token"),
+):
+    if PLANT_SERVICE_TOKEN and x_internal_token != PLANT_SERVICE_TOKEN:
+        raise HTTPException(401, "Não autorizado")
+    if file.content_type != "application/pdf" and not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(400, "Só é suportado PDF vectorial")
+
+    file_bytes = await file.read()
+
+    async def stream_events():
+        queue: asyncio.Queue = asyncio.Queue()
+        loop = asyncio.get_running_loop()
+
+        def report_progress(current_page: int, total_pages: int):
+            loop.call_soon_threadsafe(
+                queue.put_nowait,
+                {"type": "progress", "currentPage": current_page, "totalPages": total_pages},
+            )
+
+        def run_parser():
+            try:
+                result = parse_pdf(file_bytes, report_progress)
+                response = build_parse_response(result)
+                payload = response.model_dump() if hasattr(response, "model_dump") else response.dict()
+                loop.call_soon_threadsafe(queue.put_nowait, {"type": "result", "data": payload})
+            except Exception as exc:
+                loop.call_soon_threadsafe(queue.put_nowait, {"type": "error", "message": str(exc)})
+
+        parser_task = asyncio.create_task(asyncio.to_thread(run_parser))
+        try:
+            while True:
+                message = await queue.get()
+                yield json.dumps(message, ensure_ascii=False) + "\n"
+                if message["type"] in ("result", "error"):
+                    break
+        finally:
+            await parser_task
+
+    return StreamingResponse(stream_events(), media_type="application/x-ndjson")

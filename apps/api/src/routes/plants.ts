@@ -12,22 +12,78 @@ import { env } from "../env.js";
 import { plantParseResultSchema, PLANT_DISCIPLINES } from "@sigo/shared";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista"] as const;
+const clientPlantIdSchema = z.string().uuid();
+
+async function setPlantProgress(
+  plantId: string,
+  progress: number,
+  stage: string,
+  pages?: { currentPage: number; totalPages: number },
+) {
+  await db.update(plants).set({
+    processingProgress: Math.max(0, Math.min(100, Math.round(progress))),
+    processingStage: stage,
+    processingCurrentPage: pages?.currentPage,
+    processingTotalPages: pages?.totalPages,
+    processingUpdatedAt: new Date(),
+  }).where(eq(plants.id, plantId));
+}
 
 // Chama o plant-service e grava o resultado — partilhado entre o upload inicial e o
 // reprocessamento (mesmo ficheiro em disco, útil quando a lógica de extracção melhora e não se
 // quer obrigar o utilizador a carregar o PDF outra vez).
 async function processPlantFile(plantId: string, buffer: Buffer, filename: string): Promise<void> {
+  await setPlantProgress(plantId, 20, "A preparar o PDF para leitura");
   const form = new FormData();
   form.append("file", new Blob([new Uint8Array(buffer)], { type: "application/pdf" }), filename);
-  const response = await fetch(`${env.plantServiceUrl}/parse`, {
+  const response = await fetch(`${env.plantServiceUrl}/parse-stream`, {
     method: "POST",
     body: form,
     headers: env.plantServiceToken ? { "X-Internal-Token": env.plantServiceToken } : undefined,
   });
   if (!response.ok) throw new Error(`plant-service devolveu ${response.status}`);
+  if (!response.body) throw new Error("plant-service não devolveu o fluxo de análise");
 
-  const json = await response.json();
-  const parsed = plantParseResultSchema.parse(json);
+  await setPlantProgress(plantId, 28, "A iniciar leitura das páginas");
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let pending = "";
+  let parseResult: unknown;
+
+  async function consumeLine(line: string) {
+    if (!line.trim()) return;
+    const event = JSON.parse(line) as
+      | { type: "progress"; currentPage: number; totalPages: number }
+      | { type: "result"; data: unknown }
+      | { type: "error"; message: string };
+    if (event.type === "progress") {
+      const pageProgress = event.totalPages > 0 ? event.currentPage / event.totalPages : 0;
+      await setPlantProgress(
+        plantId,
+        30 + pageProgress * 55,
+        `A ler página ${event.currentPage} de ${event.totalPages}`,
+        { currentPage: event.currentPage, totalPages: event.totalPages },
+      );
+    } else if (event.type === "result") {
+      parseResult = event.data;
+    } else {
+      throw new Error(event.message || "Falha no serviço de análise");
+    }
+  }
+
+  while (true) {
+    const { done, value } = await reader.read();
+    pending += decoder.decode(value, { stream: !done });
+    const lines = pending.split("\n");
+    pending = lines.pop() ?? "";
+    for (const line of lines) await consumeLine(line);
+    if (done) break;
+  }
+  if (pending.trim()) await consumeLine(pending);
+  if (!parseResult) throw new Error("plant-service terminou sem devolver resultados");
+  const parsed = plantParseResultSchema.parse(parseResult);
+
+  await setPlantProgress(plantId, 88, "A organizar os dados encontrados");
 
   await db.delete(extractedRooms).where(eq(extractedRooms.plantId, plantId));
   await db.delete(extractedRebarSchedules).where(eq(extractedRebarSchedules.plantId, plantId));
@@ -56,7 +112,14 @@ async function processPlantFile(plantId: string, buffer: Buffer, filename: strin
     );
   }
 
-  await db.update(plants).set({ processingStatus: "concluido", structuralSummary: parsed.structuralSummary ?? null }).where(eq(plants.id, plantId));
+  await setPlantProgress(plantId, 96, "A validar compartimentos e elementos estruturais");
+  await db.update(plants).set({
+    processingStatus: "concluido",
+    processingProgress: 100,
+    processingStage: "Análise concluída",
+    processingUpdatedAt: new Date(),
+    structuralSummary: parsed.structuralSummary ?? null,
+  }).where(eq(plants.id, plantId));
 }
 
 export async function plantRoutes(app: FastifyInstance) {
@@ -77,7 +140,11 @@ export async function plantRoutes(app: FastifyInstance) {
     const data = await request.file();
     if (!data) return reply.code(400).send({ error: "Ficheiro em falta" });
     const disciplineField = data.fields.discipline;
+    const clientPlantIdField = data.fields.clientPlantId;
     const discipline = typeof disciplineField === "object" && "value" in disciplineField ? String(disciplineField.value) : "arquitectura";
+    const clientPlantIdValue = typeof clientPlantIdField === "object" && "value" in clientPlantIdField ? String(clientPlantIdField.value) : "";
+    const parsedClientPlantId = clientPlantIdSchema.safeParse(clientPlantIdValue);
+    if (!parsedClientPlantId.success) return reply.code(400).send({ error: "Identificador de acompanhamento inválido" });
     if (!PLANT_DISCIPLINES.includes(discipline as any)) {
       return reply.code(400).send({ error: "Disciplina inválida" });
     }
@@ -98,11 +165,16 @@ export async function plantRoutes(app: FastifyInstance) {
     const [plant] = await db
       .insert(plants)
       .values({
+        id: parsedClientPlantId.data,
         projectId,
         discipline: discipline as (typeof PLANT_DISCIPLINES)[number],
         filePath,
         originalFileName: data.filename,
         processingStatus: "processando",
+        processingProgress: 12,
+        processingStage: "Ficheiro recebido e validado",
+        processingStartedAt: new Date(),
+        processingUpdatedAt: new Date(),
       })
       .returning();
 
@@ -112,7 +184,7 @@ export async function plantRoutes(app: FastifyInstance) {
       return reply.code(201).send(updated);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Erro desconhecido a processar a planta";
-      await db.update(plants).set({ processingStatus: "erro", errorMessage: message }).where(eq(plants.id, plant.id));
+      await db.update(plants).set({ processingStatus: "erro", processingStage: "Análise interrompida", processingUpdatedAt: new Date(), errorMessage: message }).where(eq(plants.id, plant.id));
       return reply.code(502).send({ error: `Falha ao processar a planta: ${message}` });
     }
   });
@@ -126,7 +198,16 @@ export async function plantRoutes(app: FastifyInstance) {
     const plant = await assertPlantOwned(id, companyId);
     if (!plant) return reply.code(404).send({ error: "Planta não encontrada" });
 
-    await db.update(plants).set({ processingStatus: "processando", errorMessage: null }).where(eq(plants.id, id));
+    await db.update(plants).set({
+      processingStatus: "processando",
+      processingProgress: 5,
+      processingStage: "A reiniciar a análise",
+      processingCurrentPage: null,
+      processingTotalPages: null,
+      processingStartedAt: new Date(),
+      processingUpdatedAt: new Date(),
+      errorMessage: null,
+    }).where(eq(plants.id, id));
     try {
       const buffer = await readFile(plant.filePath);
       await processPlantFile(id, buffer, plant.originalFileName ?? "planta.pdf");
@@ -134,7 +215,7 @@ export async function plantRoutes(app: FastifyInstance) {
       return updated;
     } catch (err) {
       const message = err instanceof Error ? err.message : "Erro desconhecido a reprocessar a planta";
-      await db.update(plants).set({ processingStatus: "erro", errorMessage: message }).where(eq(plants.id, id));
+      await db.update(plants).set({ processingStatus: "erro", processingStage: "Análise interrompida", processingUpdatedAt: new Date(), errorMessage: message }).where(eq(plants.id, id));
       return reply.code(502).send({ error: `Falha ao reprocessar a planta: ${message}` });
     }
   });
@@ -150,6 +231,24 @@ export async function plantRoutes(app: FastifyInstance) {
       db.select().from(extractedRebarSchedules).where(eq(extractedRebarSchedules.plantId, id)),
     ]);
     return { plant, rooms, rebarSchedules };
+  });
+
+  app.get("/api/plants/:id/status", { preHandler: requireCompanyUser }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const companyId = request.currentUser!.companyId!;
+    const plant = await assertPlantOwned(id, companyId);
+    if (!plant) return reply.code(404).send({ error: "Planta ainda não disponível" });
+    return {
+      id: plant.id,
+      processingStatus: plant.processingStatus,
+      processingProgress: plant.processingProgress,
+      processingStage: plant.processingStage,
+      processingCurrentPage: plant.processingCurrentPage,
+      processingTotalPages: plant.processingTotalPages,
+      processingStartedAt: plant.processingStartedAt,
+      processingUpdatedAt: plant.processingUpdatedAt,
+      errorMessage: plant.errorMessage,
+    };
   });
 
   app.delete("/api/plants/:id", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {

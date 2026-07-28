@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent, type MouseEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { boqApi, type Project } from "../api/boq";
 import { catalogApi, type PriceZone } from "../api/catalog";
-import { plantsApi } from "../api/plants";
+import { plantsApi, type PlantProcessingProgress } from "../api/plants";
 import Layout from "../components/Layout";
 import Modal from "../components/Modal";
 import ConfirmDialog from "../components/ConfirmDialog";
@@ -20,6 +20,16 @@ export default function ProjectsPage() {
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [createProgress, setCreateProgress] = useState("");
+  const [analysisProgress, setAnalysisProgress] = useState<{
+    percent: number;
+    filePercent: number;
+    stage: string;
+    fileName: string;
+    currentFile: number;
+    totalFiles: number;
+    currentPage: number | null;
+    totalPages: number | null;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [pendingDelete, setPendingDelete] = useState<{ id: string; name: string } | null>(null);
@@ -68,19 +78,35 @@ export default function ProjectsPage() {
     setError(null);
     setCreating(true);
     setCreateProgress("A criar projecto...");
+    const technicalFiles = [
+      architectureFile ? { file: architectureFile, discipline: "arquitectura" as const, label: "planta de arquitectura" } : null,
+      structuralFile ? { file: structuralFile, discipline: "estrutura" as const, label: "projecto estrutural" } : null,
+    ].filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+    if (technicalFiles.length) setAnalysisProgress({ percent: 1, filePercent: 0, stage: "A criar o projecto", fileName: technicalFiles[0].file.name, currentFile: 1, totalFiles: technicalFiles.length, currentPage: null, totalPages: null });
     let createdProjectId: string | null = null;
     try {
       const created = await boqApi.createProject({ name, client: client || undefined, currency, zoneId: zoneId || undefined });
       createdProjectId = created.id;
 
       const uploadedPlants = [];
-      if (architectureFile) {
-        setCreateProgress("A analisar a planta de arquitectura...");
-        uploadedPlants.push(await plantsApi.upload(created.id, architectureFile, "arquitectura"));
-      }
-      if (structuralFile) {
-        setCreateProgress("A analisar o projecto estrutural...");
-        uploadedPlants.push(await plantsApi.upload(created.id, structuralFile, "estrutura"));
+      for (let index = 0; index < technicalFiles.length; index++) {
+        const entry = technicalFiles[index];
+        setCreateProgress(`A analisar ${entry.label}...`);
+        const updateProgress = (progress: PlantProcessingProgress) => {
+          const filePercent = progress.processingProgress;
+          const overall = Math.round(((index + filePercent / 100) / technicalFiles.length) * 100);
+          setAnalysisProgress({
+            percent: overall,
+            filePercent,
+            stage: progress.processingStage ?? "A analisar o PDF",
+            fileName: entry.file.name,
+            currentFile: index + 1,
+            totalFiles: technicalFiles.length,
+            currentPage: progress.processingCurrentPage,
+            totalPages: progress.processingTotalPages,
+          });
+        };
+        uploadedPlants.push(await plantsApi.upload(created.id, entry.file, entry.discipline, updateProgress));
       }
 
       // Com plantas, segue directamente para confirmar o que foi extraído; sem plantas, abre a
@@ -95,6 +121,7 @@ export default function ProjectsPage() {
     } finally {
       setCreating(false);
       setCreateProgress("");
+      setAnalysisProgress(null);
     }
   }
 
@@ -159,10 +186,17 @@ export default function ProjectsPage() {
                   </div>
                 </div>
               </div>
-              <div className="sm:col-span-2 flex justify-end gap-2 border-t border-slate-200 pt-4">
+              <div className="sm:col-span-2 flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-4">
+              {creating && analysisProgress && (
+                <div className="w-full rounded-xl border border-blue-100 bg-blue-50/70 p-4 mb-1" aria-live="polite">
+                  <div className="flex items-start justify-between gap-4"><div><p className="text-sm font-semibold text-blue-950">{analysisProgress.stage}</p><p className="mt-0.5 text-xs text-blue-800/70 truncate">Ficheiro {analysisProgress.currentFile} de {analysisProgress.totalFiles} · {analysisProgress.fileName}{analysisProgress.currentPage && analysisProgress.totalPages ? ` · página ${analysisProgress.currentPage} de ${analysisProgress.totalPages}` : ""}</p></div><strong className="text-2xl tabular-nums text-blue-950">{analysisProgress.percent}%</strong></div>
+                  <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-blue-100" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={analysisProgress.percent}><div className="h-full rounded-full bg-blue-600 transition-[width] duration-300" style={{ width: `${analysisProgress.percent}%` }} /></div>
+                  {analysisProgress.totalFiles > 1 && <p className="mt-2 text-[11px] text-blue-800/65">Este ficheiro: {analysisProgress.filePercent}% · progresso total considera os {analysisProgress.totalFiles} ficheiros.</p>}
+                </div>
+              )}
               <button type="button" onClick={() => setShowForm(false)} disabled={creating} className="btn btn-secondary">Cancelar</button>
               <button type="submit" disabled={creating} className="btn btn-primary min-w-44">
-                {creating ? createProgress : "Criar projecto"}
+                {creating ? analysisProgress ? `${analysisProgress.percent}% concluído` : createProgress : "Criar projecto"}
               </button>
               </div>
             </form>

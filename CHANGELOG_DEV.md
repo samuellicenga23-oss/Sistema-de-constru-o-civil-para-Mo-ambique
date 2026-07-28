@@ -390,3 +390,24 @@ publicação.
   alterações paralelas por integrar. Backup PostgreSQL criado em
   `/home/sigo/backups/sigo-predeploy-20260728-3678897.dump`, migração `0024` aplicada, build da
   VPS concluído, processo `sigo-api` recarregado e saúde interna/HTTPS confirmada.
+
+## 2026-07-28 — Codex — Progresso real da análise de plantas
+
+- **Problema:** a criação do projecto mantinha uma única chamada aberta até o analisador terminar;
+  o utilizador via apenas “A processar”, embora o PDF estivesse a avançar página por página.
+- **Serviço de plantas:** novo fluxo NDJSON transmite a página actual e o total de páginas durante
+  a extracção, sem inventar uma percentagem baseada apenas no tempo.
+- **API:** cada planta recebe o identificador antes da análise e grava percentagem, etapa, página
+  actual/total e instantes de início/actualização. O upload continua protegido e só termina quando
+  a análise e a gravação dos resultados estiverem concluídas.
+- **Interface:** o modal “Novo projecto”, o carregamento dentro da obra e o reprocessamento mostram
+  percentagem, barra de progresso, etapa corrente, nome do ficheiro e página em leitura. Quando são
+  enviados arquitectura e estrutura, apresenta também o progresso global dos dois ficheiros.
+- **Diagnóstico de produção:** os dois ficheiros mais recentes do projecto submetido pelo utilizador
+  terminaram com estado `concluido`; o defeito estava na falta de feedback intermediário, não numa
+  planta permanentemente bloqueada.
+- **Persistência:** migração `0025_puzzling_gwen_stacy.sql` adiciona os campos de progresso sem
+  alterar resultados de plantas existentes.
+- **Validação:** build completo aprovado; 38 testes da API e 12 do frontend aprovados; parser Python
+  validado com PDF sintético de três páginas e eventos reais `1/3`, `2/3`, `3/3`.
+- **Produção:** pronta para publicação depois da verificação final do `main` remoto.

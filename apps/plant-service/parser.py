@@ -661,7 +661,7 @@ def build_structural_summary(
     )
 
 
-def parse_pdf(file_bytes: bytes) -> ParseResult:
+def parse_pdf(file_bytes: bytes, progress_callback=None) -> ParseResult:
     doc = fitz.open(stream=file_bytes, filetype="pdf")
     metadata = PlantMetadata()
     rooms: list[Room] = []
@@ -695,6 +695,8 @@ def parse_pdf(file_bytes: bytes) -> ParseResult:
         beam_spans.extend(extract_beam_spans(text, page_number))
         staircases.extend(extract_staircases(text, page_number))
         slabs.extend(extract_slabs(text, page_number))
+        if progress_callback:
+            progress_callback(page_number, doc.page_count)
 
     doc.close()
     structural_summary = build_structural_summary(footings, column_groups, beam_spans, rebar_schedules, staircases, slabs)

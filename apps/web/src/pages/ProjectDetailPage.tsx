@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent, type MouseEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { boqApi, type BudgetDocument, type Project } from "../api/boq";
 import { measurementApi, type MeasurementCertificate } from "../api/measurement";
-import { plantsApi, type Plant } from "../api/plants";
+import { plantsApi, type Plant, type PlantProcessingProgress } from "../api/plants";
 import { catalogApi, type PriceZone } from "../api/catalog";
 import { suppliersApi } from "../api/suppliers";
 import Layout from "../components/Layout";
@@ -46,6 +46,7 @@ export default function ProjectDetailPage() {
   const [periodDate, setPeriodDate] = useState(todayStr());
   const [plantDiscipline, setPlantDiscipline] = useState<"arquitectura" | "estrutura">("arquitectura");
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<PlantProcessingProgress | null>(null);
   const [preparingMeasurements, setPreparingMeasurements] = useState(false);
   const [reprocessingPlantId, setReprocessingPlantId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -119,7 +120,7 @@ export default function ProjectDetailPage() {
     setError(null);
     setUploading(true);
     try {
-      const uploaded = await plantsApi.upload(projectId, file, plantDiscipline);
+      const uploaded = await plantsApi.upload(projectId, file, plantDiscipline, setUploadProgress);
       fileInput.value = "";
       await reload();
       navigate(`/plantas/${uploaded.id}`);
@@ -128,6 +129,7 @@ export default function ProjectDetailPage() {
       await reload().catch(() => {});
     } finally {
       setUploading(false);
+      setUploadProgress(null);
     }
   }
 
@@ -177,7 +179,9 @@ export default function ProjectDetailPage() {
     setError(null);
     setReprocessingPlantId(id);
     try {
-      await plantsApi.reprocess(id);
+      await plantsApi.reprocess(id, (progress) => {
+        setPlants((current) => current.map((plant) => plant.id === id ? { ...plant, ...progress } : plant));
+      });
       await reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Não foi possível reprocessar a planta");
@@ -394,9 +398,9 @@ export default function ProjectDetailPage() {
                   </Link>
                 ) : (
                   <div className="flex items-center justify-between px-5 py-3">
-                    <span className="font-medium text-gray-500 truncate pr-2">{p.originalFileName}</span>
+                    <span className="min-w-0 pr-2"><span className="block font-medium text-gray-500 truncate">{p.originalFileName}</span>{p.processingStatus === "processando" && <span className="block text-[11px] text-blue-700">{p.processingStage ?? "A analisar"}{p.processingCurrentPage && p.processingTotalPages ? ` · página ${p.processingCurrentPage}/${p.processingTotalPages}` : ""}</span>}</span>
                     <span className="flex items-center gap-2 shrink-0">
-                      <span className={`badge ${PLANT_STATUS_BADGE[p.processingStatus].cls}`}>{PLANT_STATUS_BADGE[p.processingStatus].label}</span>
+                      <span className={`badge ${PLANT_STATUS_BADGE[p.processingStatus].cls}`}>{p.processingStatus === "processando" ? `${p.processingProgress}%` : PLANT_STATUS_BADGE[p.processingStatus].label}</span>
                       {p.processingStatus === "erro" && (
                         <button onClick={(e) => handleReprocessPlant(e, p.id)} disabled={reprocessingPlantId === p.id} className="btn btn-secondary btn-sm">
                           {reprocessingPlantId === p.id ? "A tentar..." : "Tentar novamente"}
@@ -421,6 +425,7 @@ export default function ProjectDetailPage() {
             )}
           </ul>
           <form onSubmit={handleUploadPlant} className="flex gap-2 items-end px-5 py-4 border-t border-gray-100 flex-wrap">
+            {uploading && uploadProgress && <div className="w-full rounded-xl border border-blue-100 bg-blue-50/70 p-4 mb-2" aria-live="polite"><div className="flex justify-between gap-4"><div><p className="text-sm font-semibold text-blue-950">{uploadProgress.processingStage ?? "A analisar o PDF"}</p><p className="text-xs text-blue-800/70">{uploadProgress.processingCurrentPage && uploadProgress.processingTotalPages ? `Página ${uploadProgress.processingCurrentPage} de ${uploadProgress.processingTotalPages}` : "O ficheiro está a ser preparado para leitura."}</p></div><strong className="text-xl tabular-nums text-blue-950">{uploadProgress.processingProgress}%</strong></div><div className="mt-3 h-2.5 overflow-hidden rounded-full bg-blue-100" role="progressbar" aria-valuenow={uploadProgress.processingProgress} aria-valuemin={0} aria-valuemax={100}><div className="h-full rounded-full bg-blue-600 transition-[width] duration-300" style={{ width: `${uploadProgress.processingProgress}%` }} /></div></div>}
             <div>
               <label className="label">Disciplina</label>
               <select value={plantDiscipline} onChange={(e) => setPlantDiscipline(e.target.value as "arquitectura" | "estrutura")} className="input">
@@ -434,7 +439,7 @@ export default function ProjectDetailPage() {
             </div>
             <button type="submit" disabled={uploading} className="btn btn-primary">
               <IconUpload className="w-4 h-4" />
-              {uploading ? "A analisar..." : plants.length > 0 ? "Adicionar projecto" : "Carregar e analisar"}
+              {uploading ? `${uploadProgress?.processingProgress ?? 0}% analisado` : plants.length > 0 ? "Adicionar projecto" : "Carregar e analisar"}
             </button>
           </form>
         </section>

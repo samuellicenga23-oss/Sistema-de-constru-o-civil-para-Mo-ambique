@@ -435,6 +435,12 @@ export const plants = pgTable("plants", {
   filePath: text("file_path").notNull(),
   originalFileName: varchar("original_file_name", { length: 300 }),
   processingStatus: plantStatusEnum("processing_status").notNull().default("pendente"),
+  processingProgress: integer("processing_progress").notNull().default(0),
+  processingStage: varchar("processing_stage", { length: 200 }),
+  processingCurrentPage: integer("processing_current_page"),
+  processingTotalPages: integer("processing_total_pages"),
+  processingStartedAt: timestamp("processing_started_at"),
+  processingUpdatedAt: timestamp("processing_updated_at").notNull().defaultNow(),
   errorMessage: text("error_message"),
   // Resumo agregado de sapatas/pilares/vigas (projecto estrutural) — usado para pré-preencher
   // o Assistente de Medições sem repetir perguntas já respondidas pela planta importada.

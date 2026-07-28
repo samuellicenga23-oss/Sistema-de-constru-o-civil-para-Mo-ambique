@@ -52,7 +52,7 @@ export default function PlantReviewPage() {
     setReprocessing(true);
     setError(null);
     try {
-      const updated = await plantsApi.reprocess(id);
+      const updated = await plantsApi.reprocess(id, (progress) => setPlant((current) => current ? { ...current, ...progress } : current));
       setPlant(updated);
       const detail = await plantsApi.detail(id);
       setRooms(detail.rooms);
@@ -162,7 +162,7 @@ export default function PlantReviewPage() {
           </a>
           <button onClick={handleReprocess} disabled={reprocessing} className="btn btn-ghost btn-sm">
             <IconWand className="w-3.5 h-3.5" />
-            {reprocessing ? "A reprocessar..." : "Reprocessar"}
+            {reprocessing ? `A reprocessar ${plant.processingProgress}%` : "Reprocessar"}
           </button>
           <Link to={`/projectos/${plant.projectId}`} className="btn btn-ghost btn-sm">
             <IconBack className="w-3.5 h-3.5" />
