@@ -386,4 +386,7 @@ publicação.
   sem remover ou recalcular dados existentes.
 - **Validação:** build completo aprovado; 38 testes da API e 12 do frontend aprovados, incluindo
   regressões para custo horário carregado e formação sequencial do preço.
-- **Produção:** pronta para publicação depois da verificação final do `main` remoto.
+- **Produção:** publicada em `https://sud30s.org` no commit `3678897`; `main` remoto não tinha
+  alterações paralelas por integrar. Backup PostgreSQL criado em
+  `/home/sigo/backups/sigo-predeploy-20260728-3678897.dump`, migração `0024` aplicada, build da
+  VPS concluído, processo `sigo-api` recarregado e saúde interna/HTTPS confirmada.
