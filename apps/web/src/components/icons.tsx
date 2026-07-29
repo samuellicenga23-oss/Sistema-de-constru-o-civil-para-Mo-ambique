@@ -170,16 +170,6 @@ export function IconChart(p: IconProps) {
   );
 }
 
-export function IconWand(p: IconProps) {
-  return (
-    <Svg {...p}>
-      <path d="m15 4 1.2 2.6L19 8l-2.8 1.4L15 12l-1.2-2.6L11 8l2.8-1.4L15 4Z" />
-      <path d="m5 14 .8 1.8L8 17l-2.2.9L5 20l-.8-2.1L2 17l2.2-1.2L5 14Z" />
-      <path d="M4.5 21 16 9.5" />
-    </Svg>
-  );
-}
-
 export function IconKey(p: IconProps) {
   return (
     <Svg {...p}>

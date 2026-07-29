@@ -8,7 +8,7 @@ import { suppliersApi } from "../api/suppliers";
 import Layout from "../components/Layout";
 import { MetricCard, SectionHeader } from "../components/WorkspaceUI";
 import ProjectWorkspaceNav from "../components/ProjectWorkspaceNav";
-import { IconBack, IconDoc, IconClipboard, IconMap, IconPlus, IconTrash, IconUpload, IconWand } from "../components/icons";
+import { IconBack, IconDoc, IconClipboard, IconMap, IconPlus, IconRuler, IconTrash, IconUpload } from "../components/icons";
 
 const PLANT_STATUS_BADGE: Record<Plant["processingStatus"], { label: string; cls: string }> = {
   pendente: { label: "Pendente", cls: "badge-gray" },
@@ -254,7 +254,7 @@ export default function ProjectDetailPage() {
             actions={
               completedPlants.length > 0 ? (
                 <button onClick={handlePrepareMeasurements} disabled={preparingMeasurements} className="btn btn-primary btn-sm">
-                  <IconWand className="h-3.5 w-3.5" />
+                  <IconRuler className="h-3.5 w-3.5" />
                   {preparingMeasurements ? "A preparar..." : hasMeasuredBudget ? "Rever medições" : "Preparar medições"}
                 </button>
               ) : (

@@ -122,7 +122,7 @@ export default function Layout({
               <Link
                 to={item.to}
                 title={sidebarCollapsed ? item.label : undefined}
-                className={`mb-0.5 flex items-center rounded-md text-sm font-medium transition-colors ${sidebarCollapsed ? "h-10 justify-center px-2" : "gap-3 px-2.5 py-2"} ${
+                className={`mb-0.5 flex items-center rounded-md text-sm font-medium ${sidebarCollapsed ? "h-10 justify-center px-2" : "gap-3 px-2.5 py-2"} ${
                   active ? "bg-slate-200/80 text-slate-950" : "text-slate-600 hover:bg-slate-200/55 hover:text-slate-950"
                 }`}
               >
@@ -190,7 +190,7 @@ export default function Layout({
                     <Link
                       key={item.to}
                       to={item.to}
-                      className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+                      className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium ${
                         active ? "bg-slate-200 text-slate-950" : "text-slate-600 hover:bg-slate-200/60 hover:text-slate-950"
                       }`}
                     >
@@ -239,7 +239,7 @@ export default function Layout({
 
         <OfflineBanner />
 
-        <main className="page-enter min-w-0 flex-1 overflow-x-hidden p-3 pb-20 sm:p-5 md:p-8 md:pb-8 xl:p-10">{children}</main>
+        <main className="min-w-0 flex-1 overflow-x-hidden p-3 pb-20 sm:p-5 md:p-8 md:pb-8 xl:p-10">{children}</main>
 
         {/* Barra inferior móvel — só os módulos principais, ícone + rótulo curto, tocável. */}
         <nav className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-white border-t border-gray-200 flex items-stretch">

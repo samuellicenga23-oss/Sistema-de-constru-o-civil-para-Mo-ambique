@@ -1,6 +1,7 @@
 # SIGO
 
-Sistema de Medições e Orçamentos para Construção Civil (Moçambique) — SaaS multi-empresa.
+Sistema Integrado de Gestão de Obras — plataforma multi-empresa para orçamento, planeamento,
+compras, stock, execução, medição e controlo financeiro.
 
 ## Estrutura
 
@@ -47,4 +48,6 @@ O CI (`.github/workflows/ci.yml`) corre `npm ci`, build, typecheck, os mesmos te
 Postgres efémero, validação de que o schema e as migrations estão sincronizados, e uma
 auditoria de dependências informativa — em cada push/PR. Nunca faz deploy sozinho.
 
-Ver `C:\Users\Expert Sam\.claude\plans\shiny-conjuring-muffin.md` para o plano técnico completo e as decisões de âmbito validadas.
+O acesso local/VPS, a ligação segura à base de dados e a lista completa de tecnologias estão em
+[`ACESSO_TECNICO.md`](./ACESSO_TECNICO.md). O histórico comum para continuidade entre Codex e
+Claude está em [`CHANGELOG_DEV.md`](./CHANGELOG_DEV.md).

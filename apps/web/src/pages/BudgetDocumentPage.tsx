@@ -12,7 +12,7 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import ModalPortal from "../components/ModalPortal";
 import Layout from "../components/Layout";
 import { SectionHeader } from "../components/WorkspaceUI";
-import { IconBack, IconChart, IconClipboard, IconDoc, IconDownload, IconPlus, IconRefresh, IconTrash, IconWand } from "../components/icons";
+import { IconBack, IconChart, IconClipboard, IconDoc, IconDownload, IconPlus, IconRefresh, IconRuler, IconTrash } from "../components/icons";
 
 function money(value: number, currency: string) {
   return `${value.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`;
@@ -213,7 +213,7 @@ export default function BudgetDocumentPage() {
             disabled={preparingAutomaticDocument}
             className="btn btn-secondary btn-sm"
           >
-            <IconWand className="w-3.5 h-3.5" />
+            <IconRuler className="w-3.5 h-3.5" />
             {compositionLinkedCount > 0 ? "Assistente de Medições" : preparingAutomaticDocument ? "A preparar..." : "Medir pelas plantas"}
           </button>
           <button onClick={() => setShowMaterialsByPhase(true)} className="btn btn-secondary btn-sm">
@@ -282,7 +282,7 @@ export default function BudgetDocumentPage() {
                 disabled={compositionLinkedCount > 0 ? document.status !== "rascunho" || repricing : preparingAutomaticDocument}
                 className="btn btn-secondary btn-sm shrink-0"
               >
-                {compositionLinkedCount > 0 ? <IconRefresh className="h-3.5 w-3.5" /> : <IconWand className="h-3.5 w-3.5" />}
+                {compositionLinkedCount > 0 ? <IconRefresh className="h-3.5 w-3.5" /> : <IconRuler className="h-3.5 w-3.5" />}
                 {compositionLinkedCount > 0 ? "Actualizar preços" : preparingAutomaticDocument ? "A preparar..." : "Preparar medição pelas plantas"}
               </button>
             </div>
@@ -457,7 +457,7 @@ export default function BudgetDocumentPage() {
                 </div>
                 <div className="w-full bg-gray-100 rounded-full h-2">
                   <div
-                    className="bg-brand-600 h-2 rounded-full transition-all"
+                    className="bg-brand-600 h-2 rounded-full"
                     style={{ width: `${Math.min(100, dashboard.percentExecutado).toFixed(1)}%` }}
                   />
                 </div>

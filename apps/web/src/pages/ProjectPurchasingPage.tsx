@@ -463,7 +463,7 @@ export default function ProjectPurchasingPage() {
 
           <div className="divide-y divide-gray-100">
             {orders.map((o) => (
-              <div key={o.id} className="px-5 py-4 hover:bg-slate-50/70 transition-colors">
+              <div key={o.id} className="px-5 py-4 hover:bg-slate-50/70">
                 <div className="flex items-center justify-between flex-wrap gap-2">
                   <div>
                     <span className="font-medium text-gray-900">{o.supplierName}</span>{" "}

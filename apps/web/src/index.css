@@ -55,25 +55,16 @@ textarea {
   color: #172033;
 }
 
-@keyframes fade-up {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.page-enter {
-  animation: fade-up 320ms ease-out both;
-}
-
 @layer components {
   /* Botões */
   .btn {
-    @apply inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-transparent px-4 py-2.5 text-center text-sm font-semibold leading-tight transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40 focus-visible:ring-offset-2;
+    @apply inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-transparent px-4 py-2.5 text-center text-sm font-semibold leading-tight disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40 focus-visible:ring-offset-2;
   }
   .btn-primary {
     @apply bg-[#e86f25] text-white shadow-sm hover:bg-[#d85f18] active:bg-[#c75112];
   }
   .btn-secondary {
-    @apply bg-white text-slate-800 border-slate-300 shadow-sm hover:-translate-y-px hover:border-slate-400 hover:bg-slate-50 hover:shadow;
+    @apply bg-white text-slate-800 border-slate-300 shadow-sm hover:border-slate-400 hover:bg-slate-50;
   }
   .btn-ghost {
     @apply border-slate-200 bg-white text-brand-700 shadow-sm hover:border-brand-200 hover:bg-brand-50;
@@ -84,10 +75,10 @@ textarea {
 
   /* Botões-ícone pequenos (acções por linha) */
   .icon-btn {
-    @apply inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm transition-all hover:border-brand-200 hover:bg-brand-50 hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/30;
+    @apply inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm hover:border-brand-200 hover:bg-brand-50 hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/30;
   }
   .icon-btn-danger {
-    @apply inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm transition-all hover:border-red-200 hover:bg-red-50 hover:text-red-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400/30;
+    @apply inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm hover:border-red-200 hover:bg-red-50 hover:text-red-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400/30;
   }
   .icon-btn-active {
     @apply text-brand-700 bg-brand-100;
@@ -98,7 +89,7 @@ textarea {
     @apply block text-xs font-medium text-gray-500 mb-1;
   }
   .input {
-    @apply w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 placeholder-slate-400 shadow-sm transition-all focus:outline-none focus:border-brand-500 focus:ring-3 focus:ring-brand-500/10;
+    @apply w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 placeholder-slate-400 shadow-sm focus:outline-none focus:border-brand-500 focus:ring-3 focus:ring-brand-500/10;
   }
   .input-sm {
     @apply px-2 py-1 text-xs rounded-md;
@@ -123,19 +114,19 @@ textarea {
     @apply text-left text-[11px] uppercase tracking-wider text-slate-500 bg-slate-50 border-b border-slate-200;
   }
   .table-row {
-    @apply border-b border-slate-100 last:border-0 hover:bg-blue-50/35 transition-colors;
+    @apply border-b border-slate-100 last:border-0 hover:bg-blue-50/35;
   }
 
   .action-link {
-    @apply inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-brand-700 shadow-sm transition-all hover:border-brand-200 hover:bg-brand-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/30;
+    @apply inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-brand-700 shadow-sm hover:border-brand-200 hover:bg-brand-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/30;
   }
 
   .clickable-card {
-    @apply relative rounded-xl border border-slate-200 bg-white shadow-sm transition-all hover:-translate-y-px hover:border-brand-300 hover:shadow-md focus-within:border-brand-400 focus-within:ring-2 focus-within:ring-brand-500/15;
+    @apply relative rounded-xl border border-slate-200 bg-white shadow-sm hover:border-brand-300 focus-within:border-brand-400 focus-within:ring-2 focus-within:ring-brand-500/15;
   }
 
   .clickable-row {
-    @apply relative transition-colors hover:bg-blue-50/60 focus-within:bg-blue-50/60;
+    @apply relative hover:bg-blue-50/60 focus-within:bg-blue-50/60;
   }
 
   .click-hint {
@@ -146,7 +137,7 @@ textarea {
     @apply flex max-w-full items-center gap-1 overflow-x-auto rounded-lg border border-slate-200 bg-slate-100 p-1 [scrollbar-width:thin];
   }
   .workspace-tab {
-    @apply whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-white hover:text-slate-900;
+    @apply whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium text-slate-600 hover:bg-white hover:text-slate-900;
   }
   .workspace-tab-active {
     @apply bg-white text-slate-900 shadow-sm;

@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { plantsApi, type ExtractedRoom, type ExtractedRebarLine, type Plant } from "../api/plants";
 import { boqApi } from "../api/boq";
 import Layout from "../components/Layout";
-import { IconBack, IconWand } from "../components/icons";
+import { IconBack, IconRefresh, IconRuler } from "../components/icons";
 
 const UNASSIGNED_FLOOR = "Piso não identificado";
 const SECTION_STYLES = {
@@ -176,7 +176,7 @@ export default function PlantReviewPage() {
             Ver PDF original
           </a>
           <button onClick={handleReprocess} disabled={reprocessing} className="btn btn-ghost btn-sm">
-            <IconWand className="w-3.5 h-3.5" />
+            <IconRefresh className="w-3.5 h-3.5" />
             {reprocessing ? `A reprocessar ${plant.processingProgress}%` : "Reprocessar"}
           </button>
           <Link to={`/projectos/${plant.projectId}`} className="btn btn-ghost btn-sm">
@@ -204,7 +204,7 @@ export default function PlantReviewPage() {
               disabled={plant.processingStatus !== "concluido" || preparingMeasurements}
               className="btn btn-primary shrink-0"
             >
-              <IconWand className="h-4 w-4" />
+              <IconRuler className="h-4 w-4" />
               {preparingMeasurements ? "A preparar..." : "Continuar para o diagnóstico"}
             </button>
           </div>
@@ -279,13 +279,22 @@ export default function PlantReviewPage() {
               Estes pontos podem ser preenchidos à mão no Assistente de Medições ou directamente no Mapa de
               Quantidades — o resto da planta continua a ser usado normalmente.
             </p>
+            <button
+              type="button"
+              onClick={handleContinueToMeasurements}
+              disabled={preparingMeasurements}
+              className="btn btn-secondary btn-sm mt-3"
+            >
+              <IconRuler className="h-3.5 w-3.5" />
+              {preparingMeasurements ? "A preparar os campos..." : "Indicar dados manualmente"}
+            </button>
           </section>
         )}
 
         {plant.structuralSummary && (
           <section className="card card-pad">
             <div className="flex items-center gap-2 mb-3">
-              <IconWand className="w-4 h-4 text-brand-700" />
+              <IconRuler className="w-4 h-4 text-brand-700" />
               <h2 className="section-title">Resumo estrutural detectado</h2>
             </div>
             <div className="grid grid-cols-5 gap-3 text-center mb-3">
@@ -339,7 +348,7 @@ export default function PlantReviewPage() {
         {rooms.length > 0 && (
           <section className="card card-pad">
             <div className="flex items-center gap-2 mb-3">
-              <IconWand className="w-4 h-4 text-brand-700" />
+              <IconRuler className="w-4 h-4 text-brand-700" />
               <h2 className="section-title">Compartimentos detectados ({rooms.length}) — confirme o piso de cada um</h2>
             </div>
             <p className="text-sm text-gray-600 mb-3">

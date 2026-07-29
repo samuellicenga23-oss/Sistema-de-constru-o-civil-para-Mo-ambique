@@ -3,7 +3,7 @@ import { catalogApi, type Material } from "../api/catalog";
 import { quickEstimateApi, type FoundationType, type RoofType, type QuickEstimateResult, type SoilType } from "../api/quickEstimate";
 import type { StructuralSummary } from "../api/plants";
 import type { ExtractedRoom } from "../api/plants";
-import { IconBack, IconPlus, IconTrash, IconWand } from "./icons";
+import { IconBack, IconPlus, IconRuler, IconTrash } from "./icons";
 import CalculationReportView from "./CalculationReportView";
 import ModalPortal from "./ModalPortal";
 
@@ -169,6 +169,7 @@ export default function QuickEstimateWizard({
   // quando há dados importados, mas o utilizador pode mudar (o que faz cair para preenchimento manual).
   const [foundationType, setFoundationType] = useState<FoundationType>("sapata_isolada");
   const [useStructuralFooting, setUseStructuralFooting] = useState(hasStructuralFootings);
+  const [foundationConfirmed, setFoundationConfirmed] = useState(hasStructuralFootings);
   const [footingCount, setFootingCount] = useState(
     hasStructuralFootings ? String(structuralSummary!.footingsCount) : "4"
   );
@@ -181,6 +182,15 @@ export default function QuickEstimateWizard({
     hasStructuralFootings ? (structuralSummary!.footingsAvgDepthCm / 100).toFixed(2) : "0.8"
   );
   const [slabThickness, setSlabThickness] = useState("0.35");
+  const [beamConcreteVolumeM3, setBeamConcreteVolumeM3] = useState(
+    structuralSummary?.beamsConcreteVolumeM3 ? structuralSummary.beamsConcreteVolumeM3.toFixed(3) : ""
+  );
+  const [floorSlabThicknessM, setFloorSlabThicknessM] = useState(
+    structuralSummary?.slabsAvgThicknessCm ? (structuralSummary.slabsAvgThicknessCm / 100).toFixed(3) : ""
+  );
+  const [steelWeightKg, setSteelWeightKg] = useState(
+    structuralSummary?.totalSteelWeightKg ? structuralSummary.totalSteelWeightKg.toFixed(2) : ""
+  );
   const [concreteClass, setConcreteClass] = useState<"B20" | "B25" | "B30">("B25");
   const [roofType, setRoofType] = useState<RoofType>("laje_plana");
   const [roofArea, setRoofArea] = useState("");
@@ -311,17 +321,18 @@ export default function QuickEstimateWizard({
       : Number(footingCount) > 0 && Number(footingAvgArea) > 0 && Number(footingAvgDepth) > 0);
 
   const readinessChecks = [
-    { label: "Compartimentos e áreas por piso", ready: hasArchitectureRooms, impact: "Sem planta de arquitectura, indique manualmente todos os compartimentos e dimensões." },
-    { label: "Perímetro exterior e pé-direito", ready: floors.every((f) => Number(f.perimeter) > 0 && Number(f.ceilingHeight) > 0), impact: "Necessário para paredes, rebocos, pintura e revestimentos." },
-    { label: "Sapatas e fundações", ready: hasStructuralFootings, impact: "Sem planta estrutural, confirme quantidade, área e profundidade médias." },
-    { label: "Vigas estruturais", ready: Boolean(structuralSummary?.beamsConcreteVolumeM3), impact: "Sem volume real, o sistema usará um rácio genérico de betão." },
-    { label: "Lajes e espessuras", ready: Boolean(structuralSummary?.slabsAvgThicknessCm), impact: "Sem espessura real, o volume das lajes será estimado." },
-    { label: "Mapa de aço", ready: Boolean(structuralSummary?.totalSteelWeightKg), impact: "Sem quadro de armaduras, o peso será calculado por kg/m³ de betão." },
-    { label: "Redes hidráulicas e sanitárias", ready: Boolean(sewerPipe110M || sewerPipe40M || waterSupplyPipeM), impact: "Confirme comprimentos de tubagem; contagens de aparelhos não definem o traçado real." },
+    { label: "Compartimentos e áreas por piso", ready: step1Valid, impact: "Indique manualmente todos os compartimentos e dimensões.", targetStep: 0 },
+    { label: "Perímetro exterior e pé-direito", ready: floors.every((f) => Number(f.perimeter) > 0 && Number(f.ceilingHeight) > 0), impact: "Necessário para paredes, rebocos, pintura e revestimentos.", targetStep: 0 },
+    { label: "Sapatas e fundações", ready: foundationConfirmed && (foundationType === "laje" ? Number(slabThickness) > 0 : Number(footingCount) > 0 && Number(footingAvgArea) > 0 && Number(footingAvgDepth) > 0), impact: "Confirme quantidade, área e profundidade médias.", targetStep: 1 },
+    { label: "Vigas estruturais", ready: Number(beamConcreteVolumeM3) > 0, impact: "Indique o volume de betão das vigas para evitar um rácio genérico.", targetStep: 1 },
+    { label: "Lajes e espessuras", ready: Number(floorSlabThicknessM) > 0, impact: "Indique a espessura real da laje para calcular o volume.", targetStep: 1 },
+    { label: "Mapa de aço", ready: Number(steelWeightKg) > 0, impact: "Indique o peso do mapa de aço para evitar estimativas por kg/m³.", targetStep: 1 },
+    { label: "Redes hidráulicas e sanitárias", ready: Boolean(sewerPipe110M || sewerPipe40M || waterSupplyPipeM), impact: "Confirme comprimentos de tubagem; contagens de aparelhos não definem o traçado real.", targetStep: 2 },
     {
       label: "Custos críticos do catálogo",
       ready: criticalCostsReady,
       impact: "Cimento, aço e bloco devem ter custos válidos no catálogo; a zona do projecto tem prioridade quando possui preço próprio.",
+      targetStep: 3,
     },
   ];
   const readyCount = readinessChecks.filter((item) => item.ready).length;
@@ -350,15 +361,9 @@ export default function QuickEstimateWizard({
         concreteClass,
         roofType,
         roofArea: Number(roofArea),
-        steelWeightKg: structuralSummary?.totalSteelWeightKg && structuralSummary.totalSteelWeightKg > 0 ? structuralSummary.totalSteelWeightKg : undefined,
-        beamConcreteVolumeM3:
-          structuralSummary?.beamsConcreteVolumeM3 && structuralSummary.beamsConcreteVolumeM3 > 0
-            ? structuralSummary.beamsConcreteVolumeM3
-            : undefined,
-        floorSlabThicknessM:
-          structuralSummary?.slabsAvgThicknessCm && structuralSummary.slabsAvgThicknessCm > 0
-            ? structuralSummary.slabsAvgThicknessCm / 100
-            : undefined,
+        steelWeightKg: Number(steelWeightKg) > 0 ? Number(steelWeightKg) : undefined,
+        beamConcreteVolumeM3: Number(beamConcreteVolumeM3) > 0 ? Number(beamConcreteVolumeM3) : undefined,
+        floorSlabThicknessM: Number(floorSlabThicknessM) > 0 ? Number(floorSlabThicknessM) : undefined,
         columnConcreteVolumeM3: columnConcreteVolumeM3 ? Number(columnConcreteVolumeM3) : undefined,
         formworkAreaM2: formworkAreaM2 ? Number(formworkAreaM2) : undefined,
         backfillEarthVolumeM3: backfillEarthVolumeM3 ? Number(backfillEarthVolumeM3) : undefined,
@@ -399,9 +404,9 @@ export default function QuickEstimateWizard({
     <ModalPortal>
       <div className="fixed inset-0 z-50 bg-gray-900/50 flex items-center justify-center p-4">
       <div className="card w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 bg-gradient-to-r from-brand-800 to-brand-900 text-white">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 bg-slate-900 text-white">
           <div className="flex items-center gap-2">
-            <IconWand className="w-5 h-5" />
+            <IconRuler className="w-5 h-5" />
             <h2 className="font-semibold">Assistente de Medições</h2>
           </div>
           <button onClick={onClose} className="text-brand-200 hover:text-white text-sm">
@@ -442,9 +447,12 @@ export default function QuickEstimateWizard({
               </div>
               <div className="divide-y divide-slate-200 rounded-xl border border-slate-200">
                 {readinessChecks.map((item) => (
-                  <div key={item.label} className="flex gap-3 p-3.5">
+                  <div key={item.label} className="flex flex-wrap items-start gap-3 p-3.5 sm:flex-nowrap">
                     <span className={`mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full text-xs font-bold ${item.ready ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{item.ready ? "✓" : "!"}</span>
-                    <div><p className="text-sm font-medium text-slate-900">{item.label}</p><p className="mt-0.5 text-xs text-slate-500">{item.ready ? "Dados disponíveis para o cálculo." : item.impact}</p></div>
+                    <div className="min-w-0 flex-1"><p className="text-sm font-medium text-slate-900">{item.label}</p><p className="mt-0.5 text-xs text-slate-500">{item.ready ? "Dados preenchidos; pode confirmar ou alterar." : item.impact}</p></div>
+                    <button type="button" className="action-link ml-8 shrink-0 sm:ml-0" onClick={() => { setReadinessAccepted(true); setStep(item.targetStep); }}>
+                      {item.ready ? "Alterar" : "Indicar dados"}
+                    </button>
                   </div>
                 ))}
               </div>
@@ -567,11 +575,11 @@ export default function QuickEstimateWizard({
 
                       <div className="space-y-2">
                         {floor.rooms.map((room) => (
-                          <div key={room.key} className="grid grid-cols-[1fr_6rem_5rem_5rem_auto] gap-2 items-center">
+                          <div key={room.key} className="grid grid-cols-2 items-center gap-2 sm:grid-cols-[1fr_6rem_5rem_5rem_auto]">
                             <input
                               value={room.name}
                               onChange={(e) => updateRoom(floor.key, room.key, { name: e.target.value })}
-                              className="input input-sm"
+                              className="input input-sm col-span-2 sm:col-span-1"
                               placeholder="Nome (ex: Quarto 1)"
                             />
                             <select
@@ -620,9 +628,10 @@ export default function QuickEstimateWizard({
               )}
 
               {step === 1 && (
-                <div className="space-y-4 max-w-md">
+                <div className="max-w-2xl space-y-4">
                   <p className="text-sm text-gray-500">
-                    Estas escolhas ajustam os rácios de betão, aço e movimento de terras usados na estimativa.
+                    Confirme os valores detectados ou substitua-os pelas quantidades do projectista. Os valores manuais
+                    têm prioridade no cálculo e ficam registados no relatório da medição.
                   </p>
 
                   {structuralSummary && (
@@ -643,11 +652,65 @@ export default function QuickEstimateWizard({
                     </div>
                   )}
 
+                  <section className="rounded-xl border border-slate-200 bg-white p-4">
+                    <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <h3 className="text-sm font-semibold text-slate-900">Quantidades estruturais confirmadas</h3>
+                        <p className="mt-0.5 text-xs text-slate-500">Altere qualquer valor que não corresponda ao projecto executivo.</p>
+                      </div>
+                      <span className="badge badge-gray">Valor manual prevalece</span>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <div>
+                        <label className="label" htmlFor="measurement-beam-concrete">Betão em vigas (m³)</label>
+                        <input
+                          id="measurement-beam-concrete"
+                          type="number"
+                          step="0.001"
+                          min="0"
+                          value={beamConcreteVolumeM3}
+                          onChange={(event) => setBeamConcreteVolumeM3(event.target.value)}
+                          className="input"
+                          placeholder="Ex.: 12,450"
+                        />
+                        <p className="mt-1 text-[11px] text-slate-500">{structuralSummary?.beamsConcreteVolumeM3 ? "Preenchido pela planta; editável." : "Indique o volume do mapa estrutural."}</p>
+                      </div>
+                      <div>
+                        <label className="label" htmlFor="measurement-slab-thickness">Espessura média da laje (m)</label>
+                        <input
+                          id="measurement-slab-thickness"
+                          type="number"
+                          step="0.001"
+                          min="0"
+                          value={floorSlabThicknessM}
+                          onChange={(event) => setFloorSlabThicknessM(event.target.value)}
+                          className="input"
+                          placeholder="Ex.: 0,150"
+                        />
+                        <p className="mt-1 text-[11px] text-slate-500">{structuralSummary?.slabsAvgThicknessCm ? "Convertida da planta; editável." : "Indique a espessura especificada."}</p>
+                      </div>
+                      <div>
+                        <label className="label" htmlFor="measurement-steel-weight">Peso total de aço (kg)</label>
+                        <input
+                          id="measurement-steel-weight"
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={steelWeightKg}
+                          onChange={(event) => setSteelWeightKg(event.target.value)}
+                          className="input"
+                          placeholder="Ex.: 8450,00"
+                        />
+                        <p className="mt-1 text-[11px] text-slate-500">{structuralSummary?.totalSteelWeightKg ? "Preenchido pelo mapa de aço; editável." : "Indique o total do mapa de aço."}</p>
+                      </div>
+                    </div>
+                  </section>
+
                   <div>
                     <label className="label">Tipo de fundação</label>
                     <select
                       value={foundationType}
-                      onChange={(e) => setFoundationType(e.target.value as FoundationType)}
+                      onChange={(e) => { setFoundationType(e.target.value as FoundationType); setFoundationConfirmed(true); }}
                       className="input"
                     >
                       {(Object.keys(FOUNDATION_LABELS) as FoundationType[]).map((k) => (
@@ -666,7 +729,7 @@ export default function QuickEstimateWizard({
                         step="0.05"
                         min="0"
                         value={slabThickness}
-                        onChange={(e) => setSlabThickness(e.target.value)}
+                        onChange={(e) => { setSlabThickness(e.target.value); setFoundationConfirmed(true); }}
                         className="input"
                       />
                     </div>
@@ -686,7 +749,7 @@ export default function QuickEstimateWizard({
                           <p className="muted">profundidade média</p>
                         </div>
                       </div>
-                      <button onClick={() => setUseStructuralFooting(false)} className="btn btn-ghost btn-sm mt-2">
+                      <button onClick={() => { setUseStructuralFooting(false); setFoundationConfirmed(false); }} className="btn btn-ghost btn-sm mt-2">
                         Prefiro inserir manualmente
                       </button>
                     </div>
@@ -694,7 +757,7 @@ export default function QuickEstimateWizard({
                     <div className="grid grid-cols-3 gap-3">
                       {hasStructuralFootings && (
                         <div className="col-span-3">
-                          <button onClick={() => setUseStructuralFooting(true)} className="btn btn-ghost btn-sm">
+                          <button onClick={() => { setUseStructuralFooting(true); setFoundationConfirmed(true); }} className="btn btn-ghost btn-sm">
                             Usar os dados da planta estrutural
                           </button>
                         </div>
@@ -706,7 +769,7 @@ export default function QuickEstimateWizard({
                           step="1"
                           min="1"
                           value={footingCount}
-                          onChange={(e) => setFootingCount(e.target.value)}
+                          onChange={(e) => { setFootingCount(e.target.value); setFoundationConfirmed(true); }}
                           className="input"
                         />
                       </div>
@@ -717,7 +780,7 @@ export default function QuickEstimateWizard({
                           step="0.05"
                           min="0"
                           value={footingAvgArea}
-                          onChange={(e) => setFootingAvgArea(e.target.value)}
+                          onChange={(e) => { setFootingAvgArea(e.target.value); setFoundationConfirmed(true); }}
                           className="input"
                         />
                       </div>
@@ -728,7 +791,7 @@ export default function QuickEstimateWizard({
                           step="0.05"
                           min="0"
                           value={footingAvgDepth}
-                          onChange={(e) => setFootingAvgDepth(e.target.value)}
+                          onChange={(e) => { setFootingAvgDepth(e.target.value); setFoundationConfirmed(true); }}
                           className="input"
                         />
                       </div>
@@ -1146,8 +1209,8 @@ export default function QuickEstimateWizard({
                 </button>
               ) : (
                 <button onClick={handleApply} disabled={submitting} className="btn btn-primary">
-                  <IconWand className="w-4 h-4" />
-                  {submitting ? "A calcular..." : "Aplicar Estimativa"}
+                  <IconRuler className="w-4 h-4" />
+                  {submitting ? "A calcular..." : "Calcular quantidades"}
                 </button>
               )}
             </>

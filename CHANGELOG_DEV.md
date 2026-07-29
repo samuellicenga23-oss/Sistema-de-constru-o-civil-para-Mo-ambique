@@ -581,3 +581,29 @@ publicação.
   páginas `1–26` e Estrutura `27–91`.
 - **Estado:** `https://sud30s.org` está publicado e operacional. Esta entrada substitui as notas de
   “ainda não publicada” das três entradas imediatamente anteriores.
+
+## 2026-07-29 — Codex — Medições manuais, acesso técnico e interface sem animações
+
+- **Diagnóstico accionável:** cada verificação do Assistente de Medições ganhou uma acção explícita
+  `Indicar dados` ou `Alterar`, que abre directamente o passo correspondente em vez de obrigar o
+  utilizador a procurar o campo.
+- **Estrutura confirmável:** volume de betão em vigas, espessura média das lajes e peso total de aço
+  passam a ser campos editáveis. Valores detectados na planta aparecem pré-preenchidos; quando o
+  utilizador os corrige, o valor indicado prevalece no cálculo e a fórmula do relatório identifica-o
+  como indicado ou confirmado no Assistente.
+- **Lacunas da planta:** o aviso da revisão da planta ganhou o botão `Indicar dados manualmente`, que
+  prepara o Mapa de Quantidades e abre o mesmo fluxo de diagnóstico. Sapatas, compartimentos,
+  perímetros, redes hidráulicas e custos continuam ligados aos respectivos passos.
+- **Responsividade:** a grelha de compartimentos e as acções do diagnóstico foram ajustadas para
+  telemóvel. O modal foi validado a 390 px sem overflow horizontal e os campos numéricos aceitaram
+  edição directa.
+- **Interface estática:** removidas a animação de entrada das páginas, transições, deslocamentos de
+  cartões e progressos animados. A iconografia de varinha/brilho foi substituída pela régua técnica;
+  os estados de foco e hover permanecem instantâneos para preservar acessibilidade.
+- **Documentação:** criado `ACESSO_TECNICO.md` com acesso à base local e à produção, túnel SSH,
+  comandos seguros de `psql`, serviços, directórios e inventário completo de linguagens/tecnologias.
+  Nenhuma password, token ou chave privada foi incluída no documento.
+- **Validação:** build integral aprovado (117 módulos); 39 testes da API e 14 testes do frontend
+  aprovados, incluindo dois testes novos para navegação por pendência e edição de valores estruturais.
+  A revisão visual confirmou `animation-name: none` e ausência de classes animadas.
+- **Produção:** alterações ainda não publicadas; não exigem migração de base de dados.

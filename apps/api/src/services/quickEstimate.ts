@@ -243,7 +243,7 @@ export function computeQuantities(input: QuickEstimateInput) {
     footingSource = f ? "real" : "estimativa";
     const used = f ?? { count: 1, avgArea: groundFloorArea * 0.15, avgDepth: 0.2 };
     footingFormula = f
-      ? `${used.count} sapata(s) × ${fmt(used.avgArea)} m² (área média) × ${fmt(used.avgDepth)} m (profundidade média) — dados extraídos da planta estrutural`
+      ? `${used.count} sapata(s) × ${fmt(used.avgArea)} m² (área média) × ${fmt(used.avgDepth)} m (profundidade média) — dados confirmados no Assistente de Medições`
       : `${used.count} sapata × ${fmt(used.avgArea)} m² × ${fmt(used.avgDepth)} m — valores por omissão, sem planta estrutural nem contagem indicada`;
   }
   const beamSource: CalculationSource = input.beamConcreteVolumeM3 !== undefined ? "real" : "estimativa";
@@ -347,7 +347,7 @@ export function computeQuantities(input: QuickEstimateInput) {
     byCode["3.4"],
     beamSource,
     beamSource === "real"
-      ? `Volume real das vigas extraído da planta estrutural (comprimento × secção de cada vão): ${fmt(beamConcreteVolume)} m³`
+      ? `Volume de vigas indicado ou confirmado no Assistente de Medições: ${fmt(beamConcreteVolume)} m³`
       : `Volume estrutural total (${fmt(concreteVolume)} m³) × 0.24 (rácio genérico de vigas — sem planta estrutural com dados de vigas)`
   );
   push(
@@ -355,7 +355,7 @@ export function computeQuantities(input: QuickEstimateInput) {
     byCode["3.5"],
     slabSource,
     slabSource === "real"
-      ? `Área construída total (${fmt(totalBuiltArea)} m²) × espessura real da laje (${fmt(input.floorSlabThicknessM ?? 0)} m, extraída da planta estrutural)`
+      ? `Área construída total (${fmt(totalBuiltArea)} m²) × espessura da laje (${fmt(input.floorSlabThicknessM ?? 0)} m, indicada ou confirmada no Assistente)`
       : `Volume estrutural total (${fmt(concreteVolume)} m³) × 0.33 (rácio genérico de lajes — sem planta estrutural com espessura real)`
   );
   push(
@@ -363,7 +363,7 @@ export function computeQuantities(input: QuickEstimateInput) {
     byCode["3.6"],
     steelSource,
     steelSource === "real"
-      ? `Peso total de aço extraído da planta estrutural (soma de todas as linhas de armadura encontradas): ${fmt(steelWeight)} kg`
+      ? `Peso total de aço indicado ou confirmado no Assistente de Medições: ${fmt(steelWeight)} kg`
       : `Volume estrutural de betão (${fmt(concreteStructural)} m³) × 80 kg/m³ (rácio genérico de aço — sem planta estrutural com resumo de peso)`
   );
   push(

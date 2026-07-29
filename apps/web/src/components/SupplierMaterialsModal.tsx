@@ -110,7 +110,7 @@ export default function SupplierMaterialsModal({ supplier, onClose }: { supplier
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
-            className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+            className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px ${
               tab === t.id ? "border-brand-700 text-brand-800" : "border-transparent text-gray-500 hover:text-gray-800"
             }`}
           >
