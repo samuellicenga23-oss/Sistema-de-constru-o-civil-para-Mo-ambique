@@ -606,4 +606,7 @@ publicação.
 - **Validação:** build integral aprovado (117 módulos); 39 testes da API e 14 testes do frontend
   aprovados, incluindo dois testes novos para navegação por pendência e edição de valores estruturais.
   A revisão visual confirmou `animation-name: none` e ausência de classes animadas.
-- **Produção:** alterações ainda não publicadas; não exigem migração de base de dados.
+- **Produção:** publicada em `https://sud30s.org` no commit `70a9322`; backup criado em
+  `/home/sigo/backups/sigo-predeploy-20260729-197a5e4-manual-measurements.dump` (`164093` bytes).
+  Não houve migração de base de dados nem alteração do leitor Python. Build de produção aprovado,
+  API recarregada no PM2, novo bundle `index-DphZlpKZ.js` confirmado por HTTPS e health check activo.
