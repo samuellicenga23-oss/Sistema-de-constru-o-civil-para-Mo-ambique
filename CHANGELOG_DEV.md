@@ -557,3 +557,27 @@ publicação.
   páginas 12–15 e 23. Tempo de análise local do documento completo: aproximadamente `1,3 s`.
 - **Produção:** ainda não publicada; para corrigir uma planta Gil já armazenada será necessário
   publicar/reiniciar o `plant-service` e executar `plant:reprocess` no ficheiro existente.
+
+## 2026-07-29 — Codex — Deploy da renovação geral e correcção da planta Gil
+
+- **Versão publicada:** as alterações de interface, checkout anual, IVA de 16%, operações em modal,
+  mão-de-obra por fase e leitura visual de plantas foram reunidas no commit `c2e1c06` e enviadas para
+  a branch de produção `main` e para `codex/siga-visual-refresh`.
+- **Segurança:** antes da actualização foi criado o backup PostgreSQL
+  `/home/sigo/backups/sigo-predeploy-20260729-cf5b76a.dump` (`161551` bytes). O checkout da VPS estava
+  limpo e foi actualizado por fast-forward a partir de `cf5b76a`.
+- **Base de dados:** a migração `0027_moaning_mandrill.sql` foi aplicada com sucesso em conjunto com a
+  versão correspondente da API e do frontend.
+- **Validação:** 39 testes da API, 12 testes do frontend, 13 testes Python e o build completo de
+  produção foram aprovados. A landing, os três valores anuais e `/checkout/profissional` foram
+  inspeccionados em produção a 390 px, sem overflow horizontal; HTTPS e os health checks da API e do
+  leitor responderam correctamente.
+- **Leitor em produção:** a unidade systemd continua activada para os próximos arranques. Como o
+  reinício imediato exigia autorização sudo, o processo desta sessão foi recuperado sob supervisão
+  temporária do PM2 e não foi gravado no dump de arranque do PM2, evitando dois supervisores após um
+  reboot. A API permanece no PM2 como anteriormente.
+- **Projecto Gil:** a planta armazenada `0fb1db63-791b-40f8-a950-4b4f8985a4cb` foi reprocessada em
+  produção: 23 compartimentos, `380,800 m²`, pisos Anexo, Piso Superior e Piso Térreo; Arquitectura
+  páginas `1–26` e Estrutura `27–91`.
+- **Estado:** `https://sud30s.org` está publicado e operacional. Esta entrada substitui as notas de
+  “ainda não publicada” das três entradas imediatamente anteriores.
