@@ -21,6 +21,7 @@ export type PurchaseOrder = {
   requiredByDate: string | null;
   scheduleTaskId: string | null;
   notes: string | null;
+  ivaRate: string;
   lines: PurchaseOrderLine[];
   createdAt: string;
 };
@@ -72,6 +73,8 @@ export type ProcurementRequirement = {
   purchasePackageLabel: string | null;
   estimatedUnitCost: number;
   estimatedTotal: number;
+  estimatedVat: number;
+  estimatedTotalWithVat: number;
   supplierId: string | null;
   supplierName: string | null;
   quoteSource: "zona" | "geral" | "catalogo";
@@ -83,8 +86,11 @@ export type ProcurementRequirement = {
 export type ProcurementPlan = {
   documentId: string;
   currency: string;
+  ivaRate: number;
   requiredValue: number;
   shortageValue: number;
+  shortageVat: number;
+  shortageTotal: number;
   coveragePercent: number;
   requirements: ProcurementRequirement[];
   missingCompositionItems: Array<{ code: string | null; description: string; phase: string }>;

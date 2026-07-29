@@ -175,5 +175,14 @@ export const PLANT_PROCESSING_STATUSES = [
 ] as const;
 export type PlantProcessingStatus = (typeof PLANT_PROCESSING_STATUSES)[number];
 
-export const DEFAULT_IVA_RATE = 0.17;
+export const DEFAULT_IVA_RATE = 0.16;
 export const DEFAULT_CONTINGENCIAS_RATE = 0.1;
+
+export function calculateVatTotals(subtotal: number, ivaRate = DEFAULT_IVA_RATE) {
+  const iva = subtotal * ivaRate;
+  return { subtotal, ivaRate, iva, total: subtotal + iva };
+}
+
+export function priceExcludingVat(value: number, includesVat: boolean, ivaRate = DEFAULT_IVA_RATE) {
+  return includesVat ? value / (1 + ivaRate) : value;
+}

@@ -349,6 +349,14 @@ ROOM_NAME_REJECT_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# Variações e gralhas recorrentes dos próprios desenhos. A forma normalizada também melhora a
+# deduplicação entre uma planta geral e a respectiva planta cotada.
+ROOM_NAME_CANONICAL = {
+    "GARRAGEM": "Garagem",
+    "Q BANHIO": "Q. Banho",
+    "Q BANHO": "Q. Banho",
+}
+
 # Formato alternativo (tabela nativa do ArchiCAD "Rooms by stories" exportada a PDF): uma
 # tabela com colunas Story/Room/R. Height/Perimeter/Wall surf./Measured Area, um compartimento
 # por linha, cada valor de coluna na sua própria linha (algumas em branco/omissas). Dá o
@@ -442,9 +450,14 @@ def detect_document_default_floor(text: str) -> str | None:
 # tipicamente um apontamento da cotagem, não do mobiliário), a de-duplicação por número falha
 # silenciosamente a apanhar o duplicado, inflacionando a área total do piso.
 PLAN_TYPE_PATTERNS: list[tuple[re.Pattern, str]] = [
+    # Folhas de contexto podem conservar no PDF objectos CAD de outras plantas, embora estejam
+    # cobertos por uma máscara branca. O conteúdo declarado da folha prevalece sobre o título
+    # genérico "Planta de Piso" do carimbo.
+    (re.compile(r"imagem\s+(?:de\s+)?sat[eé]lite|ortofoto|google\s+maps?", re.IGNORECASE), "imagem_satelite"),
     (re.compile(r"planta\s+(?:cotada|dimensionada)|dimensioned\s+floor\s+plan", re.IGNORECASE), "cotada"),
     (re.compile(r"planta\s+(?:de\s+)?mob[ií]l(?:ia|iada|ada)|furniture\s+plan", re.IGNORECASE), "mobiliada"),
-    (re.compile(r"planta\s+de\s+implanta[çc][ãa]o", re.IGNORECASE), "implantacao"),
+    # Inclui o erro ortográfico frequente "implatação", encontrado em pranchas reais.
+    (re.compile(r"planta\s+(?:de\s+)?implan?ta[çc][ãa]o", re.IGNORECASE), "implantacao"),
     (re.compile(r"planta\s+de\s+localiza[çc][ãa]o", re.IGNORECASE), "localizacao"),
     (re.compile(r"planta\s+(?:de\s+)?funda[çc][ãa]o|foundation\s+plan", re.IGNORECASE), "fundacao"),
     (re.compile(r"planta\s+(?:de\s+)?cobertura|roof\s+plan", re.IGNORECASE), "cobertura"),
@@ -467,6 +480,7 @@ def detect_plan_type(text: str) -> str | None:
 # tipo de planta): nesse caso continua-se a extrair, tal como antes desta alteração, para não
 # fazer desaparecer silenciosamente todos os compartimentos de projectos sem essa legenda.
 ROOM_EXCLUDED_PLAN_TYPES = {
+    "imagem_satelite",
     "mobiliada",
     "implantacao",
     "localizacao",
@@ -554,8 +568,9 @@ def _room_identity(raw_name: str) -> tuple[str, str | None] | None:
     # Não separa anos/números embebidos em nomes longos sem um espaço final inequívoco.
     numbered = re.match(r"^(?P<name>.+?)[\s#-]+(?P<number>\d{1,3})$", name)
     if numbered and re.search(r"[A-Za-zÀ-ÿ]", numbered.group("name")):
-        return numbered.group("name").strip(), numbered.group("number")
-    return name, None
+        base_name = numbered.group("name").strip()
+        return ROOM_NAME_CANONICAL.get(_normalise_key(base_name), base_name), numbered.group("number")
+    return ROOM_NAME_CANONICAL.get(_normalise_key(name), name), None
 
 
 def extract_metadata(text: str) -> PlantMetadata:
@@ -600,22 +615,97 @@ def _positioned_text_lines(page) -> list[tuple[float, float, float, float, str]]
     return lines
 
 
+def _bbox_has_visible_ink(pixmap, page_rect, bbox: tuple[float, float, float, float], scale: float) -> bool:
+    """Confirma que o texto extraído também está visível na página renderizada.
+
+    Alguns ficheiros ArchiCAD conservam etiquetas de compartimentos por baixo de rectângulos
+    brancos ou fora da vista publicada. ``get_text`` devolve essas etiquetas, mas o utilizador
+    não as vê. A comparação com os pixels elimina esses objectos CAD ocultos.
+    """
+    x0, y0, x1, y1 = bbox
+    left = max(0, int((x0 - page_rect.x0) * scale) - 2)
+    top = max(0, int((y0 - page_rect.y0) * scale) - 2)
+    right = min(pixmap.width, int((x1 - page_rect.x0) * scale) + 3)
+    bottom = min(pixmap.height, int((y1 - page_rect.y0) * scale) + 3)
+    if left >= right or top >= bottom:
+        return False
+
+    samples = pixmap.samples
+    darkest = 255
+    lightest = 0
+    for row in range(top, bottom):
+        start = row * pixmap.stride + left * pixmap.n
+        end = row * pixmap.stride + right * pixmap.n
+        values = samples[start:end:pixmap.n]
+        if values:
+            darkest = min(darkest, min(values))
+            lightest = max(lightest, max(values))
+    return darkest < 253 and lightest - darkest >= 4
+
+
+def _prefer_dimensioned_view(
+    positioned_rooms: list[tuple[Room, float]],
+    lines: list[tuple[float, float, float, float, str]],
+    page_rect,
+) -> list[tuple[Room, float]]:
+    """Numa folha com planta geral e cotada lado a lado, usa apenas a vista cotada.
+
+    A decisão usa as legendas visíveis sob cada desenho e a proximidade horizontal. Assim não
+    remove duas casas de banho iguais dentro da mesma planta, mas evita contar duas vezes o
+    mesmo anexo apresentado em duas vistas na mesma prancha.
+    """
+    content_right = page_rect.x0 + page_rect.width * 0.90
+    general_centres: list[float] = []
+    dimensioned_centres: list[float] = []
+    for x0, _y0, x1, _y1, text in lines:
+        if x1 > content_right:
+            continue
+        label = _normalise_key(text)
+        centre = (x0 + x1) / 2
+        if label == "PLANTA DE PISO":
+            general_centres.append(centre)
+        elif label == "PLANTA COTADA":
+            dimensioned_centres.append(centre)
+
+    if not general_centres or not dimensioned_centres:
+        return positioned_rooms
+
+    selected: list[tuple[Room, float]] = []
+    for room, centre in positioned_rooms:
+        distance_to_general = min(abs(centre - item) for item in general_centres)
+        distance_to_dimensioned = min(abs(centre - item) for item in dimensioned_centres)
+        if distance_to_dimensioned <= distance_to_general:
+            selected.append((room, centre))
+    return selected
+
+
 def extract_rooms_spatial(page, page_number: int) -> list[Room]:
     """Associa área e ambiente pela sua posição, independentemente da ordem interna do PDF."""
     floor_label, _ = detect_floor_label(page.get_text())
     lines = _positioned_text_lines(page)
-    rooms: list[Room] = []
+    area_lines = [line for line in lines if AREA_ONLY_PATTERN.match(line[4])]
+    if not area_lines:
+        return []
+    render_scale = 2.0
+    rendered_page = page.get_pixmap(
+        matrix=fitz.Matrix(render_scale, render_scale),
+        colorspace=fitz.csGRAY,
+        alpha=False,
+    )
+    positioned_rooms: list[tuple[Room, float]] = []
 
     for area_index, (ax0, ay0, ax1, ay1, area_text) in enumerate(lines):
         area_match = AREA_ONLY_PATTERN.match(area_text)
         if not area_match:
+            continue
+        if not _bbox_has_visible_ink(rendered_page, page.rect, (ax0, ay0, ax1, ay1), render_scale):
             continue
         area = _to_float(area_match.group("area"))
         if not 0.1 <= area <= 10_000:
             continue
 
         area_centre = (ax0 + ax1) / 2
-        candidates: list[tuple[float, tuple[str, str | None]]] = []
+        candidates: list[tuple[float, tuple[str, str | None], tuple[float, float, float, float]]] = []
         for name_index, (nx0, ny0, nx1, ny1, name_text) in enumerate(lines):
             if name_index == area_index or AREA_ONLY_PATTERN.match(name_text):
                 continue
@@ -633,12 +723,17 @@ def extract_rooms_spatial(page, page_number: int) -> list[Room]:
             # A distância vertical domina; o alinhamento horizontal desempata. Uma pequena
             # penalização por largura evita escolher uma frase comprida da legenda.
             score = max(vertical_gap, 0) + horizontal_gap * 0.18 + max(len(name_text) - 45, 0)
-            candidates.append((score, identity))
+            candidates.append((score, identity, (nx0, ny0, nx1, ny1)))
 
         if candidates:
-            _, (name, number) = min(candidates, key=lambda candidate: candidate[0])
-            rooms.append(Room(name=name, number=number, area_m2=area, page=page_number, floor=floor_label))
-    return rooms
+            _, (name, number), name_bbox = min(candidates, key=lambda candidate: candidate[0])
+            if not _bbox_has_visible_ink(rendered_page, page.rect, name_bbox, render_scale):
+                continue
+            room = Room(name=name, number=number, area_m2=area, page=page_number, floor=floor_label)
+            positioned_rooms.append((room, area_centre))
+
+    positioned_rooms = _prefer_dimensioned_view(positioned_rooms, lines, page.rect)
+    return [room for room, _centre in positioned_rooms]
 
 
 def extract_room_list_fallback(text: str, page_number: int) -> list[Room]:

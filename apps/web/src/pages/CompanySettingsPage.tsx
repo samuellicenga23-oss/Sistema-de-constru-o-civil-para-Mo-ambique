@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { companiesApi, type Company, type Subscription, type CompanyUpdateInput } from "../api/companies";
 import { usersApi } from "../api/users";
 import { useAuth } from "../auth/AuthContext";
@@ -154,14 +154,12 @@ export default function CompanySettingsPage() {
       <div className="max-w-6xl">
         {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
 
-        <div className="mb-5 flex flex-wrap gap-1 border-b border-gray-200">
+        <div className="workspace-tabs mb-5">
           {TABS.map((t) => (
             <button
               key={t.id}
               onClick={() => { setTab(t.id); setSearchParams(t.id === "geral" ? {} : { tab: t.id }); }}
-              className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition-colors ${
-                tab === t.id ? "border-brand-700 text-brand-800" : "border-transparent text-gray-500 hover:text-gray-800"
-              }`}
+              className={`workspace-tab ${tab === t.id ? "workspace-tab-active" : ""}`}
             >
               {t.label}
             </button>
@@ -320,7 +318,7 @@ export default function CompanySettingsPage() {
                 ) : null;
               })()}
             </div>
-            <p className="text-xs text-gray-400 mt-2">Para mudar de plano, contacte o suporte do SIGO.</p>
+            <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-slate-200 pt-4"><p className="text-xs text-slate-500">Precisa de mais capacidade?</p><Link to="/#planos" className="action-link">Ver planos anuais →</Link></div>
           </section>
         )}
 

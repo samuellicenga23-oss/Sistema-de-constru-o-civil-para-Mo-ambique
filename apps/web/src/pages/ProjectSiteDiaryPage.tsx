@@ -6,6 +6,8 @@ import { scheduleApi, type ScheduleTask } from "../api/schedule";
 import { purchasingApi, type StockSummaryLine } from "../api/purchasing";
 import Layout from "../components/Layout";
 import ProjectWorkspaceNav from "../components/ProjectWorkspaceNav";
+import Modal from "../components/Modal";
+import { SectionHeader } from "../components/WorkspaceUI";
 import { IconBack, IconPlus, IconTrash, IconDownload, IconUpload } from "../components/icons";
 
 function todayStr() {
@@ -25,6 +27,7 @@ export default function ProjectSiteDiaryPage() {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [uploadingPhotoFor, setUploadingPhotoFor] = useState<string | null>(null);
+  const [showForm, setShowForm] = useState(false);
 
   const [date, setDate] = useState(todayStr());
   const [weather, setWeather] = useState("Sol");
@@ -89,6 +92,7 @@ export default function ProjectSiteDiaryPage() {
       setDecisions("");
       setTaskProgress([]);
       setConsumptions([]);
+      setShowForm(false);
       await reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao registar entrada do diário");
@@ -150,8 +154,8 @@ export default function ProjectSiteDiaryPage() {
         <ProjectWorkspaceNav projectId={projectId!} />
         {error && <p className="text-sm text-red-600">{error}</p>}
 
-        <section className="card card-pad">
-          <h2 className="section-title mb-3">Novo registo</h2>
+        <section className="card"><SectionHeader title="Registos do diário" description="Trabalhos, equipa, ocorrências e evidências por dia" actions={<button type="button" onClick={() => setShowForm(true)} className="btn btn-primary btn-sm"><IconPlus className="h-3.5 w-3.5" /> Registar dia</button>} /></section>
+        {showForm && <Modal title="Novo registo do Diário" subtitle={`${date} · ${project.name}`} onClose={() => !saving && setShowForm(false)} maxWidth="max-w-6xl">
           <form onSubmit={handleCreate} className="space-y-3">
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <div>
@@ -219,12 +223,12 @@ export default function ProjectSiteDiaryPage() {
                 <textarea value={decisions} onChange={(e) => setDecisions(e.target.value)} rows={2} className="input" />
               </div>
             </div>
-            <button type="submit" disabled={saving} className="btn btn-primary">
+            <div className="flex flex-col-reverse gap-2 border-t border-slate-200 pt-4 sm:flex-row sm:justify-end"><button type="button" onClick={() => setShowForm(false)} className="btn btn-secondary">Cancelar</button><button type="submit" disabled={saving} className="btn btn-primary">
               <IconPlus className="w-4 h-4" />
               {saving ? "A guardar..." : "Registar dia"}
-            </button>
+            </button></div>
           </form>
-        </section>
+        </Modal>}
 
         <section className="space-y-3">
           {entries.map((entry) => {
@@ -233,14 +237,15 @@ export default function ProjectSiteDiaryPage() {
               <div key={entry.id} className="card">
                 <button
                   onClick={() => setExpandedId(expanded ? null : entry.id)}
-                  className="w-full flex items-center justify-between px-5 py-3 text-left"
+                  className="group flex w-full flex-col gap-2 px-4 py-4 text-left hover:bg-blue-50/50 sm:flex-row sm:items-center sm:justify-between sm:px-5"
                 >
                   <span className="font-medium text-gray-900">
-                    {entry.date} <span className="text-gray-400 font-normal">— {entry.weather ?? "sem condições registadas"}</span>
+                    {entry.date} <span className="font-normal text-gray-500">— {entry.weather ?? "sem condições registadas"}</span>
                   </span>
-                  <span className="flex items-center gap-2 text-xs text-gray-500">
+                  <span className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
                     {entry.workersPresent != null && <span className="badge badge-gray">{entry.workersPresent} trabalhadores</span>}
                     {entry.photoUrls.length > 0 && <span className="badge badge-gray">{entry.photoUrls.length} fotos</span>}
+                    <span className="font-bold text-brand-700">{expanded ? "Fechar ↑" : "Ver registo ↓"}</span>
                   </span>
                 </button>
                 {expanded && (
@@ -288,7 +293,7 @@ export default function ProjectSiteDiaryPage() {
                             <img src={url} alt="Foto da obra" className="w-24 h-24 object-cover rounded-md border border-gray-200" />
                             <button
                               onClick={() => handleDeletePhoto(entry.id, url)}
-                              className="absolute -top-2 -right-2 bg-white rounded-full shadow p-1 opacity-0 group-hover/photo:opacity-100 transition-opacity"
+                              className="icon-btn-danger absolute -right-2 -top-2 !h-7 !w-7"
                               title="Remover fotografia"
                             >
                               <IconTrash className="w-3 h-3 text-red-600" />
@@ -317,8 +322,8 @@ export default function ProjectSiteDiaryPage() {
                         <IconDownload className="w-3.5 h-3.5" />
                         Exportar PDF
                       </a>
-                      <button onClick={() => handleDelete(entry)} className="text-red-600 text-xs font-medium hover:underline ml-auto">
-                        eliminar registo
+                      <button onClick={() => handleDelete(entry)} className="btn btn-sm ml-auto border-red-200 bg-white text-red-600 hover:bg-red-50">
+                        Eliminar registo
                       </button>
                     </div>
                   </div>

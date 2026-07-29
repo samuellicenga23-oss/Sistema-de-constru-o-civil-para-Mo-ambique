@@ -178,14 +178,12 @@ export default function ProjectsPage() {
               <div className="sm:col-span-2 rounded-xl border border-slate-200 bg-slate-50 p-4">
                 <div className="mb-3">
                   <p className="text-sm font-semibold text-slate-900">Projectos técnicos (opcional)</p>
-                  <p className="mt-0.5 text-xs text-slate-500">
-                    Pode enviar um único PDF completo. O SIGO separará automaticamente arquitectura, estrutura, hidrossanitário e electricidade quando existirem.
-                  </p>
+                  <p className="mt-0.5 text-xs text-slate-500">Envie um PDF completo ou as especialidades separadas. O SIGO identifica e organiza cada uma.</p>
                 </div>
                 <div className="mb-4 rounded-lg border border-blue-200 bg-white p-3">
                   <label className="label">Projecto completo ou conjunto de especialidades (PDF)</label>
                   <input type="file" name="completeProjectFile" accept="application/pdf" disabled={creating} className="input py-1.5 file:mr-2 file:rounded-md file:border-0 file:bg-blue-50 file:px-2 file:py-1 file:text-xs file:text-blue-800" />
-                  <p className="mt-1.5 text-[11px] text-slate-500">Recomendado quando recebeu todas as pranchas num único ficheiro. O original será preservado.</p>
+                  <p className="mt-1.5 text-[11px] text-slate-500">Recomendado para conjuntos de pranchas. O original é preservado.</p>
                 </div>
                 <div className="mb-3 flex items-center gap-3 text-[11px] font-semibold uppercase tracking-wide text-slate-400"><span className="h-px flex-1 bg-slate-200" /><span>ou carregue separadamente</span><span className="h-px flex-1 bg-slate-200" /></div>
                 <div className="grid gap-3 sm:grid-cols-2">
@@ -213,11 +211,10 @@ export default function ProjectsPage() {
               </button>
               </div>
             </form>
-            <p className="text-xs text-gray-500 mt-2">
-              A zona determina que preços de material se aplicam (quando um material tem preço próprio nessa zona) —
-              defina/gira as zonas no Catálogo de Preços. Os mapas automáticos de custo usam MZN, a moeda do catálogo;
-              documentos externos em USD continuam separados e não são convertidos silenciosamente.
-            </p>
+            <details className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+              <summary className="font-semibold text-slate-700">Como funcionam zona e moeda?</summary>
+              <p className="pt-2 leading-5">A zona selecciona os preços locais do Catálogo. Documentos em moedas diferentes permanecem separados e nunca são convertidos silenciosamente.</p>
+            </details>
           </Modal>
         )}
 
@@ -252,24 +249,18 @@ export default function ProjectsPage() {
               <span>Projecto</span><span>Dono da obra</span><span>Zona</span><span>Moeda</span>
             </div>
             {filteredProjects.map((p) => (
-              <Link key={p.id} to={`/projectos/${p.id}`} className="group grid sm:grid-cols-[minmax(0,1fr)_minmax(10rem,0.7fr)_10rem_6rem] items-center gap-3 sm:gap-4 border-b border-slate-100 px-5 py-4 last:border-0 hover:bg-blue-50/40">
-                <div className="flex min-w-0 items-center gap-3">
-                  <div className="w-9 h-9 shrink-0 rounded-lg bg-blue-50 text-blue-700 flex items-center justify-center"><IconFolder className="w-4.5 h-4.5" /></div>
-                  <div className="min-w-0"><p className="font-semibold text-slate-900 truncate group-hover:text-blue-700">{p.name}</p><p className="sm:hidden text-xs text-slate-500 mt-0.5">{p.client || "Sem cliente definido"}</p></div>
-                </div>
-                <span className="hidden sm:block truncate text-sm text-slate-600">{p.client || "—"}</span>
-                <span className="hidden sm:block truncate text-sm text-slate-500">{zoneName(p.zoneId) || "—"}</span>
-                <span className="flex items-center justify-between gap-2">
-                    <span className="badge badge-gray">{p.currency}</span>
-                    <button
-                      onClick={(e) => handleDelete(e, p.id, p.name)}
-                      className="icon-btn-danger opacity-0 pointer-coarse:opacity-100 group-hover:opacity-100 transition-opacity"
-                      title="Eliminar projecto"
-                    >
-                      <IconTrash className="w-3.5 h-3.5" />
-                    </button>
-                </span>
-              </Link>
+              <div key={p.id} className="group clickable-row grid grid-cols-[minmax(0,1fr)_auto] items-center border-b border-slate-100 last:border-0">
+                <Link to={`/projectos/${p.id}`} className="grid min-w-0 gap-3 px-4 py-4 sm:grid-cols-[minmax(0,1fr)_minmax(10rem,0.7fr)_10rem_6rem] sm:items-center sm:gap-4 sm:px-5">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-700"><IconFolder className="h-4.5 w-4.5" /></div>
+                    <div className="min-w-0"><p className="truncate font-semibold text-slate-900 group-hover:text-blue-700">{p.name}</p><p className="mt-0.5 truncate text-xs text-slate-500 sm:hidden">{[p.client, zoneName(p.zoneId)].filter(Boolean).join(" · ") || "Sem cliente ou zona"}</p><span className="click-hint mt-1 sm:hidden">Abrir projecto →</span></div>
+                  </div>
+                  <span className="hidden truncate text-sm text-slate-600 sm:block">{p.client || "—"}</span>
+                  <span className="hidden truncate text-sm text-slate-500 sm:block">{zoneName(p.zoneId) || "—"}</span>
+                  <span className="badge badge-gray hidden w-fit sm:inline-flex">{p.currency}</span>
+                </Link>
+                <button onClick={(e) => handleDelete(e, p.id, p.name)} className="icon-btn-danger mr-3 sm:mr-4" title={`Eliminar ${p.name}`} aria-label={`Eliminar ${p.name}`}><IconTrash className="h-3.5 w-3.5" /></button>
+              </div>
             ))}
             {filteredProjects.length === 0 && <p className="px-5 py-10 text-center text-sm text-slate-500">Nenhum projecto corresponde à pesquisa.</p>}
           </div>

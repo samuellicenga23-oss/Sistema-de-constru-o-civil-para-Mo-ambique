@@ -306,7 +306,7 @@ export default function BudgetDocumentPage() {
                 {section.items.length === 0 ? (
                   <p className="text-sm text-gray-400 py-4 text-center">Secção vazia — adicione o primeiro capítulo abaixo.</p>
                 ) : (
-                  <table className="w-full min-w-[720px] border-collapse">
+                  <table className="w-full min-w-[500px] border-collapse sm:min-w-[720px]">
                     <BoqHeaderRow />
                     <BoqTableHead />
                     <tbody>
@@ -330,7 +330,7 @@ export default function BudgetDocumentPage() {
                     }}
                   />
                 ) : (
-                  <button onClick={() => setAddingIn(section.id)} className="btn btn-ghost btn-sm">
+                  <button onClick={() => setAddingIn(section.id)} className="btn btn-secondary btn-sm">
                     <IconPlus className="w-3.5 h-3.5" />
                     Adicionar capítulo / item
                   </button>

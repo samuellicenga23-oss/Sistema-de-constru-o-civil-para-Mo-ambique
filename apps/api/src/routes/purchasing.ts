@@ -5,7 +5,7 @@ import { db } from "../db/index.js";
 import { purchaseOrders, purchaseOrderLines, stockMovements, suppliers, materials, budgetDocuments, financialEntries, scheduleTasks } from "../db/schema.js";
 import { requireCompanyUser, requireRole } from "../auth/middleware.js";
 import { assertProjectOwned } from "../services/accessControl.js";
-import { CURRENCIES } from "@sigo/shared";
+import { calculateVatTotals, CURRENCIES } from "@sigo/shared";
 import { computeProcurementPlan } from "../services/procurementEngine.js";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista"] as const;
@@ -70,7 +70,7 @@ export async function purchasingRoutes(app: FastifyInstance) {
       : documents.find((item) => item.status === "aprovado" && item.currency === project.currency) ?? documents.find((item) => item.currency === project.currency);
     if (!document) return reply.code(404).send({ error: "Crie primeiro um Mapa de Quantidades para gerar necessidades de compra" });
 
-    return computeProcurementPlan({ projectId, documentId: document.id, companyId, zoneId: project.zoneId, currency: project.currency });
+    return computeProcurementPlan({ projectId, documentId: document.id, companyId, zoneId: project.zoneId, currency: project.currency, ivaRate: Number(project.ivaRate) });
   });
 
   // ---------- Ordens de compra ----------
@@ -133,6 +133,7 @@ export async function purchasingRoutes(app: FastifyInstance) {
         requiredByDate: parsed.data.requiredByDate,
         scheduleTaskId: parsed.data.scheduleTaskId,
         notes: parsed.data.notes,
+        ivaRate: project.ivaRate,
         createdByUserId: request.currentUser!.id,
       })
       .returning();
@@ -177,7 +178,8 @@ export async function purchasingRoutes(app: FastifyInstance) {
     if (parsed.data.status === "aprovado") {
       const lines = await db.select().from(purchaseOrderLines).where(eq(purchaseOrderLines.purchaseOrderId, id));
       const [supplier] = await db.select().from(suppliers).where(eq(suppliers.id, order.supplierId)).limit(1);
-      const amount = lines.reduce((sum, line) => sum + Number(line.quantity) * Number(line.unitCost), 0);
+      const subtotal = lines.reduce((sum, line) => sum + Number(line.quantity) * Number(line.unitCost), 0);
+      const amount = calculateVatTotals(subtotal, Number(order.ivaRate)).total;
       const [existing] = await db
         .select()
         .from(financialEntries)

@@ -16,7 +16,7 @@ import {
 } from "../services/accessControl.js";
 import { generateStandardBoq } from "../services/boqTemplate.js";
 import { importMeasurementsFromExcel } from "../services/measurementImport.js";
-import { CURRENCIES, UNITS, LINE_ITEM_KINDS } from "@sigo/shared";
+import { CURRENCIES, DEFAULT_IVA_RATE, UNITS, LINE_ITEM_KINDS } from "@sigo/shared";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista"] as const;
 
@@ -30,7 +30,7 @@ const documentSchema = z.object({
   fileNumber: z.string().optional(),
   currency: z.enum(CURRENCIES).default("MZN"),
   documentDate: z.string().optional(),
-  ivaRate: z.number().min(0).max(1).default(0.17),
+  ivaRate: z.number().min(0).max(1).default(DEFAULT_IVA_RATE),
   contingenciasRate: z.number().min(0).max(1).default(0.1),
   template: z.enum(["padrao", "vazio"]).default("padrao"),
 });

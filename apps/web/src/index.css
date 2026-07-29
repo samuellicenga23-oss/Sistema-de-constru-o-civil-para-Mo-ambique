@@ -31,6 +31,25 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+button,
+summary,
+[role="button"] {
+  cursor: pointer;
+}
+
+button:disabled,
+[aria-disabled="true"] {
+  cursor: not-allowed;
+}
+
+button,
+a,
+input,
+select,
+textarea {
+  -webkit-tap-highlight-color: transparent;
+}
+
 ::selection {
   background: #bfdbfe;
   color: #172033;
@@ -48,27 +67,27 @@ body {
 @layer components {
   /* Botões */
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg text-sm font-semibold px-4 py-2.5 transition-colors duration-150 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40 focus-visible:ring-offset-2;
+    @apply inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-transparent px-4 py-2.5 text-center text-sm font-semibold leading-tight transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40 focus-visible:ring-offset-2;
   }
   .btn-primary {
     @apply bg-[#e86f25] text-white shadow-sm hover:bg-[#d85f18] active:bg-[#c75112];
   }
   .btn-secondary {
-    @apply bg-white text-slate-700 border border-slate-300 shadow-sm hover:border-slate-400 hover:bg-slate-50;
+    @apply bg-white text-slate-800 border-slate-300 shadow-sm hover:-translate-y-px hover:border-slate-400 hover:bg-slate-50 hover:shadow;
   }
   .btn-ghost {
-    @apply text-brand-700 hover:bg-brand-50;
+    @apply border-slate-200 bg-white text-brand-700 shadow-sm hover:border-brand-200 hover:bg-brand-50;
   }
   .btn-sm {
-    @apply px-2.5 py-1.5 text-xs rounded-md;
+    @apply min-h-9 px-3 py-1.5 text-xs rounded-md;
   }
 
   /* Botões-ícone pequenos (acções por linha) */
   .icon-btn {
-    @apply inline-flex items-center justify-center w-7 h-7 rounded-md text-gray-400 transition-colors hover:text-brand-700 hover:bg-brand-50;
+    @apply inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm transition-all hover:border-brand-200 hover:bg-brand-50 hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/30;
   }
   .icon-btn-danger {
-    @apply inline-flex items-center justify-center w-7 h-7 rounded-md text-gray-400 transition-colors hover:text-red-600 hover:bg-red-50;
+    @apply inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 shadow-sm transition-all hover:border-red-200 hover:bg-red-50 hover:text-red-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400/30;
   }
   .icon-btn-active {
     @apply text-brand-700 bg-brand-100;
@@ -79,7 +98,7 @@ body {
     @apply block text-xs font-medium text-gray-500 mb-1;
   }
   .input {
-    @apply w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 placeholder-slate-400 shadow-sm transition-all focus:outline-none focus:border-brand-500 focus:ring-3 focus:ring-brand-500/10;
+    @apply w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-slate-800 placeholder-slate-400 shadow-sm transition-all focus:outline-none focus:border-brand-500 focus:ring-3 focus:ring-brand-500/10;
   }
   .input-sm {
     @apply px-2 py-1 text-xs rounded-md;
@@ -87,7 +106,7 @@ body {
 
   /* Cartões e secções */
   .card {
-    @apply bg-white rounded-xl border border-slate-200 shadow-sm;
+    @apply min-w-0 bg-white rounded-xl border border-slate-200 shadow-sm;
   }
   .card-pad {
     @apply p-5 md:p-6;
@@ -107,8 +126,24 @@ body {
     @apply border-b border-slate-100 last:border-0 hover:bg-blue-50/35 transition-colors;
   }
 
+  .action-link {
+    @apply inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-brand-700 shadow-sm transition-all hover:border-brand-200 hover:bg-brand-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/30;
+  }
+
+  .clickable-card {
+    @apply relative rounded-xl border border-slate-200 bg-white shadow-sm transition-all hover:-translate-y-px hover:border-brand-300 hover:shadow-md focus-within:border-brand-400 focus-within:ring-2 focus-within:ring-brand-500/15;
+  }
+
+  .clickable-row {
+    @apply relative transition-colors hover:bg-blue-50/60 focus-within:bg-blue-50/60;
+  }
+
+  .click-hint {
+    @apply inline-flex items-center gap-1 text-[11px] font-semibold text-brand-700;
+  }
+
   .workspace-tabs {
-    @apply flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-100 p-1 overflow-x-auto;
+    @apply flex max-w-full items-center gap-1 overflow-x-auto rounded-lg border border-slate-200 bg-slate-100 p-1 [scrollbar-width:thin];
   }
   .workspace-tab {
     @apply whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-white hover:text-slate-900;
@@ -117,7 +152,7 @@ body {
     @apply bg-white text-slate-900 shadow-sm;
   }
   .toolbar {
-    @apply flex flex-wrap items-end justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm;
+    @apply flex min-w-0 flex-wrap items-end justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm;
   }
 
   /* Badges de estado */
@@ -138,5 +173,24 @@ body {
   }
   .badge-brand {
     @apply bg-brand-100 text-brand-800;
+  }
+}
+
+@media (max-width: 639px) {
+  .btn {
+    white-space: normal;
+  }
+
+  .card-pad {
+    padding: 1rem;
+  }
+
+  .toolbar {
+    padding: 0.875rem;
+  }
+
+  table th,
+  table td {
+    overflow-wrap: anywhere;
   }
 }

@@ -432,24 +432,21 @@ export default function QuickCalcPage() {
       <div className="space-y-5 max-w-3xl">
         {error && <p className="text-sm text-red-600">{error}</p>}
 
-        <div className="flex gap-1 border-b border-gray-200 flex-wrap">
+        <div className="workspace-tabs">
           {(["laje", "betao", "generico", "fossa"] as Tab[]).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
-              className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                tab === t ? "border-brand-700 text-brand-800" : "border-transparent text-gray-500 hover:text-gray-800"
-              }`}
+              className={`workspace-tab ${tab === t ? "workspace-tab-active" : ""}`}
             >
               {TAB_LABELS[t]}
             </button>
           ))}
         </div>
 
-        <div className="card card-pad space-y-3">
-          <p className="text-xs text-gray-500">
-            Título e referência do relatório em PDF — edite como quiser (ex: obra, cliente, responsável).
-          </p>
+        <details className="card card-pad group">
+          <summary className="flex list-none items-center justify-between gap-3 text-sm font-semibold text-slate-900"><span>Dados do relatório e zona de preços</span><span className="text-brand-700 group-open:rotate-45">+</span></summary>
+          <div className="mt-4 space-y-3 border-t border-slate-200 pt-4">
           <div>
             <label className="label">Título do relatório</label>
             <input
@@ -483,7 +480,8 @@ export default function QuickCalcPage() {
             </select>
             <p className="mt-1 text-xs text-slate-500">Aplica-se a Laje, Betão e Qualquer composição. Os totais são recalculados automaticamente.</p>
           </div>
-        </div>
+          </div>
+        </details>
 
         {tab === "laje" && (
           <section className="card card-pad space-y-4">
@@ -491,12 +489,8 @@ export default function QuickCalcPage() {
               <IconRuler className="w-4 h-4 text-brand-700" />
               <h2 className="section-title">Laje — área e espessura</h2>
             </div>
-            <p className="text-xs text-gray-500">
-              Dá o volume de betão (e os materiais desse betão, pelo rácio já definido no Catálogo de Preços) e uma
-              estimativa do peso de aço para uma malha de varões com o mesmo espaçamento nas duas direcções — útil
-              quando ainda não há um projecto de armadura detalhado.
-            </p>
-            <div className="grid grid-cols-2 gap-3">
+            <p className="text-xs leading-5 text-gray-500">Volume, materiais e estimativa de aço para uma laje sem armadura detalhada.</p>
+            <div className="grid gap-3 sm:grid-cols-2">
               <div>
                 <label className="label">Área (m²)</label>
                 <input type="number" step="0.01" min="0" value={areaM2} onChange={(e) => setAreaM2(e.target.value)} className="input" />
@@ -515,7 +509,6 @@ export default function QuickCalcPage() {
                   ))}
                 </select>
               </div>
-              <div />
               <div>
                 <label className="label">Diâmetro do varão (mm)</label>
                 <input type="number" step="1" min="0" value={barDiameterMm} onChange={(e) => setBarDiameterMm(e.target.value)} className="input" />
@@ -531,8 +524,8 @@ export default function QuickCalcPage() {
             </div>
 
             {lajeResult && (
-              <div className="rounded-lg border border-gray-200 overflow-hidden">
-                <table className="w-full text-sm">
+              <div className="overflow-x-auto rounded-lg border border-gray-200">
+                <table className="w-full min-w-[620px] text-sm">
                   <thead>
                     <tr className="table-head-row">
                       <th className="text-left py-2 px-4 font-medium">Material</th>
@@ -601,12 +594,8 @@ export default function QuickCalcPage() {
               <IconRuler className="w-4 h-4 text-brand-700" />
               <h2 className="section-title">Betão — volume simples</h2>
             </div>
-            <p className="text-xs text-gray-500">
-              Para sapatas, vigas, pilares ou qualquer elemento em que já saiba o volume (ou as dimensões) — dá os
-              materiais do betão pelo rácio do Catálogo de Preços, com a opção de incluir uma estimativa genérica de
-              aço.
-            </p>
-            <div className="flex gap-2">
+            <p className="text-xs leading-5 text-gray-500">Materiais e custo para um volume ou dimensões conhecidas.</p>
+            <div className="flex flex-wrap gap-2">
               <button
                 onClick={() => setVolumeMode("directo")}
                 className={`btn btn-sm ${volumeMode === "directo" ? "btn-primary" : "btn-secondary"}`}
@@ -665,8 +654,8 @@ export default function QuickCalcPage() {
             </label>
 
             {betaoResult && (
-              <div className="rounded-lg border border-gray-200 overflow-hidden">
-                <table className="w-full text-sm">
+              <div className="overflow-x-auto rounded-lg border border-gray-200">
+                <table className="w-full min-w-[620px] text-sm">
                   <thead>
                     <tr className="table-head-row">
                       <th className="text-left py-2 px-4 font-medium">Material</th>
@@ -729,12 +718,8 @@ export default function QuickCalcPage() {
               <IconRuler className="w-4 h-4 text-brand-700" />
               <h2 className="section-title">Qualquer composição do Catálogo</h2>
             </div>
-            <p className="text-xs text-gray-500">
-              Escolha qualquer composição de custo já definida no Catálogo de Preços (alvenaria, reboco, betonilha,
-              revestimentos, pinturas, cobertura, tubagens, aparelhos sanitários/eléctricos...) e indique a
-              quantidade — dá os materiais e o valor total, sem precisar de criar um projecto.
-            </p>
-            <div className="grid grid-cols-2 gap-3">
+            <p className="text-xs leading-5 text-gray-500">Calcule materiais e custo total a partir de qualquer composição do Catálogo.</p>
+            <div className="grid gap-3 sm:grid-cols-2">
               <div>
                 <label className="label">Zona de preço (opcional)</label>
                 <select value={zoneId} onChange={(e) => setZoneId(e.target.value)} className="input">
@@ -746,8 +731,7 @@ export default function QuickCalcPage() {
                   ))}
                 </select>
               </div>
-              <div />
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <label className="label">Composição</label>
                 <select value={genericoCompId} onChange={(e) => setGenericoCompId(e.target.value)} className="input">
                   {genericoCompositionsByCategory.map(([category, comps]) => (
@@ -768,8 +752,8 @@ export default function QuickCalcPage() {
             </div>
 
             {genericoResult && (
-              <div className="rounded-lg border border-gray-200 overflow-hidden">
-                <table className="w-full text-sm">
+              <div className="overflow-x-auto rounded-lg border border-gray-200">
+                <table className="w-full min-w-[620px] text-sm">
                   <thead>
                     <tr className="table-head-row">
                       <th className="text-left py-2 px-4 font-medium">Material</th>
@@ -813,11 +797,8 @@ export default function QuickCalcPage() {
               <IconRuler className="w-4 h-4 text-brand-700" />
               <h2 className="section-title">Fossa Séptica — pré-dimensionamento</h2>
             </div>
-            <p className="text-xs text-gray-500">
-              Estimativa do volume útil da fossa séptica e da área de infiltração necessária, pelo método Morais
-              (1962) — o mesmo usado no Assistente de Medições. Não substitui um projecto de saneamento aprovado.
-            </p>
-            <div className="grid grid-cols-2 gap-3">
+            <p className="text-xs leading-5 text-gray-500">Pré-dimensionamento pelo método Morais (1962). Requer validação do projectista.</p>
+            <div className="grid gap-3 sm:grid-cols-2">
               <div>
                 <label className="label">Nº de pessoas servidas</label>
                 <input type="number" step="1" min="1" value={numberOfPeople} onChange={(e) => setNumberOfPeople(e.target.value)} className="input" />
@@ -826,7 +807,7 @@ export default function QuickCalcPage() {
                 <label className="label">Capitação diária (L/pessoa/dia)</label>
                 <input type="number" step="1" min="0" value={dailyFlow} onChange={(e) => setDailyFlow(e.target.value)} className="input" />
               </div>
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <label className="label">Tipo de solo (vala de infiltração)</label>
                 <select value={soilType} onChange={(e) => setSoilType(e.target.value as SoilType)} className="input">
                   {(Object.keys(SOIL_TYPE_LABELS) as SoilType[]).map((s) => (
@@ -839,7 +820,7 @@ export default function QuickCalcPage() {
             </div>
 
             {fossaResult && (
-              <div className="rounded-lg border border-gray-200 overflow-hidden">
+              <div className="overflow-x-auto rounded-lg border border-gray-200">
                 <table className="w-full text-sm">
                   <tbody>
                     <tr className="table-row bg-brand-50/60">

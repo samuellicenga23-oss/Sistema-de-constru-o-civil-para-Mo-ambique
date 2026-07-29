@@ -5,6 +5,7 @@ import { scheduleApi, type ProjectSchedule, type SchedulePaper, type SchedulePri
 import Layout from "../components/Layout";
 import { MetricCard } from "../components/WorkspaceUI";
 import ProjectWorkspaceNav from "../components/ProjectWorkspaceNav";
+import Modal from "../components/Modal";
 import { IconBack, IconChart, IconDownload, IconPlus, IconRefresh, IconTrash } from "../components/icons";
 
 const DAY_MS = 86_400_000;
@@ -178,7 +179,20 @@ export default function ProjectSchedulePage() {
             </div>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-2 text-[10px] font-semibold text-slate-500"><span>Seleccione o nome ou a barra para abrir os detalhes da actividade.</span><span className="flex flex-wrap gap-4"><i className="not-italic"><b className="mr-1 inline-block h-1 w-5 bg-slate-400 align-middle" /> Linha de base</i><i className="not-italic"><b className="mr-1 inline-block h-2.5 w-5 rounded bg-blue-600 align-middle" /> Execução</i><i className="not-italic"><b className="mr-1 inline-block h-2 w-5 bg-slate-900 align-middle" /> Fase-resumo</i></span></div>
-          <div className="overflow-x-auto">
+          <div className="divide-y divide-slate-100 md:hidden">
+            {visibleTasks.map((task) => {
+              const childCount = task.isSummary ? schedule.tasks.filter((child) => child.parentId === task.id).length : 0;
+              return <div key={`mobile-${task.id}`} className={`p-4 ${task.isSummary ? "bg-slate-50" : "bg-white"}`}>
+                <div className="flex items-start gap-3">
+                  {task.isSummary && <button type="button" className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-slate-300 bg-white font-black text-slate-600" onClick={() => toggleCollapse(task.id)} aria-label={collapsed.has(task.id) ? "Mostrar subactividades" : "Ocultar subactividades"}>{collapsed.has(task.id) ? "+" : "−"}</button>}
+                  <button type="button" className={`min-w-0 flex-1 text-left ${task.parentId ? "pl-4" : ""}`} onClick={() => setSelectedId(task.id)}><span className="text-xs font-bold text-blue-700">{task.code}</span><strong className={`mt-0.5 block text-sm text-slate-950 ${task.isSummary ? "uppercase" : ""}`}>{task.name}</strong><span className="mt-1 block text-xs text-slate-500">{task.isSummary ? `${childCount} subactividade${childCount === 1 ? "" : "s"}` : `${fmtDate(task.startDate)} — ${fmtDate(task.endDate)} · ${task.durationDays} d`}</span></button>
+                  <button type="button" className="btn btn-secondary btn-sm shrink-0" onClick={() => setSelectedId(task.id)}>Editar</button>
+                </div>
+                <div className="mt-3 flex items-center gap-3"><div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-200"><i className={`block h-full ${STATUS_COLORS[task.status]}`} style={{ width: `${Math.min(100, task.progress)}%` }} /></div><span className="w-10 text-right text-xs font-bold tabular-nums">{task.progress.toFixed(0)}%</span></div>
+              </div>;
+            })}
+          </div>
+          <div className="hidden overflow-x-auto md:block">
             <div style={{ width: 600 + timeline!.width }}>
               <div className="sticky top-0 z-10 grid border-b border-slate-200 bg-slate-950 text-white" style={{ gridTemplateColumns: `600px ${timeline!.width}px` }}>
                 <div className="grid grid-cols-[64px_minmax(260px,1fr)_82px_104px] items-center px-3 py-3 text-[10px] font-semibold uppercase tracking-[.08em]"><span>WBS</span><span>Actividade</span><span>Duração</span><span>Execução</span></div>
@@ -223,7 +237,7 @@ export default function ProjectSchedulePage() {
           </div>
         </section>
 
-        {selected && <TaskEditor task={selected} tasks={schedule.tasks} onSaved={reload} onDeleted={async () => { setSelectedId(null); await reload(); }} setError={setError} />}
+        {selected && <TaskEditor task={selected} tasks={schedule.tasks} onClose={() => setSelectedId(null)} onSaved={async () => { setSelectedId(null); await reload(); }} onDeleted={async () => { setSelectedId(null); await reload(); }} setError={setError} />}
       </>}
       {!schedule.tasks.length && !setupOpen && <div className="card card-pad py-14 text-center"><IconChart className="mx-auto mb-3 h-10 w-10 text-blue-600" /><h3 className="text-lg font-semibold">Transforme o orçamento num plano executável</h3><p className="mx-auto mt-2 max-w-xl text-sm text-slate-500">O SIGO cria a WBS com actividades e subactividades, distribui o prazo pelo peso financeiro e estabelece a linha de base. Depois, Diário e Autos alimentam o progresso real.</p><button onClick={() => setSetupOpen(true)} className="btn btn-primary mt-5">Configurar cronograma</button></div>}
     </div>
@@ -258,7 +272,7 @@ function formFromTask(task: ScheduleTask): EditorForm {
   };
 }
 
-function TaskEditor({ task, tasks, onSaved, onDeleted, setError }: { task: ScheduleTask; tasks: ScheduleTask[]; onSaved: () => Promise<void>; onDeleted: () => Promise<void>; setError: (value: string | null) => void }) {
+function TaskEditor({ task, tasks, onClose, onSaved, onDeleted, setError }: { task: ScheduleTask; tasks: ScheduleTask[]; onClose: () => void; onSaved: () => Promise<void>; onDeleted: () => Promise<void>; setError: (value: string | null) => void }) {
   const [form, setForm] = useState<EditorForm>(() => formFromTask(task));
   const [saving, setSaving] = useState(false);
   useEffect(() => setForm(formFromTask(task)), [task.id]);
@@ -287,10 +301,10 @@ function TaskEditor({ task, tasks, onSaved, onDeleted, setError }: { task: Sched
   }
 
   const parentOptions = tasks.filter((item) => !item.parentId && item.id !== task.id);
-  return <form onSubmit={save} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-4"><div><p className="text-[10px] font-bold uppercase tracking-[.12em] text-blue-700">Detalhes seleccionados · {task.isSummary ? "Fase-resumo" : task.parentId ? "Subactividade" : "Actividade"} · WBS {task.code}</p><h3 className="mt-1 text-base font-bold text-slate-950">{task.name}</h3></div><button type="button" onClick={remove} className="btn btn-ghost btn-sm text-red-600"><IconTrash className="h-4 w-4" /> Eliminar</button></div>
-    {task.isSummary && <div className="mx-5 mt-5 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800"><strong>Fase calculada pelas subactividades.</strong> O período, o estado e o progresso deste resumo são agregados automaticamente; edite apenas o código e o nome.</div>}
-    <div className="grid gap-5 p-5 lg:grid-cols-[1.08fr_.92fr]">
+  return <Modal title={task.name} subtitle={`${task.isSummary ? "Fase-resumo" : task.parentId ? "Subactividade" : "Actividade"} · WBS ${task.code}`} onClose={onClose} maxWidth="max-w-5xl"><form onSubmit={save}>
+    <div className="mb-4 flex justify-end"><button type="button" onClick={remove} className="btn btn-ghost btn-sm text-red-600"><IconTrash className="h-4 w-4" /> Eliminar</button></div>
+    {task.isSummary && <div className="mb-5 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800"><strong>Fase calculada pelas subactividades.</strong> O período, o estado e o progresso deste resumo são agregados automaticamente; edite apenas o código e o nome.</div>}
+    <div className="grid gap-5 lg:grid-cols-[1.08fr_.92fr]">
       <fieldset className="rounded-xl border border-slate-200 bg-slate-50/70 p-4"><legend className="px-2 text-xs font-bold uppercase tracking-[.08em] text-slate-500">Estrutura e execução</legend><div className="grid gap-3 sm:grid-cols-2">
         <div><label className="label">Código WBS</label><input className="input" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} /></div>
         <div><label className="label">Nível na WBS</label><select className="input" disabled={task.isSummary} value={form.parentId} onChange={(e) => setForm({ ...form, parentId: e.target.value })}><option value="">Actividade principal</option>{parentOptions.map((item) => <option key={item.id} value={item.id}>Sob {item.code} · {item.name}</option>)}</select></div>
@@ -306,6 +320,6 @@ function TaskEditor({ task, tasks, onSaved, onDeleted, setError }: { task: Sched
         <div><label className="label">Notas / restrições</label><textarea className="input min-h-24 resize-y py-3" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Acesso, equipa, aprovação, fornecimento crítico..." /></div>
       </div></fieldset>
     </div>
-    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-5 py-4"><p className="text-xs text-slate-500">Diário de Obra e Autos aprovados podem substituir o progresso manual.</p><button className="btn btn-primary" disabled={saving}>{saving ? "A guardar..." : "Guardar alterações"}</button></div>
-  </form>;
+    <div className="mt-5 flex flex-col-reverse gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-between"><p className="text-xs text-slate-500">Diário de Obra e Autos aprovados podem substituir o progresso manual.</p><div className="flex gap-2"><button type="button" onClick={onClose} className="btn btn-secondary flex-1 sm:flex-none">Cancelar</button><button className="btn btn-primary flex-1 sm:flex-none" disabled={saving}>{saving ? "A guardar..." : "Guardar alterações"}</button></div></div>
+  </form></Modal>;
 }

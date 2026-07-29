@@ -10,6 +10,8 @@ from parser import (
     extract_room_list_fallback,
     extract_rooms,
     extract_rooms_spatial,
+    detect_plan_type,
+    is_room_area_page,
     parse_pdf,
 )
 
@@ -30,6 +32,11 @@ S = 12,35 m2
             [("Suite", "2", 22.4), ("Cozinha", None, 16.0), ("Quarto", "1", 12.35)],
         )
 
+    def test_normalises_common_room_name_typos_from_drawings(self):
+        rooms = extract_rooms("Garragem\nA: 47,52 m2\nQ.BANHIO\nA: 3,90 m2", 1)
+
+        self.assertEqual([(room.name, room.area_m2) for room in rooms], [("Garagem", 47.52), ("Q. Banho", 3.9)])
+
     def test_uses_geometry_when_pdf_text_order_is_not_semantic(self):
         doc = fitz.open()
         page = doc.new_page(width=600, height=400)
@@ -42,6 +49,45 @@ S = 12,35 m2
         self.assertEqual(len(rooms), 1)
         self.assertEqual(rooms[0].name, "Cozinha")
         self.assertEqual(rooms[0].area_m2, 12.5)
+        doc.close()
+
+    def test_excludes_satellite_and_misspelled_site_plan_sheets(self):
+        satellite = "Planta de Piso\nConteúdo: IMAGEM SATÉLITE"
+        site_plan = "Planta de Piso\nConteúdo: PLANTA DE IMPLATAÇÃO"
+
+        self.assertEqual(detect_plan_type(satellite), "imagem_satelite")
+        self.assertEqual(detect_plan_type(site_plan), "implantacao")
+        self.assertFalse(is_room_area_page(satellite))
+        self.assertFalse(is_room_area_page(site_plan))
+
+    def test_ignores_room_tags_hidden_by_published_pdf_mask(self):
+        doc = fitz.open()
+        page = doc.new_page(width=600, height=400)
+        page.insert_text((100, 110), "Cozinha", fontsize=10)
+        page.insert_text((100, 130), "12,50 m2", fontsize=10)
+        page.insert_text((360, 110), "Quarto", fontsize=10)
+        page.insert_text((360, 130), "18,00 m2", fontsize=10)
+        page.draw_rect(fitz.Rect(345, 90, 440, 145), color=(1, 1, 1), fill=(1, 1, 1), overlay=True)
+
+        rooms = extract_rooms_spatial(page, 1)
+
+        self.assertEqual([(room.name, room.area_m2) for room in rooms], [("Cozinha", 12.5)])
+        doc.close()
+
+    def test_prefers_dimensioned_view_when_two_views_share_one_sheet(self):
+        doc = fitz.open()
+        page = doc.new_page(width=700, height=400)
+        for x in (120, 470):
+            page.insert_text((x, 100), "Cozinha", fontsize=10)
+            page.insert_text((x, 120), "12,50 m2", fontsize=10)
+            page.insert_text((x, 160), "W.C", fontsize=10)
+            page.insert_text((x, 180), "4,00 m2", fontsize=10)
+        page.insert_text((110, 350), "PLANTA DE PISO", fontsize=12)
+        page.insert_text((455, 350), "PLANTA COTADA", fontsize=12)
+
+        rooms = extract_rooms_spatial(page, 1)
+
+        self.assertEqual([(room.name, room.area_m2) for room in rooms], [("Cozinha", 12.5), ("W.C", 4.0)])
         doc.close()
 
     def test_duplicate_sheets_do_not_remove_legitimate_equal_rooms(self):

@@ -38,6 +38,38 @@ export type MeasurementLine = {
 export type MeasurementCertificateDetail = {
   certificate: MeasurementCertificate;
   lines: MeasurementLine[];
+  financialParameters: { currency: string; ivaRate: number; contingenciasRate: number };
+};
+
+export type PhaseLabourLine = {
+  labourCategoryId: string;
+  name: string;
+  plannedHours: number;
+  periodHours: number;
+  cumulativeHours: number;
+  hourlyRate: number;
+  periodCost: number;
+  cumulativeCost: number;
+  currency: string;
+};
+
+export type LabourByPhaseResponse = {
+  currency: string;
+  ivaRate: number;
+  phases: Array<{
+    key: string;
+    label: string;
+    labour: PhaseLabourLine[];
+    itemsWithoutComposition: Array<{ code: string | null; description: string; periodQty: number; unit: string | null }>;
+    periodHours: number;
+    cumulativeHours: number;
+    periodCost: number;
+    cumulativeCost: number;
+  }>;
+  grandPeriodHours: number;
+  grandCumulativeHours: number;
+  grandPeriodCost: number;
+  grandCumulativeCost: number;
 };
 
 export type MeasurementDashboard =
@@ -56,6 +88,7 @@ export const measurementApi = {
   create: (projectId: string, data: { budgetDocumentId: string; periodStartDate?: string; periodDate: string; notes?: string }) =>
     request<MeasurementCertificate>(`/projects/${projectId}/measurement-certificates`, { method: "POST", body: JSON.stringify(data) }),
   detail: (id: string) => request<MeasurementCertificateDetail>(`/measurement-certificates/${id}`),
+  labourByPhase: (id: string) => request<LabourByPhaseResponse>(`/measurement-certificates/${id}/labour-by-phase`),
   updateStatus: (id: string, status: "rascunho" | "submetido" | "aprovado", decisionNote?: string) =>
     request<MeasurementCertificate>(`/measurement-certificates/${id}`, { method: "PUT", body: JSON.stringify({ status, decisionNote }) }),
   delete: (id: string) => request<{ ok: true }>(`/measurement-certificates/${id}`, { method: "DELETE" }),

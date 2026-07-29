@@ -10,6 +10,7 @@ import {
 } from "../db/schema.js";
 import { computeMaterialsByPhase } from "./materialsByPhase.js";
 import { mapToPhase } from "./phaseMapping.js";
+import { calculateVatTotals } from "@sigo/shared";
 
 export type ProcurementRequirement = {
   materialId: string;
@@ -26,6 +27,8 @@ export type ProcurementRequirement = {
   purchasePackageLabel: string | null;
   estimatedUnitCost: number;
   estimatedTotal: number;
+  estimatedVat: number;
+  estimatedTotalWithVat: number;
   supplierId: string | null;
   supplierName: string | null;
   quoteSource: "zona" | "geral" | "catalogo";
@@ -49,6 +52,7 @@ export async function computeProcurementPlan(args: {
   companyId: string;
   zoneId: string | null;
   currency: string;
+  ivaRate: number;
 }) {
   const phaseReport = await computeMaterialsByPhase(args.documentId, args.companyId);
   if (!phaseReport) return null;
@@ -89,8 +93,11 @@ export async function computeProcurementPlan(args: {
     return {
       documentId: args.documentId,
       currency: args.currency,
+      ivaRate: args.ivaRate,
       requiredValue: 0,
       shortageValue: 0,
+      shortageVat: 0,
+      shortageTotal: 0,
       coveragePercent: 0,
       requirements: [],
       missingCompositionItems: phaseReport.phases.flatMap((phase) => phase.itemsWithoutComposition.map((item) => ({ ...item, phase: phase.label }))),
@@ -160,6 +167,7 @@ export async function computeProcurementPlan(args: {
     const phaseKeys = new Set(item.phases.map((phase) => phase.key));
     const matchingTasks = taskRows.filter((task) => phaseKeys.has(mapToPhase(task.name, [], task.name)));
     const suggestedTask = matchingTasks.find((task) => !summaryTaskIds.has(task.id)) ?? matchingTasks[0];
+    const estimate = calculateVatTotals(suggestedOrderQty * estimatedUnitCost, args.ivaRate);
     return {
       materialId: item.materialId,
       materialName: item.materialName,
@@ -174,7 +182,9 @@ export async function computeProcurementPlan(args: {
       purchaseQty: item.packageSize ? Math.ceil(suggestedOrderQty / item.packageSize) : null,
       purchasePackageLabel: item.purchasePackageLabel,
       estimatedUnitCost,
-      estimatedTotal: suggestedOrderQty * estimatedUnitCost,
+      estimatedTotal: estimate.subtotal,
+      estimatedVat: estimate.iva,
+      estimatedTotalWithVat: estimate.total,
       supplierId: quote?.supplierId ?? null,
       supplierName: quote?.supplierName ?? null,
       quoteSource,
@@ -184,11 +194,16 @@ export async function computeProcurementPlan(args: {
     };
   }).sort((a, b) => b.shortageQty * b.estimatedUnitCost - a.shortageQty * a.estimatedUnitCost);
 
+  const shortageValue = requirements.reduce((sum, item) => sum + item.estimatedTotal, 0);
+  const shortageTotals = calculateVatTotals(shortageValue, args.ivaRate);
   return {
     documentId: args.documentId,
     currency: args.currency,
+    ivaRate: args.ivaRate,
     requiredValue: requirements.reduce((sum, item) => sum + item.requiredQty * item.estimatedUnitCost, 0),
-    shortageValue: requirements.reduce((sum, item) => sum + item.estimatedTotal, 0),
+    shortageValue,
+    shortageVat: shortageTotals.iva,
+    shortageTotal: shortageTotals.total,
     coveragePercent: requirements.reduce((sum, item) => sum + item.requiredQty * item.estimatedUnitCost, 0)
       ? Math.max(0, Math.min(100, (requirements.reduce((sum, item) => sum + Math.min(item.requiredQty, item.consumedQty + Math.max(0, item.stockQty) + item.orderedQty) * item.estimatedUnitCost, 0) / requirements.reduce((sum, item) => sum + item.requiredQty * item.estimatedUnitCost, 0)) * 100))
       : 100,

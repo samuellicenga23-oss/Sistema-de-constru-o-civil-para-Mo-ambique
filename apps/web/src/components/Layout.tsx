@@ -99,10 +99,10 @@ export default function Layout({
               {!sidebarCollapsed && <div><p className="text-base font-black tracking-[0.14em] text-slate-900">SIGO</p><p className="max-w-[150px] text-[8px] uppercase leading-3 tracking-[0.11em] text-slate-400">Sistema Integrado de Gestão de Obras</p></div>}
             </div>
           )}
-          {!sidebarCollapsed && <button onClick={() => setSidebarCollapsed(true)} className="grid h-8 w-8 place-items-center rounded-md text-slate-400 hover:bg-slate-200/70 hover:text-slate-700" title="Recolher menu"><IconClose className="h-4 w-4" /></button>}
+          {!sidebarCollapsed && <button onClick={() => setSidebarCollapsed(true)} className="icon-btn border-0 bg-transparent shadow-none" title="Recolher menu"><IconClose className="h-4 w-4" /></button>}
         </div>
 
-        {sidebarCollapsed && <button onClick={() => setSidebarCollapsed(false)} className="mx-auto mt-3 grid h-8 w-8 place-items-center rounded-md text-slate-500 hover:bg-slate-200/70" title="Expandir menu"><IconMenu className="h-4 w-4" /></button>}
+        {sidebarCollapsed && <button onClick={() => setSidebarCollapsed(false)} className="icon-btn mx-auto mt-3" title="Expandir menu"><IconMenu className="h-4 w-4" /></button>}
 
         {companyName && !sidebarCollapsed && (
           <div className="mx-3 mt-3 flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2.5 py-2 text-xs font-medium text-slate-700">
@@ -146,7 +146,7 @@ export default function Layout({
               )}
               {!sidebarCollapsed && <div className="min-w-0 flex-1"><p className="text-sm font-medium text-slate-800 truncate">{user?.name}</p><p className="text-[11px] text-slate-400">{user ? ROLE_LABELS[user.role] : ""}</p></div>}
             </Link>
-            {!sidebarCollapsed && <button onClick={() => logout()} title="Sair" className="grid h-8 w-8 place-items-center rounded-md text-slate-400 hover:bg-slate-200 hover:text-slate-700 transition-colors">
+            {!sidebarCollapsed && <button onClick={() => logout()} title="Sair" className="icon-btn border-0 bg-transparent shadow-none">
               <IconLogout className="w-[18px] h-[18px]" />
             </button>}
           </div>
@@ -156,8 +156,8 @@ export default function Layout({
       {/* Conteúdo */}
       <div className="flex-1 min-w-0 flex flex-col">
         {/* Barra superior móvel (ecrãs pequenos, sem sidebar) */}
-        <div className="md:hidden bg-[#172033] text-white px-4 py-3 flex items-center justify-between shadow-sm">
-          <button onClick={() => setDrawerOpen(true)} aria-label="Abrir menu" className="text-brand-200 hover:text-white -ml-1 p-1">
+        <div className="md:hidden bg-[#172033] text-white px-3 py-2.5 flex items-center justify-between shadow-sm">
+          <button onClick={() => setDrawerOpen(true)} aria-label="Abrir menu" className="grid h-10 w-10 place-items-center rounded-lg border border-white/10 text-brand-200 hover:bg-white/10 hover:text-white">
             <IconMenu className="w-5 h-5" />
           </button>
           <p className="font-black tracking-[0.18em]">SIGO</p>
@@ -178,7 +178,7 @@ export default function Layout({
             <div className="relative w-72 max-w-[80vw] bg-[#f8f8f9] text-slate-700 flex flex-col shadow-xl">
               <div className="px-4 py-4 flex items-center justify-between border-b border-slate-200">
                 <p className="text-lg font-black tracking-[0.18em] text-slate-900">SIGO</p>
-                <button onClick={() => setDrawerOpen(false)} aria-label="Fechar menu" className="text-slate-500 hover:text-slate-900 p-1">
+                <button onClick={() => setDrawerOpen(false)} aria-label="Fechar menu" className="icon-btn">
                   <IconClose className="w-5 h-5" />
                 </button>
               </div>
@@ -223,14 +223,14 @@ export default function Layout({
           </div>
         )}
 
-        <header className="bg-white border-b border-slate-200 px-5 md:px-8 py-4 flex flex-wrap items-center justify-between gap-3 sticky top-0 z-10">
-          <div className="min-w-0">
-            <h1 className="text-lg md:text-xl font-black tracking-tight text-slate-900 truncate">{title}</h1>
-            {subtitle && <p className="text-xs text-gray-400 mt-0.5">{subtitle}</p>}
+        <header className="sticky top-0 z-10 flex flex-col gap-3 border-b border-slate-200 bg-white px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between md:px-8 md:py-4">
+          <div className="min-w-0 max-w-full">
+            <h1 className="break-words text-lg font-black tracking-tight text-slate-900 md:text-xl">{title}</h1>
+            {subtitle && <p className="mt-1 max-w-3xl break-words text-xs leading-4 text-slate-500">{subtitle}</p>}
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2 sm:justify-end">
             <InstallAppButton />
-            {actions && <div className="flex items-center gap-2 flex-wrap">{actions}</div>}
+            {actions && <div className="flex max-w-full flex-wrap items-center gap-2 sm:justify-end">{actions}</div>}
             <div className="hidden md:block">
               <UserMenu />
             </div>
@@ -239,7 +239,7 @@ export default function Layout({
 
         <OfflineBanner />
 
-        <main className="page-enter flex-1 p-5 md:p-8 xl:p-10 pb-20 md:pb-8">{children}</main>
+        <main className="page-enter min-w-0 flex-1 overflow-x-hidden p-3 pb-20 sm:p-5 md:p-8 md:pb-8 xl:p-10">{children}</main>
 
         {/* Barra inferior móvel — só os módulos principais, ícone + rótulo curto, tocável. */}
         <nav className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-white border-t border-gray-200 flex items-stretch">

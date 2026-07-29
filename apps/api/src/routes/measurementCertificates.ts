@@ -11,6 +11,7 @@ import {
   getMeasurementDashboard,
   updateCertificateLinePeriod,
 } from "../services/measurementEngine.js";
+import { computeLabourByPhase } from "../services/labourByPhase.js";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista", "engenheiro_fiscal"] as const;
 const createSchema = z.object({
@@ -49,7 +50,16 @@ export async function measurementCertificateRoutes(app: FastifyInstance) {
     const { id } = request.params as { id: string };
     const certificate = await assertCertificateOwned(id, request.currentUser!.companyId!);
     if (!certificate) return reply.code(404).send({ error: "Auto de medição não encontrado" });
-    return getCertificateDetail(id);
+    const detail = await getCertificateDetail(id);
+    const [document] = await db.select({ currency: budgetDocuments.currency, ivaRate: budgetDocuments.ivaRate, contingenciasRate: budgetDocuments.contingenciasRate }).from(budgetDocuments).where(eq(budgetDocuments.id, certificate.budgetDocumentId)).limit(1);
+    return { ...detail, financialParameters: { currency: document?.currency ?? "MZN", ivaRate: Number(document?.ivaRate ?? 0.16), contingenciasRate: Number(document?.contingenciasRate ?? 0) } };
+  });
+
+  app.get("/api/measurement-certificates/:id/labour-by-phase", { preHandler: requireCompanyUser }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const result = await computeLabourByPhase(id, request.currentUser!.companyId!);
+    if (!result) return reply.code(404).send({ error: "Auto de medição não encontrado" });
+    return result;
   });
 
   app.put("/api/measurement-certificates/:id", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {

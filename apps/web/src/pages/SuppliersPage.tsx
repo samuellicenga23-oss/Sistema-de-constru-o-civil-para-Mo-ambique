@@ -2,6 +2,8 @@ import { useEffect, useState, type FormEvent } from "react";
 import { suppliersApi, type Supplier } from "../api/suppliers";
 import SupplierMaterialsModal from "../components/SupplierMaterialsModal";
 import Layout from "../components/Layout";
+import Modal from "../components/Modal";
+import ConfirmDialog from "../components/ConfirmDialog";
 import { IconPlus, IconTrash, IconUsers } from "../components/icons";
 
 export default function SuppliersPage() {
@@ -10,6 +12,7 @@ export default function SuppliersPage() {
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
   const [materialsModalSupplier, setMaterialsModalSupplier] = useState<Supplier | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<Supplier | null>(null);
 
   const [name, setName] = useState("");
   const [contact, setContact] = useState("");
@@ -49,10 +52,10 @@ export default function SuppliersPage() {
   }
 
   async function handleDelete(supplier: Supplier) {
-    if (!window.confirm(`Eliminar o fornecedor "${supplier.name}"? Esta acção não pode ser desfeita.`)) return;
     setError(null);
     try {
       await suppliersApi.delete(supplier.id);
+      setPendingDelete(null);
       await reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao eliminar fornecedor");
@@ -77,7 +80,8 @@ export default function SuppliersPage() {
           </div>
 
           {showForm && (
-            <form onSubmit={handleCreate} className="grid gap-3 sm:grid-cols-2 px-5 py-4 border-b border-gray-100">
+            <Modal title="Novo fornecedor" subtitle="Dados essenciais para cotações e compras" onClose={() => !saving && setShowForm(false)}>
+            <form onSubmit={handleCreate} className="grid gap-3 sm:grid-cols-2">
               <div>
                 <label className="label">Nome</label>
                 <input required value={name} onChange={(e) => setName(e.target.value)} className="input" />
@@ -94,30 +98,32 @@ export default function SuppliersPage() {
                 <label className="label">NUIT</label>
                 <input value={nuit} onChange={(e) => setNuit(e.target.value)} className="input" />
               </div>
-              <div className="sm:col-span-2">
+              <div className="flex flex-col-reverse gap-2 border-t border-slate-200 pt-4 sm:col-span-2 sm:flex-row sm:justify-end">
+                <button type="button" onClick={() => setShowForm(false)} className="btn btn-secondary">Cancelar</button>
                 <button type="submit" disabled={saving} className="btn btn-primary">
                   {saving ? "A guardar..." : "Guardar fornecedor"}
                 </button>
               </div>
             </form>
+            </Modal>
           )}
 
           <ul>
             {suppliers.map((s) => (
-              <li key={s.id} className="table-row group flex items-center justify-between px-5 py-3">
-                <div>
+              <li key={s.id} className="table-row group flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+                <div className="min-w-0">
                   <p className="font-medium text-gray-900">{s.name}</p>
-                  <p className="text-xs text-gray-500">
+                  <p className="mt-0.5 break-words text-xs text-gray-500">
                     {[s.contact, s.location, s.nuit ? `NUIT ${s.nuit}` : null].filter(Boolean).join(" · ") || "Sem dados de contacto"}
                   </p>
                 </div>
-                <div className="flex items-center gap-2">
-                  <button onClick={() => setMaterialsModalSupplier(s)} className="btn btn-ghost btn-sm">
-                    materiais e preços
+                <div className="flex items-center gap-2 sm:shrink-0">
+                  <button onClick={() => setMaterialsModalSupplier(s)} className="btn btn-secondary btn-sm flex-1 sm:flex-none">
+                    Gerir materiais e preços
                   </button>
                   <button
-                    onClick={() => handleDelete(s)}
-                    className="icon-btn-danger opacity-0 pointer-coarse:opacity-100 group-hover:opacity-100 transition-opacity"
+                    onClick={() => setPendingDelete(s)}
+                    className="icon-btn-danger"
                     title="Eliminar fornecedor"
                   >
                     <IconTrash className="w-3.5 h-3.5" />
@@ -132,6 +138,7 @@ export default function SuppliersPage() {
         </section>
 
         {materialsModalSupplier && <SupplierMaterialsModal supplier={materialsModalSupplier} onClose={() => setMaterialsModalSupplier(null)} />}
+        {pendingDelete && <ConfirmDialog title="Eliminar fornecedor?" message={`O fornecedor “${pendingDelete.name}” e as cotações associadas serão removidos.`} confirmLabel="Eliminar fornecedor" danger onCancel={() => setPendingDelete(null)} onConfirm={() => handleDelete(pendingDelete)} />}
       </div>
     </Layout>
   );

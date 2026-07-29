@@ -50,11 +50,11 @@ export default function EditablePrice({
         setDraft(String(value));
         setEditing(true);
       }}
-      className="hover:bg-brand-50 rounded px-1 -mx-1 text-left"
-      title="Clicar para editar"
+      className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-dashed border-brand-300 bg-brand-50/50 px-2 py-1 text-left font-semibold text-brand-800 hover:border-brand-500 hover:bg-brand-50"
+      title="Editar preço"
     >
-      {Number(value).toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
-      {suffix ? ` ${suffix}` : ""}
+      <span>{Number(value).toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 4 })}{suffix ? ` ${suffix}` : ""}</span>
+      <small className="text-[9px] font-bold uppercase tracking-wide text-brand-600">Editar</small>
     </button>
   );
 }

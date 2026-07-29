@@ -2,12 +2,12 @@ import type { ReactNode } from "react";
 
 export function SectionHeader({ title, description, actions }: { title: string; description?: string; actions?: ReactNode }) {
   return (
-    <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 px-5 py-4">
-      <div>
+    <div className="flex min-w-0 flex-col gap-3 border-b border-slate-200 px-4 py-4 sm:flex-row sm:items-start sm:justify-between sm:px-5">
+      <div className="min-w-0">
         <h2 className="text-sm font-semibold text-slate-900">{title}</h2>
-        {description && <p className="mt-0.5 text-xs text-slate-500">{description}</p>}
+        {description && <p className="mt-1 max-w-3xl text-xs leading-5 text-slate-500">{description}</p>}
       </div>
-      {actions && <div className="flex items-center gap-2">{actions}</div>}
+      {actions && <div className="flex max-w-full flex-wrap items-center gap-2 sm:shrink-0 sm:justify-end">{actions}</div>}
     </div>
   );
 }
@@ -23,8 +23,8 @@ export function MetricCard({ label, value, tone = "neutral", note }: { label: st
   return (
     <div className={`card rounded-lg border-t-2 px-4 py-3.5 ${tones[tone]}`}>
       <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</p>
-      <p className="mt-1.5 text-lg font-bold tabular-nums">{value}</p>
-      {note && <p className="mt-1 text-[11px] text-slate-400">{note}</p>}
+      <p className="mt-1.5 break-words text-lg font-bold tabular-nums">{value}</p>
+      {note && <p className="mt-1 text-[11px] leading-4 text-slate-500">{note}</p>}
     </div>
   );
 }

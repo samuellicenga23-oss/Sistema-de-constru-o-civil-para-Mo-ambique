@@ -291,7 +291,7 @@ export const projects = pgTable("projects", {
   // catálogo ao calcular o custo unitário de composições usadas neste projecto.
   zoneId: uuid("zone_id").references(() => priceZones.id),
   currency: currencyEnum("currency").notNull().default("MZN"),
-  ivaRate: numeric("iva_rate", { precision: 5, scale: 4 }).notNull().default("0.17"),
+  ivaRate: numeric("iva_rate", { precision: 5, scale: 4 }).notNull().default("0.16"),
   contingenciasRate: numeric("contingencias_rate", { precision: 5, scale: 4 }).notNull().default("0.10"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
@@ -304,7 +304,7 @@ export const budgetDocuments = pgTable("budget_documents", {
   fileNumber: varchar("file_number", { length: 50 }),
   currency: currencyEnum("currency").notNull().default("MZN"),
   documentDate: date("document_date"),
-  ivaRate: numeric("iva_rate", { precision: 5, scale: 4 }).notNull().default("0.17"),
+  ivaRate: numeric("iva_rate", { precision: 5, scale: 4 }).notNull().default("0.16"),
   contingenciasRate: numeric("contingencias_rate", { precision: 5, scale: 4 }).notNull().default("0.10"),
   status: documentStatusEnum("status").notNull().default("rascunho"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -580,6 +580,9 @@ export const purchaseOrders = pgTable("purchase_orders", {
   requiredByDate: date("required_by_date"),
   scheduleTaskId: uuid("schedule_task_id").references(() => scheduleTasks.id, { onDelete: "set null" }),
   notes: text("notes"),
+  // Snapshot fiscal da ordem. O total aprovado no Financeiro usa esta taxa, mesmo que a taxa
+  // padrão da empresa venha a mudar depois.
+  ivaRate: numeric("iva_rate", { precision: 5, scale: 4 }).notNull().default("0.16"),
   createdByUserId: uuid("created_by_user_id").references(() => users.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });

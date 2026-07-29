@@ -53,12 +53,12 @@ export default function MeasurementGrid({ lineItemId, onQuantityChange }: { line
   const total = lines.reduce((sum, l) => sum + l.partial, 0);
 
   return (
-    <div className="bg-brand-50 rounded-lg p-3 mt-1 ml-14 text-xs">
-      <p className="font-medium text-brand-900 mb-2">Medições (Nº × Comp. × Larg. × Alt. = Parcial)</p>
+    <div className="mt-1 rounded-lg bg-brand-50 p-3 text-xs sm:ml-14">
+      <p className="font-medium text-brand-900 mb-2">Medições dimensionais</p>
       {error && <p className="text-red-600 mb-1">{error}</p>}
 
       {lines.length > 0 && (
-        <table className="w-full mb-2">
+        <div className="mb-2 overflow-x-auto"><table className="w-full min-w-[520px]">
           <thead>
             <tr className="text-left text-gray-500 border-b border-gray-200">
               <th className="py-0.5">Descrição</th>
@@ -80,8 +80,8 @@ export default function MeasurementGrid({ lineItemId, onQuantityChange }: { line
                 <td>{l.height !== null ? Number(l.height) : "—"}</td>
                 <td className="text-right font-medium">{l.partial.toFixed(3)}</td>
                 <td className="text-right">
-                  <button onClick={() => handleDelete(l.id)} className="text-red-500 hover:underline">
-                    x
+                  <button onClick={() => handleDelete(l.id)} className="icon-btn-danger !h-7 !w-7" title="Eliminar medição">
+                    ×
                   </button>
                 </td>
               </tr>
@@ -94,7 +94,7 @@ export default function MeasurementGrid({ lineItemId, onQuantityChange }: { line
               <td></td>
             </tr>
           </tbody>
-        </table>
+        </table></div>
       )}
 
       <form onSubmit={handleAdd} className="flex gap-1.5 items-end flex-wrap">
@@ -108,11 +108,11 @@ export default function MeasurementGrid({ lineItemId, onQuantityChange }: { line
         <input type="number" step="any" placeholder="Comp." title="Comprimento (m)" value={length} onChange={(e) => setLength(e.target.value)} className="w-16 rounded border border-gray-300 px-1.5 py-0.5" />
         <input type="number" step="any" placeholder="Larg." title="Largura (m)" value={width} onChange={(e) => setWidth(e.target.value)} className="w-16 rounded border border-gray-300 px-1.5 py-0.5" />
         <input type="number" step="any" placeholder="Alt." title="Altura (m)" value={height} onChange={(e) => setHeight(e.target.value)} className="w-16 rounded border border-gray-300 px-1.5 py-0.5" />
-        <button type="submit" className="rounded bg-brand-600 text-white px-2 py-0.5 hover:bg-brand-700">
+        <button type="submit" className="btn btn-primary btn-sm">
           Adicionar medição
         </button>
       </form>
-      <p className="text-gray-400 mt-1">Dimensões vazias contam como 1 (ex: medição só por comprimento: preencher apenas Comp.).</p>
+      <p className="text-gray-500 mt-2">Campos vazios contam como 1.</p>
     </div>
   );
 }

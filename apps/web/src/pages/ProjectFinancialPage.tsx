@@ -5,6 +5,7 @@ import { financialApi, type FinancialEntry, type FinancialSummary } from "../api
 import Layout from "../components/Layout";
 import { MetricCard, SectionHeader } from "../components/WorkspaceUI";
 import ProjectWorkspaceNav from "../components/ProjectWorkspaceNav";
+import Modal from "../components/Modal";
 import { IconBack, IconPlus, IconTrash } from "../components/icons";
 
 const CATEGORY_SUGGESTIONS_DESPESA = ["Mão-de-obra", "Materiais", "Equipamento", "Subcontratação", "Transporte", "Outros"];
@@ -26,6 +27,7 @@ export default function ProjectFinancialPage() {
   const [summary, setSummary] = useState<FinancialSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [showForm, setShowForm] = useState(false);
 
   const [type, setType] = useState<"receita" | "despesa">("despesa");
   const [category, setCategory] = useState("Materiais");
@@ -67,6 +69,7 @@ export default function ProjectFinancialPage() {
       setDescription("");
       setAmount("");
       setMarkPaidNow(false);
+      setShowForm(false);
       await reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao registar lançamento");
@@ -117,7 +120,7 @@ export default function ProjectFinancialPage() {
       <div className="space-y-5 max-w-7xl">
         <ProjectWorkspaceNav projectId={projectId!} />
         {error && <p className="text-sm text-red-600">{error}</p>}
-        <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900"><strong>Financeiro sincronizado.</strong> Ordens de compra aprovadas entram em contas a pagar; autos aprovados entram em contas a receber. Aqui só confirma o pagamento ou acrescenta movimentos excepcionais.</div>
+        <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm leading-6 text-blue-900"><strong>Sincronizado com compras e autos.</strong> Aqui confirma pagamentos e regista excepções.</div>
 
         {/* Indicadores */}
         <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
@@ -128,15 +131,14 @@ export default function ProjectFinancialPage() {
           <MetricCard label="Contas a receber" value={fmt(summary.contasAReceber, currency)} tone="info" />
           <MetricCard label="Contas a pagar" value={fmt(summary.contasAPagar, currency)} tone="warning" />
         </div>
-        <p className="text-xs text-gray-400 -mt-3">
-          A margem realizada é sempre valor recebido − custo pago. Valores pendentes vêm automaticamente dos documentos operacionais e não entram no caixa até serem liquidados.
-        </p>
+        <details className="-mt-3 rounded-lg px-1 text-xs text-slate-500"><summary className="font-semibold text-slate-600">Como é calculada a margem?</summary><p className="pt-2 leading-5">Margem realizada = valor recebido − custo pago. Pendências não entram no caixa antes da liquidação.</p></details>
 
         {/* Fluxo de caixa mensal */}
         {summary.fluxoCaixaMensal.length > 0 && (
           <section className="card">
             <SectionHeader title="Fluxo de caixa mensal" description="Receitas e despesas efectivamente pagas por mês" />
-            <div className="overflow-x-auto">
+            <div className="divide-y divide-slate-100 sm:hidden">{summary.fluxoCaixaMensal.map((m) => <div key={`mobile-${m.month}`} className="p-4"><div className="flex items-center justify-between"><strong className="text-sm text-slate-900">{m.month}</strong><strong className={`text-sm tabular-nums ${m.saldo >= 0 ? "text-green-700" : "text-red-600"}`}>{fmt(m.saldo, currency)}</strong></div><div className="mt-2 flex justify-between text-xs"><span className="text-green-700">Receitas {fmt(m.receitas, currency)}</span><span className="text-red-600">Despesas {fmt(m.despesas, currency)}</span></div></div>)}</div>
+            <div className="hidden overflow-x-auto sm:block">
               <table className="w-full text-sm min-w-[480px]">
                 <thead>
                   <tr className="table-head-row">
@@ -164,9 +166,8 @@ export default function ProjectFinancialPage() {
         )}
 
         {/* Novo lançamento */}
-        <section className="card overflow-hidden">
-          <SectionHeader title="Novo lançamento" description="Registe uma receita ou despesa desta obra" />
-          <form onSubmit={handleCreate} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6 items-end p-5">
+        <section className="card overflow-hidden"><SectionHeader title="Movimentos excepcionais" description="Use apenas para valores que não vêm de compras ou autos" actions={<button type="button" onClick={() => setShowForm(true)} className="btn btn-primary btn-sm"><IconPlus className="h-3.5 w-3.5" /> Novo lançamento</button>} /></section>
+        {showForm && <Modal title="Novo lançamento financeiro" subtitle={`Receita ou despesa · ${project.name}`} onClose={() => !saving && setShowForm(false)} maxWidth="max-w-3xl"><form onSubmit={handleCreate} className="grid gap-4 sm:grid-cols-2">
             <div>
               <label className="label">Tipo</label>
               <select value={type} onChange={(e) => setType(e.target.value as "receita" | "despesa")} className="input">
@@ -183,7 +184,7 @@ export default function ProjectFinancialPage() {
                 ))}
               </datalist>
             </div>
-            <div className="lg:col-span-2">
+            <div className="sm:col-span-2">
               <label className="label">Descrição (opcional)</label>
               <input value={description} onChange={(e) => setDescription(e.target.value)} className="input" />
             </div>
@@ -195,21 +196,21 @@ export default function ProjectFinancialPage() {
               <label className="label">Data de vencimento</label>
               <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="input" />
             </div>
-            <label className="flex items-center gap-2 text-sm text-gray-700 lg:col-span-3">
+            <label className="flex items-center gap-2 rounded-lg bg-slate-50 p-3 text-sm text-gray-700 sm:col-span-2">
               <input type="checkbox" checked={markPaidNow} onChange={(e) => setMarkPaidNow(e.target.checked)} className="w-4 h-4 rounded border-gray-300 text-brand-700" />
               Já foi {type === "receita" ? "recebido" : "pago"} (marca como pago hoje)
             </label>
-            <button type="submit" disabled={saving} className="btn btn-primary lg:col-span-3">
+            <div className="flex flex-col-reverse gap-2 border-t border-slate-200 pt-4 sm:col-span-2 sm:flex-row sm:justify-end"><button type="button" onClick={() => setShowForm(false)} className="btn btn-secondary">Cancelar</button><button type="submit" disabled={saving} className="btn btn-primary">
               <IconPlus className="w-4 h-4" />
               {saving ? "A guardar..." : "Registar"}
-            </button>
-          </form>
-        </section>
+            </button></div>
+          </form></Modal>}
 
         {/* Lista de lançamentos */}
         <section className="card">
           <SectionHeader title="Lançamentos" description={`${entries.length} movimento(s) registado(s)`} />
-          <div className="overflow-x-auto">
+          <div className="divide-y divide-slate-100 md:hidden">{entries.map((entry) => <article key={`mobile-${entry.id}`} className="p-4"><div className="flex items-start justify-between gap-3"><div><span className={`badge ${entry.type === "receita" ? "badge-green" : "badge-red"}`}>{entry.type === "receita" ? "Receita" : "Despesa"}</span><strong className="mt-2 block text-sm text-slate-900">{entry.category}</strong><p className="mt-1 text-xs text-slate-500">{entry.description ?? (entry.sourceType === "purchase_order" ? "Ordem de compra" : entry.sourceType === "measurement_certificate" ? "Auto de medição" : "Sem descrição")}</p></div><div className="text-right"><strong className="block text-sm tabular-nums">{fmt(Number(entry.amount), entry.currency)}</strong><span className={`badge mt-2 ${entry.status === "pago" ? "badge-green" : "badge-yellow"}`}>{entry.status === "pago" ? "Pago" : "Pendente"}</span></div></div><div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3"><span className="text-xs text-slate-500">Vence {entry.dueDate || "—"}</span><div className="flex gap-2">{entry.status === "pendente" && <button onClick={() => handleMarkPaid(entry)} className="btn btn-secondary btn-sm text-green-700">Marcar pago</button>}{!entry.sourceType && <button onClick={() => handleDelete(entry)} className="icon-btn-danger" title="Eliminar lançamento"><IconTrash className="h-3.5 w-3.5" /></button>}</div></div></article>)}</div>
+          <div className="hidden overflow-x-auto md:block">
             <table className="w-full text-sm min-w-[640px]">
               <thead>
                 <tr className="table-head-row">
@@ -237,11 +238,11 @@ export default function ProjectFinancialPage() {
                     </td>
                     <td className="pr-5 space-x-3">
                       {e.status === "pendente" && (
-                        <button onClick={() => handleMarkPaid(e)} className="text-green-700 text-xs font-medium hover:underline">
-                          marcar pago
+                        <button onClick={() => handleMarkPaid(e)} className="btn btn-secondary btn-sm text-green-700">
+                          Marcar pago
                         </button>
                       )}
-                      {!e.sourceType && <button onClick={() => handleDelete(e)} className="icon-btn-danger opacity-0 pointer-coarse:opacity-100 group-hover:opacity-100 transition-opacity inline-flex">
+                      {!e.sourceType && <button onClick={() => handleDelete(e)} className="icon-btn-danger inline-flex" title="Eliminar lançamento">
                         <IconTrash className="w-3.5 h-3.5" />
                       </button>}
                     </td>

@@ -1,34 +1,8 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { calculateVatTotals } from "@sigo/shared";
 import { useAuth } from "../auth/AuthContext";
-
-const WHATSAPP_NUMBER = "258866384194";
-const CONTACT_EMAIL = "licsenga.samuel@mechanical.co.mz";
-
-const plans = [
-  {
-    name: "Fundamento",
-    monthly: 4900,
-    description: "Para pequenas empresas que querem abandonar folhas dispersas e organizar a primeira operação digital.",
-    limits: "Até 3 obras activas · 5 utilizadores",
-    features: ["Orçamentos e composições", "Preços por fornecedor e zona", "Documentos e relatórios PDF", "Cálculos rápidos com custos"],
-  },
-  {
-    name: "Profissional",
-    monthly: 12900,
-    description: "Para equipas com várias frentes que precisam de ligar o planeamento, o estaleiro e o controlo financeiro.",
-    limits: "Até 15 obras activas · 20 utilizadores",
-    features: ["Tudo do Fundamento", "Cronograma Gantt e subactividades", "Diário de Obra e Autos de Medição", "Compras, armazém e financeiro", "Acompanhamento de implementação"],
-    featured: true,
-  },
-  {
-    name: "Empresa",
-    monthly: 29900,
-    description: "Para construtoras com várias equipas, governação de acessos e uma implantação acompanhada de perto.",
-    limits: "Até 50 obras activas · utilizadores ilimitados",
-    features: ["Tudo do Profissional", "Perfis e acessos avançados", "Migração inicial de dados", "Formação da equipa", "Suporte prioritário"],
-  },
-];
+import { COMMERCIAL_PLANS, SIGO_CONTACT_EMAIL, SIGO_WHATSAPP_NUMBER, formatMzn } from "../commercialPlans";
 
 const productViews = {
   orcamento: {
@@ -57,7 +31,7 @@ function whatsappHref(plan?: string) {
   const message = plan
     ? `Olá Samuel. Tenho interesse no plano ${plan} do SIGO. Gostaria de receber mais informações.`
     : "Olá Samuel. Gostaria de conhecer melhor o SIGO para a minha empresa de construção.";
-  return `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`;
+  return `https://wa.me/${SIGO_WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`;
 }
 
 function emailHref(plan?: string) {
@@ -65,7 +39,7 @@ function emailHref(plan?: string) {
   const body = plan
     ? `Olá Samuel,\n\nTenho interesse no plano ${plan} do SIGO e gostaria de receber mais informações.\n\nEmpresa:\nNome:\nTelefone:`
     : "Olá Samuel,\n\nGostaria de agendar uma apresentação do SIGO.\n\nEmpresa:\nNome:\nTelefone:";
-  return `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  return `mailto:${SIGO_CONTACT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 }
 
 function Brand({ light = false }: { light?: boolean }) {
@@ -133,7 +107,6 @@ export default function PublicLandingPage() {
   const { user } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
   const [activeProduct, setActiveProduct] = useState<ProductKey>("cronograma");
-  const [annual, setAnnual] = useState(true);
   const platformHref = user ? (user.role === "super_admin" ? "/admin" : "/painel") : "/login";
   const closeMenu = () => setMenuOpen(false);
 
@@ -151,7 +124,7 @@ export default function PublicLandingPage() {
     <main id="inicio" className="pt-[76px]">
       <section className="relative border-b border-[#142033]/10">
         <div className="mx-auto grid max-w-[1280px] items-center gap-16 px-5 py-16 sm:py-20 lg:grid-cols-[.86fr_1.14fr] lg:px-8 lg:py-24">
-          <div className="relative z-10"><p className="mb-6 inline-flex items-center gap-2 border-l-2 border-[#ed6c22] pl-3 text-xs font-black uppercase tracking-[0.14em] text-[#8f4d25]">Da estimativa à obra, tudo ligado</p><h1 className="max-w-[650px] text-[46px] font-black leading-[1.01] tracking-[-0.05em] text-[#101a2c] sm:text-6xl lg:text-[68px]">Controle a obra como ela realmente acontece.</h1><p className="mt-7 max-w-xl text-lg leading-8 text-slate-600">O SIGO liga orçamento, planeamento, compras, campo e medição. A sua equipa trabalha no mesmo fluxo e sabe o que mudou, o que falta e qual é a próxima decisão.</p><div className="mt-9 flex flex-col gap-3 sm:flex-row"><a className="rounded-lg bg-[#ed6c22] px-6 py-3.5 text-center text-sm font-black text-white shadow-[0_10px_26px_rgba(237,108,34,.2)] hover:bg-[#d85f18]" href={whatsappHref()} target="_blank" rel="noreferrer">Ver o SIGO em funcionamento</a><a className="rounded-lg border border-slate-300 bg-white px-6 py-3.5 text-center text-sm font-bold text-slate-800 hover:border-slate-400" href="#plataforma">Explorar a plataforma ↓</a></div><div className="mt-10 grid max-w-xl grid-cols-2 gap-x-6 gap-y-3 border-t border-[#142033]/10 pt-6 text-sm font-semibold text-slate-600 sm:grid-cols-3"><span>✓ MZN e USD</span><span>✓ Computador e telemóvel</span><span>✓ Implementação acompanhada</span></div></div>
+          <div className="relative z-10"><p className="mb-5 inline-flex items-center gap-2 border-l-2 border-[#ed6c22] pl-3 text-[11px] font-black uppercase tracking-[0.14em] text-[#8f4d25] sm:mb-6 sm:text-xs">Da estimativa à obra, tudo ligado</p><h1 className="max-w-[650px] text-[40px] font-black leading-[1.03] tracking-[-0.05em] text-[#101a2c] sm:text-6xl lg:text-[68px]">Controle a obra como ela realmente acontece.</h1><p className="mt-6 max-w-xl text-base leading-7 text-slate-600 sm:mt-7 sm:text-lg sm:leading-8">O SIGO liga orçamento, planeamento, compras, campo e medição. A sua equipa trabalha no mesmo fluxo e sabe o que mudou, o que falta e qual é a próxima decisão.</p><div className="mt-8 flex flex-col gap-3 sm:mt-9 sm:flex-row"><a className="rounded-lg bg-[#ed6c22] px-6 py-3.5 text-center text-sm font-black text-white shadow-[0_10px_26px_rgba(237,108,34,.2)] hover:bg-[#d85f18]" href={whatsappHref()} target="_blank" rel="noreferrer">Ver o SIGO em funcionamento</a><a className="rounded-lg border border-slate-300 bg-white px-6 py-3.5 text-center text-sm font-bold text-slate-800 hover:border-slate-400" href="#plataforma">Explorar a plataforma ↓</a></div><div className="mt-8 grid max-w-xl grid-cols-2 gap-x-6 gap-y-3 border-t border-[#142033]/10 pt-5 text-xs font-semibold text-slate-600 sm:mt-10 sm:grid-cols-3 sm:pt-6 sm:text-sm"><span>✓ MZN e USD</span><span>✓ Computador e telemóvel</span><span>✓ Implementação acompanhada</span></div></div>
           <HeroProduct />
         </div>
         <div className="mx-auto max-w-[1280px] border-t border-[#142033]/10 px-5 lg:px-8"><div className="grid py-5 text-center text-[10px] font-black uppercase tracking-[.13em] text-slate-500 sm:grid-cols-5"><span className="py-2">Orçamentar</span><span className="py-2 sm:border-l sm:border-slate-300">Planear</span><span className="py-2 sm:border-l sm:border-slate-300">Comprar</span><span className="py-2 sm:border-l sm:border-slate-300">Executar</span><span className="py-2 sm:border-l sm:border-slate-300">Medir</span></div></div>
@@ -170,7 +143,7 @@ export default function PublicLandingPage() {
           ["Construtora", "Margem e produção", "Veja custos previstos, necessidades de compra, avanço e desvios antes de afectarem a obra."],
           ["Fiscalização", "Evidência e medição", "Confirme quantidades, Diário, anexos e acumulados com um histórico claro de aprovação."],
           ["Dono da obra", "Prazo e compromisso", "Acompanhe marcos, execução financeira e decisões pendentes sem entrar no detalhe operacional."],
-        ].map(([role, outcome, copy], index) => <article key={role} className="flex min-h-[330px] flex-col rounded-2xl border border-white/10 bg-white/[.045] p-6"><span className="text-sm font-black text-orange-300">0{index + 1}</span><div className="mt-auto"><p className="text-xs font-bold uppercase tracking-[.13em] text-slate-400">{role}</p><h3 className="mt-2 text-xl font-black">{outcome}</h3><p className="mt-4 text-sm leading-6 text-slate-300">{copy}</p></div></article>)}</div></div></div></section>
+        ].map(([role, outcome, copy], index) => <article key={role} className="flex min-h-[220px] flex-col rounded-2xl border border-white/10 bg-white/[.045] p-6 md:min-h-[300px]"><span className="text-sm font-black text-orange-300">0{index + 1}</span><div className="mt-auto"><p className="text-xs font-bold uppercase tracking-[.13em] text-slate-400">{role}</p><h3 className="mt-2 text-xl font-black">{outcome}</h3><p className="mt-4 text-sm leading-6 text-slate-300">{copy}</p></div></article>)}</div></div></div></section>
 
       <section className="bg-[#eef1f4] py-20 lg:py-28"><div className="mx-auto max-w-[1280px] px-5 lg:px-8"><div className="grid gap-12 lg:grid-cols-[.72fr_1.28fr]"><div><p className="text-xs font-black uppercase tracking-[0.16em] text-[#d85f18]">A cadeia de decisão</p><h2 className="mt-4 text-4xl font-black tracking-[-0.04em]">Sem atalhos invisíveis.</h2><p className="mt-5 leading-7 text-slate-600">O SIGO mostra o que falta antes de avançar e conserva a origem de cada valor.</p></div><ol className="relative border-l border-slate-300 pl-8">{[
           ["Preço de origem", "Cotações, fornecedor e zona definem o custo do material."],
@@ -180,8 +153,8 @@ export default function PublicLandingPage() {
           ["Diário e Autos", "O campo confirma o executado e actualiza o controlo."],
         ].map(([title, copy], index) => <li key={title} className="relative pb-8 last:pb-0"><span className="absolute -left-[43px] grid h-7 w-7 place-items-center rounded-full border-4 border-[#eef1f4] bg-[#142033] text-[9px] font-black text-white">{index + 1}</span><h3 className="font-black">{title}</h3><p className="mt-1 text-sm leading-6 text-slate-600">{copy}</p></li>)}</ol></div></div></section>
 
-      <section id="planos" className="scroll-mt-24 bg-[#f6f1e8] py-20 lg:py-28"><div className="mx-auto max-w-[1280px] px-5 lg:px-8"><div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between"><div><p className="text-xs font-black uppercase tracking-[0.16em] text-[#d85f18]">Planos SIGO</p><h2 className="mt-4 max-w-2xl text-4xl font-black tracking-[-0.04em] sm:text-5xl">Comece com o controlo que a sua equipa precisa.</h2></div><div className="inline-flex w-fit rounded-xl border border-slate-300 bg-white p-1" aria-label="Periodicidade"><button type="button" aria-pressed={!annual} onClick={() => setAnnual(false)} className={`rounded-lg px-4 py-2 text-xs font-bold ${!annual ? "bg-[#142033] text-white" : "text-slate-600"}`}>Mensal</button><button type="button" aria-pressed={annual} onClick={() => setAnnual(true)} className={`rounded-lg px-4 py-2 text-xs font-bold ${annual ? "bg-[#142033] text-white" : "text-slate-600"}`}>Anual <span className={annual ? "text-orange-300" : "text-[#d85f18]"}>−15%</span></button></div></div>
-        <div className="mt-14 grid items-stretch gap-5 lg:grid-cols-3">{plans.map((plan) => { const annualTotal = Math.round(plan.monthly * 12 * .85); const savings = plan.monthly * 12 - annualTotal; const price = annual ? annualTotal : plan.monthly; return <article key={plan.name} className={`relative flex flex-col rounded-2xl border p-7 ${plan.featured ? "border-[#ed6c22] bg-white shadow-[0_24px_60px_rgba(20,32,51,.12)] lg:-translate-y-3" : "border-slate-200 bg-white/75"}`}>{plan.featured && <span className="absolute right-5 top-0 -translate-y-1/2 rounded-full bg-[#ed6c22] px-3 py-1 text-[10px] font-black uppercase tracking-wider text-white">Recomendado</span>}<p className="text-sm font-black uppercase tracking-[0.1em] text-slate-500">{plan.name}</p><div className="mt-5 flex flex-wrap items-end gap-x-2"><strong className="text-4xl font-black tracking-[-0.04em]">{price.toLocaleString("pt-PT")}</strong><span className="pb-1 text-sm font-semibold text-slate-500">MZN / {annual ? "ano" : "mês"}</span></div><p className="mt-2 min-h-5 text-xs font-semibold text-[#a84a16]">{annual ? `15% de desconto · poupa ${savings.toLocaleString("pt-PT")} MZN por ano` : "facturação mensal"}</p><p className="mt-5 min-h-[92px] text-sm leading-6 text-slate-600">{plan.description}</p><p className="mt-3 border-y border-slate-100 py-3 text-xs font-bold">{plan.limits}</p><ul className="my-6 flex-1 space-y-3">{plan.features.map((feature) => <li key={feature} className="flex gap-3 text-sm text-slate-700"><span className="font-black text-[#ed6c22]">✓</span><span>{feature}</span></li>)}</ul><a className={`rounded-lg px-4 py-3 text-center text-sm font-black ${plan.featured ? "bg-[#ed6c22] text-white hover:bg-[#d85f18]" : "bg-[#142033] text-white hover:bg-[#24324a]"}`} href={whatsappHref(plan.name)} target="_blank" rel="noreferrer">Falar sobre o {plan.name}</a><a className="mt-2 rounded-lg px-4 py-2.5 text-center text-xs font-bold text-slate-500 hover:bg-slate-50 hover:text-slate-900" href={emailHref(plan.name)}>Receber detalhes por email</a></article>; })}</div><p className="mt-7 text-center text-xs leading-5 text-slate-500">Valores de referência em Meticais. O valor anual já inclui 15% de desconto. Integrações e desenvolvimento à medida são orçamentados depois do diagnóstico da empresa.</p>
+      <section id="planos" className="scroll-mt-24 bg-[#f6f1e8] py-20 lg:py-28"><div className="mx-auto max-w-[1280px] px-5 lg:px-8"><div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between"><div><p className="text-xs font-black uppercase tracking-[0.16em] text-[#d85f18]">Subscrição anual</p><h2 className="mt-4 max-w-2xl text-4xl font-black tracking-[-0.04em] sm:text-5xl">Escolha a capacidade certa para a sua operação.</h2></div><div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-800">15% de desconto já aplicado</div></div>
+        <div className="mt-14 grid items-stretch gap-5 lg:grid-cols-3">{COMMERCIAL_PLANS.map((plan) => { const savings = plan.regularAnnualPrice - plan.annualPrice; const totals = calculateVatTotals(plan.annualPrice); return <article key={plan.slug} className={`relative flex min-w-0 flex-col rounded-2xl border p-6 sm:p-7 ${plan.featured ? "border-[#ed6c22] bg-white shadow-[0_24px_60px_rgba(20,32,51,.12)] lg:-translate-y-3" : "border-slate-200 bg-white/75"}`}>{plan.featured && <span className="absolute right-5 top-0 -translate-y-1/2 rounded-full bg-[#ed6c22] px-3 py-1 text-[10px] font-black uppercase tracking-wider text-white">Recomendado</span>}<p className="text-sm font-black uppercase tracking-[0.1em] text-slate-500">{plan.name}</p><p className="mt-2 text-xs font-semibold text-[#a84a16]">{plan.audience}</p><div className="mt-5"><strong className="block break-words text-4xl font-black tracking-[-0.04em]">{totals.total.toLocaleString("pt-MZ")}</strong><span className="mt-1 block text-sm font-semibold text-slate-500">MZN por ano · IVA incluído</span></div><p className="mt-2 text-xs text-slate-500">Base {formatMzn(totals.subtotal)} + IVA 16% · poupa {formatMzn(savings)} na base anual</p><p className="mt-5 text-sm leading-6 text-slate-600">{plan.description}</p><p className="mt-4 border-y border-slate-100 py-3 text-xs font-bold">{plan.limits}</p><ul className="my-6 flex-1 space-y-3">{plan.features.map((feature) => <li key={feature} className="flex gap-3 text-sm text-slate-700"><span className="font-black text-[#ed6c22]">✓</span><span>{feature}</span></li>)}</ul><Link className={`rounded-lg px-4 py-3 text-center text-sm font-black ${plan.featured ? "bg-[#ed6c22] text-white hover:bg-[#d85f18]" : "bg-[#142033] text-white hover:bg-[#24324a]"}`} to={`/checkout/${plan.slug}`}>Escolher {plan.name} →</Link><a className="mt-2 rounded-lg px-4 py-2.5 text-center text-xs font-bold text-slate-500 hover:bg-slate-50 hover:text-slate-900" href={emailHref(plan.name)}>Tirar uma dúvida</a></article>; })}</div><p className="mt-7 text-center text-xs leading-5 text-slate-500">Valores anuais em Meticais, com desconto e IVA discriminados. O checkout confirma o pedido; a activação é acompanhada pela equipa SIGO.</p>
       </div></section>
 
       <section id="perguntas" className="scroll-mt-24 bg-white py-20 lg:py-28"><div className="mx-auto grid max-w-[1080px] gap-10 px-5 lg:grid-cols-[.7fr_1.3fr] lg:px-8"><div><p className="text-xs font-black uppercase tracking-[0.16em] text-[#d85f18]">Antes de decidir</p><h2 className="mt-4 text-4xl font-black tracking-[-0.04em]">Perguntas honestas, respostas directas.</h2></div><div className="divide-y divide-slate-200 border-y border-slate-200">{[
@@ -191,7 +164,7 @@ export default function PublicLandingPage() {
           ["Como escolho o plano?", "Na demonstração avaliamos número de obras, tamanho da equipa e fluxo actual. A recomendação parte da sua operação, não apenas do número de utilizadores."],
         ].map(([question, answer]) => <details key={question} className="group py-5"><summary className="flex cursor-pointer list-none items-center justify-between gap-5 font-black"><span>{question}</span><span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-slate-100 text-lg font-normal group-open:rotate-45">+</span></summary><p className="max-w-2xl pt-4 text-sm leading-7 text-slate-600">{answer}</p></details>)}</div></div></section>
 
-      <section id="contacto" className="bg-white pb-20 lg:pb-28"><div className="mx-auto max-w-[1280px] px-5 lg:px-8"><div className="overflow-hidden rounded-[28px] bg-[#ed6c22] px-7 py-12 text-white md:px-12 lg:flex lg:items-center lg:justify-between lg:px-16 lg:py-16"><div><p className="text-xs font-black uppercase tracking-[0.16em] text-orange-100">Uma conversa, uma obra real</p><h2 className="mt-3 max-w-2xl text-4xl font-black leading-tight tracking-[-0.04em]">Mostre-nos como gere a obra hoje.</h2><p className="mt-4 max-w-xl leading-7 text-orange-50">Usamos o seu fluxo para mostrar onde o SIGO reduz repetição, falhas e decisões tardias.</p></div><div className="mt-9 flex min-w-fit flex-col gap-3 lg:mt-0"><a className="rounded-lg bg-white px-6 py-3.5 text-center text-sm font-black text-[#b8470a]" href={whatsappHref()} target="_blank" rel="noreferrer">WhatsApp · +258 86 638 4194</a><a className="rounded-lg border border-white/40 px-6 py-3.5 text-center text-sm font-bold text-white hover:bg-white/10" href={emailHref()}>{CONTACT_EMAIL}</a></div></div></div></section>
+      <section id="contacto" className="bg-white pb-20 lg:pb-28"><div className="mx-auto max-w-[1280px] px-5 lg:px-8"><div className="overflow-hidden rounded-[28px] bg-[#ed6c22] px-7 py-12 text-white md:px-12 lg:flex lg:items-center lg:justify-between lg:px-16 lg:py-16"><div><p className="text-xs font-black uppercase tracking-[0.16em] text-orange-100">Uma conversa, uma obra real</p><h2 className="mt-3 max-w-2xl text-4xl font-black leading-tight tracking-[-0.04em]">Mostre-nos como gere a obra hoje.</h2><p className="mt-4 max-w-xl leading-7 text-orange-50">Usamos o seu fluxo para mostrar onde o SIGO reduz repetição, falhas e decisões tardias.</p></div><div className="mt-9 flex min-w-fit flex-col gap-3 lg:mt-0"><a className="rounded-lg bg-white px-6 py-3.5 text-center text-sm font-black text-[#b8470a]" href={whatsappHref()} target="_blank" rel="noreferrer">WhatsApp · +258 86 638 4194</a><a className="rounded-lg border border-white/40 px-6 py-3.5 text-center text-sm font-bold text-white hover:bg-white/10" href={emailHref()}>{SIGO_CONTACT_EMAIL}</a></div></div></div></section>
     </main>
 
     <footer className="border-t border-slate-800 bg-[#101827] py-10 text-white"><div className="mx-auto flex max-w-[1280px] flex-col gap-8 px-5 sm:flex-row sm:items-end sm:justify-between lg:px-8"><div><Brand light /><p className="mt-5 max-w-sm text-sm leading-6 text-slate-400">Custos, prazo e execução no mesmo sistema de gestão de obras.</p></div><div className="text-sm text-slate-400 sm:text-right"><p>Moçambique · MZN e USD</p><p className="mt-2">© 2026 SIGO. Todos os direitos reservados.</p></div></div></footer>

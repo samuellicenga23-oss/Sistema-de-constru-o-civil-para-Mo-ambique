@@ -16,9 +16,9 @@ export default function Modal({
 }) {
   return (
     <ModalPortal>
-      <div className="fixed inset-0 z-50 bg-gray-900/50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/50 p-2 sm:p-4" onClick={onClose}>
       <div
-        className={`card card-pad w-full ${maxWidth} max-h-[85vh] overflow-y-auto`}
+        className={`card w-full ${maxWidth} max-h-[94dvh] overflow-x-hidden overflow-y-auto overscroll-contain p-4 sm:p-6`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between mb-4 gap-3">
@@ -26,7 +26,7 @@ export default function Modal({
             <h2 className="text-lg font-bold text-gray-900">{title}</h2>
             {subtitle && <p className="text-xs text-gray-500 mt-0.5">{subtitle}</p>}
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none shrink-0" title="Fechar">
+          <button onClick={onClose} className="icon-btn shrink-0" title="Fechar" aria-label="Fechar janela">
             ✕
           </button>
         </div>

@@ -475,3 +475,85 @@ publicação.
   reiniciado sob supervisão do systemd, API recarregada e saúde interna/HTTPS confirmada. O anexo
   usado na validação não existia na base de produção com o nome exacto, pelo que não foi associado
   automaticamente a uma obra potencialmente errada.
+
+## 2026-07-29 — Codex — Operações em modal, IVA 16% e mão de obra por fase
+
+- **Branch:** `codex/siga-visual-refresh`.
+- **Cronograma:** editar actividades e subactividades abre agora uma janela modal; em ecrãs pequenos
+  o Gantt dá lugar a cartões operacionais legíveis, preservando edição, datas, duração e progresso.
+- **Compras e stock:** preparação de ordens de compra e registo de movimentos foram transferidos para
+  modais responsivos. Necessidades, linhas das ordens, movimentos e respectivos totais passam a ter
+  vistas próprias para telemóvel, sem colunas cortadas.
+- **IVA:** o padrão legal do sistema foi actualizado de 17% para 16% em projectos, orçamentos, autos e
+  ordens de compra. Resumos exibem subtotal, IVA e total com IVA; compromissos financeiros pendentes
+  são recalculados pela migração `0027_moaning_mandrill.sql`.
+- **Integridade dos preços:** materiais e preços por zona marcados como “IVA incluído” são normalizados para
+  valor líquido antes de alimentarem composições, evitando a cobrança duplicada do imposto no total
+  do orçamento.
+- **Mão de obra por fase:** cada auto de medição ganhou um relatório que transforma as composições dos
+  itens em horas e custo planeado, do período e acumulado, agrupados por fase. Itens sem composição são
+  identificados explicitamente, sem inventar produtividades.
+- **Compras automáticas:** o plano de aprovisionamento passa a devolver estimativa líquida, IVA e total
+  com IVA, e a ordem guarda a taxa da obra como snapshot para auditoria posterior.
+- **Responsividade global:** cabeçalhos, barras de acções, área de conteúdo e janelas modais foram
+  ajustados para quebra de texto, scroll controlado e largura útil em telemóveis.
+- **Validação:** compilação TypeScript de shared, API e frontend aprovada; `git diff --check` aprovado;
+  cálculo directo validado com 100 000 MZN + 16% = 116 000 MZN e normalização inversa de preço bruto.
+  O arranque visual local ficou impedido pela restrição de acesso do ambiente ao `vite.config.ts`; a
+  suíte integral também permanece condicionada pelo erro de sandbox `os.userInfo/ENOMEM` já registado.
+- **Produção:** ainda não publicada; não executar a migração `0027` isoladamente da versão da API e do
+  frontend desta entrada.
+
+## 2026-07-29 — Codex — Varredura geral de UI/UX e checkout anual
+
+- **Critério de design:** a interface foi revista com referências de produtos B2B actuais e sistemas
+  de gestão: hierarquia curta, alvos de clique inequívocos, acções persistentes, tabelas que passam a
+  cartões no telemóvel e informação secundária sob expansão voluntária.
+- **Sistema visual:** botões, ícones, foco de teclado, links de acção, cartões clicáveis, estados hover,
+  cabeçalhos, separadores e janelas modais passam a partilhar contraste, dimensão e comportamento.
+  Acções destrutivas deixaram de depender do rato sobre a linha para ficarem visíveis.
+- **Responsividade:** menu, cabeçalhos, barras de acções, orçamento, catálogo, compras, stock, financeiro,
+  diário, cálculos rápidos e cronograma foram ajustados para quebra de texto e vistas móveis próprias,
+  evitando colunas esmagadas e conteúdo fora do ecrã.
+- **Menos ruído:** formulários extensos de catálogo, fornecedor, diário, compras, stock e financeiro
+  foram movidos para modais; instruções longas passaram a resumos curtos ou blocos expansíveis.
+- **Catálogo e navegação:** composições, materiais, mão-de-obra e zonas ganharam cartões móveis com
+  acções explícitas. O menu do projecto e os separadores da empresa/cálculos têm estado activo visível.
+- **Planos:** removida a alternância mensal. Fundamento, Profissional e Empresa são apresentados apenas
+  como subscrições anuais, com desconto, base tributável, IVA de 16% e total anual transparentes.
+- **Checkout:** criada a rota pública `/checkout/:planSlug`, com identificação da empresa, responsável,
+  dimensão da equipa, resumo fiscal e revisão antes de enviar o pedido por WhatsApp ou email. A página
+  esclarece que não cobra silenciosamente: a equipa valida o enquadramento e formaliza a subscrição.
+- **Continuidade:** toda esta entrada permanece na branch `codex/siga-visual-refresh` juntamente com a
+  migração `0027` e as melhorias operacionais anteriores; Claude deve tratar o conjunto como uma única
+  versão ainda não publicada.
+- **Validação:** TypeScript de shared, API e frontend aprovado; build Vite/PWA de produção aprovado
+  (117 módulos); `git diff --check` aprovado. Landing e checkout foram inspeccionados a 390 px e
+  1265 px, sem overflow horizontal; a navegação para o checkout começa no topo da página.
+- **Produção:** ainda não publicada nesta entrada.
+
+## 2026-07-29 — Codex — Leitura visual de etiquetas CAD e caso Projecto Gil
+
+- **Caso real:** `Projecto Completo Gil.pdf` devolvia 48 compartimentos e `914,70 m²`, incluindo
+  13 registos em “Piso não identificado”. As páginas de imagem satélite e implantação conservam
+  objectos CAD invisíveis; a folha do anexo contém planta geral e cotada lado a lado; e algumas
+  etiquetas de outros desenhos permanecem por baixo de máscaras brancas.
+- **Conteúdo da prancha:** o leitor passa a excluir explicitamente imagem satélite/ortofoto e aceita
+  a grafia real `PLANTA DE IMPLATAÇÃO`, sem deixar o título genérico do carimbo “Planta de Piso”
+  sobrepor-se ao conteúdo declarado.
+- **Validação visual:** cada etiqueta de área e o respectivo nome têm agora de possuir tinta visível
+  na renderização da página. Texto extraível mas coberto por máscara, recorte ou fundo branco deixa
+  de alimentar medições.
+- **Duas vistas na mesma folha:** quando legendas visíveis identificam `PLANTA DE PISO` e
+  `PLANTA COTADA`, os compartimentos são associados geometricamente às vistas e só a cotada é usada.
+  Compartimentos legítimos iguais dentro da mesma planta continuam preservados.
+- **Normalização:** gralhas comuns do desenho (`Garragem`, `Q.BANHIO`) são apresentadas como
+  `Garagem` e `Q. Banho`, melhorando também a deduplicação entre pranchas.
+- **Resultado Gil:** 23 compartimentos, `380,80 m²`, sem piso desconhecido: Piso Térreo 8 / `163,68 m²`,
+  Piso Superior 11 / `180,22 m²` e Anexo 4 / `36,90 m²`. A separação Arquitectura páginas `1–26`
+  e Estrutura `27–91` permaneceu correcta.
+- **Validação:** 13 testes Python aprovados, incluindo máscara branca, implantação com erro de grafia,
+  imagem satélite e duas vistas na mesma prancha; o PDF real foi renderizado e confrontado nas
+  páginas 12–15 e 23. Tempo de análise local do documento completo: aproximadamente `1,3 s`.
+- **Produção:** ainda não publicada; para corrigir uma planta Gil já armazenada será necessário
+  publicar/reiniciar o `plant-service` e executar `plant:reprocess` no ficheiro existente.

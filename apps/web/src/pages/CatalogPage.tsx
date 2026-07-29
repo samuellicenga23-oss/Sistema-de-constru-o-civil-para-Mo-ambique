@@ -7,6 +7,7 @@ import MaterialPackageEditor from "../components/MaterialPackageEditor";
 import MaterialPricingModal from "../components/MaterialPricingModal";
 import { LabourEditor, MaterialEditor, ZoneEditor } from "../components/CatalogEditors";
 import Layout from "../components/Layout";
+import Modal from "../components/Modal";
 import { IconPlus, IconTrash } from "../components/icons";
 
 function money(value: string | number) {
@@ -40,6 +41,7 @@ export default function CatalogPage() {
   const [newCompositionName, setNewCompositionName] = useState("");
   const [newCompositionCategory, setNewCompositionCategory] = useState("");
   const [newCompositionUnit, setNewCompositionUnit] = useState("m3");
+  const [showCompositionForm, setShowCompositionForm] = useState(false);
   const [labourEditor, setLabourEditor] = useState<{ item: LabourCategory | null } | null>(null);
   const [materialEditor, setMaterialEditor] = useState<{ item: Material | null } | null>(null);
   const [zoneEditor, setZoneEditor] = useState<{ item: PriceZone | null } | null>(null);
@@ -233,9 +235,9 @@ export default function CatalogPage() {
           <div className="grid lg:grid-cols-[1.4fr_1fr]">
             <div className="p-5 lg:p-6 border-b lg:border-b-0 lg:border-r border-slate-200">
               <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-brand-700">Base técnica do orçamento</p>
-              <h2 className="mt-1 text-xl font-bold text-slate-950">Custos rastreáveis, não apenas preços digitados</h2>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">Cada preço deve explicar o que é, onde se aplica, quando foi recolhido e como entra na composição. O SIGO preserva o preço nos documentos já criados e só recalcula novos itens ou actualizações confirmadas.</p>
-              <div className="mt-4 flex flex-wrap gap-2 text-xs"><span className="badge badge-gray">Custo directo</span><span className="badge badge-gray">Perdas</span><span className="badge badge-gray">Encargos</span><span className="badge badge-gray">Localização</span><span className="badge badge-gray">Indirectos e margem</span></div>
+              <h2 className="mt-1 text-xl font-bold text-slate-950">A origem de cada custo, num só lugar</h2>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">Composições, recursos e zonas alimentam os orçamentos sem alterar documentos já aprovados.</p>
+              <div className="mt-4 flex flex-wrap gap-2 text-xs"><span className="badge badge-gray">Recursos</span><span className="badge badge-gray">Zonas</span><span className="badge badge-gray">Fontes</span><span className="badge badge-gray">Margem</span></div>
             </div>
             <div className="grid grid-cols-2 bg-slate-50/70">
               {[
@@ -294,11 +296,7 @@ export default function CatalogPage() {
         {tab === "composicoes" && (
           <section className="card overflow-hidden">
             <div className="px-5 py-4 border-b border-slate-200 space-y-3 bg-slate-50/60">
-              <p className="text-xs text-gray-500 max-w-lg">
-                Preço unitário = mão-de-obra + materiais + máquinas por unidade de trabalho. Clique numa composição para
-                abrir o editor completo. Qualquer preço pode ser ajustado directamente — a sua empresa fica sempre com a
-                sua própria versão, sem afectar as outras empresas.
-              </p>
+              <p className="text-xs leading-5 text-gray-500 max-w-lg">Abra uma composição para rever recursos, rendimentos e preço unitário.</p>
               <div className="flex flex-wrap items-end gap-3 justify-between border-t border-slate-200 pt-3">
                 <input
                   type="search"
@@ -307,42 +305,46 @@ export default function CatalogPage() {
                   onChange={(e) => setCompositionQuery(e.target.value)}
                   className="input max-w-xs"
                 />
-                <form onSubmit={handleCreateComposition} className="flex gap-2 items-end flex-wrap">
+                <button type="button" onClick={() => setShowCompositionForm(true)} className="btn btn-primary btn-sm"><IconPlus className="h-3.5 w-3.5" /> Nova composição</button>
+                {showCompositionForm && <Modal title="Nova composição" subtitle="Crie a ficha base e adicione os recursos no passo seguinte" onClose={() => setShowCompositionForm(false)}><form onSubmit={handleCreateComposition} className="space-y-4">
+                  <div><label className="label">Nome do serviço</label>
                   <input
                     required
                     placeholder="ex: Betão ciclópico"
                     value={newCompositionName}
                     onChange={(e) => setNewCompositionName(e.target.value)}
-                    className="input input-sm w-44"
-                  />
+                    className="input"
+                  /></div>
+                  <div><label className="label">Categoria</label>
                   <input
                     list="composition-categories"
                     placeholder="categoria"
                     value={newCompositionCategory}
                     onChange={(e) => setNewCompositionCategory(e.target.value)}
-                    className="input input-sm w-36"
-                  />
+                    className="input"
+                  /></div>
                   <datalist id="composition-categories">
                     {categories.map((c) => (
                       <option key={c} value={c} />
                     ))}
                   </datalist>
-                  <select value={newCompositionUnit} onChange={(e) => setNewCompositionUnit(e.target.value)} className="input input-sm w-auto">
+                  <div><label className="label">Unidade de saída</label><select value={newCompositionUnit} onChange={(e) => setNewCompositionUnit(e.target.value)} className="input">
                     {["m3", "m2", "m", "ml", "kg", "un", "vg", "h"].map((u) => (
                       <option key={u} value={u}>
                         {u}
                       </option>
                     ))}
-                  </select>
-                  <button type="submit" className="btn btn-primary btn-sm">
+                  </select></div>
+                  <div className="flex flex-col-reverse gap-2 border-t border-slate-200 pt-4 sm:flex-row sm:justify-end"><button type="button" onClick={() => setShowCompositionForm(false)} className="btn btn-secondary">Cancelar</button><button type="submit" className="btn btn-primary">
                     <IconPlus className="w-3.5 h-3.5" />
                     Criar
-                  </button>
-                </form>
+                  </button></div>
+                </form></Modal>}
               </div>
             </div>
 
-            <div className="overflow-x-auto">
+            <div className="divide-y divide-slate-100 md:hidden">{filteredCompositions.map((c) => <button key={`mobile-${c.id}`} type="button" onClick={() => navigate(`/catalogo/composicoes/${c.id}`)} className="group block w-full px-4 py-4 text-left hover:bg-blue-50/60"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><span className="font-mono text-[10px] font-semibold text-slate-400">{c.code || "SEM CÓD."}</span><strong className="mt-1 block text-sm text-slate-900 group-hover:text-brand-700">{c.name}</strong><p className="mt-1 text-xs text-slate-500">{c.category} · {c.outputUnit} · revisão {c.version}</p></div><span className={`badge shrink-0 ${c.isReady ? "badge-green" : "badge-yellow"}`}>{c.qualityScore}%</span></div><div className="mt-3 flex items-end justify-between gap-3 border-t border-slate-100 pt-3"><span className="click-hint">Abrir composição →</span><span className="text-right"><strong className="block text-sm tabular-nums">{money(c.unitCost)} {c.currency}</strong><small className="text-[10px] text-slate-500">por {c.outputUnit}</small></span></div></button>)}</div>
+            <div className="hidden overflow-x-auto md:block">
               <table className="w-full text-sm min-w-[860px]">
                 <thead>
                   <tr className="table-head-row">
@@ -376,7 +378,7 @@ export default function CatalogPage() {
                           <td className="text-right tabular-nums text-gray-600">{money(c.equipmentCost)}</td>
                           <td className="text-center"><span title={c.qualityWarnings.join("\n")} className={`badge ${c.isReady ? "badge-green" : "badge-yellow"}`}>{c.qualityScore}% · {c.isReady ? "pronta" : "rever"}</span></td>
                           <td className="text-right tabular-nums font-semibold text-gray-900 pr-5">
-                            {money(c.unitCost)} <span className="text-xs text-gray-400">{c.currency}</span>
+                            {money(c.unitCost)} <span className="text-xs text-gray-400">{c.currency}</span><span className="ml-2 text-brand-700" aria-hidden="true">→</span>
                           </td>
                         </tr>
                       ))}
@@ -398,7 +400,7 @@ export default function CatalogPage() {
         {tab === "mao-de-obra" && (
           <section className="card">
             <div className="px-5 pt-4 pb-3 border-b border-gray-100 space-y-3">
-              <p className="text-xs text-gray-500 max-w-2xl">O custo/hora carregado considera horas produtivas, encargos sociais e custos complementares. A fonte e a data de vigência permitem auditar cada valor e rever apenas o que ficou desactualizado.</p>
+              <p className="text-xs leading-5 text-gray-500 max-w-2xl">Custo por hora, encargos e fonte de cada categoria profissional.</p>
               <div className="flex flex-wrap items-end gap-3 justify-between">
                 <input
                   type="search"
@@ -410,7 +412,8 @@ export default function CatalogPage() {
                 <button type="button" onClick={() => setLabourEditor({ item: null })} className="btn btn-primary btn-sm"><IconPlus className="w-3.5 h-3.5" /> Nova categoria</button>
               </div>
             </div>
-            <div className="overflow-x-auto"><table className="w-full text-sm min-w-[900px]">
+            <div className="divide-y divide-slate-100 md:hidden">{filteredLabour.map((lc) => <article key={`mobile-${lc.id}`} className="p-4"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><span className="font-mono text-[10px] text-slate-400">{lc.code || "SEM CÓD."}</span><strong className="mt-1 block text-sm text-slate-900">{lc.name}</strong><p className="mt-1 text-xs text-slate-500">{lc.sourceName || "Fonte por definir"}</p></div><span className="text-right"><strong className="block text-sm tabular-nums">{money(lc.hourlyRate)} {lc.currency}/h</strong><small className="text-[10px] text-slate-500">encargos {money(Number(lc.socialChargesPct) + Number(lc.complementaryCostsPct))}%</small></span></div><div className="mt-3 flex gap-2 border-t border-slate-100 pt-3"><button onClick={() => setLabourEditor({ item: lc })} className="btn btn-secondary btn-sm flex-1">Editar ficha</button>{isOwn(lc.companyId) && <button onClick={() => handleDeleteLabour(lc.id, lc.name)} className="btn btn-sm border-red-200 bg-white text-red-600">Remover</button>}</div></article>)}</div>
+            <div className="hidden overflow-x-auto md:block"><table className="w-full text-sm min-w-[900px]">
               <thead>
                 <tr className="table-head-row">
                   <th className="py-2.5 px-5 font-medium">Código e categoria</th>
@@ -436,7 +439,7 @@ export default function CatalogPage() {
                     <td className="text-right tabular-nums text-gray-600">{money(lc.hourlyRate)} /h</td>
                     <td><p className="text-xs text-slate-700">{lc.sourceName || "Fonte por definir"}</p><p className="text-[11px] text-slate-400">{lc.effectiveDate ? `desde ${new Date(lc.effectiveDate).toLocaleDateString("pt-MZ")}` : "sem data de vigência"}</p></td>
                     <td className="text-right pr-5">
-                      <button onClick={() => setLabourEditor({ item: lc })} className="btn btn-ghost btn-sm">ficha</button>
+                      <button onClick={() => setLabourEditor({ item: lc })} className="btn btn-secondary btn-sm">Editar</button>
                       {isOwn(lc.companyId) && (
                         <button onClick={() => handleDeleteLabour(lc.id, lc.name)} className="btn btn-ghost btn-sm text-red-600 hover:bg-red-50">
                           remover
@@ -460,10 +463,11 @@ export default function CatalogPage() {
         {tab === "materiais" && (
           <section className="card">
             <div className="px-5 pt-4 pb-3 border-b border-gray-100 space-y-3">
-              <p className="text-xs text-gray-500 max-w-3xl">O material é definido por código, especificação, unidade, origem e data do preço. A perda padrão entra como sugestão nas composições; a unidade de compra converte o consumo medido em sacos, camiões ou embalagens para compras e stock.</p>
+              <p className="text-xs leading-5 text-gray-500 max-w-3xl">Preço, especificação, perda e unidade de compra de cada material.</p>
               <div className="flex flex-wrap items-center justify-between gap-3"><input type="search" placeholder="Pesquisar por código, material ou categoria..." value={materialQuery} onChange={(e) => setMaterialQuery(e.target.value)} className="input max-w-sm" /><button type="button" onClick={() => setMaterialEditor({ item: null })} className="btn btn-primary btn-sm"><IconPlus className="w-3.5 h-3.5" /> Novo material</button></div>
             </div>
-            <div className="overflow-x-auto">
+            <div className="divide-y divide-slate-100 md:hidden">{filteredMaterials.map((m) => <article key={`mobile-${m.id}`} className="p-4"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><span className="font-mono text-[10px] text-slate-400">{m.code || "SEM CÓD."}</span><strong className="mt-1 block text-sm text-slate-900">{m.name}</strong><p className="mt-1 text-xs text-slate-500">{m.category} · {m.unit}</p></div><span className="text-right"><strong className="block text-sm tabular-nums">{money(m.effectiveUnitCost)} {m.currency}</strong><small className="text-[10px] text-slate-500">{m.priceBasis === "zone_specific" ? "preço da zona" : "preço base"}</small></span></div>{m.marketPrice && <div className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-900"><span>Melhor cotação · {m.marketSupplierName}</span><strong className="float-right tabular-nums">{money(m.marketPrice)} {m.marketCurrency}</strong></div>}<div className="mt-3 grid grid-cols-2 gap-2 border-t border-slate-100 pt-3"><button onClick={() => setMaterialEditor({ item: m })} className="btn btn-secondary btn-sm">Editar ficha</button><button onClick={() => setPricingModalMaterial(m)} className="btn btn-secondary btn-sm">Preços e fornecedores</button>{m.marketPrice && <button type="button" onClick={() => handleSaveMaterialPrice(m.id, Number(m.marketPrice))} className="btn btn-primary btn-sm col-span-2">Adoptar melhor cotação</button>}</div></article>)}</div>
+            <div className="hidden overflow-x-auto md:block">
               <table className="w-full text-sm min-w-[1180px]">
                 <thead>
                   <tr className="table-head-row">
@@ -512,13 +516,13 @@ export default function CatalogPage() {
                         )}
                       </td>
                       <td className="text-right pr-5">
-                        <button onClick={() => setMaterialEditor({ item: m })} className="btn btn-ghost btn-sm">ficha</button><button onClick={() => setPricingModalMaterial(m)} className="btn btn-ghost btn-sm">zonas e fornecedores</button>
+                        <button onClick={() => setMaterialEditor({ item: m })} className="btn btn-secondary btn-sm">Editar</button><button onClick={() => setPricingModalMaterial(m)} className="btn btn-secondary btn-sm">Preços</button>
                       </td>
                     </tr>
                   ))}
                   {filteredMaterials.length === 0 && (
                     <tr>
-                      <td colSpan={7} className="py-6 text-center text-gray-400">
+                      <td colSpan={8} className="py-6 text-center text-gray-400">
                         Nenhum material corresponde à pesquisa.
                       </td>
                     </tr>
@@ -540,10 +544,11 @@ export default function CatalogPage() {
         {tab === "zonas" && (
           <section className="card">
             <div className="px-5 pt-4 pb-3 border-b border-gray-100 space-y-3">
-              <p className="text-xs text-gray-500 max-w-3xl">A zona representa o contexto real da obra: província, distrito, mercado local, transporte, mão-de-obra e equipamento. Um preço específico por zona prevalece; onde não existir, o SIGO aplica os factores documentados abaixo ao preço base.</p>
+              <p className="text-xs leading-5 text-gray-500 max-w-3xl">Ajuste materiais, transporte, mão-de-obra e equipamento ao contexto local da obra.</p>
               <button type="button" onClick={() => setZoneEditor({ item: null })} className="btn btn-primary btn-sm"><IconPlus className="w-3.5 h-3.5" /> Nova zona</button>
             </div>
-            <div className="overflow-x-auto"><table className="w-full text-sm min-w-[900px]">
+            <div className="divide-y divide-slate-100 md:hidden">{zones.map((z) => <article key={`mobile-${z.id}`} className="p-4"><div className="flex items-start justify-between gap-3"><div><strong className="text-sm text-slate-900">{z.name}</strong><p className="mt-1 text-xs text-slate-500">{[z.district, z.province].filter(Boolean).join(", ") || "Localização por definir"}</p></div><span className="badge badge-gray">Zona</span></div><dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg bg-slate-50 p-3 text-xs"><div className="flex justify-between gap-2"><dt className="text-slate-500">Materiais</dt><dd className="font-semibold">{Number(z.materialAdjustmentPct) >= 0 ? "+" : ""}{money(z.materialAdjustmentPct)}%</dd></div><div className="flex justify-between gap-2"><dt className="text-slate-500">Transporte</dt><dd className="font-semibold">+{money(z.defaultTransportPct)}%</dd></div><div className="flex justify-between gap-2"><dt className="text-slate-500">Mão-de-obra</dt><dd className="font-semibold">{Number(z.labourAdjustmentPct) >= 0 ? "+" : ""}{money(z.labourAdjustmentPct)}%</dd></div><div className="flex justify-between gap-2"><dt className="text-slate-500">Equipamento</dt><dd className="font-semibold">{Number(z.equipmentAdjustmentPct) >= 0 ? "+" : ""}{money(z.equipmentAdjustmentPct)}%</dd></div></dl><div className="mt-3 flex gap-2"><button onClick={() => setZoneEditor({ item: z })} className="btn btn-secondary btn-sm flex-1">Configurar zona</button><button onClick={() => handleDeleteZone(z.id, z.name)} className="btn btn-sm border-red-200 bg-white text-red-600">Remover</button></div></article>)}</div>
+            <div className="hidden overflow-x-auto md:block"><table className="w-full text-sm min-w-[900px]">
               <thead>
                 <tr className="table-head-row">
                   <th className="py-2.5 px-5 font-medium">Zona e localização</th>
@@ -562,7 +567,7 @@ export default function CatalogPage() {
                     <td className="text-right tabular-nums">{Number(z.materialAdjustmentPct) >= 0 ? "+" : ""}{money(z.materialAdjustmentPct)}%</td><td className="text-right tabular-nums">+{money(z.defaultTransportPct)}%</td><td className="text-right tabular-nums">{Number(z.labourAdjustmentPct) >= 0 ? "+" : ""}{money(z.labourAdjustmentPct)}%</td><td className="text-right tabular-nums">{Number(z.equipmentAdjustmentPct) >= 0 ? "+" : ""}{money(z.equipmentAdjustmentPct)}%</td>
                     <td><p className="text-xs text-slate-700">{z.sourceName || "Fonte por definir"}</p><p className="text-[11px] text-slate-400">{z.effectiveDate ? `desde ${new Date(z.effectiveDate).toLocaleDateString("pt-MZ")}` : "sem data de vigência"}</p></td>
                     <td className="text-right pr-5">
-                      <button onClick={() => setZoneEditor({ item: z })} className="btn btn-ghost btn-sm">configurar</button>
+                      <button onClick={() => setZoneEditor({ item: z })} className="btn btn-secondary btn-sm">Configurar</button>
                       <button onClick={() => handleDeleteZone(z.id, z.name)} className="btn btn-ghost btn-sm text-red-600 hover:bg-red-50">
                         remover
                       </button>

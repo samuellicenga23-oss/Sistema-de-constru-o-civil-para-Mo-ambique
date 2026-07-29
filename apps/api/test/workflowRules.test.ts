@@ -3,6 +3,7 @@ import { validateMeasuredQuantity } from "../src/services/measurementEngine.js";
 import { addWorkingDays, allocateDurations, allocateDurationsWithMinimums } from "../src/services/scheduleEngine.js";
 import { resolveSchedulePrintOptions } from "../src/services/schedulePdf.js";
 import { calculateProcurementQuantity } from "../src/services/procurementEngine.js";
+import { calculateVatTotals, DEFAULT_IVA_RATE, priceExcludingVat } from "@sigo/shared";
 
 describe("Regras dos Autos de Medição", () => {
   it("calcula o acumulado a partir do período actual", () => {
@@ -49,5 +50,12 @@ describe("Regras do Cronograma", () => {
 describe("Regras de Aprovisionamento", () => {
   it("não volta a comprar o material já consumido e arredonda à embalagem comercial", () => {
     expect(calculateProcurementQuantity({ requiredQty: 100, consumedQty: 20, stockQty: 30, orderedQty: 10, packageSize: 25 })).toEqual({ shortageQty: 40, suggestedOrderQty: 50 });
+  });
+
+  it("aplica IVA de 16% e separa subtotal, imposto e total", () => {
+    expect(DEFAULT_IVA_RATE).toBe(0.16);
+    expect(calculateVatTotals(100_000)).toEqual({ subtotal: 100_000, ivaRate: 0.16, iva: 16_000, total: 116_000 });
+    expect(priceExcludingVat(116_000, true)).toBe(100_000);
+    expect(priceExcludingVat(100_000, false)).toBe(100_000);
   });
 });

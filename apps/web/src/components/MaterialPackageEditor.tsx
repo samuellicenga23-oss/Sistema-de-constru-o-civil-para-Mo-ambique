@@ -72,10 +72,10 @@ export default function MaterialPackageEditor({
         setDraftQty(qty ?? "");
         setEditing(true);
       }}
-      className="hover:bg-brand-50 rounded px-1 -mx-1 text-left text-xs"
-      title="Clicar para editar a unidade de compra de mercado (ex: camião, saco, palete)"
+      className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-dashed border-slate-300 bg-white px-2 py-1 text-left text-xs font-medium text-slate-700 hover:border-brand-400 hover:bg-brand-50"
+      title="Editar unidade de compra"
     >
-      {label ? label : <span className="text-gray-400">definir...</span>}
+      {label ? label : <span className="text-gray-500">Definir unidade</span>}<small className="text-[9px] font-bold uppercase text-brand-600">Editar</small>
     </button>
   );
 }

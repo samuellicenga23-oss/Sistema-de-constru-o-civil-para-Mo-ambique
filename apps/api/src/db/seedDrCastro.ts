@@ -322,7 +322,7 @@ export async function seedDrCastro() {
       client: "Gilberto Manuel Manhiça",
       phase: "Projecto Executivo",
       currency: "USD",
-      ivaRate: "0.17",
+      ivaRate: "0.16",
       contingenciasRate: "0.10",
     })
     .returning();
@@ -334,7 +334,7 @@ export async function seedDrCastro() {
       title: "Mapa de Quantidades",
       revision: "0",
       currency: "USD",
-      ivaRate: "0.17",
+      ivaRate: "0.16",
       contingenciasRate: "0.10",
     })
     .returning();

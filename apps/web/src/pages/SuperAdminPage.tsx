@@ -216,13 +216,13 @@ export default function SuperAdminPage() {
                     </td>
                     <td className="pr-5 space-x-3">
                       {c.subscription?.status !== "activo" && (
-                        <button onClick={() => handleStatusChange(c.id, "activo")} className="text-green-700 text-xs font-medium hover:underline">
-                          activar
+                        <button onClick={() => handleStatusChange(c.id, "activo")} className="btn btn-secondary btn-sm text-green-700">
+                          Activar
                         </button>
                       )}
                       {c.subscription?.status !== "suspenso" && (
-                        <button onClick={() => handleStatusChange(c.id, "suspenso")} className="text-red-600 text-xs font-medium hover:underline">
-                          suspender
+                        <button onClick={() => handleStatusChange(c.id, "suspenso")} className="btn btn-secondary btn-sm text-red-600">
+                          Suspender
                         </button>
                       )}
                     </td>

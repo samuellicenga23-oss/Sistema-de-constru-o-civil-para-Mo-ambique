@@ -7,7 +7,7 @@ import { requireCompanyUser, requireRole } from "../auth/middleware.js";
 import { assertProjectOwned } from "../services/accessControl.js";
 import { generateStandardBoq } from "../services/boqTemplate.js";
 import { getStandardSectionId } from "../services/quickEstimate.js";
-import { CURRENCIES, getPlanDefinition } from "@sigo/shared";
+import { CURRENCIES, DEFAULT_IVA_RATE, getPlanDefinition } from "@sigo/shared";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista"] as const;
 
@@ -21,7 +21,7 @@ const projectSchema = z.object({
   phase: z.string().optional(),
   zoneId: z.string().uuid().nullable().optional(),
   currency: z.enum(CURRENCIES).default("MZN"),
-  ivaRate: z.number().min(0).max(1).default(0.17),
+  ivaRate: z.number().min(0).max(1).default(DEFAULT_IVA_RATE),
   contingenciasRate: z.number().min(0).max(1).default(0.1),
 });
 const projectUpdateSchema = projectSchema.partial();

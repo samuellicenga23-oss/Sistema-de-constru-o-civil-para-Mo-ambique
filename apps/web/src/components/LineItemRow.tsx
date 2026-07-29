@@ -25,9 +25,9 @@ export function BoqHeaderRow() {
     <colgroup>
       <col className="w-16" />
       <col />
-      <col className="w-12" />
+      <col className="hidden w-12 sm:table-column" />
       <col className="w-24" />
-      <col className="w-28" />
+      <col className="hidden w-28 sm:table-column" />
       <col className="w-28" />
       <col className="w-28" />
     </colgroup>
@@ -40,9 +40,9 @@ export function BoqTableHead() {
       <tr className="table-head-row">
         <th className="py-2 px-2 font-medium">Item</th>
         <th className="font-medium">Descrição</th>
-        <th className="font-medium">Un</th>
+        <th className="hidden font-medium sm:table-cell">Un</th>
         <th className="text-right font-medium">Quant.</th>
-        <th className="text-right font-medium">P. Unit.</th>
+        <th className="hidden text-right font-medium sm:table-cell">P. Unit.</th>
         <th className="text-right font-medium">Total</th>
         <th className="text-right font-medium pr-2">Acções</th>
       </tr>
@@ -174,17 +174,17 @@ export default function LineItemRow({
     <Fragment>
       <tr className={`${rowBg} table-row text-sm group`}>
         <td className={`py-1.5 px-2 text-xs align-top ${isChapter ? "text-brand-700 font-bold" : "text-gray-400"}`}>{node.code}</td>
-        <td className={`align-top ${isNote ? "italic text-gray-400 text-xs" : "text-gray-800"}`} style={{ paddingLeft: 8 + depth * 16 }}>
+        <td className={`break-words align-top ${isNote ? "italic text-gray-400 text-xs" : "text-gray-800"}`} style={{ paddingLeft: 8 + depth * 12 }}>
           {node.description}
         </td>
-        <td className="align-top text-xs text-gray-400 whitespace-nowrap">{node.kind === "item" ? node.unit : ""}</td>
+        <td className="hidden align-top text-xs text-gray-400 whitespace-nowrap sm:table-cell">{node.kind === "item" ? node.unit : ""}</td>
         <td className="align-top text-right text-gray-600 tabular-nums whitespace-nowrap">{node.kind === "item" ? node.quantity : ""}</td>
-        <td className="align-top text-right text-gray-600 tabular-nums whitespace-nowrap">{node.kind === "item" ? money(node.unitPrice ?? 0) : ""}</td>
+        <td className="hidden align-top text-right text-gray-600 tabular-nums whitespace-nowrap sm:table-cell">{node.kind === "item" ? money(node.unitPrice ?? 0) : ""}</td>
         <td className={`align-top text-right tabular-nums whitespace-nowrap ${isChapter ? "font-bold" : "font-medium"} ${isNote ? "text-transparent" : "text-gray-900"}`}>
           {isNote ? "" : money(node.totalPrice)}
         </td>
         <td className="align-top text-right pr-2 whitespace-nowrap">
-          <span className="inline-flex gap-0.5 opacity-0 pointer-coarse:opacity-100 group-hover:opacity-100 transition-opacity">
+          <span className="inline-flex gap-1">
             {node.kind === "item" && (
               <button
                 onClick={() => setShowMeasurements((s) => !s)}

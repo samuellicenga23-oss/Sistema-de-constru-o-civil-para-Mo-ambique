@@ -12,6 +12,7 @@ import {
   materialZonePrices,
   priceZones,
 } from "../db/schema.js";
+import { priceExcludingVat } from "@sigo/shared";
 
 // Resolve pelo NOME (não pelo id fixado na linha da composição) qual é a linha "visível" da
 // empresa para cada recurso — mesma lógica de dedup usada nas listagens do catálogo (própria,
@@ -101,6 +102,51 @@ export type CompositionMaterialQuantityLine = {
   purchasePackageQty: number | null;
 };
 
+export type CompositionLabourQuantityLine = {
+  labourCategoryId: string;
+  name: string;
+  hoursPerUnit: number;
+  hourlyRate: number;
+  currency: string;
+};
+
+// Horas de cada categoria por unidade da composição. Usa a categoria própria da empresa quando
+// existir e aplica o factor de mão-de-obra da zona exactamente como o preço da composição.
+export async function getCompositionLabourQuantities(
+  compositionId: string,
+  requestingCompanyId: string | null,
+  zoneId?: string | null
+): Promise<CompositionLabourQuantityLine[]> {
+  const labourLinesRaw = await db
+    .select({ qtyPerUnit: compositionLabourLines.qtyPerUnit, name: labourCategories.name, hourlyRate: labourCategories.hourlyRate, currency: labourCategories.currency })
+    .from(compositionLabourLines)
+    .innerJoin(labourCategories, eq(compositionLabourLines.labourCategoryId, labourCategories.id))
+    .where(eq(compositionLabourLines.compositionId, compositionId));
+  const names = Array.from(new Set(labourLinesRaw.map((line) => line.name)));
+  const resolved = names.length
+    ? await resolveByName(
+        await db
+          .select({ id: labourCategories.id, name: labourCategories.name, companyId: labourCategories.companyId, hourlyRate: labourCategories.hourlyRate, currency: labourCategories.currency })
+          .from(labourCategories)
+          .where(and(inArray(labourCategories.name, names), companyScope(labourCategories.companyId, requestingCompanyId)))
+      )
+    : new Map();
+  const [zone] = zoneId
+    ? await db.select({ labourAdjustmentPct: priceZones.labourAdjustmentPct }).from(priceZones).where(and(eq(priceZones.id, zoneId), companyScope(priceZones.companyId, requestingCompanyId))).limit(1)
+    : [undefined];
+  const zoneFactor = 1 + Number(zone?.labourAdjustmentPct ?? 0) / 100;
+  return labourLinesRaw.map((line) => {
+    const category = resolved.get(line.name);
+    return {
+      labourCategoryId: category?.id ?? "",
+      name: line.name,
+      hoursPerUnit: Number(line.qtyPerUnit),
+      hourlyRate: Number(category?.hourlyRate ?? line.hourlyRate) * zoneFactor,
+      currency: category?.currency ?? line.currency,
+    };
+  });
+}
+
 // Quantidade (+ custo e unidade de compra) de cada material por unidade de saída da composição —
 // mesma resolução por NOME (não pelo id fixado na linha) já usada em computeCompositionUnitCost,
 // mas devolvendo a quantidade/preço unitário do material em vez do custo total da composição.
@@ -130,6 +176,7 @@ export async function getCompositionMaterialQuantities(
       unit: materials.unit,
       baseUnitCost: materials.baseUnitCost,
       importFactor: materials.importFactor,
+      includesVat: materials.includesVat,
       currency: materials.currency,
     })
     .from(compositionMaterialLines)
@@ -147,6 +194,7 @@ export async function getCompositionMaterialQuantities(
             unit: materials.unit,
             baseUnitCost: materials.baseUnitCost,
             importFactor: materials.importFactor,
+            includesVat: materials.includesVat,
             currency: materials.currency,
             purchasePackageLabel: materials.purchasePackageLabel,
             purchasePackageQty: materials.purchasePackageQty,
@@ -156,7 +204,7 @@ export async function getCompositionMaterialQuantities(
       )
     : new Map();
 
-  let zoneCostByMaterialId = new Map<string, number>();
+  let zoneCostByMaterialId = new Map<string, { unitCost: number; includesVat: boolean }>();
   let materialZoneFactor = 1;
   if (zoneId && resolvedMaterials.size) {
     const [zone] = await db.select().from(priceZones).where(and(eq(priceZones.id, zoneId), companyScope(priceZones.companyId, requestingCompanyId))).limit(1);
@@ -165,17 +213,18 @@ export async function getCompositionMaterialQuantities(
         * (1 + Number(zone.defaultTransportPct) / 100);
       const materialIds = Array.from(resolvedMaterials.values(), (m) => m.id);
       const zonePrices = await db
-        .select({ materialId: materialZonePrices.materialId, unitCost: materialZonePrices.unitCost })
+        .select({ materialId: materialZonePrices.materialId, unitCost: materialZonePrices.unitCost, includesVat: materialZonePrices.includesVat })
         .from(materialZonePrices)
         .where(and(eq(materialZonePrices.zoneId, zoneId), inArray(materialZonePrices.materialId, materialIds)));
-      zoneCostByMaterialId = new Map(zonePrices.map((p) => [p.materialId, Number(p.unitCost)]));
+      zoneCostByMaterialId = new Map(zonePrices.map((p) => [p.materialId, { unitCost: Number(p.unitCost), includesVat: p.includesVat }]));
     }
   }
 
   return materialLinesRaw.map((l) => {
     const resolved = resolvedMaterials.get(l.name);
     const explicitZoneCost = resolved ? zoneCostByMaterialId.get(resolved.id) : undefined;
-    const unitCost = explicitZoneCost ?? Number(resolved?.baseUnitCost ?? l.baseUnitCost) * materialZoneFactor;
+    const listedUnitCost = explicitZoneCost?.unitCost ?? Number(resolved?.baseUnitCost ?? l.baseUnitCost) * materialZoneFactor;
+    const unitCost = priceExcludingVat(listedUnitCost, explicitZoneCost?.includesVat ?? resolved?.includesVat ?? l.includesVat);
     const importFactor = Number(resolved?.importFactor ?? l.importFactor);
     return {
       materialId: resolved?.id ?? "",
@@ -233,6 +282,7 @@ export async function computeCompositionUnitCost(
       name: materials.name,
       baseUnitCost: materials.baseUnitCost,
       importFactor: materials.importFactor,
+      includesVat: materials.includesVat,
     })
     .from(compositionMaterialLines)
     .innerJoin(materials, eq(compositionMaterialLines.materialId, materials.id))
@@ -251,20 +301,20 @@ export async function computeCompositionUnitCost(
   const resolvedMaterials = materialNames.length
     ? await resolveByName(
         await db
-          .select({ id: materials.id, name: materials.name, companyId: materials.companyId, baseUnitCost: materials.baseUnitCost, importFactor: materials.importFactor })
+          .select({ id: materials.id, name: materials.name, companyId: materials.companyId, baseUnitCost: materials.baseUnitCost, importFactor: materials.importFactor, includesVat: materials.includesVat })
           .from(materials)
           .where(and(inArray(materials.name, materialNames), companyScope(materials.companyId, scope)))
       )
     : new Map();
 
-  let zoneCostByMaterialId = new Map<string, number>();
+  let zoneCostByMaterialId = new Map<string, { unitCost: number; includesVat: boolean }>();
   if (zoneId && zone && resolvedMaterials.size) {
     const materialIds = Array.from(resolvedMaterials.values(), (m) => m.id);
     const zonePrices = await db
-      .select({ materialId: materialZonePrices.materialId, unitCost: materialZonePrices.unitCost })
+      .select({ materialId: materialZonePrices.materialId, unitCost: materialZonePrices.unitCost, includesVat: materialZonePrices.includesVat })
       .from(materialZonePrices)
       .where(and(eq(materialZonePrices.zoneId, zoneId), inArray(materialZonePrices.materialId, materialIds)));
-    zoneCostByMaterialId = new Map(zonePrices.map((p) => [p.materialId, Number(p.unitCost)]));
+    zoneCostByMaterialId = new Map(zonePrices.map((p) => [p.materialId, { unitCost: Number(p.unitCost), includesVat: p.includesVat }]));
   }
 
   const labourNames = Array.from(new Set(labourLinesRaw.map((l) => l.name)));
@@ -294,7 +344,8 @@ export async function computeCompositionUnitCost(
   const materialCost = materialLinesRaw.reduce((sum, l) => {
     const resolved = resolvedMaterials.get(l.name);
     const explicitZoneCost = resolved ? zoneCostByMaterialId.get(resolved.id) : undefined;
-    const unitCost = explicitZoneCost ?? Number(resolved?.baseUnitCost ?? l.baseUnitCost) * materialZoneFactor;
+    const listedUnitCost = explicitZoneCost?.unitCost ?? Number(resolved?.baseUnitCost ?? l.baseUnitCost) * materialZoneFactor;
+    const unitCost = priceExcludingVat(listedUnitCost, explicitZoneCost?.includesVat ?? resolved?.includesVat ?? l.includesVat);
     const importFactor = Number(resolved?.importFactor ?? l.importFactor);
     const wasteFactor = 1 + Number(l.wastePct) / 100;
     return sum + Number(l.qtyPerUnit) * wasteFactor * unitCost * importFactor;

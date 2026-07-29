@@ -86,7 +86,7 @@ export default function DashboardPage() {
   return (
     <Layout
       title="Visão geral"
-      subtitle="Custos, planeamento, compras, execução e medição numa única cadeia de decisão"
+      subtitle="Estado das obras, decisões pendentes e desempenho"
       actions={
         <Link to="/projectos" className="btn btn-primary btn-sm">
           <IconPlus className="w-3.5 h-3.5" />
@@ -94,7 +94,7 @@ export default function DashboardPage() {
         </Link>
       }
     >
-      <div className="space-y-7 max-w-[1500px] mx-auto">
+      <div className="mx-auto max-w-[1500px] space-y-5 md:space-y-7">
         {error && <p className="text-sm text-red-600">{error}</p>}
 
         <div className="flex flex-wrap items-end justify-between gap-4 border-b border-slate-200 pb-5">
@@ -102,7 +102,7 @@ export default function DashboardPage() {
               <p className="text-2xl font-bold tracking-tight text-slate-900">
                 {greeting}, {user?.name?.split(" ")[0]}
               </p>
-              <p className="mt-1 text-sm text-slate-500">Resumo das obras e actividades da empresa.</p>
+              <p className="mt-1 text-sm text-slate-500">O que precisa da sua atenção hoje.</p>
             </div>
             <div className="text-right">
               <p className="text-xs text-slate-400">Hoje</p>
@@ -113,8 +113,8 @@ export default function DashboardPage() {
         </div>
 
         <section className="card overflow-hidden">
-          <div className="border-b border-slate-200 px-5 py-4"><p className="text-[10px] font-bold uppercase tracking-[0.14em] text-brand-700">Fluxo integrado da obra</p><h2 className="mt-1 text-sm font-semibold text-slate-900">Cada módulo recebe informação do anterior e devolve controlo ao seguinte</h2></div>
-          <div className="grid gap-px bg-slate-200 md:grid-cols-5">{OPERATION_FLOW.map((item, index) => <Link key={item.step} to={item.to} className="group relative bg-white px-4 py-4 hover:bg-blue-50/60"><div className="flex items-center gap-2"><span className="text-[10px] font-black text-[#d85f18]">{item.step}</span>{index < OPERATION_FLOW.length - 1 && <span className="ml-auto text-slate-300 group-hover:text-blue-500">→</span>}</div><p className="mt-2 text-xs font-semibold text-slate-900">{item.label}</p><p className="mt-1 text-[10px] text-slate-500">{item.detail}</p></Link>)}</div>
+          <div className="border-b border-slate-200 px-4 py-3.5 sm:px-5"><p className="text-[10px] font-bold uppercase tracking-[0.14em] text-brand-700">Fluxo da obra</p><h2 className="mt-1 text-sm font-semibold text-slate-900">Do preço ao resultado</h2></div>
+          <div className="flex snap-x gap-px overflow-x-auto bg-slate-200 [scrollbar-width:thin] md:grid md:grid-cols-5 md:overflow-visible">{OPERATION_FLOW.map((item) => <Link key={item.step} to={item.to} className="group relative w-[190px] shrink-0 snap-start bg-white px-4 py-3.5 hover:bg-blue-50/60 md:w-auto"><div className="flex items-center justify-between gap-2"><span className="text-[10px] font-black text-[#d85f18]">{item.step}</span><span className="grid h-6 w-6 place-items-center rounded-full border border-slate-200 text-xs text-brand-700 transition group-hover:border-brand-300 group-hover:bg-white">→</span></div><p className="mt-2 text-xs font-semibold text-slate-900">{item.label}</p><p className="mt-1 text-[10px] text-slate-500">{item.detail}</p></Link>)}</div>
         </section>
 
         {data && (
@@ -171,11 +171,11 @@ export default function DashboardPage() {
                   <ul className="space-y-2">
                     {data.recentCertificates.map((c) => (
                       <li key={c.id}>
-                        <Link to={`/autos/${c.id}`} className="flex items-center justify-between gap-2 text-sm hover:text-brand-700">
+                        <Link to={`/autos/${c.id}`} className="clickable-row flex items-center justify-between gap-2 rounded-lg border border-slate-100 px-3 py-2.5 text-sm hover:text-brand-700">
                           <span className="truncate">
                             Auto {c.number} — {c.projectName}
                           </span>
-                          <span className={`badge ${CERT_STATUS_TONE[c.status]} shrink-0`}>{CERT_STATUS_LABELS[c.status]}</span>
+                          <span className="flex shrink-0 items-center gap-2"><span className={`badge ${CERT_STATUS_TONE[c.status]}`}>{CERT_STATUS_LABELS[c.status]}</span><span aria-hidden="true">→</span></span>
                         </Link>
                       </li>
                     ))}
@@ -192,7 +192,7 @@ export default function DashboardPage() {
             <section className="card">
               <div className="flex items-center justify-between px-5 pt-4 pb-2 border-b border-gray-100">
                 <h2 className="section-title text-base">Projectos por valor orçamentado</h2>
-                <Link to="/projectos" className="text-sm text-brand-700 font-medium hover:underline">
+                <Link to="/projectos" className="action-link">
                   Ver todos →
                 </Link>
               </div>
@@ -209,8 +209,8 @@ export default function DashboardPage() {
                   {data.projects.map((p) => {
                     const max = Math.max(...data.projects.map((x) => x.total), 1);
                     return (
-                      <li key={p.id} className="table-row">
-                        <Link to={`/projectos/${p.id}`} className="flex items-center gap-4 px-5 py-3">
+                      <li key={p.id} className="table-row clickable-row">
+                        <Link to={`/projectos/${p.id}`} className="flex items-center gap-3 px-4 py-3 sm:gap-4 sm:px-5">
                           <div className="min-w-0 flex-1">
                             <p className="font-medium text-gray-900 truncate">{p.name}</p>
                             <div className="mt-1.5 w-full bg-gray-100 rounded-full h-1.5">
@@ -221,6 +221,7 @@ export default function DashboardPage() {
                             <p className="font-semibold text-gray-900 tabular-nums">{money(p.total, p.currency)}</p>
                             <p className="muted">{p.documentCount} documento(s)</p>
                           </div>
+                          <span className="text-brand-700" aria-hidden="true">→</span>
                         </Link>
                       </li>
                     );
