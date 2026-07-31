@@ -127,12 +127,15 @@ export default function Layout({
               <Link
                 to={item.to}
                 title={sidebarCollapsed ? item.label : undefined}
-                className={`mb-0.5 flex items-center rounded-md text-sm font-medium transition-colors ${sidebarCollapsed ? "h-10 justify-center px-2" : "gap-3 px-2.5 py-2"} ${
-                  active ? "bg-white text-slate-950 shadow-sm ring-1 ring-slate-200/80" : "text-slate-600 hover:bg-slate-200/55 hover:text-slate-950"
+                className={`mb-0.5 flex items-center rounded-xl text-sm font-medium transition-colors ${sidebarCollapsed ? "h-10 justify-center px-2" : "gap-3 px-2.5 py-2"} ${
+                  active
+                    ? "bg-white text-slate-950 shadow-sm ring-1 ring-brand-200/80"
+                    : "text-slate-600 hover:bg-slate-200/55 hover:text-slate-950"
                 }`}
               >
-                <Icon className={`w-[17px] h-[17px] shrink-0 ${active ? "text-accent" : "text-slate-500"}`} />
+                <Icon className={`w-[17px] h-[17px] shrink-0 ${active ? "text-brand-600" : "text-slate-500"}`} />
                 {!sidebarCollapsed && <span className="truncate">{item.label}</span>}
+                {active && !sidebarCollapsed && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-accent" aria-hidden />}
               </Link>
               </div>
             );
@@ -195,11 +198,11 @@ export default function Layout({
                     <Link
                       key={item.to}
                       to={item.to}
-                      className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium ${
-                        active ? "bg-slate-200 text-slate-950" : "text-slate-600 hover:bg-slate-200/60 hover:text-slate-950"
+                      className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium ${
+                        active ? "bg-white text-slate-950 shadow-sm ring-1 ring-brand-200" : "text-slate-600 hover:bg-slate-200/60 hover:text-slate-950"
                       }`}
                     >
-                      <Icon className="w-[18px] h-[18px]" />
+                      <Icon className={`w-[18px] h-[18px] ${active ? "text-brand-600" : ""}`} />
                       {item.label}
                     </Link>
                   );
@@ -228,11 +231,11 @@ export default function Layout({
           </div>
         )}
 
-        <header className="sticky top-0 z-10 border-b border-slate-200 bg-white">
+        <header className="sticky top-0 z-10 border-b border-slate-200/90 bg-white/90 backdrop-blur-md">
           <div className="mx-auto flex w-full max-w-[1500px] flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between md:px-8 md:py-4 xl:px-10">
             <div className="min-w-0 max-w-full">
-              <h1 className="break-words text-lg font-black tracking-tight text-slate-900 md:text-xl">{title}</h1>
-              {subtitle && <p className="mt-1 max-w-3xl break-words text-xs leading-4 text-slate-500">{subtitle}</p>}
+              <h1 className="page-title break-words">{title}</h1>
+              {subtitle && <p className="mt-1 max-w-3xl break-words text-xs leading-5 text-slate-500">{subtitle}</p>}
             </div>
             <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2 sm:justify-end overflow-x-auto">
               <InstallAppButton />
@@ -251,7 +254,7 @@ export default function Layout({
         </main>
 
         {/* Barra inferior móvel — só os módulos principais, ícone + rótulo curto, tocável. */}
-        <nav className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-white border-t border-gray-200 flex items-stretch">
+        <nav className="md:hidden fixed bottom-0 inset-x-0 z-30 flex items-stretch border-t border-slate-200 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md">
           {bottomBarItems.map((item) => {
             const active = isActive(item);
             const Icon = item.icon;
@@ -259,10 +262,11 @@ export default function Layout({
               <Link
                 key={item.to}
                 to={item.to}
-                className={`flex-1 flex flex-col items-center justify-center gap-0.5 py-2 text-[10px] font-medium ${
-                  active ? "text-brand-700" : "text-gray-400"
+                className={`relative flex flex-1 flex-col items-center justify-center gap-0.5 py-2 text-[10px] font-semibold ${
+                  active ? "text-brand-700" : "text-slate-400"
                 }`}
               >
+                {active && <span className="absolute inset-x-4 top-0 h-0.5 rounded-full bg-accent" aria-hidden />}
                 <Icon className="w-5 h-5" />
                 {item.label.split(" ")[0]}
               </Link>

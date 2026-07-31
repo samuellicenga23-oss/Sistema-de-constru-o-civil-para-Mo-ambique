@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import type { ProjectWorkflowStatus } from "../api/boq";
 
 const TONE: Record<string, string> = {
-  info: "border-blue-200 bg-blue-50 text-blue-950",
+  info: "border-brand-200 bg-brand-50 text-ink",
   warning: "border-amber-200 bg-amber-50 text-amber-950",
   error: "border-red-200 bg-red-50 text-red-950",
 };

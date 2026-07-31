@@ -252,9 +252,9 @@ export default function ProjectsPage() {
                 </div>
               </div>
               {workspace === "orcamentos" && (
-                <div className="sm:col-span-2 flex flex-col gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900 sm:flex-row sm:items-center sm:justify-between">
+                <div className="sm:col-span-2 flex flex-col gap-2 rounded-lg border border-brand-200 bg-brand-50 px-4 py-3 text-sm text-ink sm:flex-row sm:items-center sm:justify-between">
                   <span>Já mediu esta obra no SIGO?</span>
-                  <Link to="/medicoes" onClick={() => setShowForm(false)} className="font-semibold text-blue-800 hover:underline">Abrir Medições e enviar para orçamento →</Link>
+                  <Link to="/medicoes" onClick={() => setShowForm(false)} className="font-semibold text-brand-800 hover:underline">Abrir Medições e enviar para orçamento →</Link>
                 </div>
               )}
               {workspace === "medicoes" && startMode === "plantas" && <div className="sm:col-span-2 rounded-xl border border-slate-200 bg-slate-50 p-4">
@@ -262,9 +262,9 @@ export default function ProjectsPage() {
                   <p className="text-sm font-semibold text-slate-900">Projectos técnicos</p>
                   <p className="mt-0.5 text-xs text-slate-500">Envie o conjunto completo ou as especialidades separadas.</p>
                 </div>
-                <div className="mb-4 rounded-lg border border-blue-200 bg-white p-3">
+                <div className="mb-4 rounded-lg border border-brand-200 bg-white p-3">
                   <label className="label">Projecto completo ou conjunto de especialidades (PDF)</label>
-                  <input type="file" name="completeProjectFile" accept="application/pdf" disabled={creating} className="input py-1.5 file:mr-2 file:rounded-md file:border-0 file:bg-blue-50 file:px-2 file:py-1 file:text-xs file:text-blue-800" />
+                  <input type="file" name="completeProjectFile" accept="application/pdf" disabled={creating} className="input py-1.5 file:mr-2 file:rounded-md file:border-0 file:bg-brand-50 file:px-2 file:py-1 file:text-xs file:text-brand-800" />
                 </div>
                 <div className="mb-3 flex items-center gap-3 text-[11px] font-semibold uppercase tracking-wide text-slate-400"><span className="h-px flex-1 bg-slate-200" /><span>ou carregue separadamente</span><span className="h-px flex-1 bg-slate-200" /></div>
                 <div className="grid gap-3 sm:grid-cols-2">
@@ -279,7 +279,7 @@ export default function ProjectsPage() {
                 </div>
               </div>}
               {startMode === "manual" && (
-                <div className="sm:col-span-2 rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+                <div className="sm:col-span-2 rounded-lg border border-brand-100 bg-brand-50 px-4 py-3 text-sm text-ink">
                   {workspace === "medicoes"
                     ? "A medição abrirá sem preços para introduzir áreas, comprimentos e quantidades."
                     : "O orçamento abrirá com a estrutura de trabalhos para introduzir quantidades e aplicar preços."}
@@ -313,10 +313,10 @@ export default function ProjectsPage() {
               </details>
               <div className="sm:col-span-2 flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-4">
               {creating && analysisProgress && (
-                <div className="w-full rounded-xl border border-blue-100 bg-blue-50/70 p-4 mb-1" aria-live="polite">
-                  <div className="flex items-start justify-between gap-4"><div><p className="text-sm font-semibold text-blue-950">{analysisProgress.stage}</p><p className="mt-0.5 text-xs text-blue-800/70 truncate">Ficheiro {analysisProgress.currentFile} de {analysisProgress.totalFiles} · {analysisProgress.fileName}{analysisProgress.currentPage && analysisProgress.totalPages ? ` · página ${analysisProgress.currentPage} de ${analysisProgress.totalPages}` : ""}</p></div><strong className="text-2xl tabular-nums text-blue-950">{analysisProgress.percent}%</strong></div>
-                  <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-blue-100" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={analysisProgress.percent}><div className="h-full rounded-full bg-blue-600" style={{ width: `${analysisProgress.percent}%` }} /></div>
-                  {analysisProgress.totalFiles > 1 && <p className="mt-2 text-[11px] text-blue-800/65">Este ficheiro: {analysisProgress.filePercent}% · progresso total considera os {analysisProgress.totalFiles} ficheiros.</p>}
+                <div className="w-full rounded-xl border border-brand-100 bg-brand-50/70 p-4 mb-1" aria-live="polite">
+                  <div className="flex items-start justify-between gap-4"><div><p className="text-sm font-semibold text-ink">{analysisProgress.stage}</p><p className="mt-0.5 text-xs text-brand-800/70 truncate">Ficheiro {analysisProgress.currentFile} de {analysisProgress.totalFiles} · {analysisProgress.fileName}{analysisProgress.currentPage && analysisProgress.totalPages ? ` · página ${analysisProgress.currentPage} de ${analysisProgress.totalPages}` : ""}</p></div><strong className="text-2xl tabular-nums text-ink">{analysisProgress.percent}%</strong></div>
+                  <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-brand-100" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={analysisProgress.percent}><div className="h-full rounded-full bg-brand-600" style={{ width: `${analysisProgress.percent}%` }} /></div>
+                  {analysisProgress.totalFiles > 1 && <p className="mt-2 text-[11px] text-brand-800/65">Este ficheiro: {analysisProgress.filePercent}% · progresso total considera os {analysisProgress.totalFiles} ficheiros.</p>}
                 </div>
               )}
               <button type="button" onClick={() => setShowForm(false)} disabled={creating} className="btn btn-secondary">Cancelar</button>
@@ -367,8 +367,8 @@ export default function ProjectsPage() {
               <div key={p.id} className="group clickable-row grid grid-cols-[minmax(0,1fr)_auto] items-center border-b border-slate-100 last:border-0">
                 <Link to={`/projectos/${p.id}`} className="grid min-w-0 gap-3 px-4 py-4 sm:grid-cols-[minmax(0,1fr)_minmax(10rem,0.7fr)_10rem_6rem] sm:items-center sm:gap-4 sm:px-5">
                   <div className="flex min-w-0 items-center gap-3">
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-700"><IconFolder className="h-4.5 w-4.5" /></div>
-                    <div className="min-w-0"><p className="truncate font-semibold text-slate-900 group-hover:text-blue-700">{p.name}</p><p className="mt-0.5 truncate text-xs text-slate-500 sm:hidden">{[p.client, zoneName(p.zoneId)].filter(Boolean).join(" · ") || "Sem cliente ou zona"}</p><span className="click-hint mt-1 sm:hidden">Abrir projecto →</span></div>
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-700"><IconFolder className="h-4.5 w-4.5" /></div>
+                    <div className="min-w-0"><p className="truncate font-semibold text-slate-900 group-hover:text-brand-700">{p.name}</p><p className="mt-0.5 truncate text-xs text-slate-500 sm:hidden">{[p.client, zoneName(p.zoneId)].filter(Boolean).join(" · ") || "Sem cliente ou zona"}</p><span className="click-hint mt-1 sm:hidden">Abrir projecto →</span></div>
                   </div>
                   <span className="hidden truncate text-sm text-slate-600 sm:block">{p.client || "—"}</span>
                   <span className="hidden truncate text-sm text-slate-500 sm:block">{zoneName(p.zoneId) || "—"}</span>

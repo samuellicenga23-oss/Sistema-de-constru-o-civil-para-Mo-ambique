@@ -41,13 +41,13 @@ const OPERATION_FLOW = [
 
 function StatCard({ label, value, icon, tint }: { label: string; value: string | number; icon: ReactNode; tint: string }) {
   return (
-    <div className="card card-pad">
+    <div className="card card-pad transition hover:-translate-y-0.5 hover:shadow-[0_16px_36px_-18px_rgba(20,32,51,0.35)]">
       <div className="flex items-center justify-between gap-4">
         <div>
           <p className="text-sm text-slate-500">{label}</p>
-          <p className="mt-1 text-2xl font-bold tabular-nums text-slate-900">{value}</p>
+          <p className="mt-1 font-display text-2xl font-bold tabular-nums text-slate-900">{value}</p>
         </div>
-        <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${tint}`}>{icon}</div>
+        <div className={`flex h-11 w-11 items-center justify-center rounded-xl ${tint}`}>{icon}</div>
       </div>
     </div>
   );
@@ -109,16 +109,16 @@ export default function DashboardPage() {
         {error && <ErrorState message={error} onRetry={loadDashboard} />}
 
         <section className="card overflow-hidden">
-          <div className="border-b border-slate-200 px-4 py-3.5 sm:px-5">
-            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-brand-700">Fluxo da obra</p>
-            <h2 className="mt-1 text-sm font-semibold text-slate-900">Do preço ao resultado</h2>
+          <div className="border-b border-slate-200 bg-gradient-to-r from-brand-50/80 to-transparent px-4 py-3.5 sm:px-5">
+            <p className="eyebrow">Fluxo da obra</p>
+            <h2 className="mt-1 font-display text-sm font-bold text-slate-900">Do preço ao resultado</h2>
           </div>
           <div className="flex snap-x gap-px overflow-x-auto bg-slate-200 [scrollbar-width:thin] md:grid md:grid-cols-5 md:overflow-visible">
             {OPERATION_FLOW.map((item) => (
               <Link
                 key={item.step}
                 to={item.to}
-                className="group relative w-[170px] shrink-0 snap-start bg-white px-4 py-3.5 transition hover:bg-blue-50/60 md:w-auto"
+                className="group relative w-[170px] shrink-0 snap-start bg-white px-4 py-3.5 transition hover:bg-brand-50/60 md:w-auto"
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-[10px] font-black text-accent">{item.step}</span>
@@ -144,7 +144,7 @@ export default function DashboardPage() {
             )}
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <StatCard label="Projectos" value={data.totalProjects} tint="bg-blue-50 text-blue-700" icon={<IconFolder className="w-5 h-5" />} />
+              <StatCard label="Projectos" value={data.totalProjects} tint="bg-brand-50 text-brand-700" icon={<IconFolder className="w-5 h-5" />} />
               <StatCard label="Mapas" value={data.totalDocuments} tint="bg-cyan-50 text-cyan-700" icon={<IconDoc className="w-5 h-5" />} />
               <StatCard label="Certificados" value={data.totalCertificates} tint="bg-orange-50 text-orange-700" icon={<IconClipboard className="w-5 h-5" />} />
               <StatCard label="Plantas" value={data.totalPlants} tint="bg-slate-100 text-slate-700" icon={<IconMap className="w-5 h-5" />} />
@@ -153,7 +153,7 @@ export default function DashboardPage() {
             <div className="grid gap-4 md:grid-cols-2">
               <section className="card card-pad">
                 <div className="mb-5">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-brand-700">Desempenho</p>
+                  <p className="eyebrow">Desempenho</p>
                   <h2 className="section-title mt-1 text-base">Resumo financeiro</h2>
                 </div>
                 <dl className="grid grid-cols-2 gap-y-3 text-sm">
@@ -170,7 +170,7 @@ export default function DashboardPage() {
 
               <section className="card card-pad">
                 <div className="mb-5">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-brand-700">Actividade</p>
+                  <p className="eyebrow">Actividade</p>
                   <h2 className="section-title mt-1 text-base">Certificados recentes</h2>
                 </div>
                 {data.recentCertificates.length === 0 ? (

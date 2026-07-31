@@ -52,37 +52,44 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen grid lg:grid-cols-2 bg-[#172033]">
+    <div className="min-h-screen grid lg:grid-cols-2 bg-ink">
       {/* Painel de marca */}
-      <div className="hidden lg:flex flex-col justify-between text-white p-14 xl:p-20">
-        <Link to="/" className="inline-block">
+      <div className="relative hidden overflow-hidden lg:flex flex-col justify-between text-white p-14 xl:p-20">
+        <div aria-hidden className="pointer-events-none absolute inset-0">
+          <div className="absolute -left-20 top-10 h-80 w-80 rounded-full bg-[radial-gradient(circle,rgba(26,173,180,0.28),transparent_70%)]" />
+          <div className="absolute -right-10 bottom-0 h-96 w-96 rounded-full bg-[radial-gradient(circle,rgba(237,108,34,0.18),transparent_72%)]" />
+          <div className="absolute inset-0 opacity-20" style={{ backgroundImage: "linear-gradient(rgba(255,255,255,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.06) 1px, transparent 1px)", backgroundSize: "42px 42px" }} />
+        </div>
+        <Link to="/" className="relative inline-block">
           <LogoFull dark tagline={false} />
         </Link>
-        <div className="max-w-lg">
-          <h1 className="text-4xl font-bold leading-tight tracking-tight">Gestão de obras sem complicação.</h1>
+        <div className="relative max-w-lg">
+          <p className="mb-4 text-[11px] font-display font-black uppercase tracking-[0.16em] text-teal-bright">SIGO</p>
+          <h1 className="font-display text-4xl font-black leading-tight tracking-tight">Gestão de obras sem complicação.</h1>
           <p className="mt-4 max-w-md text-base leading-7 text-slate-300">
             Orçamentos, medições, compras e controlo financeiro numa plataforma feita para equipas de construção.
           </p>
           <div className="mt-8 space-y-3 text-sm text-slate-200">
             {["Planeamento e orçamento", "Acompanhamento da execução", "Controlo de custos e compras"].map((item) => (
               <div key={item} className="flex items-center gap-3">
-                <span className="grid h-5 w-5 place-items-center rounded-full bg-white/10 text-[#1AADB4] text-xs">✓</span>
+                <span className="grid h-5 w-5 place-items-center rounded-full bg-white/10 text-teal text-xs">✓</span>
                 <span>{item}</span>
               </div>
             ))}
           </div>
         </div>
-        <p className="text-xs text-slate-500">Moçambique · MZN & USD</p>
+        <p className="relative text-xs text-slate-500">Moçambique · MZN & USD</p>
       </div>
 
       {/* Formulário */}
-      <div className="flex items-center justify-center bg-[#f4f6f8] px-6 py-12">
-        <div className="w-full max-w-md">
+      <div className="flex items-center justify-center bg-surface px-6 py-12">
+        <div className="w-full max-w-md page-enter">
           <div className="lg:hidden flex items-center justify-center mb-6">
             <LogoFull />
           </div>
-          <div className="rounded-xl border border-slate-200 bg-white p-7 md:p-9 shadow-sm">
-            <h2 className="text-2xl font-bold tracking-tight text-slate-900">Entrar no SIGO</h2>
+          <div className="rounded-2xl border border-slate-200 bg-white p-7 md:p-9 shadow-[0_20px_50px_-24px_rgba(20,32,51,0.35)]">
+            <p className="eyebrow mb-2">Acesso à plataforma</p>
+            <h2 className="font-display text-2xl font-bold tracking-tight text-slate-900">Entrar no SIGO</h2>
             <p className="text-sm text-slate-500 mt-1 mb-7">Utilize as credenciais da sua empresa.</p>
 
             <form onSubmit={handleSubmit} className="space-y-4">
