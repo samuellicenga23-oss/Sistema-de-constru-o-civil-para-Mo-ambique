@@ -223,41 +223,69 @@ export async function getProjectWorkflowStatus(projectId: string): Promise<Proje
     }
   }
 
+  // Um aviso por tipo — não um cartão por cada orçamento (evita duplicados quando há 2+ mapas).
+  const unpricedBudgets: Array<{ id: string; title: string; count: number }> = [];
+  const reviewReadyBudgets: Array<{ id: string; title: string }> = [];
+  let hasApprovedBudget = false;
+
   for (const doc of budgetDocs) {
     const withoutPrice = await countLeafItemsWithoutPrice(doc.id);
     if (withoutPrice > 0) {
-      guidance.push({
-        id: "orcamento_sem_preco",
-        severity: "warning",
-        title: "Orçamento com itens sem preço",
-        message: `${withoutPrice} item(ns) em «${doc.title}» não têm composição nem preço unitário. Ligue cada item ao catálogo ou preencha manualmente antes de submeter.`,
-        actions: [
-          { label: "Abrir orçamento", path: `/documentos/${doc.id}?semPreco=1` },
-          { label: "Catálogo", path: "/catalogo" },
-        ],
-      });
+      unpricedBudgets.push({ id: doc.id, title: doc.title, count: withoutPrice });
+    } else if (doc.status !== "aprovado") {
+      reviewReadyBudgets.push({ id: doc.id, title: doc.title });
     }
-    if (doc.status !== "aprovado" && withoutPrice === 0) {
-      guidance.push({
-        id: "orcamento_nao_aprovado",
-        severity: "info",
-        title: "Orçamento pronto para revisão",
-        message: "Preços preenchidos. Aprove o orçamento para desbloquear certificados de obra e cronograma financeiro.",
-        actions: [{ label: "Rever orçamento", path: `/documentos/${doc.id}` }],
-      });
-    }
-    if (doc.status === "aprovado") {
-      guidance.push({
-        id: "certificacao_disponivel",
-        severity: "info",
-        title: "Obra em execução — certificados disponíveis",
-        message: "Com o orçamento aprovado, pode registar avanços físicos por período (certificados de obra). Isto alimenta o cronograma e o financeiro — é distinto das medições de projecto.",
-        actions: [
-          { label: "Certificados", anchor: "certificados-obra" },
-          { label: "Cronograma", path: `/projectos/${projectId}/cronograma` },
-        ],
-      });
-    }
+    if (doc.status === "aprovado") hasApprovedBudget = true;
+  }
+
+  if (unpricedBudgets.length > 0) {
+    const totalItems = unpricedBudgets.reduce((sum, item) => sum + item.count, 0);
+    const message =
+      unpricedBudgets.length === 1
+        ? `${unpricedBudgets[0].count} item(ns) em «${unpricedBudgets[0].title}» não têm composição nem preço unitário. Ligue cada item ao catálogo ou preencha manualmente antes de submeter.`
+        : `${unpricedBudgets.length} orçamentos têm itens sem preço (${totalItems} no total). Ligue cada item ao catálogo ou preencha o preço antes de submeter.`;
+    guidance.push({
+      id: "orcamento_sem_preco",
+      severity: "warning",
+      title: unpricedBudgets.length === 1 ? "Orçamento com itens sem preço" : "Orçamentos com itens sem preço",
+      message,
+      actions: [
+        ...unpricedBudgets.slice(0, 3).map((doc, index) => ({
+          label: unpricedBudgets.length === 1 ? "Abrir orçamento" : `Abrir orçamento ${index + 1}`,
+          path: `/documentos/${doc.id}?semPreco=1`,
+        })),
+        { label: "Catálogo", path: "/catalogo" },
+      ],
+    });
+  }
+
+  if (reviewReadyBudgets.length > 0) {
+    guidance.push({
+      id: "orcamento_nao_aprovado",
+      severity: "info",
+      title: reviewReadyBudgets.length === 1 ? "Orçamento pronto para revisão" : "Orçamentos prontos para revisão",
+      message:
+        reviewReadyBudgets.length === 1
+          ? "Preços preenchidos. Aprove o orçamento para desbloquear certificados de obra e cronograma financeiro."
+          : `${reviewReadyBudgets.length} orçamentos têm preços preenchidos e podem ser aprovados.`,
+      actions: reviewReadyBudgets.slice(0, 3).map((doc, index) => ({
+        label: reviewReadyBudgets.length === 1 ? "Rever orçamento" : `Rever orçamento ${index + 1}`,
+        path: `/documentos/${doc.id}`,
+      })),
+    });
+  }
+
+  if (hasApprovedBudget) {
+    guidance.push({
+      id: "certificacao_disponivel",
+      severity: "info",
+      title: "Obra em execução — certificados disponíveis",
+      message: "Com o orçamento aprovado, pode registar avanços físicos por período (certificados de obra). Isto alimenta o cronograma e o financeiro — é distinto das medições de projecto.",
+      actions: [
+        { label: "Certificados", anchor: "certificados-obra" },
+        { label: "Cronograma", path: `/projectos/${projectId}/cronograma` },
+      ],
+    });
   }
 
   return {

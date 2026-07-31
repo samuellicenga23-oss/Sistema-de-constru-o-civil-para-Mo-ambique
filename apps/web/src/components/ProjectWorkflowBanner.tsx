@@ -18,8 +18,8 @@ export default function ProjectWorkflowBanner({
 
   return (
     <div className="space-y-2 xl:col-span-2">
-      {status.guidance.map((item, index) => (
-        <article key={`${item.id}-${index}`} className={`rounded-xl border px-4 py-3 text-sm ${TONE[item.severity]}`}>
+      {status.guidance.map((item) => (
+        <article key={item.id} className={`rounded-xl border px-4 py-3 text-sm ${TONE[item.severity]}`}>
           <p className="font-semibold">{item.title}</p>
           <p className="mt-1 text-[13px] leading-relaxed opacity-90">{item.message}</p>
           {item.actions.length > 0 && (
