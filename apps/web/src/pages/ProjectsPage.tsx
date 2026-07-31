@@ -6,6 +6,9 @@ import { plantsApi, type PlantProcessingProgress, type PlantUploadDiscipline } f
 import Layout from "../components/Layout";
 import Modal from "../components/Modal";
 import ConfirmDialog from "../components/ConfirmDialog";
+import LoadingState from "../components/LoadingState";
+import EmptyState from "../components/EmptyState";
+import AlertBanner from "../components/AlertBanner";
 import { IconFolder, IconPlus, IconTrash } from "../components/icons";
 import { UNITS, type Unit } from "@sigo/shared";
 
@@ -132,7 +135,7 @@ export default function ProjectsPage() {
       const uploadedPlants = [];
       for (let index = 0; index < technicalFiles.length; index++) {
         const entry = technicalFiles[index];
-        setCreateProgress(`A analisar ${entry.label}...`);
+        setCreateProgress(`A enviar ${entry.label}...`);
         const updateProgress = (progress: PlantProcessingProgress) => {
           const filePercent = progress.processingProgress;
           const overall = Math.round(((index + filePercent / 100) / technicalFiles.length) * 100);
@@ -157,11 +160,12 @@ export default function ProjectsPage() {
       } else if (startMode === "manual" && created.defaultDocumentId) {
         navigate(workspace === "medicoes" ? `/documentos/${created.defaultDocumentId}?assistente=1` : `/documentos/${created.defaultDocumentId}`);
       } else {
-        navigate(uploadedPlants.length > 0 ? `/plantas/${uploadedPlants[0].id}` : `/projectos/${created.id}#plantas-do-projecto`);
+        navigate(`/projectos/${created.id}#plantas-do-projecto`);
       }
     } catch (err) {
       if (createdProjectId) {
-        navigate(`/projectos/${createdProjectId}?uploadErro=1`);
+        const motivo = startMode === "importar" ? "excel" : startMode === "plantas" ? "planta" : "geral";
+        navigate(`/projectos/${createdProjectId}?uploadErro=1&motivo=${motivo}`);
       } else {
         setError(err instanceof Error ? err.message : "Erro ao criar projecto");
       }
@@ -176,8 +180,8 @@ export default function ProjectsPage() {
     <Layout
       title={workspace === "medicoes" ? "Medições" : "Orçamentos"}
       subtitle={workspace === "medicoes"
-        ? `${workspaceProjects.length} trabalho(s) de medição · plantas, memória de cálculo e quantidades`
-        : `${workspaceProjects.length} orçamento(s) · quantidades, composições e preços`}
+        ? `${workspaceProjects.length} obra(s) · quantidades e plantas`
+        : `${workspaceProjects.length} obra(s) · preços e composições`}
       actions={
         <button onClick={() => setShowForm((s) => !s)} className="btn btn-primary btn-sm">
           <IconPlus className="w-3.5 h-3.5" />
@@ -186,7 +190,7 @@ export default function ProjectsPage() {
       }
     >
       <div className="mx-auto w-full max-w-6xl space-y-5">
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {error && <AlertBanner tone="error" onDismiss={() => setError(null)}>{error}</AlertBanner>}
 
         {showForm && (
           <Modal
@@ -325,29 +329,34 @@ export default function ProjectsPage() {
         )}
 
         {!loading && workspaceProjects.length > 0 && (
-          <div className="toolbar">
-            <div className="min-w-[240px] flex-1 max-w-md">
-              <label className="label">Pesquisar {workspace === "medicoes" ? "medições" : "orçamentos"}</label>
-              <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} className="input" placeholder="Nome, cliente ou zona" />
+          <div className="toolbar flex-col items-stretch gap-4 sm:flex-row sm:items-end">
+            <div className="min-w-0 flex-1">
+              <label className="label">Pesquisar</label>
+              <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} className="input w-full" placeholder="Nome, cliente ou zona" />
             </div>
-            <div className="flex items-center gap-6 px-2 text-sm">
-              <div><span className="block text-xs text-slate-400">Total</span><strong className="text-slate-900">{workspaceProjects.length}</strong></div>
-              <div><span className="block text-xs text-slate-400">Em MZN</span><strong className="text-slate-900">{workspaceProjects.filter((p) => p.currency === "MZN").length}</strong></div>
-              <div><span className="block text-xs text-slate-400">Em USD</span><strong className="text-slate-900">{workspaceProjects.filter((p) => p.currency === "USD").length}</strong></div>
+            <div className="kpi-strip shrink-0 sm:max-w-sm">
+              <div className="kpi-chip"><span className="block text-[10px] text-slate-400">Total</span><strong className="text-sm tabular-nums">{workspaceProjects.length}</strong></div>
+              <div className="kpi-chip"><span className="block text-[10px] text-slate-400">MZN</span><strong className="text-sm tabular-nums">{workspaceProjects.filter((p) => p.currency === "MZN").length}</strong></div>
+              <div className="kpi-chip"><span className="block text-[10px] text-slate-400">USD</span><strong className="text-sm tabular-nums">{workspaceProjects.filter((p) => p.currency === "USD").length}</strong></div>
             </div>
           </div>
         )}
 
         {loading ? (
-          <p className="text-sm text-gray-400 py-8 text-center">A carregar...</p>
+          <LoadingState />
         ) : workspaceProjects.length === 0 && !showForm ? (
-          <div className="card p-12 text-center">
-            <IconFolder className="w-10 h-10 mx-auto text-gray-300 mb-3" />
-            <p className="text-gray-500 mb-4">{workspace === "medicoes" ? "Ainda não há medições. Crie a primeira para obter quantidades a partir das plantas." : "Ainda não há orçamentos. Crie um ou envie uma medição concluída."}</p>
-            <button onClick={() => setShowForm(true)} className="btn btn-primary">
-              <IconPlus className="w-4 h-4" />
-              {workspace === "medicoes" ? "Criar medição" : "Criar orçamento"}
-            </button>
+          <div className="card">
+            <EmptyState
+              title={workspace === "medicoes" ? "Ainda não há medições." : "Ainda não há orçamentos."}
+              description={workspace === "medicoes" ? "Crie a primeira obra para obter quantidades." : "Crie um orçamento ou envie uma medição concluída."}
+              icon={<IconFolder className="h-6 w-6" />}
+              action={
+                <button onClick={() => setShowForm(true)} className="btn btn-primary">
+                  <IconPlus className="w-4 h-4" />
+                  {workspace === "medicoes" ? "Criar medição" : "Criar orçamento"}
+                </button>
+              }
+            />
           </div>
         ) : (
           <div className="card overflow-hidden">
@@ -376,7 +385,12 @@ export default function ProjectsPage() {
       {pendingDelete && (
         <ConfirmDialog
           title="Eliminar projecto?"
-          message={`O projecto “${pendingDelete.name}” e todos os mapas, plantas e autos associados serão eliminados definitivamente.`}
+          message={`Eliminar “${pendingDelete.name}”?`}
+          details={[
+            "Mapas de quantidades e orçamentos",
+            "Plantas, autos e documentos associados",
+            "Esta acção não pode ser desfeita",
+          ]}
           confirmLabel="Eliminar projecto"
           danger
           busy={deleting}

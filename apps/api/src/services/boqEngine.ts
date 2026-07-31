@@ -3,6 +3,7 @@ import { db } from "../db/index.js";
 import { budgetDocuments, budgetSections, lineItems } from "../db/schema.js";
 import { calculateBudgetTotals } from "./budgetTotals.js";
 import { technicalDescription } from "./technicalDescriptions.js";
+import { enrichLineItemTechnicalSpecs } from "./specEnrichment.js";
 
 export type LineItemNode = {
   id: string;
@@ -11,6 +12,7 @@ export type LineItemNode = {
   kind: "capitulo" | "grupo" | "item" | "nota";
   code: string | null;
   description: string;
+  technicalSpecification: string | null;
   unit: string | null;
   quantity: number | null;
   unitPrice: number | null;
@@ -83,12 +85,24 @@ export function hideInternalPricing(summary: BudgetDocumentSummary): BudgetDocum
   };
 }
 
-function buildTree(flatItems: (typeof lineItems.$inferSelect)[]): LineItemNode[] {
+function splitDescription(description: string): { label: string; embeddedSpec: string | null } {
+  const marker = "\n\n— Especificação técnica —\n";
+  const idx = description.indexOf(marker);
+  if (idx === -1) return { label: technicalDescription(description), embeddedSpec: null };
+  return {
+    label: technicalDescription(description.slice(0, idx).trim()),
+    embeddedSpec: description.slice(idx + marker.length).trim() || null,
+  };
+}
+
+function buildTree(flatItems: (typeof lineItems.$inferSelect)[], techSpecs: Map<string, string | null>): LineItemNode[] {
   const byId = new Map<string, LineItemNode>();
   for (const item of flatItems) {
+    const { label, embeddedSpec } = splitDescription(item.description);
     byId.set(item.id, {
       ...item,
-      description: technicalDescription(item.description),
+      description: label,
+      technicalSpecification: embeddedSpec ?? techSpecs.get(item.id) ?? null,
       quantity: item.quantity !== null ? Number(item.quantity) : null,
       unitPrice: item.unitPrice !== null ? Number(item.unitPrice) : null,
       sellingUnitPrice: null,
@@ -144,8 +158,11 @@ export async function getBudgetDocumentSummary(documentId: string): Promise<Budg
     ? await db.select().from(lineItems).where(inArray(lineItems.sectionId, sectionIds))
     : [];
 
+  const projectId = document.projectId;
+  const techSpecs = await enrichLineItemTechnicalSpecs(allItems, projectId);
+
   const sectionNodes: SectionNode[] = sections.map((section) => {
-    const items = buildTree(allItems.filter((i) => i.sectionId === section.id));
+    const items = buildTree(allItems.filter((i) => i.sectionId === section.id), techSpecs);
     const total = items.reduce((sum, i) => sum + i.totalPrice, 0);
     return { id: section.id, name: section.name, sortOrder: section.sortOrder, items, total, sellingTotal: 0 };
   });

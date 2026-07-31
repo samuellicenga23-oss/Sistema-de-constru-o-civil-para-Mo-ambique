@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { measurementApi, type MeasurementCertificateDetail, type MeasurementLine } from "../api/measurement";
 import Layout from "../components/Layout";
+import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import LabourByPhaseModal from "../components/LabourByPhaseModal";
 import { IconBack, IconClipboard } from "../components/icons";
 
@@ -10,6 +11,7 @@ function money(value: number) { return value.toLocaleString("pt-MZ", { minimumFr
 const STATUS_LABEL = { rascunho: "Em preparação", submetido: "Em fiscalização", aprovado: "Aprovado" } as const;
 
 export default function MeasurementCertificatePage() {
+  const { confirm, dialog } = useConfirmDialog();
   const { id } = useParams<{ id: string }>();
   const [data, setData] = useState<MeasurementCertificateDetail | null>(null);
   const [drafts, setDrafts] = useState<Record<string, { periodQty: string; notes: string; overrunReason: string }>>({});
@@ -42,13 +44,68 @@ export default function MeasurementCertificatePage() {
     if (!id) return;
     let decisionNote: string | undefined;
     if (status === "rascunho") { decisionNote = window.prompt("Motivo da devolução para correcção:")?.trim(); if (!decisionNote) return; }
-    const confirmation = status === "aprovado" ? "Aprovar este auto? O valor passará automaticamente para Contas a Receber e o progresso actualizará o cronograma." : status === "submetido" ? "Submeter este auto à fiscalização? As quantidades ficam bloqueadas até eventual devolução." : null;
-    if (confirmation && !window.confirm(confirmation)) return;
+    const confirmOpts =
+      status === "aprovado"
+        ? {
+            title: "Aprovar auto?",
+            message: "Aprovar este auto de medição?",
+            confirmLabel: "Aprovar",
+            details: ["O valor passará para Contas a Receber", "O progresso actualizará o cronograma"],
+          }
+        : status === "submetido"
+          ? {
+              title: "Submeter à fiscalização?",
+              message: "Submeter este auto à fiscalização?",
+              confirmLabel: "Submeter",
+              details: ["As quantidades ficam bloqueadas até eventual devolução"],
+            }
+          : null;
+    if (confirmOpts && !(await confirm(confirmOpts))) return;
     setBusy(true); setError(null);
     try { await measurementApi.updateStatus(id, status, decisionNote); await reload(); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "Erro ao alterar estado"); }
     finally { setBusy(false); }
   }
+
+  async function saveAllDirty() {
+    if (!data || data.certificate.status !== "rascunho") return;
+    const toSave = data.lines.filter((line) => {
+      const draft = drafts[line.id];
+      if (!draft) return false;
+      const qty = Number(draft.periodQty || 0);
+      return qty !== line.periodQty || (draft.notes || "") !== (line.notes ?? "") || (draft.overrunReason || "") !== (line.overrunReason ?? "");
+    });
+    if (toSave.length === 0) return;
+    setBusy(true);
+    setError(null);
+    try {
+      for (const line of toSave) {
+        const draft = drafts[line.id]!;
+        const periodQty = Number(draft.periodQty || 0);
+        const willOverrun = line.budgetedQty !== null && line.previousQty + periodQty > line.budgetedQty + 0.0001;
+        if (willOverrun && !draft.overrunReason.trim()) {
+          setError(`O item ${line.code ?? ""} ultrapassa o contratado. Indique a justificação.`);
+          return;
+        }
+        await measurementApi.updateLine(line.id, { periodQty, notes: draft.notes || null, overrunReason: draft.overrunReason || null });
+      }
+      await reload();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Erro ao guardar medições");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const dirtyLineIds = useMemo(() => {
+    if (!data || data.certificate.status !== "rascunho") return [] as string[];
+    return data.lines.filter((line) => {
+      const draft = drafts[line.id];
+      if (!draft) return false;
+      const qty = Number(draft.periodQty || 0);
+      return qty !== line.periodQty || (draft.notes || "") !== (line.notes ?? "") || (draft.overrunReason || "") !== (line.overrunReason ?? "");
+    }).map((l) => l.id);
+  }, [data, drafts]);
 
   const grouped = useMemo(() => {
     const map = new Map<string, MeasurementLine[]>();
@@ -88,7 +145,7 @@ export default function MeasurementCertificatePage() {
   const measuredItems = lines.filter((line) => line.periodQty > 0).length;
   const overruns = lines.filter((line) => line.hasOverrun).length;
 
-  return <Layout title={`Auto de Medição n.º ${certificate.number}`} subtitle={`${certificate.periodStartDate ? `${certificate.periodStartDate} — ` : "Até "}${certificate.periodDate} · ${STATUS_LABEL[certificate.status]}`} actions={<><button type="button" onClick={() => setShowLabour(true)} className="btn btn-secondary btn-sm"><IconClipboard className="h-4 w-4" /> Mão de obra por fase</button><Link to={`/projectos/${certificate.projectId}`} className="btn btn-ghost btn-sm"><IconBack className="h-4 w-4" /> Projecto</Link></>}>
+  return (<><Layout title={`Auto de Medição n.º ${certificate.number}`} subtitle={`${certificate.periodStartDate ? `${certificate.periodStartDate} — ` : "Até "}${certificate.periodDate} · ${STATUS_LABEL[certificate.status]}`} actions={<><button type="button" onClick={() => setShowLabour(true)} className="btn btn-secondary btn-sm"><IconClipboard className="h-4 w-4" /> Mão de obra por fase</button>{!locked && dirtyLineIds.length > 0 && <button type="button" disabled={busy} onClick={saveAllDirty} className="btn btn-primary btn-sm">Guardar {dirtyLineIds.length} alteração(ões)</button>}<Link to={`/projectos/${certificate.projectId}`} className="btn btn-ghost btn-sm"><IconBack className="h-4 w-4" /> Projecto</Link></>}>
     <div className="mx-auto w-full max-w-[1500px] space-y-5">
       {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
 
@@ -109,5 +166,5 @@ export default function MeasurementCertificatePage() {
       </div>
       {showLabour && <LabourByPhaseModal certificateId={certificate.id} onClose={() => setShowLabour(false)} />}
     </div>
-  </Layout>;
+  </Layout>{dialog}</>);
 }

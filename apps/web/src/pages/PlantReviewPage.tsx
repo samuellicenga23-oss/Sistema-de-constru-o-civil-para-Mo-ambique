@@ -192,21 +192,24 @@ export default function PlantReviewPage() {
         <section className="card overflow-hidden border-t-4 border-t-brand-600">
           <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-brand-700">Passo 2 de 4 · Confirmar dados</p>
-              <h2 className="mt-1 text-lg font-bold text-slate-900">A análise terminou. Reveja apenas o que precisa de confirmação.</h2>
+              <p className="text-xs font-semibold uppercase tracking-wide text-brand-700">Análise concluída</p>
+              <h2 className="mt-1 text-lg font-bold text-slate-900">Resumo da planta — confirme só se necessário</h2>
               <p className="mt-1 max-w-2xl text-sm text-slate-600">
-                O SIGO organizou este ficheiro por disciplina e juntará os dados encontrados ao diagnóstico de medição — sem criação manual de capítulos ou importação de Excel.
+                {rooms.length} compartimento(s) · {totalRoomsArea.toFixed(1)} m² · pode medir já ou corrigir pisos abaixo.
               </p>
             </div>
+            <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
             <button
               type="button"
               onClick={handleContinueToMeasurements}
               disabled={plant.processingStatus !== "concluido" || preparingMeasurements}
-              className="btn btn-primary shrink-0"
+              className="btn btn-primary"
             >
               <IconRuler className="h-4 w-4" />
-              {preparingMeasurements ? "A preparar..." : "Continuar para o diagnóstico"}
+              {preparingMeasurements ? "A abrir..." : "Medir agora"}
             </button>
+            <Link to={`/projectos/${plant.projectId}#plantas-do-projecto`} className="btn btn-secondary">Voltar ao projecto</Link>
+            </div>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-5 py-3 text-xs text-slate-600">
             <span>Tem outra disciplina? Adicione-a antes ou depois; os dados serão combinados automaticamente.</span>
@@ -215,20 +218,9 @@ export default function PlantReviewPage() {
         </section>
 
         {plant.documentAnalysis && (
-          <section className="card overflow-hidden">
-            <div className="border-b border-slate-200 px-5 py-4">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Leitura do documento</p>
-              <div className="mt-1 flex flex-wrap items-baseline justify-between gap-2">
-                <h2 className="section-title">
-                  {plant.documentAnalysis.isMultiDiscipline ? "Projecto completo separado automaticamente" : "Disciplina identificada automaticamente"}
-                </h2>
-                <span className="text-xs text-slate-500">{plant.documentAnalysis.pageCount} páginas no ficheiro original</span>
-              </div>
-              <p className="mt-1 text-sm text-slate-600">
-                O PDF original foi preservado. O SIGO organiza as folhas por especialidade antes de medir; os dados quantitativos apresentados abaixo dependem do que foi efectivamente reconhecido em cada secção.
-              </p>
-            </div>
-            <div className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-3">
+          <details className="card overflow-hidden">
+            <summary className="cursor-pointer px-5 py-4 font-semibold text-slate-900">Detalhes da leitura do PDF ({plant.documentAnalysis.pageCount} páginas)</summary>
+            <div className="grid gap-3 border-t border-slate-100 p-5 sm:grid-cols-2 lg:grid-cols-3">
               {plant.documentAnalysis.sections.map((section, index) => (
                 <div key={`${section.discipline}-${section.startPage}-${index}`} className={`rounded-lg border p-3 ${SECTION_STYLES[section.discipline]}`}>
                   <div className="flex items-start justify-between gap-3">
@@ -243,18 +235,8 @@ export default function PlantReviewPage() {
                 </div>
               ))}
             </div>
-          </section>
+          </details>
         )}
-
-        <div className="card card-pad text-xs text-gray-500 leading-relaxed">
-          <p className="font-medium text-gray-700 mb-1">Como os dados entram no cálculo</p>
-          <p>
-            Os dados extraídos abaixo não são escritos directamente no Mapa de Quantidades — servem para{" "}
-            <strong>ajustar as quantidades dos itens-padrão já existentes</strong> (do capítulo de fundações ao de
-            acabamentos) através do Assistente de Medições, sem duplicar um item por compartimento/elemento nem criar
-            capítulos novos.
-          </p>
-        </div>
 
         {gaps.length > 0 && (
           <section className="card card-pad border-amber-200 bg-amber-50">

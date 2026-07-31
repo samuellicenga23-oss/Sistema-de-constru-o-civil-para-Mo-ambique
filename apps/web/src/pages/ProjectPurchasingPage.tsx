@@ -14,6 +14,7 @@ import {
 } from "../api/purchasing";
 import { scheduleApi, type ScheduleTask } from "../api/schedule";
 import Layout from "../components/Layout";
+import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { MetricCard, SectionHeader } from "../components/WorkspaceUI";
 import ProjectWorkspaceNav from "../components/ProjectWorkspaceNav";
 import Modal from "../components/Modal";
@@ -66,6 +67,7 @@ function stockMovementTotals(movement: StockMovement, ivaRate: number) {
 }
 
 export default function ProjectPurchasingPage() {
+  const { confirm, dialog } = useConfirmDialog();
   const { projectId } = useParams<{ projectId: string }>();
   const [project, setProject] = useState<Project | null>(null);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -243,7 +245,13 @@ export default function ProjectPurchasingPage() {
   }
 
   async function handleDeleteOrder(order: PurchaseOrder) {
-    if (!window.confirm(`Eliminar a ordem de compra de "${order.supplierName}"? Esta acção não pode ser desfeita.`)) return;
+    const ok = await confirm({
+      title: "Eliminar ordem de compra?",
+      message: `Eliminar ordem de "${order.supplierName}"?`,
+      confirmLabel: "Eliminar",
+      danger: true,
+    });
+    if (!ok) return;
     setError(null);
     try {
       await purchasingApi.deleteOrder(order.id);
@@ -278,7 +286,13 @@ export default function ProjectPurchasingPage() {
   }
 
   async function handleDeleteMovement(m: StockMovement) {
-    if (!window.confirm(`Eliminar este movimento de stock (${m.materialName})? Esta acção não pode ser desfeita.`)) return;
+    const ok = await confirm({
+      title: "Eliminar movimento?",
+      message: `Eliminar movimento de stock (${m.materialName})?`,
+      confirmLabel: "Eliminar",
+      danger: true,
+    });
+    if (!ok) return;
     setError(null);
     try {
       await purchasingApi.deleteStockMovement(m.id);
@@ -293,6 +307,7 @@ export default function ProjectPurchasingPage() {
   }
 
   return (
+    <>
     <Layout
       title={`Compras e Armazém — ${project.name}`}
       subtitle="Ordens de compra a fornecedores e stock de materiais desta obra — ligado ao Catálogo de Preços"
@@ -649,5 +664,7 @@ export default function ProjectPurchasingPage() {
         </section>}
       </div>
     </Layout>
+    {dialog}
+    </>
   );
 }

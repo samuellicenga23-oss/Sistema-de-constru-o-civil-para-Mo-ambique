@@ -100,7 +100,14 @@ export type ExtractedRebarLine = {
 export const plantsApi = {
   list: (projectId: string) => request<Plant[]>(`/projects/${projectId}/plants`),
 
-  upload: async (projectId: string, file: File, discipline: PlantUploadDiscipline, onProgress?: (progress: PlantProcessingProgress) => void) => {
+  upload: async (
+    projectId: string,
+    file: File,
+    discipline: PlantUploadDiscipline = "auto",
+    onProgress?: (progress: PlantProcessingProgress) => void,
+    options?: { waitForCompletion?: boolean },
+  ) => {
+    const waitForCompletion = options?.waitForCompletion ?? false;
     const plantId = crypto.randomUUID();
     const form = new FormData();
     form.append("clientPlantId", plantId);
@@ -108,7 +115,7 @@ export const plantsApi = {
     form.append("file", file);
     onProgress?.({ id: plantId, processingStatus: "pendente", processingProgress: 3, processingStage: "A enviar o ficheiro", processingCurrentPage: null, processingTotalPages: null, processingStartedAt: new Date().toISOString(), processingUpdatedAt: new Date().toISOString(), errorMessage: null });
     let stopped = false;
-    const watcher = watchProgress(plantId, onProgress, () => stopped);
+    const watcher = waitForCompletion ? watchProgress(plantId, onProgress, () => stopped) : null;
     try {
       const res = await fetch(`/api/projects/${projectId}/plants`, { method: "POST", credentials: "include", body: form });
       if (!res.ok) {
@@ -118,30 +125,30 @@ export const plantsApi = {
       }
       const plant = await res.json() as Plant;
       onProgress?.(plant);
-      // O POST devolve logo que o ficheiro fica gravado — a leitura continua no servidor. Espera
-      // aqui que o polling confirme "concluido"/"erro" antes de devolver, para quem chama
-      // continuar a receber o resultado final da leitura, não apenas a confirmação do upload.
+      if (!waitForCompletion) return plant;
       const finalProgress = await watcher;
       return finalProgress ? { ...plant, ...finalProgress } : plant;
     } finally {
       stopped = true;
-      await watcher;
+      if (watcher) await watcher;
     }
   },
 
   detail: (id: string) => request<{ plant: Plant; rooms: ExtractedRoom[]; rebarSchedules: ExtractedRebarLine[] }>(`/plants/${id}`),
 
-  reprocess: async (id: string, onProgress?: (progress: PlantProcessingProgress) => void) => {
+  reprocess: async (id: string, onProgress?: (progress: PlantProcessingProgress) => void, options?: { waitForCompletion?: boolean }) => {
+    const waitForCompletion = options?.waitForCompletion ?? true;
     let stopped = false;
-    const watcher = watchProgress(id, onProgress, () => stopped);
+    const watcher = waitForCompletion ? watchProgress(id, onProgress, () => stopped) : null;
     try {
       const plant = await request<Plant>(`/plants/${id}/reprocess`, { method: "POST" });
       onProgress?.(plant);
+      if (!waitForCompletion) return plant;
       const finalProgress = await watcher;
       return finalProgress ? { ...plant, ...finalProgress } : plant;
     } finally {
       stopped = true;
-      await watcher;
+      if (watcher) await watcher;
     }
   },
 

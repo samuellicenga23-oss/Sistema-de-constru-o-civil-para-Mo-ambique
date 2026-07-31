@@ -7,7 +7,7 @@ import { IconBack, IconPlus, IconRuler, IconTrash } from "./icons";
 import CalculationReportView from "./CalculationReportView";
 import ModalPortal from "./ModalPortal";
 
-type RoomForm = { key: string; name: string; type: "seco" | "humido"; length: string; width: string };
+type RoomForm = { key: string; name: string; type: "seco" | "humido"; length: string; width: string; areaOnly?: boolean };
 type FloorForm = { key: string; label?: string; ceilingHeight: string; perimeter: string; rooms: RoomForm[] };
 
 const UNASSIGNED_FLOOR = "Piso não identificado";
@@ -71,21 +71,17 @@ const SOIL_TYPE_LABELS: Record<SoilType, string> = {
   argila_compacta: "Argila compacta",
 };
 
-// A planta de arquitectura só dá a área de cada compartimento, não o comprimento/largura —
-// aproxima-se como quadrado (lado = √área) só para o cálculo de perímetro de paredes; o
-// utilizador pode corrigir para as dimensões reais em qualquer compartimento.
+// A planta só dá a área — guarda-se num único campo (areaOnly) em vez de duplicar o valor
+// em comprimento e largura iguais (√área), o que parecia “medição duplicada” no ecrã.
 function roomsFromExtracted(rooms: ExtractedRoom[]): RoomForm[] {
-  return rooms.map((r) => {
-    const area = Number(r.areaM2);
-    const side = Math.sqrt(area);
-    return {
-      key: nextKey(),
-      name: r.number ? `${r.name} (${r.number})` : r.name,
-      type: classifyRoomType(r.name),
-      length: side.toFixed(2),
-      width: side.toFixed(2),
-    };
-  });
+  return rooms.map((r) => ({
+    key: nextKey(),
+    name: r.number ? `${r.name} (${r.number})` : r.name,
+    type: classifyRoomType(r.name),
+    length: Number(r.areaM2).toFixed(2),
+    width: "",
+    areaOnly: true,
+  }));
 }
 
 function newFloor(): FloorForm {
@@ -99,7 +95,7 @@ function newFloor(): FloorForm {
 
 function floorFromRooms(label: string | undefined, rooms: ExtractedRoom[]): FloorForm {
   const roomForms = roomsFromExtracted(rooms);
-  const totalArea = roomForms.reduce((s, r) => s + Number(r.length) * Number(r.width), 0);
+  const totalArea = roomForms.reduce((s, r) => s + Number(r.length), 0);
   return {
     key: nextKey(),
     label,
@@ -123,7 +119,7 @@ function floorsFromExtractedRooms(rooms: ExtractedRoom[]): FloorForm[] {
   return labels.map((label) => floorFromRooms(label, groups.get(label)!));
 }
 
-const STEPS = ["Pisos e Compartimentos", "Estrutura", "Hidráulica", "Custos", "Revisão"];
+const STEPS = ["Espaços", "Estrutura", "Confirmar"];
 
 const FOUNDATION_LABELS: Record<FoundationType, string> = {
   sapata_isolada: "Sapata isolada",
@@ -160,8 +156,8 @@ export default function QuickEstimateWizard({
 }: Props) {
   const hasStructuralFootings = !!structuralSummary && structuralSummary.footingsCount > 0;
   const hasArchitectureRooms = !!architectureRooms && architectureRooms.length > 0;
+  const hasPlantData = hasArchitectureRooms || hasStructuralFootings;
   const [step, setStep] = useState(0);
-  const [readinessAccepted, setReadinessAccepted] = useState(false);
   const [floors, setFloors] = useState<FloorForm[]>(
     hasArchitectureRooms ? floorsFromExtractedRooms(architectureRooms!) : [newFloor()]
   );
@@ -252,21 +248,23 @@ export default function QuickEstimateWizard({
     const mainFloors = floors.filter((f) => !/anexo|cobertura/i.test(f.label ?? ""));
     const candidates = mainFloors.length > 0 ? mainFloors : floors;
     const topFloor = candidates[candidates.length - 1];
-    const topFloorArea = topFloor.rooms.reduce((s, r) => s + (Number(r.length) || 0) * (Number(r.width) || 0), 0);
+    const topFloorArea = topFloor.rooms.reduce((s, r) => s + roomArea(r), 0);
     if (topFloorArea > 0) setRoofArea((topFloorArea * 1.1).toFixed(2));
   }, [floors, roofAreaTouched]);
 
-  // Nº de aparelhos sanitários sugerido a partir dos compartimentos húmidos do Passo 1 —
-  // só a primeira vez que se entra no passo de Hidráulica, para não sobrepor edições depois.
+  // Sugere aparelhos sanitários e habitantes a partir dos compartimentos — uma vez, ao abrir.
   useEffect(() => {
-    if (step !== 2 || hydraulicInitialized) return;
+    if (hydraulicInitialized) return;
     const wetCount = floors.reduce((s, f) => s + f.rooms.filter((r) => r.type === "humido").length, 0);
+    const totalRooms = floors.reduce((s, f) => s + f.rooms.length, 0);
     const suggested = Math.max(1, wetCount);
     setToilets(String(suggested));
     setSinks(String(suggested));
     setShowers(String(suggested));
+    setKitchenSinks(String(Math.max(1, floors.some((f) => f.rooms.some((r) => /cozinha/i.test(r.name))) ? 1 : 0)));
+    setSepticPeople(String(Math.max(4, totalRooms * 2)));
     setHydraulicInitialized(true);
-  }, [step, hydraulicInitialized, floors]);
+  }, [floors, hydraulicInitialized]);
 
   function updateFloor(key: string, patch: Partial<FloorForm>) {
     setFloors((fs) => fs.map((f) => (f.key === key ? { ...f, ...patch } : f)));
@@ -306,12 +304,47 @@ export default function QuickEstimateWizard({
     });
   }
 
+  function roomArea(room: RoomForm): number {
+    if (room.areaOnly) return Number(room.length) || 0;
+    return (Number(room.length) || 0) * (Number(room.width) || 0);
+  }
+
+  function roomDimensions(room: RoomForm): { length: number; width: number } {
+    if (room.areaOnly) {
+      const area = Number(room.length);
+      if (!(area > 0)) return { length: 0, width: 0 };
+      const side = Math.sqrt(area);
+      return { length: side, width: side };
+    }
+    return { length: Number(room.length), width: Number(room.width) };
+  }
+
+  function expandRoomDimensions(floorKey: string, roomKey: string) {
+    setFloors((fs) =>
+      fs.map((f) => {
+        if (f.key !== floorKey) return f;
+        return {
+          ...f,
+          rooms: f.rooms.map((r) => {
+            if (r.key !== roomKey || !r.areaOnly) return r;
+            const { length, width } = roomDimensions(r);
+            return { ...r, areaOnly: false, length: length.toFixed(2), width: width.toFixed(2) };
+          }),
+        };
+      }),
+    );
+  }
+
   const step1Valid = floors.every(
     (f) =>
       Number(f.ceilingHeight) > 0 &&
       Number(f.perimeter) > 0 &&
       f.rooms.length > 0 &&
-      f.rooms.every((r) => r.name.trim().length > 0 && Number(r.length) > 0 && Number(r.width) > 0)
+      f.rooms.every((r) => {
+        if (!r.name.trim()) return false;
+        if (r.areaOnly) return Number(r.length) > 0;
+        return Number(r.length) > 0 && Number(r.width) > 0;
+      })
   );
 
   const step2Valid =
@@ -327,12 +360,12 @@ export default function QuickEstimateWizard({
     { label: "Vigas estruturais", ready: Number(beamConcreteVolumeM3) > 0, impact: "Indique o volume de betão das vigas para evitar um rácio genérico.", targetStep: 1 },
     { label: "Lajes e espessuras", ready: Number(floorSlabThicknessM) > 0, impact: "Indique a espessura real da laje para calcular o volume.", targetStep: 1 },
     { label: "Mapa de aço", ready: Number(steelWeightKg) > 0, impact: "Indique o peso do mapa de aço para evitar estimativas por kg/m³.", targetStep: 1 },
-    { label: "Redes hidráulicas e sanitárias", ready: Boolean(sewerPipe110M || sewerPipe40M || waterSupplyPipeM), impact: "Confirme comprimentos de tubagem; contagens de aparelhos não definem o traçado real.", targetStep: 2 },
+    { label: "Redes hidráulicas", ready: true, impact: "Estimadas a partir dos compartimentos húmidos e perímetro — ajuste na confirmação se necessário.", targetStep: 2 },
     {
       label: "Custos críticos do catálogo",
       ready: criticalCostsReady,
-      impact: "Cimento, aço e bloco devem ter custos válidos no catálogo; a zona do projecto tem prioridade quando possui preço próprio.",
-      targetStep: 3,
+      impact: "Cimento, aço e bloco — aviso na confirmação; não bloqueia a medição.",
+      targetStep: 2,
     },
   ];
   const readyCount = readinessChecks.filter((item) => item.ready).length;
@@ -352,7 +385,10 @@ export default function QuickEstimateWizard({
         floors: floors.map((f) => ({
           ceilingHeight: Number(f.ceilingHeight),
           perimeter: Number(f.perimeter),
-          rooms: f.rooms.map((r) => ({ name: r.name.trim(), type: r.type, length: Number(r.length), width: Number(r.width) })),
+          rooms: f.rooms.map((r) => {
+            const { length, width } = roomDimensions(r);
+            return { name: r.name.trim(), type: r.type, length, width };
+          }),
         })),
         foundationType,
         ...(foundationType === "laje"
@@ -414,7 +450,7 @@ export default function QuickEstimateWizard({
           </button>
         </div>
 
-        {!result && readinessAccepted && (
+        {!result && (
           <div className="flex items-center gap-1 px-5 py-3 border-b border-gray-100 overflow-x-auto">
             {STEPS.map((label, i) => (
               <div key={label} className="flex items-center gap-1 shrink-0">
@@ -435,78 +471,15 @@ export default function QuickEstimateWizard({
         <div className="p-5 overflow-y-auto flex-1">
           {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
 
-          {!result && !readinessAccepted ? (
-            <div className="space-y-5">
-              <div>
-                <div className="flex items-end justify-between gap-3">
-                  <div><p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Diagnóstico antes de medir</p><h3 className="mt-1 text-xl font-bold text-slate-900">Prontidão dos dados: {readinessPercent}%</h3></div>
-                  <span className={`badge ${readinessPercent >= 75 ? "badge-green" : readinessPercent >= 45 ? "badge-yellow" : "badge-red"}`}>{readyCount} de {readinessChecks.length} confirmados</span>
-                </div>
-                <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100"><div className={`h-full ${readinessPercent >= 75 ? "bg-emerald-500" : readinessPercent >= 45 ? "bg-amber-500" : "bg-red-500"}`} style={{ width: `${readinessPercent}%` }} /></div>
-                <p className="mt-3 text-sm text-slate-600">O SIGO não vai esconder pressupostos. Veja primeiro o que já está confirmado, o que falta e onde uma estimativa genérica seria usada.</p>
-              </div>
-              <div className="divide-y divide-slate-200 rounded-xl border border-slate-200">
-                {readinessChecks.map((item) => (
-                  <div key={item.label} className="flex flex-wrap items-start gap-3 p-3.5 sm:flex-nowrap">
-                    <span className={`mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full text-xs font-bold ${item.ready ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{item.ready ? "✓" : "!"}</span>
-                    <div className="min-w-0 flex-1"><p className="text-sm font-medium text-slate-900">{item.label}</p><p className="mt-0.5 text-xs text-slate-500">{item.ready ? "Dados preenchidos; pode confirmar ou alterar." : item.impact}</p></div>
-                    <button type="button" className="action-link ml-8 shrink-0 sm:ml-0" onClick={() => { setReadinessAccepted(true); setStep(item.targetStep); }}>
-                      {item.ready ? "Alterar" : "Indicar dados"}
-                    </button>
-                  </div>
-                ))}
-              </div>
-              <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"><strong>Pode continuar com estimativas,</strong> mas cada dado em falta ficará identificado no relatório final para revisão e ponderação do utilizador.</div>
-            </div>
-          ) : result ? (
-            <div className="space-y-4">
-              <div className="rounded-lg bg-green-50 border border-green-200 p-4">
-                <p className="font-medium text-green-800">
-                  {result.itemsUpdated} itens do Mapa de Quantidades foram preenchidos automaticamente.
-                </p>
-                <p className="text-sm text-green-700 mt-1">
-                  As quantidades ficam identificadas como "estimativa" — pode abrir a régua de medições em qualquer item e
-                  ajustar como preferir.
-                </p>
-              </div>
-              <dl className="grid grid-cols-2 gap-3 text-sm">
-                <div className="card card-pad !p-3">
-                  <dt className="muted">Área total construída</dt>
-                  <dd className="font-semibold text-gray-900">{result.summary.totalBuiltArea.toFixed(2)} m²</dd>
-                </div>
-                <div className="card card-pad !p-3">
-                  <dt className="muted">Área do piso térreo</dt>
-                  <dd className="font-semibold text-gray-900">{result.summary.groundFloorArea.toFixed(2)} m²</dd>
-                </div>
-                <div className="card card-pad !p-3">
-                  <dt className="muted">Volume de betão estrutural</dt>
-                  <dd className="font-semibold text-gray-900">{result.summary.concreteVolume.toFixed(2)} m³</dd>
-                </div>
-                <div className="card card-pad !p-3">
-                  <dt className="muted">Peso de aço estimado</dt>
-                  <dd className="font-semibold text-gray-900">{result.summary.steelWeight.toFixed(0)} kg</dd>
-                </div>
-                <div className="card card-pad !p-3">
-                  <dt className="muted">Área de paredes exteriores</dt>
-                  <dd className="font-semibold text-gray-900">{result.summary.totalExteriorWallArea.toFixed(2)} m²</dd>
-                </div>
-                <div className="card card-pad !p-3">
-                  <dt className="muted">Compartimentos húmidos</dt>
-                  <dd className="font-semibold text-gray-900">{result.summary.wetRoomsCount}</dd>
-                </div>
-                <div className="card card-pad !p-3">
-                  <dt className="muted">Volume de betão em fundações</dt>
-                  <dd className="font-semibold text-gray-900">{result.summary.footingConcreteVolume.toFixed(2)} m³</dd>
-                </div>
-                <div className="card card-pad !p-3">
-                  <dt className="muted">Aparelhos sanitários previstos</dt>
-                  <dd className="font-semibold text-gray-900">{result.summary.totalFixtures}</dd>
-                </div>
-              </dl>
-              <CalculationReportView entries={result.report} />
-            </div>
-          ) : (
+          {!result ? (
             <>
+              {step === 0 && readinessPercent < 100 && (
+                <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                  <span className={`badge ${readinessPercent >= 75 ? "badge-green" : "badge-yellow"}`}>{readinessPercent}% prontidão</span>
+                  <span>{readyCount} de {readinessChecks.length} grupos de dados confirmados — pode continuar; o relatório marca estimativas.</span>
+                  {hasPlantData && <span className="text-brand-700">Dados da planta importados.</span>}
+                </div>
+              )}
               {step === 0 && (
                 <div className="space-y-4">
                   <p className="text-sm text-gray-500">
@@ -521,10 +494,8 @@ export default function QuickEstimateWizard({
                         {architecturePlantName ? ` (${architecturePlantName})` : ""}, em {floors.length} piso(s).
                       </p>
                       <p className="mt-1 text-brand-700">
-                        A planta só dá a área de cada compartimento — o comprimento/largura abaixo são uma aproximação
-                        (quadrado de área equivalente). Corrija-os se souber as dimensões reais, para o perímetro das
-                        paredes ficar mais exacto. O piso de cada compartimento já foi confirmado no ecrã da planta —
-                        se precisar de o corrigir, volte lá.
+                        A planta traz a área de cada compartimento — use o campo «Área (m²)» abaixo.
+                        Se souber comprimento e largura reais, clique em «Dimensões» no compartimento.
                       </p>
                     </div>
                   )}
@@ -575,42 +546,79 @@ export default function QuickEstimateWizard({
 
                       <div className="space-y-2">
                         {floor.rooms.map((room) => (
-                          <div key={room.key} className="grid grid-cols-2 items-center gap-2 sm:grid-cols-[1fr_6rem_5rem_5rem_auto]">
-                            <input
-                              value={room.name}
-                              onChange={(e) => updateRoom(floor.key, room.key, { name: e.target.value })}
-                              className="input input-sm col-span-2 sm:col-span-1"
-                              placeholder="Nome (ex: Quarto 1)"
-                            />
-                            <select
-                              value={room.type}
-                              onChange={(e) => updateRoom(floor.key, room.key, { type: e.target.value as "seco" | "humido" })}
-                              className="input input-sm"
+                          <div key={room.key} className="space-y-1.5">
+                            <div
+                              className={
+                                room.areaOnly
+                                  ? "grid grid-cols-[1fr_6rem_6rem_auto] items-end gap-2 sm:grid-cols-[1fr_6rem_7rem_auto]"
+                                  : "grid grid-cols-2 items-end gap-2 sm:grid-cols-[1fr_6rem_5rem_5rem_auto]"
+                              }
                             >
-                              <option value="seco">Seco</option>
-                              <option value="humido">Húmido</option>
-                            </select>
-                            <input
-                              type="number"
-                              step="0.1"
-                              min="0"
-                              value={room.length}
-                              onChange={(e) => updateRoom(floor.key, room.key, { length: e.target.value })}
-                              className="input input-sm"
-                              placeholder="Compr. m"
-                            />
-                            <input
-                              type="number"
-                              step="0.1"
-                              min="0"
-                              value={room.width}
-                              onChange={(e) => updateRoom(floor.key, room.key, { width: e.target.value })}
-                              className="input input-sm"
-                              placeholder="Larg. m"
-                            />
-                            <button onClick={() => removeRoom(floor.key, room.key)} className="icon-btn-danger">
-                              <IconTrash className="w-4 h-4" />
-                            </button>
+                              <input
+                                value={room.name}
+                                onChange={(e) => updateRoom(floor.key, room.key, { name: e.target.value })}
+                                className="input input-sm col-span-2 sm:col-span-1"
+                                placeholder="Nome (ex: Quarto 1)"
+                              />
+                              <select
+                                value={room.type}
+                                onChange={(e) => updateRoom(floor.key, room.key, { type: e.target.value as "seco" | "humido" })}
+                                className="input input-sm"
+                              >
+                                <option value="seco">Seco</option>
+                                <option value="humido">Húmido</option>
+                              </select>
+                              {room.areaOnly ? (
+                                <div>
+                                  <label className="mb-0.5 block text-[10px] font-medium text-slate-500">Área (m²)</label>
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    value={room.length}
+                                    onChange={(e) => updateRoom(floor.key, room.key, { length: e.target.value })}
+                                    className="input input-sm"
+                                  />
+                                </div>
+                              ) : (
+                                <>
+                                  <div>
+                                    <label className="mb-0.5 block text-[10px] font-medium text-slate-500">Compr. (m)</label>
+                                    <input
+                                      type="number"
+                                      step="0.1"
+                                      min="0"
+                                      value={room.length}
+                                      onChange={(e) => updateRoom(floor.key, room.key, { length: e.target.value })}
+                                      className="input input-sm"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="mb-0.5 block text-[10px] font-medium text-slate-500">Larg. (m)</label>
+                                    <input
+                                      type="number"
+                                      step="0.1"
+                                      min="0"
+                                      value={room.width}
+                                      onChange={(e) => updateRoom(floor.key, room.key, { width: e.target.value })}
+                                      className="input input-sm"
+                                    />
+                                  </div>
+                                </>
+                              )}
+                              <button onClick={() => removeRoom(floor.key, room.key)} className="icon-btn-danger self-end">
+                                <IconTrash className="w-4 h-4" />
+                              </button>
+                            </div>
+                            {room.areaOnly && (
+                              <button
+                                type="button"
+                                onClick={() => expandRoomDimensions(floor.key, room.key)}
+                                className="text-[11px] font-medium text-brand-700 hover:text-brand-900"
+                              >
+                                Dimensões (compr. × larg.)
+                              </button>
+                            )}
                           </div>
                         ))}
                         <button onClick={() => addRoom(floor.key)} className="btn btn-ghost btn-sm">
@@ -880,12 +888,38 @@ export default function QuickEstimateWizard({
               )}
 
               {step === 2 && (
-                <div className="space-y-4 max-w-md">
-                  <p className="text-sm text-gray-500">
-                    Indique os aparelhos sanitários previstos — os valores já vêm sugeridos a partir dos compartimentos
-                    húmidos indicados no Passo 1, mas pode ajustar livremente.
-                  </p>
-                  <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-4 text-sm">
+                  <p className="text-gray-500">Confirme os dados e ajuste instalações sanitárias se necessário. Tubagens são estimadas automaticamente pelo motor de cálculo.</p>
+                  {floors.map((f, i) => (
+                    <div key={f.key} className="rounded-lg border border-gray-200 p-3">
+                      <p className="font-medium text-gray-900 mb-1">
+                        {f.label || `Piso ${i + 1}`} — pé-direito {f.ceilingHeight} m, perímetro {f.perimeter} m
+                      </p>
+                      <p className="text-gray-500 text-xs">
+                        {f.rooms.map((r) => {
+                          const dims = roomDimensions(r);
+                          const area = roomArea(r);
+                          return r.areaOnly
+                            ? `${r.name} (${r.type}, ${area.toFixed(2)} m²)`
+                            : `${r.name} (${r.type}, ${dims.length}×${dims.width} m)`;
+                        }).join(" · ")}
+                      </p>
+                    </div>
+                  ))}
+                  <div className="rounded-lg border border-gray-200 p-3 text-gray-500">
+                    Fundação: <span className="text-gray-900">{FOUNDATION_LABELS[foundationType]}</span>
+                    {foundationType === "laje" ? (
+                      <span className="text-gray-900"> (espessura {slabThickness} m)</span>
+                    ) : (
+                      <span className="text-gray-900"> ({footingCount} sapatas × {footingAvgArea} m² × {footingAvgDepth} m)</span>
+                    )}
+                    {" · Betão: "}<span className="text-gray-900">{concreteClass}</span>
+                    {" · Cobertura: "}<span className="text-gray-900">{ROOF_LABELS[roofType]} ({roofArea} m²)</span>
+                  </div>
+
+                  <div className="rounded-xl border border-slate-200 p-4">
+                    <p className="text-sm font-semibold text-slate-900 mb-3">Instalações sanitárias</p>
+                    <div className="grid grid-cols-2 gap-3 max-w-md">
                     <div>
                       <label className="label">Sanitas</label>
                       <input type="number" step="1" min="0" value={toilets} onChange={(e) => setToilets(e.target.value)} className="input" />
@@ -932,255 +966,62 @@ export default function QuickEstimateWizard({
                       />
                     </div>
                   </div>
-                  <p className="text-xs text-gray-500">
-                    Nº de caixas de visita/inspecção: não há um rácio genérico sensato para isto (depende do traçado da
-                    rede — mudanças de direcção, distância entre troços), por isso indique directamente quantas estão
-                    previstas na planta ou no levantamento.
-                  </p>
+                  </div>
                   <label className="flex items-center gap-2 text-sm text-gray-700">
-                    <input
-                      type="checkbox"
-                      checked={hasWaterTank}
-                      onChange={(e) => setHasWaterTank(e.target.checked)}
-                      className="w-4 h-4 rounded border-gray-300 text-brand-700 focus:ring-brand-500"
-                    />
-                    Prever reservatório de água (depósito)
+                    <input type="checkbox" checked={hasWaterTank} onChange={(e) => setHasWaterTank(e.target.checked)} className="w-4 h-4 rounded border-gray-300 text-brand-700 focus:ring-brand-500" />
+                    Prever reservatório de água
                   </label>
+                  <label className="flex items-center gap-2 text-sm text-gray-700">
+                    <input type="checkbox" checked={useSepticTank} onChange={(e) => setUseSepticTank(e.target.checked)} className="w-4 h-4 rounded border-gray-300 text-brand-700 focus:ring-brand-500" />
+                    Fossa séptica (sem rede pública)
+                  </label>
+                  {useSepticTank && (
+                    <div className="grid grid-cols-2 gap-3 max-w-md">
+                      <div>
+                        <label className="label">Habitantes</label>
+                        <input type="number" step="1" min="1" value={septicPeople} onChange={(e) => setSepticPeople(e.target.value)} className="input" />
+                      </div>
+                      <div>
+                        <label className="label">Capitação (L/pessoa/dia)</label>
+                        <select value={septicFlow} onChange={(e) => setSepticFlow(e.target.value)} className="input">
+                          <option value="20">20 — sem canalização</option>
+                          <option value="60">60 — torneira exterior</option>
+                          <option value="100">100 — canalização interior</option>
+                        </select>
+                      </div>
+                    </div>
+                  )}
 
                   <details className="rounded-lg border border-gray-200 p-3">
-                    <summary className="text-sm font-medium text-gray-700 cursor-pointer">
-                      Ajustes avançados (opcional) — insira um valor real em vez da estimativa genérica
-                    </summary>
-                    <p className="text-xs text-gray-500 mt-2 mb-3">
-                      Estes comprimentos de tubagem usam sempre um rácio genérico por aparelho/compartimento. Se souber o
-                      comprimento real (ex: de um levantamento ou planta hidráulica), indique-o aqui.
-                    </p>
-                    <div className="grid grid-cols-1 gap-3">
-                      <div>
-                        <label className="label">Tubagem de esgoto Ø110mm (ml)</label>
-                        <input type="number" step="0.1" min="0" value={sewerPipe110M} onChange={(e) => setSewerPipe110M(e.target.value)} className="input" />
-                      </div>
-                      <div>
-                        <label className="label">Tubagem de esgoto Ø40mm (ml)</label>
-                        <input type="number" step="0.1" min="0" value={sewerPipe40M} onChange={(e) => setSewerPipe40M(e.target.value)} className="input" />
-                      </div>
-                      <div>
-                        <label className="label">Tubo de queda pluvial (m)</label>
-                        <input type="number" step="0.1" min="0" value={downpipeLengthM} onChange={(e) => setDownpipeLengthM(e.target.value)} className="input" />
-                      </div>
-                      <div>
-                        <label className="label">Rede de distribuição de água fria (ml)</label>
-                        <input type="number" step="0.1" min="0" value={waterSupplyPipeM} onChange={(e) => setWaterSupplyPipeM(e.target.value)} className="input" />
-                      </div>
+                    <summary className="cursor-pointer text-sm font-medium text-gray-700">Tubagens — valores reais (opcional)</summary>
+                    <div className="mt-3 grid grid-cols-2 gap-3">
+                      <div><label className="label">Esgoto Ø110 (ml)</label><input type="number" step="0.1" min="0" value={sewerPipe110M} onChange={(e) => setSewerPipe110M(e.target.value)} className="input" placeholder="Auto" /></div>
+                      <div><label className="label">Esgoto Ø40 (ml)</label><input type="number" step="0.1" min="0" value={sewerPipe40M} onChange={(e) => setSewerPipe40M(e.target.value)} className="input" placeholder="Auto" /></div>
                     </div>
                   </details>
 
-                  <div className="rounded-lg border border-gray-200 p-3">
-                    <label className="flex items-center gap-2 text-sm font-medium text-gray-700 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={useSepticTank}
-                        onChange={(e) => setUseSepticTank(e.target.checked)}
-                        className="w-4 h-4 rounded border-gray-300 text-brand-700 focus:ring-brand-500"
-                      />
-                      Este projecto usa fossa séptica (sem ligação à rede pública de esgotos)
-                    </label>
-
-                    {useSepticTank && (
-                      <div className="mt-3 space-y-3">
-                        <p className="text-xs text-gray-500">
-                          Volume da fossa e área de infiltração dimensionados pelo método de Morais (1962)/Bartolomeu
-                          (1996), a mesma base de cálculo usada em Portugal e Moçambique para saneamento autónomo.
-                        </p>
-                        <div className="grid grid-cols-2 gap-3">
-                          <div>
-                            <label className="label">Nº de pessoas (habitantes)</label>
-                            <input
-                              type="number"
-                              step="1"
-                              min="1"
-                              value={septicPeople}
-                              onChange={(e) => setSepticPeople(e.target.value)}
-                              className="input"
-                            />
-                          </div>
-                          <div>
-                            <label className="label">Capitação (L/pessoa/dia)</label>
-                            <select value={septicFlow} onChange={(e) => setSepticFlow(e.target.value)} className="input">
-                              <option value="20">20 — sem ligação domiciliária</option>
-                              <option value="60">60 — torneira no quintal</option>
-                              <option value="100">100 — canalização interior</option>
-                            </select>
-                          </div>
-                          <div className="col-span-2">
-                            <label className="label">Tipo de solo (para a vala/poço de infiltração)</label>
-                            <select
-                              value={septicSoilType}
-                              onChange={(e) => setSepticSoilType(e.target.value as SoilType)}
-                              className="input"
-                            >
-                              {(Object.keys(SOIL_TYPE_LABELS) as SoilType[]).map((s) => (
-                                <option key={s} value={s}>
-                                  {SOIL_TYPE_LABELS[s]}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        </div>
-
-                        {(() => {
-                          const people = Number(septicPeople) || 0;
-                          const flow = Number(septicFlow) || 100;
-                          if (!(people > 0)) return null;
-                          const tank = previewSepticTankVolumeM3(people, flow);
-                          const areaPerPerson = INFILTRATION_AREA_PER_PERSON_M2[septicSoilType];
-                          return (
-                            <div className="rounded-lg bg-brand-50 border border-brand-100 p-3 text-sm space-y-1">
-                              <p>
-                                Fossa séptica: <span className="font-semibold text-brand-900">{tank.volumeM3.toFixed(2)} m³</span> (
-                                {(tank.volumeM3 * 1000).toFixed(0)} L, {tank.compartments} compartimentos)
-                              </p>
-                              {areaPerPerson !== null ? (
-                                <p>
-                                  Área de infiltração:{" "}
-                                  <span className="font-semibold text-brand-900">{(people * areaPerPerson).toFixed(2)} m²</span>
-                                </p>
-                              ) : (
-                                <p className="text-amber-700">
-                                  Argila compacta não tem solução por infiltração simples segundo a tabela de referência —
-                                  considere um poço absorvente mais profundo, aterro filtrante, ou outra solução com
-                                  acompanhamento de um especialista.
-                                </p>
-                              )}
-                            </div>
-                          );
-                        })()}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {step === 3 && (
-                <div className="space-y-4">
-                  <div className="rounded-xl border border-brand-100 bg-brand-50 p-4">
-                    <p className="text-sm font-semibold text-brand-950">Custos aplicados automaticamente</p>
-                    <p className="mt-1 text-sm leading-relaxed text-brand-800">
-                      Esta medição não altera o catálogo. As composições usam primeiro o preço da zona do projecto e,
-                      quando não existe, o preço base já aprovado pela empresa.
+                  {!catalogLoading && !criticalCostsReady && (
+                    <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                      Alguns custos do catálogo estão em falta — a medição calcula quantidades; actualize preços antes de orçamentar.
                     </p>
-                  </div>
-
-                  {documentCurrency !== "MZN" && (
-                    <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-                      O catálogo automático está em MZN. Para evitar uma conversão silenciosa, o SIGO vai preparar um
-                      mapa automático separado em MZN e preservar este documento em {documentCurrency}.
-                    </div>
                   )}
-
-                  <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-                    {criticalCosts.map((item) => (
-                      <div key={item.key} className="flex items-center justify-between gap-4 border-b border-slate-100 px-4 py-3 last:border-0">
-                        <div>
-                          <p className="text-sm font-medium text-slate-900">{item.label}</p>
-                          <p className="mt-0.5 text-xs text-slate-500">
-                            {item.material ? item.source : "Material não encontrado no catálogo"}
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <p className={`text-sm font-semibold tabular-nums ${item.price != null && item.price > 0 ? "text-slate-900" : "text-rose-700"}`}>
-                            {item.price != null && item.price > 0
-                              ? `${item.price.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MZN`
-                              : "Por definir"}
-                          </p>
-                          {item.material && <p className="mt-0.5 text-xs text-slate-400">por {item.material.unit}</p>}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  {catalogLoading ? (
-                    <p className="text-sm text-slate-500">A consultar o catálogo da zona...</p>
-                  ) : !criticalCostsReady ? (
-                    <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
-                      Existem custos críticos em falta. Actualize-os no Catálogo de Preços antes de emitir um orçamento.
-                    </p>
-                  ) : (
-                    <p className="text-sm text-emerald-700">Custos críticos disponíveis para calcular as composições.</p>
-                  )}
-                </div>
-              )}
-
-              {step === 4 && (
-                <div className="space-y-3 text-sm">
-                  <p className="text-gray-500">Confirme os dados antes de gerar as quantidades.</p>
-                  {floors.map((f, i) => (
-                    <div key={f.key} className="rounded-lg border border-gray-200 p-3">
-                      <p className="font-medium text-gray-900 mb-1">
-                        {f.label || `Piso ${i + 1}`} — pé-direito {f.ceilingHeight} m, perímetro {f.perimeter} m
-                      </p>
-                      <p className="text-gray-500">
-                        {f.rooms.map((r) => `${r.name} (${r.type}, ${r.length}×${r.width}m)`).join(" · ")}
-                      </p>
-                    </div>
-                  ))}
-                  <div className="rounded-lg border border-gray-200 p-3">
-                    <p className="text-gray-500">
-                      Fundação: <span className="text-gray-900">{FOUNDATION_LABELS[foundationType]}</span>{" "}
-                      {foundationType === "laje" ? (
-                        <span className="text-gray-900">(espessura {slabThickness} m)</span>
-                      ) : (
-                        <span className="text-gray-900">
-                          ({footingCount} sapatas × {footingAvgArea} m² × {footingAvgDepth} m)
-                        </span>
-                      )}{" "}
-                      · Betão: <span className="text-gray-900">{concreteClass}</span> · Cobertura:{" "}
-                      <span className="text-gray-900">
-                        {ROOF_LABELS[roofType]} ({roofArea} m²)
-                      </span>
-                    </p>
-                  </div>
-                  <div className="rounded-lg border border-gray-200 p-3">
-                    <p className="text-gray-500">
-                      Hidráulica: <span className="text-gray-900">{toilets} sanitas</span>,{" "}
-                      <span className="text-gray-900">{sinks} lavatórios</span>,{" "}
-                      <span className="text-gray-900">{showers} chuveiros</span>,{" "}
-                      <span className="text-gray-900">{kitchenSinks} pias de cozinha</span>,{" "}
-                      <span className="text-gray-900">{laundryTanks} tanques</span>,{" "}
-                      <span className="text-gray-900">{manholeCount} caixas de visita</span>
-                      {hasWaterTank ? ", com reservatório de água" : ", sem reservatório de água"}
-                      {useSepticTank && (
-                        <>
-                          {" · Fossa séptica: "}
-                          <span className="text-gray-900">
-                            {previewSepticTankVolumeM3(Number(septicPeople) || 1, Number(septicFlow) || 100).volumeM3.toFixed(2)} m³
-                          </span>
-                          {" para "}
-                          <span className="text-gray-900">{septicPeople} pessoa(s)</span>
-                          {" · Solo: "}
-                          <span className="text-gray-900">{SOIL_TYPE_LABELS[septicSoilType]}</span>
-                        </>
-                      )}
-                    </p>
-                  </div>
-                  <div className="rounded-lg border border-gray-200 p-3">
-                    <p className="mb-2 font-medium text-gray-900">Custos do catálogo ({zoneId ? "zona do projecto" : "preço base"})</p>
-                    <div className="grid gap-2 sm:grid-cols-3">
-                      {criticalCosts.map((item) => (
-                        <div key={item.key}>
-                          <p className="text-xs text-gray-500">{item.label}</p>
-                          <p className="font-medium text-gray-900">
-                            {item.price != null && item.price > 0
-                              ? `${item.price.toLocaleString("pt-MZ", { maximumFractionDigits: 2 })} MZN`
-                              : "Por definir"}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
                 </div>
               )}
             </>
+          ) : (
+            <div className="space-y-4">
+              <div className="rounded-lg bg-green-50 border border-green-200 p-4">
+                <p className="font-medium text-green-800">{result!.itemsUpdated} itens preenchidos automaticamente.</p>
+                <p className="text-sm text-green-700 mt-1">Quantidades marcadas como estimativa — ajuste na régua de medições.</p>
+              </div>
+              <dl className="grid grid-cols-2 gap-3 text-sm">
+                <div className="card card-pad !p-3"><dt className="muted">Área construída</dt><dd className="font-semibold">{result!.summary.totalBuiltArea.toFixed(2)} m²</dd></div>
+                <div className="card card-pad !p-3"><dt className="muted">Betão estrutural</dt><dd className="font-semibold">{result!.summary.concreteVolume.toFixed(2)} m³</dd></div>
+                <div className="card card-pad !p-3"><dt className="muted">Aço</dt><dd className="font-semibold">{result!.summary.steelWeight.toFixed(0)} kg</dd></div>
+                <div className="card card-pad !p-3"><dt className="muted">Aparelhos sanitários</dt><dd className="font-semibold">{result!.summary.totalFixtures}</dd></div>
+              </dl>
+              <CalculationReportView entries={result!.report} />
+            </div>
           )}
         </div>
 
@@ -1188,14 +1029,7 @@ export default function QuickEstimateWizard({
           {result ? (
             <>
               <span />
-              <button onClick={onClose} className="btn btn-primary">
-                Ver Mapa de Quantidades
-              </button>
-            </>
-          ) : !readinessAccepted ? (
-            <>
-              <button onClick={onClose} className="btn btn-ghost">Cancelar</button>
-              <button onClick={() => setReadinessAccepted(true)} className="btn btn-primary">Rever e preencher dados</button>
+              <button onClick={onClose} className="btn btn-primary">Ver Mapa de Quantidades</button>
             </>
           ) : (
             <>
@@ -1204,9 +1038,7 @@ export default function QuickEstimateWizard({
                 {step === 0 ? "Cancelar" : "Voltar"}
               </button>
               {step < STEPS.length - 1 ? (
-                <button onClick={() => canProceed() && setStep((s) => s + 1)} disabled={!canProceed()} className="btn btn-primary">
-                  Seguinte
-                </button>
+                <button onClick={() => canProceed() && setStep((s) => s + 1)} disabled={!canProceed()} className="btn btn-primary">Seguinte</button>
               ) : (
                 <button onClick={handleApply} disabled={submitting} className="btn btn-primary">
                   <IconRuler className="w-4 h-4" />

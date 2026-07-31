@@ -2,6 +2,9 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { catalogApi, type CostCompositionDetail, type LabourCategory, type Material, type Equipment } from "../api/catalog";
 import Layout from "../components/Layout";
+import LoadingState from "../components/LoadingState";
+import AlertBanner from "../components/AlertBanner";
+import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { IconTrash, IconPlus, IconBack } from "../components/icons";
 
 function money(value: string | number) {
@@ -224,6 +227,7 @@ function LineEditor({
 export default function CompositionDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { confirm, dialog } = useConfirmDialog();
   const [detail, setDetail] = useState<CostCompositionDetail | null>(null);
   const [labourCategories, setLabourCategories] = useState<LabourCategory[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
@@ -338,13 +342,20 @@ export default function CompositionDetailPage() {
 
   async function handleDelete() {
     if (!id || !detail) return;
-    if (!window.confirm(`Eliminar a composição "${detail.name}"? Itens de orçamento já criados mantêm o preço gravado, mas deixarão de estar ligados a esta composição.`)) return;
+    const ok = await confirm({
+      title: "Eliminar composição?",
+      message: `Eliminar “${detail.name}”?`,
+      confirmLabel: "Eliminar",
+      danger: true,
+      details: ["Itens de orçamento existentes mantêm o preço gravado"],
+    });
+    if (!ok) return;
     await catalogApi.deleteComposition(id);
     navigate("/catalogo");
   }
 
   if (!detail) {
-    return <div className="min-h-screen flex items-center justify-center text-gray-400">A carregar...</div>;
+    return <LoadingState fullScreen label="A carregar composição..." />;
   }
 
   // Usa o preço ao vivo do catálogo quando o recurso ainda lá está; senão, a reserva
@@ -380,8 +391,37 @@ export default function CompositionDetailPage() {
     >
       <div className="mx-auto w-full max-w-6xl space-y-5">
         <div className="space-y-5 min-w-0">
-          {error && <p className="text-sm text-red-600">{error}</p>}
-          {message && <p className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">{message}</p>}
+          {error && <AlertBanner tone="error" onDismiss={() => setError(null)}>{error}</AlertBanner>}
+          {message && <AlertBanner tone="success" onDismiss={() => setMessage(null)}>{message}</AlertBanner>}
+
+          <section className="card card-pad space-y-3">
+            <div>
+              <h2 className="section-title">Descrição e critérios técnicos</h2>
+              <p className="mt-1 text-xs text-slate-500">Aparecem no orçamento quando um item está ligado a esta composição — inclui acabamentos, normas e modo de medição.</p>
+            </div>
+            <div className="grid gap-3 lg:grid-cols-2">
+              <div className="lg:col-span-2">
+                <label className="label">Descrição / especificação resumida</label>
+                <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} className="input text-sm" placeholder="Ex.: Sanita completa com autoclismo dual, assento e ligações..." />
+              </div>
+              <div>
+                <label className="label">Critério de medição</label>
+                <textarea value={measurementCriteria} onChange={(e) => setMeasurementCriteria(e.target.value)} rows={2} className="input text-sm" placeholder="Ex.: Por unidade instalada e ensaiada" />
+              </div>
+              <div>
+                <label className="label">Notas de execução</label>
+                <textarea value={executionNotes} onChange={(e) => setExecutionNotes(e.target.value)} rows={2} className="input text-sm" placeholder="Ex.: Fixação, vedação, ensaio de estanqueidade..." />
+              </div>
+              <div>
+                <label className="label">Código interno</label>
+                <input value={code} onChange={(e) => setCode(e.target.value)} className="input" placeholder="Opcional" />
+              </div>
+              <div>
+                <label className="label">Categoria</label>
+                <input value={category} onChange={(e) => setCategory(e.target.value)} className="input" />
+              </div>
+            </div>
+          </section>
 
           <LineEditor
             title="Mão-de-obra"
@@ -404,7 +444,12 @@ export default function CompositionDetailPage() {
               return Number(mat?.baseUnitCost ?? 0) * Number(mat?.importFactor ?? 1);
             }}
             fallback={materialFallback}
-            hint={(refId) => formatSupplierHint(supplierSummaryByMaterial, refId)}
+            hint={(refId) => {
+              const mat = materials.find((o) => o.id === refId);
+              const supplier = formatSupplierHint(supplierSummaryByMaterial, refId);
+              const parts = [mat?.specification, supplier].filter(Boolean);
+              return parts.length ? parts.join(" · ") : null;
+            }}
             supportsWaste
             optionDefaultWaste={(refId) => Number(materials.find((o) => o.id === refId)?.defaultWastePct ?? 0)}
           />
@@ -427,6 +472,7 @@ export default function CompositionDetailPage() {
           {[["Mão-de-obra", labourCost], ["Materiais", materialCost], ["Máquinas", equipmentCost], ["Custo directo", directCost]].map(([label, value], index) => <div key={String(label)} className={`p-4 ${index ? "border-t sm:border-l sm:border-t-0" : ""} border-slate-200`}><span className="text-xs text-slate-500">{label}</span><strong className="mt-1 block text-lg tabular-nums text-slate-950">{money(Number(value))} MZN</strong></div>)}
         </section>
       </div>
+      {dialog}
     </Layout>
   );
 }

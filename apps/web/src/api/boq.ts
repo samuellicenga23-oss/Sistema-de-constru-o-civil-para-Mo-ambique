@@ -72,6 +72,7 @@ export type LineItemNode = {
   kind: LineItemKind;
   code: string | null;
   description: string;
+  technicalSpecification: string | null;
   unit: string | null;
   quantity: number | null;
   unitPrice: number | null;
@@ -120,6 +121,7 @@ export type BudgetRepriceResult = {
 export const boqApi = {
   listProjects: () => request<Project[]>("/projects"),
   getProject: (id: string) => request<Project>(`/projects/${id}`),
+  getProjectWorkflow: (id: string) => request<ProjectWorkflowStatus>(`/projects/${id}/workflow`),
   createProject: (data: {
     name: string;
     client?: string;
@@ -167,6 +169,8 @@ export const boqApi = {
   deleteBudgetDocument: (id: string) => request<{ ok: true }>(`/budget-documents/${id}`, { method: "DELETE" }),
   createBudgetFromMeasurement: (id: string) =>
     request<{ document: BudgetDocument; created: boolean }>(`/budget-documents/${id}/create-budget`, { method: "POST" }),
+  applySpecifications: (id: string) =>
+    request<{ updated: number }>(`/budget-documents/${id}/apply-specifications`, { method: "POST" }),
   measurementExcelUrl: (id: string) => `/api/budget-documents/${id}/export-measurements.xlsx`,
   measurementPdfUrl: (id: string) => `/api/budget-documents/${id}/export-measurements.pdf`,
 
@@ -178,6 +182,11 @@ export const boqApi = {
 
   createSection: (documentId: string, data: { name: string; sortOrder?: number }) =>
     request<SectionNode>(`/budget-documents/${documentId}/sections`, { method: "POST", body: JSON.stringify(data) }),
+
+  updateSection: (id: string, data: { name: string }) =>
+    request<SectionNode>(`/sections/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+
+  deleteSection: (id: string) => request<{ ok: true }>(`/sections/${id}`, { method: "DELETE" }),
 
   createLineItem: (
     sectionId: string,
@@ -194,15 +203,21 @@ export const boqApi = {
     }
   ) => request<LineItemNode>(`/sections/${sectionId}/line-items`, { method: "POST", body: JSON.stringify(data) }),
 
-  updateLineItem: (id: string, data: Partial<{ description: string; unit: string; quantity: number; unitPrice: number }>) =>
-    request<LineItemNode>(`/line-items/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  updateLineItem: (
+    id: string,
+    data: Partial<{ description: string; technicalSpecification: string | null; unit: string; quantity: number; unitPrice: number; compositionId: string | null }>,
+  ) => request<LineItemNode>(`/line-items/${id}`, { method: "PUT", body: JSON.stringify(data) }),
 
   deleteLineItem: (id: string) => request<{ ok: true }>(`/line-items/${id}`, { method: "DELETE" }),
 
-  importMeasurements: async (documentId: string, file: File) => {
+  bulkUpdateSpecifications: (items: Array<{ id: string; technicalSpecification: string | null }>) =>
+    request<{ updated: number }>(`/line-items/bulk-specifications`, { method: "POST", body: JSON.stringify({ items }) }),
+
+  importMeasurements: async (documentId: string, file: File, createMissing = true) => {
     const form = new FormData();
     form.append("file", file);
-    const res = await fetch(`/api/budget-documents/${documentId}/import-measurements`, {
+    const qs = createMissing ? "" : "?createMissing=false";
+    const res = await fetch(`/api/budget-documents/${documentId}/import-measurements${qs}`, {
       method: "POST",
       credentials: "include",
       body: form,
@@ -217,6 +232,20 @@ export const boqApi = {
 
 export type MeasurementImportResult = {
   itemsUpdated: number;
+  itemsCreated: number;
   rowsRead: number;
   unmatched: { sheet: string; rowNumber: number; code: string; quantity: number; reason: string }[];
+};
+
+export type ProjectWorkflowStatus = {
+  projectId: string;
+  measurementMode: string;
+  projectType: string;
+  guidance: Array<{
+    id: string;
+    severity: "info" | "warning" | "error";
+    title: string;
+    message: string;
+    actions: Array<{ label: string; path?: string; anchor?: string; hint?: string }>;
+  }>;
 };

@@ -1,13 +1,17 @@
 import { useEffect, useState, type FormEvent, type MouseEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { boqApi, type BudgetDocument, type Project, type ProjectMaterialSpecification } from "../api/boq";
+import { boqApi, type BudgetDocument, type Project, type ProjectMaterialSpecification, type ProjectWorkflowStatus } from "../api/boq";
 import { measurementApi, type MeasurementCertificate } from "../api/measurement";
-import { plantsApi, type Plant, type PlantProcessingProgress, type PlantUploadDiscipline } from "../api/plants";
+import { plantsApi, type Plant } from "../api/plants";
 import { catalogApi, type PriceZone } from "../api/catalog";
 import { suppliersApi } from "../api/suppliers";
 import Layout from "../components/Layout";
+import PlantUploadProgress from "../components/PlantUploadProgress";
+import { useConfirmDialog } from "../hooks/useConfirmDialog";
+import { usePlantPolling } from "../hooks/usePlantPolling";
 import { SectionHeader } from "../components/WorkspaceUI";
 import ProjectWorkspaceNav from "../components/ProjectWorkspaceNav";
+import ProjectWorkflowBanner from "../components/ProjectWorkflowBanner";
 import { IconBack, IconDoc, IconClipboard, IconMap, IconPlus, IconRuler, IconTrash, IconUpload } from "../components/icons";
 import { UNITS, type Unit } from "@sigo/shared";
 
@@ -36,6 +40,7 @@ function todayStr() {
 }
 
 export default function ProjectDetailPage() {
+  const { confirm, dialog } = useConfirmDialog();
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -49,9 +54,8 @@ export default function ProjectDetailPage() {
   const [template, setTemplate] = useState<"padrao" | "vazio">("padrao");
   const [selectedDocId, setSelectedDocId] = useState("");
   const [periodDate, setPeriodDate] = useState(todayStr());
-  const [plantDiscipline, setPlantDiscipline] = useState<PlantUploadDiscipline>("auto");
   const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState<PlantProcessingProgress | null>(null);
+  const [uploadNotice, setUploadNotice] = useState<string | null>(null);
   const [preparingMeasurements, setPreparingMeasurements] = useState(false);
   const [reprocessingPlantId, setReprocessingPlantId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -59,6 +63,7 @@ export default function ProjectDetailPage() {
   const [materialSpecifications, setMaterialSpecifications] = useState<ProjectMaterialSpecification[]>([]);
   const [newMaterial, setNewMaterial] = useState<{ name: string; unit: Unit; specification: string }>({ name: "", unit: "un", specification: "" });
   const [addingMaterial, setAddingMaterial] = useState(false);
+  const [workflowStatus, setWorkflowStatus] = useState<ProjectWorkflowStatus | null>(null);
 
   async function reload() {
     if (!projectId) return;
@@ -74,6 +79,7 @@ export default function ProjectDetailPage() {
     setCertificates(certs);
     setPlants(plantList);
     setMaterialSpecifications(projectMaterials);
+    boqApi.getProjectWorkflow(projectId).then(setWorkflowStatus).catch(() => setWorkflowStatus(null));
     const firstBudget = docs.find((document) => document.documentType === "orcamento");
     if (!selectedDocId && firstBudget) setSelectedDocId(firstBudget.id);
     const [catalogMaterials, supplierList, compositionList] = await Promise.all([
@@ -94,6 +100,12 @@ export default function ProjectDetailPage() {
     reload().catch((err) => setError(err.message));
     catalogApi.listPriceZones().then(setZones).catch(() => {});
   }, [projectId]);
+
+  usePlantPolling(
+    plants,
+    (id, progress) => setPlants((current) => current.map((p) => (p.id === id ? { ...p, ...progress } : p))),
+    () => void reload(),
+  );
 
   async function handleZoneChange(newZoneId: string) {
     if (!projectId) return;
@@ -150,17 +162,19 @@ export default function ProjectDetailPage() {
     if (!file) return;
     setError(null);
     setUploading(true);
+    setUploadNotice(null);
     try {
-      const uploaded = await plantsApi.upload(projectId, file, plantDiscipline, setUploadProgress);
+      await plantsApi.upload(projectId, file, "auto", (progress) => {
+        setPlants((current) => current.map((p) => (p.id === progress.id ? { ...p, ...progress } : p)));
+      });
       fileInput.value = "";
       await reload();
-      navigate(`/plantas/${uploaded.id}`);
+      setUploadNotice(`“${file.name}” enviado — a análise continua em segundo plano.`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao carregar a planta");
       await reload().catch(() => {});
     } finally {
       setUploading(false);
-      setUploadProgress(null);
     }
   }
 
@@ -181,7 +195,14 @@ export default function ProjectDetailPage() {
   async function handleDeleteDocument(e: MouseEvent, id: string, title: string) {
     e.preventDefault();
     e.stopPropagation();
-    if (!window.confirm(`Eliminar o documento "${title}"? Isto apaga também os seus autos de medição associados. Esta acção não pode ser desfeita.`)) return;
+    const ok = await confirm({
+      title: "Eliminar documento?",
+      message: `Eliminar “${title}”?`,
+      confirmLabel: "Eliminar",
+      danger: true,
+      details: ["Autos de medição associados serão removidos"],
+    });
+    if (!ok) return;
     setError(null);
     try {
       await boqApi.deleteBudgetDocument(id);
@@ -194,7 +215,14 @@ export default function ProjectDetailPage() {
   async function handleDeletePlant(e: MouseEvent, id: string, name: string | null) {
     e.preventDefault();
     e.stopPropagation();
-    if (!window.confirm(`Eliminar a planta "${name ?? "sem nome"}"? Os dados extraídos (compartimentos/aço) desta planta deixam de estar disponíveis no Assistente. Esta acção não pode ser desfeita.`)) return;
+    const ok = await confirm({
+      title: "Eliminar planta?",
+      message: `Eliminar “${name ?? "sem nome"}”?`,
+      confirmLabel: "Eliminar",
+      danger: true,
+      details: ["Dados extraídos deixam de estar disponíveis no Assistente"],
+    });
+    if (!ok) return;
     setError(null);
     try {
       await plantsApi.delete(id);
@@ -224,7 +252,13 @@ export default function ProjectDetailPage() {
   async function handleDeleteCertificate(e: MouseEvent, id: string, number: number) {
     e.preventDefault();
     e.stopPropagation();
-    if (!window.confirm(`Eliminar o Auto Nº ${number}? Esta acção não pode ser desfeita.`)) return;
+    const ok = await confirm({
+      title: "Eliminar auto?",
+      message: `Eliminar Auto Nº ${number}?`,
+      confirmLabel: "Eliminar",
+      danger: true,
+    });
+    if (!ok) return;
     setError(null);
     try {
       await measurementApi.delete(id);
@@ -284,11 +318,18 @@ export default function ProjectDetailPage() {
       <div className="mx-auto grid w-full max-w-[1500px] items-start gap-5 xl:grid-cols-2">
         <div className="xl:col-span-2"><ProjectWorkspaceNav projectId={projectId!} measurementOnly={project.projectType === "medicao"} /></div>
         {error && <p className="text-sm text-red-600 xl:col-span-2">{error}</p>}
+        {uploadNotice && <p className="text-sm text-emerald-700 xl:col-span-2">{uploadNotice}</p>}
         {searchParams.get("uploadErro") === "1" && (
           <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 xl:col-span-2">
-            O projecto foi criado, mas um dos ficheiros não pôde ser analisado. O registo da obra está seguro; reveja abaixo o ficheiro com falha ou carregue-o novamente.
+            {searchParams.get("motivo") === "excel"
+              ? "O projecto foi criado, mas a importação Excel falhou. Abra o mapa de quantidades e importe novamente — confirme os nomes das secções/folhas."
+              : searchParams.get("motivo") === "planta"
+                ? "O projecto foi criado, mas um PDF não pôde ser analisado. Reveja o ficheiro abaixo ou continue com medição manual / Excel."
+                : "O projecto foi criado, mas um passo falhou. O registo da obra está seguro — siga as indicações abaixo."}
           </div>
         )}
+
+        <ProjectWorkflowBanner status={workflowStatus} projectId={projectId!} />
 
         <section className="card order-2 overflow-hidden border-t-4 border-t-brand-600 xl:col-span-2">
           <SectionHeader
@@ -506,7 +547,18 @@ export default function ProjectDetailPage() {
                   </Link>
                 ) : (
                   <div className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-                    <span className="min-w-0 sm:pr-2"><span className="block break-words font-medium text-gray-500 sm:truncate">{p.originalFileName}</span>{p.processingStatus === "processando" && <span className="block text-[11px] text-blue-700">{p.processingStage ?? "A analisar"}{p.processingCurrentPage && p.processingTotalPages ? ` · página ${p.processingCurrentPage}/${p.processingTotalPages}` : ""}</span>}</span>
+                    <span className="min-w-0 sm:pr-2">
+                      <span className="block break-words font-medium text-gray-500 sm:truncate">{p.originalFileName}</span>
+                      {p.processingStatus === "processando" && (
+                        <span className="block text-[11px] text-blue-700">
+                          {p.processingStage ?? "A analisar"}
+                          {p.processingCurrentPage && p.processingTotalPages ? ` · página ${p.processingCurrentPage}/${p.processingTotalPages}` : ""}
+                        </span>
+                      )}
+                      {p.processingStatus === "erro" && p.errorMessage && (
+                        <span className="mt-0.5 block text-[11px] leading-4 text-red-600">{p.errorMessage}</span>
+                      )}
+                    </span>
                     <span className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:shrink-0">
                       <span className={`badge ${PLANT_STATUS_BADGE[p.processingStatus].cls}`}>{p.processingStatus === "processando" ? `${p.processingProgress}%` : PLANT_STATUS_BADGE[p.processingStatus].label}</span>
                       {p.processingStatus === "erro" && (
@@ -532,78 +584,91 @@ export default function ProjectDetailPage() {
               </li>
             )}
           </ul>
-          <form onSubmit={handleUploadPlant} className="grid items-end gap-3 border-t border-gray-100 px-4 py-4 sm:px-5 2xl:grid-cols-[12rem_minmax(0,1fr)_auto]">
-            {uploading && uploadProgress && <div className="w-full rounded-xl border border-blue-100 bg-blue-50/70 p-4 mb-2" aria-live="polite"><div className="flex justify-between gap-4"><div><p className="text-sm font-semibold text-blue-950">{uploadProgress.processingStage ?? "A analisar o PDF"}</p><p className="text-xs text-blue-800/70">{uploadProgress.processingCurrentPage && uploadProgress.processingTotalPages ? `Página ${uploadProgress.processingCurrentPage} de ${uploadProgress.processingTotalPages}` : "O ficheiro está a ser preparado para leitura."}</p></div><strong className="text-xl tabular-nums text-blue-950">{uploadProgress.processingProgress}%</strong></div><div className="mt-3 h-2.5 overflow-hidden rounded-full bg-blue-100" role="progressbar" aria-valuenow={uploadProgress.processingProgress} aria-valuemin={0} aria-valuemax={100}><div className="h-full rounded-full bg-blue-600" style={{ width: `${uploadProgress.processingProgress}%` }} /></div></div>}
-            <div>
-              <label className="label">Modo de leitura</label>
-              <select value={plantDiscipline} onChange={(e) => setPlantDiscipline(e.target.value as PlantUploadDiscipline)} className="input">
-                <option value="auto">Detectar automaticamente</option>
-                <option value="arquitectura">Arquitectura</option>
-                <option value="estrutura">Estrutura</option>
-              </select>
-            </div>
+          <form onSubmit={handleUploadPlant} className="grid items-end gap-3 border-t border-gray-100 px-4 py-4 sm:px-5 sm:grid-cols-[minmax(0,1fr)_auto]">
+            {plants.some((p) => p.processingStatus === "processando" || p.processingStatus === "pendente") && (
+              <div className="sm:col-span-2">
+                {plants.filter((p) => p.processingStatus === "processando" || p.processingStatus === "pendente").map((p) => (
+                  <PlantUploadProgress key={p.id} progress={p} compact />
+                ))}
+              </div>
+            )}
             <div className="min-w-0">
               <label className="label">Ficheiro PDF</label>
               <input type="file" name="plantFile" accept="application/pdf" required className="input py-1.5 file:mr-3 file:rounded-md file:border-0 file:bg-brand-100 file:text-brand-800 file:px-2.5 file:py-1 file:text-xs file:font-medium" />
+              <p className="mt-1 text-[11px] text-slate-500">Arquitectura, estrutura ou projecto completo — o SIGO detecta automaticamente.</p>
             </div>
-            <button type="submit" disabled={uploading} className="btn btn-primary w-full 2xl:w-auto">
+            <button type="submit" disabled={uploading} className="btn btn-primary w-full sm:w-auto">
               <IconUpload className="w-4 h-4" />
-              {uploading ? `${uploadProgress?.processingProgress ?? 0}% analisado` : plants.length > 0 ? "Adicionar projecto" : "Carregar e analisar"}
+              {uploading ? "A enviar..." : plants.length > 0 ? "Adicionar PDF" : "Carregar PDF"}
             </button>
           </form>
         </section>
 
-        {/* Autos de Medição */}
-        {budgetDocuments.length > 0 && (
-          <section className="card order-8 xl:col-span-2">
-            <SectionHeader title="Autos de medição" description="Execução física e certificação dos trabalhos" actions={<IconClipboard className="w-4 h-4 text-blue-700" />} />
-            <div className="grid md:grid-cols-2">
-              <ul className="md:border-r border-gray-100">
-                {certificates.map((c) => (
-                  <li key={c.id} className="table-row group">
-                    <Link to={`/autos/${c.id}`} className="flex items-center justify-between px-5 py-3">
-                      <span className="font-medium text-gray-900">
-                        Auto Nº {c.number} <span className="text-gray-400 font-normal">— {c.periodDate}</span>
-                      </span>
-                      <span className="flex items-center gap-2">
-                        <span className={`badge ${DOC_STATUS_BADGE[c.status] ?? "badge-gray"}`}>{c.status}</span>
-                        <button
-                          onClick={(e) => handleDeleteCertificate(e, c.id, c.number)}
-                          className="icon-btn-danger opacity-0 pointer-coarse:opacity-100 group-hover:opacity-100"
-                          title="Eliminar auto de medição"
-                        >
-                          <IconTrash className="w-3.5 h-3.5" />
-                        </button>
-                      </span>
-                    </Link>
-                  </li>
-                ))}
-                {certificates.length === 0 && <li className="px-5 py-4 text-sm text-gray-400">Sem autos de medição ainda.</li>}
-              </ul>
-              <form onSubmit={handleCreateCertificate} className="flex gap-2 items-end px-5 py-4 flex-wrap">
-                <div className="flex-1 min-w-[160px]">
-                  <label className="label">Mapa de quantidades base</label>
-                  <select value={selectedDocId} onChange={(e) => setSelectedDocId(e.target.value)} className="input">
-                    {budgetDocuments.map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {d.title}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="label">Data do período</label>
-                  <input type="date" value={periodDate} onChange={(e) => setPeriodDate(e.target.value)} className="input" />
-                </div>
-                <button type="submit" className="btn btn-primary">
-                  <IconPlus className="w-4 h-4" />
-                  Novo auto
-                </button>
-              </form>
+        {/* Certificados de obra (avanço físico — distinto das medições de projecto) */}
+        <section id="certificados-obra" className="card order-8 xl:col-span-2 scroll-mt-24">
+          <SectionHeader
+            title="Certificados de obra"
+            description="Avanço físico por período, contra o orçamento aprovado — alimenta cronograma e financeiro (não confundir com medições de projecto)"
+            actions={<IconClipboard className="w-4 h-4 text-blue-700" />}
+          />
+          {budgetDocuments.length === 0 ? (
+            <div className="border-t border-gray-100 px-5 py-4 text-sm text-slate-600">
+              <p>Disponível depois de ter um <strong>orçamento</strong> (com preços). Fluxo: medições → «Enviar para orçamento» → aprovar → certificar execução.</p>
+              {measurementDocuments.length > 0 && (
+                <Link to={`/documentos/${measurementDocuments[0].id}`} className="action-link mt-2 inline-block">
+                  Ir à medição e enviar para orçamento →
+                </Link>
+              )}
             </div>
-          </section>
-        )}
+          ) : (
+          <div className="grid md:grid-cols-2">
+            <ul className="md:border-r border-gray-100">
+              {certificates.map((c) => (
+                <li key={c.id} className="table-row group">
+                  <Link to={`/autos/${c.id}`} className="flex items-center justify-between px-5 py-3">
+                    <span className="font-medium text-gray-900">
+                      Certificado Nº {c.number} <span className="text-gray-400 font-normal">— {c.periodDate}</span>
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <span className={`badge ${DOC_STATUS_BADGE[c.status] ?? "badge-gray"}`}>{c.status}</span>
+                      <button
+                        onClick={(e) => handleDeleteCertificate(e, c.id, c.number)}
+                        className="icon-btn-danger opacity-0 pointer-coarse:opacity-100 group-hover:opacity-100"
+                        title="Eliminar certificado"
+                      >
+                        <IconTrash className="w-3.5 h-3.5" />
+                      </button>
+                    </span>
+                  </Link>
+                </li>
+              ))}
+              {certificates.length === 0 && <li className="px-5 py-4 text-sm text-gray-400">Sem certificados — registe o avanço do 1.º período quando a obra estiver a decorrer.</li>}
+            </ul>
+            <form onSubmit={handleCreateCertificate} className="flex gap-2 items-end px-5 py-4 flex-wrap">
+              <div className="flex-1 min-w-[160px]">
+                <label className="label">Orçamento base (contrato)</label>
+                <select value={selectedDocId} onChange={(e) => setSelectedDocId(e.target.value)} className="input">
+                  {budgetDocuments.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.title} {d.status !== "aprovado" ? "(ainda não aprovado)" : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="label">Data do período</label>
+                <input type="date" value={periodDate} onChange={(e) => setPeriodDate(e.target.value)} className="input" />
+              </div>
+              <button type="submit" className="btn btn-primary" disabled={!selectedDocId}>
+                <IconPlus className="w-4 h-4" />
+                Novo certificado
+              </button>
+            </form>
+          </div>
+          )}
+        </section>
       </div>
+      {dialog}
     </Layout>
   );
 }

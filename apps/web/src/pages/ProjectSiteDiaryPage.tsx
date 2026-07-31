@@ -5,6 +5,7 @@ import { siteDiaryApi, type SiteDiaryEntry } from "../api/siteDiary";
 import { scheduleApi, type ScheduleTask } from "../api/schedule";
 import { purchasingApi, type StockSummaryLine } from "../api/purchasing";
 import Layout from "../components/Layout";
+import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import ProjectWorkspaceNav from "../components/ProjectWorkspaceNav";
 import Modal from "../components/Modal";
 import PageSearch from "../components/PageSearch";
@@ -19,6 +20,7 @@ function todayStr() {
 const WEATHER_OPTIONS = ["Sol", "Nublado", "Chuva", "Chuva forte (obra parada)"];
 
 export default function ProjectSiteDiaryPage() {
+  const { confirm, dialog } = useConfirmDialog();
   const { projectId } = useParams<{ projectId: string }>();
   const [project, setProject] = useState<Project | null>(null);
   const [entries, setEntries] = useState<SiteDiaryEntry[]>([]);
@@ -29,6 +31,7 @@ export default function ProjectSiteDiaryPage() {
   const [saving, setSaving] = useState(false);
   const [uploadingPhotoFor, setUploadingPhotoFor] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [formMode, setFormMode] = useState<"quick" | "full">("quick");
   const [query, setQuery] = useState("");
 
   const [date, setDate] = useState(todayStr());
@@ -104,7 +107,13 @@ export default function ProjectSiteDiaryPage() {
   }
 
   async function handleDelete(entry: SiteDiaryEntry) {
-    if (!window.confirm(`Eliminar o registo de ${entry.date}? Esta acção não pode ser desfeita.`)) return;
+    const ok = await confirm({
+      title: "Eliminar registo?",
+      message: `Eliminar o registo de ${entry.date}?`,
+      confirmLabel: "Eliminar",
+      danger: true,
+    });
+    if (!ok) return;
     setError(null);
     try {
       await siteDiaryApi.delete(entry.id);
@@ -158,6 +167,7 @@ export default function ProjectSiteDiaryPage() {
   }
 
   return (
+    <>
     <Layout
       title={`Diário de Obra — ${project.name}`}
       subtitle="Registo diário de trabalhos, materiais, presenças e ocorrências — com exportação em PDF"
@@ -174,27 +184,31 @@ export default function ProjectSiteDiaryPage() {
 
         <section className="card"><SectionHeader title="Registos do diário" description="Trabalhos, equipa, ocorrências e evidências por dia" actions={<button type="button" onClick={() => setShowForm(true)} className="btn btn-primary btn-sm"><IconPlus className="h-3.5 w-3.5" /> Registar dia</button>} /></section>
         <PageSearch value={query} onChange={setQuery} placeholder="Pesquisar por data, trabalho, material ou ocorrência…" resultLabel={`${filteredEntries.length} registo(s)`} />
-        {showForm && <Modal title="Novo registo do Diário" subtitle={`${date} · ${project.name}`} onClose={() => !saving && setShowForm(false)} maxWidth="max-w-6xl">
+        {showForm && <Modal title="Novo registo do Diário" subtitle={`${date} · ${project.name}`} onClose={() => !saving && setShowForm(false)} maxWidth={formMode === "full" ? "max-w-6xl" : "max-w-lg"}>
           <form onSubmit={handleCreate} className="space-y-3">
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="flex gap-2 text-xs">
+              <button type="button" className={`rounded-full px-3 py-1 font-semibold ${formMode === "quick" ? "bg-brand-700 text-white" : "bg-slate-100 text-slate-600"}`} onClick={() => setFormMode("quick")}>Registo rápido</button>
+              <button type="button" className={`rounded-full px-3 py-1 font-semibold ${formMode === "full" ? "bg-brand-700 text-white" : "bg-slate-100 text-slate-600"}`} onClick={() => setFormMode("full")}>Registo completo</button>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
               <div>
                 <label className="label">Data</label>
                 <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="input" />
               </div>
               <div>
-                <label className="label">Condições meteorológicas</label>
+                <label className="label">Meteorologia</label>
                 <select value={weather} onChange={(e) => setWeather(e.target.value)} className="input">
                   {WEATHER_OPTIONS.map((w) => (
-                    <option key={w} value={w}>
-                      {w}
-                    </option>
+                    <option key={w} value={w}>{w}</option>
                   ))}
                 </select>
               </div>
-              <div>
-                <label className="label">Nº trabalhadores presentes</label>
-                <input type="number" min="0" value={workersPresent} onChange={(e) => setWorkersPresent(e.target.value)} className="input" />
+              <div className={formMode === "quick" ? "sm:col-span-2" : ""}>
+                <label className="label">Trabalhadores presentes</label>
+                <input type="number" min="0" value={workersPresent} onChange={(e) => setWorkersPresent(e.target.value)} className="input" placeholder="Opcional" />
               </div>
+              {formMode === "full" && (
+              <>
               <div>
                 <label className="label">Equipamentos presentes</label>
                 <input value={equipmentPresent} onChange={(e) => setEquipmentPresent(e.target.value)} className="input" placeholder="Betoneira, dumper..." />
@@ -207,11 +221,15 @@ export default function ProjectSiteDiaryPage() {
                 <label className="label">Hora de saída</label>
                 <input type="time" value={exitTime} onChange={(e) => setExitTime(e.target.value)} className="input" />
               </div>
+              </>
+              )}
             </div>
             <div>
               <label className="label">Trabalhos executados *</label>
-              <textarea required value={workDone} onChange={(e) => setWorkDone(e.target.value)} rows={2} className="input" />
+              <textarea required value={workDone} onChange={(e) => setWorkDone(e.target.value)} rows={formMode === "quick" ? 3 : 2} className="input" placeholder="Descreva o que foi feito hoje na obra..." />
             </div>
+            {formMode === "full" && (
+            <>
             <div className="grid gap-4 rounded-xl border border-blue-200 bg-blue-50/50 p-4 lg:grid-cols-2">
               <div className="space-y-2"><div className="flex items-center justify-between"><div><h3 className="text-sm font-semibold text-slate-900">Progresso do cronograma</h3><p className="text-xs text-slate-500">Actualize as actividades realmente executadas hoje.</p></div><button type="button" className="btn btn-secondary btn-sm" disabled={!tasks.length} onClick={() => setTaskProgress([...taskProgress, { taskId: tasks[0]?.id ?? "", progressPercent: "", notes: "" }])}><IconPlus className="h-3.5 w-3.5" /> Actividade</button></div>{taskProgress.map((item, index) => <div key={index} className="grid grid-cols-[minmax(0,1fr)_90px_auto] gap-2"><select className="input" value={item.taskId} onChange={(event) => setTaskProgress(taskProgress.map((row, rowIndex) => rowIndex === index ? { ...row, taskId: event.target.value } : row))}>{tasks.map((task) => <option key={task.id} value={task.id}>{task.code} · {task.name}</option>)}</select><div className="relative"><input className="input pr-7" type="number" min="0" max="100" placeholder="%" value={item.progressPercent} onChange={(event) => setTaskProgress(taskProgress.map((row, rowIndex) => rowIndex === index ? { ...row, progressPercent: event.target.value } : row))} /><span className="absolute right-2 top-2.5 text-xs text-slate-400">%</span></div><button type="button" className="icon-btn-danger" onClick={() => setTaskProgress(taskProgress.filter((_, rowIndex) => rowIndex !== index))}><IconTrash className="h-3.5 w-3.5" /></button><input className="input col-span-2" placeholder="Trabalho executado, restrição ou evidência" value={item.notes} onChange={(event) => setTaskProgress(taskProgress.map((row, rowIndex) => rowIndex === index ? { ...row, notes: event.target.value } : row))} /></div>)}{!tasks.length && <p className="rounded-lg bg-white px-3 py-2 text-xs text-amber-700">Crie o cronograma da obra para ligar trabalhos diários a actividades.</p>}</div>
               <div className="space-y-2"><div className="flex items-center justify-between"><div><h3 className="text-sm font-semibold text-slate-900">Consumo real do armazém</h3><p className="text-xs text-slate-500">A saída é criada no stock ao guardar o diário.</p></div><button type="button" className="btn btn-secondary btn-sm" disabled={!stock.length} onClick={() => setConsumptions([...consumptions, { materialId: stock.find((item) => item.balance > 0)?.materialId ?? "", quantity: "", notes: "" }])}><IconPlus className="h-3.5 w-3.5" /> Material</button></div>{consumptions.map((item, index) => { const current = stock.find((line) => line.materialId === item.materialId); return <div key={index} className="grid grid-cols-[minmax(0,1fr)_110px_auto] gap-2"><select className="input" value={item.materialId} onChange={(event) => setConsumptions(consumptions.map((row, rowIndex) => rowIndex === index ? { ...row, materialId: event.target.value } : row))}>{stock.filter((line) => line.balance > 0).map((line) => <option key={line.materialId} value={line.materialId}>{line.materialName} · disponível {line.balance.toLocaleString("pt-MZ", { maximumFractionDigits: 3 })} {line.unit}</option>)}</select><input className="input" type="number" min="0" step="0.001" placeholder={current?.unit ?? "Quant."} value={item.quantity} onChange={(event) => setConsumptions(consumptions.map((row, rowIndex) => rowIndex === index ? { ...row, quantity: event.target.value } : row))} /><button type="button" className="icon-btn-danger" onClick={() => setConsumptions(consumptions.filter((_, rowIndex) => rowIndex !== index))}><IconTrash className="h-3.5 w-3.5" /></button><input className="input col-span-2" placeholder="Frente de trabalho ou finalidade do consumo" value={item.notes} onChange={(event) => setConsumptions(consumptions.map((row, rowIndex) => rowIndex === index ? { ...row, notes: event.target.value } : row))} /></div>})}{!stock.some((item) => item.balance > 0) && <p className="rounded-lg bg-white px-3 py-2 text-xs text-amber-700">Sem material disponível. Receba primeiro uma ordem de compra no Armazém.</p>}</div>
@@ -242,6 +260,8 @@ export default function ProjectSiteDiaryPage() {
                 <textarea value={decisions} onChange={(e) => setDecisions(e.target.value)} rows={2} className="input" />
               </div>
             </div>
+            </>
+            )}
             <div className="flex flex-col-reverse gap-2 border-t border-slate-200 pt-4 sm:flex-row sm:justify-end"><button type="button" onClick={() => setShowForm(false)} className="btn btn-secondary">Cancelar</button><button type="submit" disabled={saving} className="btn btn-primary">
               <IconPlus className="w-4 h-4" />
               {saving ? "A guardar..." : "Registar dia"}
@@ -355,5 +375,7 @@ export default function ProjectSiteDiaryPage() {
         </section>
       </div>
     </Layout>
+    {dialog}
+    </>
   );
 }

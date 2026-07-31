@@ -12,7 +12,9 @@ import {
 import { requireCompanyUser, requireRole } from "../auth/middleware.js";
 import { assertProjectOwned } from "../services/accessControl.js";
 import { generateStandardBoq } from "../services/boqTemplate.js";
+import { applyProjectSpecificationsToDocument } from "../services/specEnrichment.js";
 import { getStandardSectionId } from "../services/quickEstimate.js";
+import { getProjectWorkflowStatus } from "../services/projectWorkflow.js";
 import { resolveOrCreateMaterialByName } from "../services/materialResolution.js";
 import { CURRENCIES, DEFAULT_IVA_RATE, getPlanDefinition, UNITS } from "@sigo/shared";
 
@@ -64,6 +66,12 @@ async function linkMaterialSpecification(
       set: { specification: input.specification?.trim() || null },
     })
     .returning();
+  if (input.specification?.trim()) {
+    await db
+      .update(materials)
+      .set({ specification: input.specification.trim() })
+      .where(eq(materials.id, resolved.material.id));
+  }
   return { link, material: resolved.material, createdMaterial: resolved.created };
 }
 
@@ -79,6 +87,16 @@ export async function projectRoutes(app: FastifyInstance) {
     const [project] = await db.select().from(projects).where(and(eq(projects.id, id), eq(projects.companyId, companyId))).limit(1);
     if (!project) return reply.code(404).send({ error: "Projecto não encontrado" });
     return project;
+  });
+
+  app.get("/api/projects/:id/workflow", { preHandler: requireCompanyUser }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const companyId = request.currentUser!.companyId!;
+    const project = await assertProjectOwned(id, companyId);
+    if (!project) return reply.code(404).send({ error: "Projecto não encontrado" });
+    const status = await getProjectWorkflowStatus(id);
+    if (!status) return reply.code(404).send({ error: "Projecto não encontrado" });
+    return status;
   });
 
   app.post("/api/projects", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
@@ -146,6 +164,9 @@ export async function projectRoutes(app: FastifyInstance) {
     await generateStandardBoq(document.id, companyId, project.zoneId, "Edifício Principal", !isMeasurementProject);
     for (const specification of materialSpecifications) {
       await linkMaterialSpecification(project.id, companyId, specification);
+    }
+    if (!isMeasurementProject) {
+      await applyProjectSpecificationsToDocument(document.id, project.id);
     }
 
     return reply.code(201).send({ ...project, defaultDocumentId: document.id });

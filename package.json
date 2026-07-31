@@ -10,6 +10,7 @@
   "scripts": {
     "dev:api": "npm run dev --workspace=apps/api",
     "dev:web": "npm run dev --workspace=apps/web",
+    "dev:plant": "node scripts/dev-plant.mjs",
     "build:shared": "npm run build --workspace=packages/shared",
     "build:api": "npm run build:shared && npm run build --workspace=apps/api",
     "build:web": "npm run build:shared && npm run build --workspace=apps/web",

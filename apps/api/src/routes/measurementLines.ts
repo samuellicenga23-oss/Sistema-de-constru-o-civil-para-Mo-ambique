@@ -2,10 +2,11 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { measurementLines } from "../db/schema.js";
+import { measurementLines, budgetSections, budgetDocuments, lineItems } from "../db/schema.js";
 import { requireCompanyUser, requireRole } from "../auth/middleware.js";
 import { assertLineItemOwned } from "../services/accessControl.js";
 import { getMeasurementLines, recomputeItemQuantity, computePartial } from "../services/dimensionEngine.js";
+import { buildMeasurementLinesFromPlant, loadProjectPlantRooms } from "../services/plantMeasurementLink.js";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista"] as const;
 
@@ -98,5 +99,50 @@ export async function measurementLineRoutes(app: FastifyInstance) {
     await db.delete(measurementLines).where(eq(measurementLines.id, id));
     const newQuantity = await recomputeItemQuantity(existing.lineItemId);
     return { ok: true, itemQuantity: newQuantity };
+  });
+
+  // Preenche a régua com áreas dos compartimentos da planta, conforme o código do item (5.1, 6.1…).
+  app.post("/api/line-items/:id/fill-from-plant", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const companyId = request.currentUser!.companyId!;
+    const item = await assertLineItemOwned(id, companyId);
+    if (!item) return reply.code(404).send({ error: "Item não encontrado" });
+    if (item.kind !== "item") return reply.code(400).send({ error: "Só itens têm medições" });
+    if (!item.code) return reply.code(400).send({ error: "Este item não tem código — não é possível ligar à planta." });
+
+    const [projectRow] = await db
+      .select({ projectId: budgetDocuments.projectId })
+      .from(budgetSections)
+      .innerJoin(budgetDocuments, eq(budgetSections.documentId, budgetDocuments.id))
+      .where(eq(budgetSections.id, item.sectionId))
+      .limit(1);
+    if (!projectRow) return reply.code(404).send({ error: "Projecto não encontrado" });
+
+    const rooms = await loadProjectPlantRooms(projectRow.projectId);
+    const built = buildMeasurementLinesFromPlant(item.code, rooms);
+    if (!built.ok) return reply.code(422).send({ error: built.reason });
+
+    await db.delete(measurementLines).where(eq(measurementLines.lineItemId, id));
+    for (const line of built.lines) {
+      await db.insert(measurementLines).values({
+        lineItemId: id,
+        description: line.description,
+        count: line.count.toFixed(4),
+        length: line.length !== null ? line.length.toFixed(4) : null,
+        width: line.width !== null ? line.width.toFixed(4) : null,
+        height: line.height !== null ? line.height.toFixed(4) : null,
+        sortOrder: line.sortOrder,
+      });
+    }
+
+    const newQuantity = await recomputeItemQuantity(id);
+    await db.update(lineItems).set({ origin: "planta" }).where(eq(lineItems.id, id));
+
+    return {
+      linesCreated: built.lines.length,
+      roomCount: built.roomCount,
+      strategy: built.strategy,
+      itemQuantity: newQuantity,
+    };
   });
 }

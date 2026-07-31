@@ -1,13 +1,26 @@
 import type { ReactNode } from "react";
 
-// Estado vazio consistente — antes cada página escrevia o seu próprio bloco "ainda não há X"
-// com estilos ligeiramente diferentes.
-export default function EmptyState({ title, description, action }: { title: string; description?: string; action?: ReactNode }) {
+export default function EmptyState({
+  title,
+  description,
+  action,
+  icon,
+}: {
+  title: string;
+  description?: string;
+  action?: ReactNode;
+  icon?: ReactNode;
+}) {
   return (
-    <div className="py-10 px-4 text-center">
-      <p className="text-gray-500 mb-1">{title}</p>
-      {description && <p className="muted mb-3">{description}</p>}
-      {action}
+    <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
+      {icon && (
+        <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-slate-100 text-slate-400">
+          {icon}
+        </div>
+      )}
+      <p className="text-sm font-medium text-slate-700">{title}</p>
+      {description && <p className="muted mt-1 max-w-sm">{description}</p>}
+      {action && <div className="mt-4">{action}</div>}
     </div>
   );
 }

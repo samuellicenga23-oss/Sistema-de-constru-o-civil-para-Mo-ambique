@@ -2,27 +2,28 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { companiesApi, type Company, type Subscription, type CompanyUpdateInput } from "../api/companies";
 import { usersApi } from "../api/users";
+import { boqApi } from "../api/boq";
 import { useAuth } from "../auth/AuthContext";
 import Layout from "../components/Layout";
 import LoadingState from "../components/LoadingState";
+import AlertBanner from "../components/AlertBanner";
 import TeamAccessPanel from "../components/TeamAccessPanel";
 import { CURRENCIES, getPlanDefinition } from "@sigo/shared";
+import { SIGO_WHATSAPP_NUMBER, formatMzn } from "../commercialPlans";
 
 const STATUS_LABELS: Record<string, string> = { trial: "Trial", activo: "Activo", suspenso: "Suspenso" };
 const STATUS_BADGE: Record<string, string> = { trial: "badge-yellow", activo: "badge-green", suspenso: "badge-red" };
 
 type Tab = "geral" | "logotipo" | "calculo" | "subscricao" | "utilizadores";
-const TABS: Array<{ id: Tab; label: string }> = [
-  { id: "geral", label: "Dados gerais" },
-  { id: "logotipo", label: "Logótipo" },
-  { id: "calculo", label: "Configurações de cálculo" },
-  { id: "subscricao", label: "Subscrição" },
-  { id: "utilizadores", label: "Utilizadores" },
+const TABS: Array<{ id: Tab; label: string; short: string }> = [
+  { id: "geral", label: "Dados gerais", short: "Geral" },
+  { id: "logotipo", label: "Logótipo", short: "Logo" },
+  { id: "calculo", label: "Cálculo", short: "Cálculo" },
+  { id: "subscricao", label: "Subscrição", short: "Plano" },
+  { id: "utilizadores", label: "Utilizadores", short: "Equipa" },
 ];
 
-// Campos de texto simples reaproveitados nos separadores "Dados gerais" — cada um é só
-// {chave, rótulo}, para não repetir o mesmo bloco de label+input onze vezes.
-const GENERAL_FIELDS: Array<{ key: keyof CompanyUpdateInput; label: string; placeholder?: string }> = [
+const GENERAL_FIELDS: Array<{ key: keyof CompanyUpdateInput; label: string }> = [
   { key: "nuit", label: "NUIT" },
   { key: "address", label: "Endereço" },
   { key: "province", label: "Província" },
@@ -43,11 +44,11 @@ export default function CompanySettingsPage() {
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [form, setForm] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
   const [uploading, setUploading] = useState(false);
-
   const [userCount, setUserCount] = useState(0);
+  const [projectCount, setProjectCount] = useState(0);
 
   async function reload() {
     const data = await companiesApi.me();
@@ -72,7 +73,9 @@ export default function CompanySettingsPage() {
   }
 
   async function reloadUsers() {
-    setUserCount((await usersApi.list()).length);
+    const [users, projects] = await Promise.all([usersApi.list(), boqApi.listProjects()]);
+    setUserCount(users.length);
+    setProjectCount(projects.length);
   }
 
   useEffect(() => {
@@ -80,11 +83,15 @@ export default function CompanySettingsPage() {
     reloadUsers().catch(() => {});
   }, []);
 
+  function flash(text: string) {
+    setMessage(text);
+    setTimeout(() => setMessage((current) => (current === text ? null : current)), 2500);
+  }
+
   async function handleSaveGeneral(e: FormEvent) {
     e.preventDefault();
     setError(null);
     setSaving(true);
-    setSaved(false);
     try {
       await companiesApi.updateMe({
         name: form.name,
@@ -100,8 +107,7 @@ export default function CompanySettingsPage() {
         documentFooter: form.documentFooter,
       });
       await reload();
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2500);
+      flash("Dados da empresa guardados.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao actualizar");
     } finally {
@@ -113,7 +119,6 @@ export default function CompanySettingsPage() {
     e.preventDefault();
     setError(null);
     setSaving(true);
-    setSaved(false);
     try {
       await companiesApi.updateMe({
         defaultCurrency: form.defaultCurrency,
@@ -121,8 +126,7 @@ export default function CompanySettingsPage() {
         workingHoursPerDay: Number(form.workingHoursPerDay),
       });
       await reload();
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2500);
+      flash("Parâmetros de cálculo guardados.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao actualizar");
     } finally {
@@ -138,6 +142,7 @@ export default function CompanySettingsPage() {
     try {
       await companiesApi.uploadLogo(file);
       await reload();
+      flash("Logótipo actualizado.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao carregar logótipo");
     } finally {
@@ -146,80 +151,77 @@ export default function CompanySettingsPage() {
   }
 
   if (!company) {
-    return <LoadingState fullScreen />;
+    return <LoadingState fullScreen label="A carregar empresa..." />;
   }
 
-  return (
-    <Layout title="Definições da Empresa" subtitle="Identidade, parâmetros de cálculo, subscrição e acessos da equipa">
-      <div className="mx-auto w-full max-w-6xl">
-        {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
+  const plan = getPlanDefinition(subscription?.plan ?? "free");
 
-        <div className="workspace-tabs mb-5">
+  return (
+    <Layout title="Empresa" subtitle="Identidade, parâmetros de cálculo e equipa">
+      <div className="mx-auto w-full max-w-4xl space-y-5">
+        {error && <AlertBanner tone="error" onDismiss={() => setError(null)}>{error}</AlertBanner>}
+        {message && <AlertBanner tone="success" onDismiss={() => setMessage(null)}>{message}</AlertBanner>}
+
+        <section className="card overflow-hidden">
+          <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:p-6">
+            <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 p-2">
+              {company.logoUrl ? (
+                <img src={company.logoUrl} alt="" className="max-h-full max-w-full object-contain" />
+              ) : (
+                <span className="text-2xl font-black text-brand-700">{company.name.charAt(0)}</span>
+              )}
+            </div>
+            <div className="min-w-0 flex-1">
+              <h2 className="truncate text-lg font-bold text-slate-900">{company.name}</h2>
+              <p className="mt-0.5 text-sm text-slate-500">{[company.district, company.province].filter(Boolean).join(" · ") || "Localização por definir"}</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <span className={`badge ${STATUS_BADGE[subscription?.status ?? "trial"]}`}>{STATUS_LABELS[subscription?.status ?? "trial"]}</span>
+                {plan && <span className="badge badge-gray">Plano {plan.label}</span>}
+                <span className="badge badge-gray">{userCount} utilizador(es)</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <div className="workspace-tabs overflow-x-auto">
           {TABS.map((t) => (
             <button
               key={t.id}
               onClick={() => { setTab(t.id); setSearchParams(t.id === "geral" ? {} : { tab: t.id }); }}
-              className={`workspace-tab ${tab === t.id ? "workspace-tab-active" : ""}`}
+              className={`workspace-tab whitespace-nowrap ${tab === t.id ? "workspace-tab-active" : ""}`}
             >
-              {t.label}
+              <span className="hidden sm:inline">{t.label}</span>
+              <span className="sm:hidden">{t.short}</span>
             </button>
           ))}
         </div>
 
         {tab === "geral" && (
           <section className="card card-pad">
+            <h2 className="section-title mb-4">Dados gerais</h2>
             <form onSubmit={handleSaveGeneral} className="space-y-4">
               <div>
-                <label className="label">Nome da empresa</label>
-                <input
-                  value={form.name ?? ""}
-                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                  disabled={!canEdit}
-                  className="input"
-                  required
-                />
+                <label className="label">Nome da empresa *</label>
+                <input value={form.name ?? ""} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} disabled={!canEdit} className="input" required />
               </div>
-              <div className="grid sm:grid-cols-2 gap-4">
+              <div className="grid gap-4 sm:grid-cols-2">
                 {GENERAL_FIELDS.map((field) => (
                   <div key={field.key}>
                     <label className="label">{field.label}</label>
-                    <input
-                      value={form[field.key] ?? ""}
-                      onChange={(e) => setForm((f) => ({ ...f, [field.key]: e.target.value }))}
-                      disabled={!canEdit}
-                      className="input"
-                    />
+                    <input value={form[field.key] ?? ""} onChange={(e) => setForm((f) => ({ ...f, [field.key]: e.target.value }))} disabled={!canEdit} className="input" />
                   </div>
                 ))}
               </div>
               <div>
                 <label className="label">Dados bancários</label>
-                <textarea
-                  value={form.bankDetails ?? ""}
-                  onChange={(e) => setForm((f) => ({ ...f, bankDetails: e.target.value }))}
-                  disabled={!canEdit}
-                  className="input"
-                  rows={2}
-                  placeholder="Banco, NIB, número de conta..."
-                />
+                <textarea value={form.bankDetails ?? ""} onChange={(e) => setForm((f) => ({ ...f, bankDetails: e.target.value }))} disabled={!canEdit} className="input min-h-20" placeholder="Banco, NIB, conta..." />
               </div>
               <div>
-                <label className="label">Rodapé para documentos exportados</label>
-                <textarea
-                  value={form.documentFooter ?? ""}
-                  onChange={(e) => setForm((f) => ({ ...f, documentFooter: e.target.value }))}
-                  disabled={!canEdit}
-                  className="input"
-                  rows={2}
-                />
+                <label className="label">Rodapé dos documentos exportados</label>
+                <textarea value={form.documentFooter ?? ""} onChange={(e) => setForm((f) => ({ ...f, documentFooter: e.target.value }))} disabled={!canEdit} className="input min-h-16" />
               </div>
               {canEdit && (
-                <div className="flex items-center gap-3">
-                  <button type="submit" disabled={saving} className="btn btn-primary">
-                    {saving ? "A guardar..." : "Guardar"}
-                  </button>
-                  {saved && <span className="text-sm text-green-600">Guardado.</span>}
-                </div>
+                <button type="submit" disabled={saving} className="btn btn-primary">{saving ? "A guardar..." : "Guardar dados"}</button>
               )}
             </form>
           </section>
@@ -227,76 +229,43 @@ export default function CompanySettingsPage() {
 
         {tab === "logotipo" && (
           <section className="card card-pad">
-            <h2 className="section-title mb-3">Logótipo</h2>
-            {company.logoUrl && <img src={company.logoUrl} alt="Logótipo" className="h-16 mb-3 object-contain" />}
+            <h2 className="section-title mb-2">Logótipo</h2>
+            <p className="muted mb-4">Aparece na barra lateral e nos documentos exportados.</p>
+            {company.logoUrl && <img src={company.logoUrl} alt="Logótipo" className="mb-4 h-20 object-contain" />}
             {canEdit ? (
               <>
-                <input
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp,image/gif"
-                  onChange={handleLogoChange}
-                  disabled={uploading}
-                  className="text-sm file:mr-3 file:rounded-md file:border-0 file:bg-brand-100 file:text-brand-800 file:px-2.5 file:py-1 file:text-xs file:font-medium"
-                />
-                {uploading && <p className="text-xs text-gray-400 mt-2">A carregar...</p>}
+                <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={handleLogoChange} disabled={uploading} className="input py-2 file:mr-3 file:rounded-md file:border-0 file:bg-brand-100 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-brand-800" />
+                {uploading && <p className="muted mt-2">A carregar...</p>}
               </>
             ) : (
-              <p className="muted">Só um administrador da empresa pode mudar o logótipo.</p>
+              <p className="muted">Só um administrador pode alterar o logótipo.</p>
             )}
           </section>
         )}
 
         {tab === "calculo" && (
           <section className="card card-pad">
-            <h2 className="section-title mb-3">Configurações de cálculo</h2>
-            <p className="muted mb-4">Valores por omissão usados em novos orçamentos e composições de custo desta empresa.</p>
-            <form onSubmit={handleSaveCalc} className="grid sm:grid-cols-3 gap-4">
+            <h2 className="section-title mb-2">Parâmetros de cálculo</h2>
+            <p className="muted mb-4">Usados no custo/hora da mão-de-obra e em novos projectos.</p>
+            <form onSubmit={handleSaveCalc} className="grid gap-4 sm:grid-cols-3">
               <div>
                 <label className="label">Moeda por omissão</label>
-                <select
-                  value={form.defaultCurrency ?? "MZN"}
-                  onChange={(e) => setForm((f) => ({ ...f, defaultCurrency: e.target.value }))}
-                  disabled={!canEdit}
-                  className="input"
-                >
-                  {CURRENCIES.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
+                <select value={form.defaultCurrency ?? "MZN"} onChange={(e) => setForm((f) => ({ ...f, defaultCurrency: e.target.value }))} disabled={!canEdit} className="input">
+                  {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
               <div>
-                <label className="label">Dias de trabalho / mês</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={31}
-                  value={form.workingDaysPerMonth ?? ""}
-                  onChange={(e) => setForm((f) => ({ ...f, workingDaysPerMonth: e.target.value }))}
-                  disabled={!canEdit}
-                  className="input"
-                />
+                <label className="label">Dias úteis / mês</label>
+                <input type="number" min={1} max={31} value={form.workingDaysPerMonth ?? ""} onChange={(e) => setForm((f) => ({ ...f, workingDaysPerMonth: e.target.value }))} disabled={!canEdit} className="input" />
+                <p className="muted mt-1">Típico: 22 (seg–sáb)</p>
               </div>
               <div>
-                <label className="label">Horas de trabalho / dia</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={24}
-                  step="0.5"
-                  value={form.workingHoursPerDay ?? ""}
-                  onChange={(e) => setForm((f) => ({ ...f, workingHoursPerDay: e.target.value }))}
-                  disabled={!canEdit}
-                  className="input"
-                />
+                <label className="label">Horas / dia</label>
+                <input type="number" min={1} max={24} step="0.5" value={form.workingHoursPerDay ?? ""} onChange={(e) => setForm((f) => ({ ...f, workingHoursPerDay: e.target.value }))} disabled={!canEdit} className="input" />
               </div>
               {canEdit && (
-                <div className="sm:col-span-3 flex items-center gap-3">
-                  <button type="submit" disabled={saving} className="btn btn-primary">
-                    {saving ? "A guardar..." : "Guardar"}
-                  </button>
-                  {saved && <span className="text-sm text-green-600">Guardado.</span>}
+                <div className="sm:col-span-3">
+                  <button type="submit" disabled={saving} className="btn btn-primary">{saving ? "A guardar..." : "Guardar parâmetros"}</button>
                 </div>
               )}
             </form>
@@ -304,26 +273,72 @@ export default function CompanySettingsPage() {
         )}
 
         {tab === "subscricao" && (
-          <section className="card card-pad">
-            <h2 className="section-title mb-3">Subscrição</h2>
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className={`badge ${STATUS_BADGE[subscription?.status ?? "trial"]}`}>{STATUS_LABELS[subscription?.status ?? "trial"]}</span>
-              {(() => {
-                const plan = getPlanDefinition(subscription?.plan ?? "free");
-                return plan ? (
-                  <span className="text-sm text-gray-700">
-                    Plano <span className="font-semibold">{plan.label}</span> — {plan.maxUsers ? `até ${plan.maxUsers} utilizador(es)` : "utilizadores ilimitados"} (
-                    {userCount} em uso), {plan.maxProjects ? `até ${plan.maxProjects} projectos` : "projectos ilimitados"}
-                  </span>
-                ) : null;
-              })()}
+          <section className="card card-pad space-y-4">
+            <h2 className="section-title">Subscrição e capacidade</h2>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={`badge ${STATUS_BADGE[subscription?.status ?? "trial"]}`}>{STATUS_LABELS[subscription?.status ?? "trial"]}</span>
+                {plan && <span className="text-sm font-semibold text-slate-800">Plano {plan.label}</span>}
+              </div>
+              {plan && (
+                <>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <div className="flex justify-between text-xs text-slate-600 mb-1">
+                        <span>Utilizadores</span>
+                        <span>{userCount}{plan.maxUsers ? ` / ${plan.maxUsers}` : ""}</span>
+                      </div>
+                      {plan.maxUsers && (
+                        <div className="h-2 rounded-full bg-slate-200 overflow-hidden">
+                          <div className="h-full bg-brand-600 rounded-full" style={{ width: `${Math.min(100, (userCount / plan.maxUsers) * 100)}%` }} />
+                        </div>
+                      )}
+                    </div>
+                    <div>
+                      <div className="flex justify-between text-xs text-slate-600 mb-1">
+                        <span>Projectos</span>
+                        <span>{projectCount}{plan.maxProjects ? ` / ${plan.maxProjects}` : ""}</span>
+                      </div>
+                      {plan.maxProjects && (
+                        <div className="h-2 rounded-full bg-slate-200 overflow-hidden">
+                          <div className="h-full bg-brand-600 rounded-full" style={{ width: `${Math.min(100, (projectCount / plan.maxProjects) * 100)}%` }} />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  {plan.annualPriceMzn != null && plan.annualPriceMzn > 0 && (
+                    <p className="text-sm text-slate-700">Referência anual: <strong>{formatMzn(plan.annualPriceMzn)}</strong> · mensal {formatMzn(plan.monthlyPriceMzn ?? 0)}</p>
+                  )}
+                  {plan.priceNote && <p className="text-xs text-slate-500">{plan.priceNote}</p>}
+                  <ul className="space-y-1 text-sm text-slate-600">
+                    {plan.features.slice(0, 6).map((f) => (
+                      <li key={f} className="flex gap-2"><span className="text-emerald-600">✓</span>{f}</li>
+                    ))}
+                  </ul>
+                </>
+              )}
             </div>
-            <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-slate-200 pt-4"><p className="text-xs text-slate-500">Precisa de mais capacidade?</p><Link to="/#planos" className="action-link">Ver planos anuais →</Link></div>
+            <p className="text-xs text-slate-500">A activação e alteração de plano é feita pela equipa SIGO (facturação fora do sistema). Contacte o suporte para upgrade ou mais capacidade.</p>
+            <div className="flex flex-wrap gap-2">
+              <Link to="/#planos" className="btn btn-secondary btn-sm">Ver planos públicos</Link>
+              <a
+                href={`https://wa.me/${SIGO_WHATSAPP_NUMBER}?text=${encodeURIComponent("Olá, gostaria de alterar o plano ou aumentar a capacidade da minha empresa no SIGO.")}`}
+                target="_blank"
+                rel="noreferrer"
+                className="btn btn-primary btn-sm"
+              >
+                Pedir upgrade
+              </a>
+            </div>
           </section>
         )}
 
         {tab === "utilizadores" && (
-          canEdit ? <TeamAccessPanel maxUsers={getPlanDefinition(subscription?.plan ?? "free")?.maxUsers ?? null} onCountChange={setUserCount} /> : <section className="card card-pad"><p className="muted">Só um administrador da empresa pode gerir a equipa.</p></section>
+          canEdit ? (
+            <TeamAccessPanel maxUsers={plan?.maxUsers ?? null} onCountChange={setUserCount} />
+          ) : (
+            <section className="card card-pad"><p className="muted">Só um administrador pode gerir a equipa.</p></section>
+          )
         )}
       </div>
     </Layout>

@@ -2,7 +2,11 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { boqApi, type BudgetDocument, type Project } from "../api/boq";
 import { scheduleApi, type ProjectSchedule, type SchedulePaper, type SchedulePrintScale, type ScheduleTask, type ScheduleTaskStatus } from "../api/schedule";
+import { workingDaysInclusive, workingDayOffset, nextWorkingDay, calendarDaysInclusive } from "@sigo/shared";
 import Layout from "../components/Layout";
+import LoadingState from "../components/LoadingState";
+import AlertBanner from "../components/AlertBanner";
+import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { MetricCard } from "../components/WorkspaceUI";
 import ProjectWorkspaceNav from "../components/ProjectWorkspaceNav";
 import Modal from "../components/Modal";
@@ -23,16 +27,10 @@ const PROGRESS_SOURCE_LABELS: Record<ScheduleTask["progressSource"], string> = {
 function today() { return new Date().toISOString().slice(0, 10); }
 function fmtMoney(value: number, currency: string) { return new Intl.NumberFormat("pt-MZ", { style: "currency", currency, maximumFractionDigits: 0 }).format(value); }
 function fmtDate(value: string | null) { return value ? new Intl.DateTimeFormat("pt-PT", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(`${value}T00:00:00Z`)) : "—"; }
-function daysBetween(start: string, end: string) { return Math.max(1, Math.round((new Date(`${end}T00:00:00Z`).getTime() - new Date(`${start}T00:00:00Z`).getTime()) / DAY_MS) + 1); }
-function dayOffset(start: string, end: string) { return Math.max(0, Math.round((new Date(`${end}T00:00:00Z`).getTime() - new Date(`${start}T00:00:00Z`).getTime()) / DAY_MS)); }
-function nextWorkingDay(date: string) {
-  const value = new Date(`${date}T00:00:00Z`);
-  do value.setUTCDate(value.getUTCDate() + 1); while (value.getUTCDay() === 0);
-  return value.toISOString().slice(0, 10);
-}
 
 export default function ProjectSchedulePage() {
   const { projectId } = useParams<{ projectId: string }>();
+  const { confirm, dialog } = useConfirmDialog();
   const [project, setProject] = useState<Project | null>(null);
   const [documents, setDocuments] = useState<BudgetDocument[]>([]);
   const [schedule, setSchedule] = useState<ProjectSchedule | null>(null);
@@ -73,7 +71,16 @@ export default function ProjectSchedulePage() {
     event.preventDefault();
     if (!projectId) return;
     if (!documentId) return;
-    if (schedule?.tasks.length && !window.confirm("Recriar substitui o cronograma actual, as subactividades e a linha de base. Continuar?")) return;
+    if (schedule?.tasks.length) {
+      const ok = await confirm({
+        title: "Recriar cronograma?",
+        message: "A linha de base actual, subactividades e dependências serão substituídas.",
+        confirmLabel: "Recriar",
+        danger: true,
+        details: ["WBS gerada de novo a partir do mapa", "Progresso manual pode perder-se"],
+      });
+      if (!ok) return;
+    }
     setSaving(true); setError(null);
     try {
       const next = await scheduleApi.generate(projectId, {
@@ -141,16 +148,28 @@ export default function ProjectSchedulePage() {
   }, [schedule?.tasks, collapsed, taskQuery]);
   const timeline = useMemo(() => {
     if (!schedule?.startDate || !schedule.endDate) return null;
-    const totalDays = daysBetween(schedule.startDate, schedule.endDate);
-    const pixelsPerDay = { compacto: 3.2, normal: 5.2, detalhe: 8 }[timelineZoom];
-    const width = Math.max(760, totalDays * pixelsPerDay);
+    const totalWorkingDays = workingDaysInclusive(schedule.startDate, schedule.endDate);
+    const totalCalendarDays = calendarDaysInclusive(schedule.startDate, schedule.endDate);
+    const pixelsPerDay = { compacto: 4, normal: 6.5, detalhe: 10 }[timelineZoom];
+    const width = Math.max(640, totalWorkingDays * pixelsPerDay);
     const markers: Array<{ label: string; left: number }> = [];
-    const cursor = new Date(`${schedule.startDate}T00:00:00Z`); cursor.setUTCDate(1); cursor.setUTCMonth(cursor.getUTCMonth() + 1);
-    while (cursor.toISOString().slice(0, 10) <= schedule.endDate) {
-      markers.push({ label: cursor.toLocaleDateString("pt-PT", { month: "short", year: "2-digit", timeZone: "UTC" }), left: dayOffset(schedule.startDate, cursor.toISOString().slice(0, 10)) / totalDays * 100 });
-      cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+    const weekendBands: Array<{ left: number; width: number }> = [];
+    const cursor = new Date(`${schedule.startDate}T00:00:00Z`);
+    const end = new Date(`${schedule.endDate}T00:00:00Z`);
+    while (cursor <= end) {
+      if (cursor.getUTCDay() === 0) {
+        const calOffset = Math.round((cursor.getTime() - new Date(`${schedule.startDate}T00:00:00Z`).getTime()) / DAY_MS);
+        weekendBands.push({ left: (calOffset / totalCalendarDays) * 100, width: (1 / totalCalendarDays) * 100 });
+      }
+      if (cursor.getUTCDate() === 1) {
+        markers.push({
+          label: cursor.toLocaleDateString("pt-PT", { month: "short", year: "2-digit", timeZone: "UTC" }),
+          left: (workingDayOffset(schedule.startDate, cursor.toISOString().slice(0, 10)) / Math.max(1, totalWorkingDays - 1)) * 100,
+        });
+      }
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
     }
-    return { width, totalDays, markers };
+    return { width, totalWorkingDays, totalCalendarDays, markers, weekendBands };
   }, [schedule?.startDate, schedule?.endDate, timelineZoom]);
 
   function toggleCollapse(taskId: string) {
@@ -161,12 +180,12 @@ export default function ProjectSchedulePage() {
     });
   }
 
-  if (!project || !schedule) return <div className="min-h-screen grid place-items-center text-slate-400">A carregar cronograma...</div>;
+  if (!project || !schedule) return <LoadingState fullScreen label="A carregar cronograma..." />;
 
   return <Layout title={`Cronograma — ${project.name}`} subtitle="Planeamento WBS ligado ao orçamento, diário de obra, compras e autos de medição" actions={<><div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-1"><select className="h-7 rounded border-0 bg-transparent px-2 text-xs font-semibold text-slate-700 outline-none" aria-label="Formato do PDF" value={printPaper} onChange={(event) => setPrintPaper(event.target.value as SchedulePaper)}><option value="auto">Folha automática</option><option value="A3">A3</option><option value="A2">A2</option><option value="A1">A1</option></select><span className="h-5 border-l border-slate-200" /><select className="h-7 rounded border-0 bg-transparent px-2 text-xs font-semibold text-slate-700 outline-none" aria-label="Escala do PDF" value={printScale} onChange={(event) => setPrintScale(event.target.value === "fit" ? "fit" : Number(event.target.value) as SchedulePrintScale)}><option value="fit">Ajustar à folha</option><option value="100">Escala 100%</option><option value="85">Escala 85%</option><option value="70">Escala 70%</option><option value="55">Escala 55%</option></select></div><a className={`btn btn-secondary btn-sm ${!schedule.tasks.length ? "pointer-events-none opacity-50" : ""}`} href={schedule.tasks.length ? scheduleApi.exportPdfUrl(project.id, { paper: printPaper, scale: printScale }) : undefined} aria-disabled={!schedule.tasks.length}><IconDownload className="h-4 w-4" /> Exportar PDF</a><Link className="btn btn-ghost btn-sm" to={`/projectos/${project.id}`}><IconBack className="h-4 w-4" /> Projecto</Link></>}>
     <div className="mx-auto w-full max-w-[1500px] space-y-5">
       <ProjectWorkspaceNav projectId={project.id} />
-      {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
+      {error && <AlertBanner tone="error" onDismiss={() => setError(null)}>{error}</AlertBanner>}
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div><h2 className="text-lg font-semibold text-slate-950">Plano de execução</h2><p className="text-sm text-slate-500">Capítulos organizam a obra; subactividades recebem prazo, dependência e progresso real.</p></div>
@@ -196,8 +215,8 @@ export default function ProjectSchedulePage() {
 
       {schedule.tasks.length > 0 && <>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <MetricCard label="Execução física" value={`${schedule.overallProgress.toFixed(1)}%`} note={`${leafTasks.filter((task) => task.status === "concluido").length} de ${leafTasks.length} tarefas executáveis concluídas`} />
-          <MetricCard label="Período" value={`${daysBetween(schedule.startDate!, schedule.endDate!)} dias`} note={`${fmtDate(schedule.startDate)} — ${fmtDate(schedule.endDate)}`} />
+          <MetricCard label="Execução física" value={`${schedule.overallProgress.toFixed(1)}%`} note={`${leafTasks.filter((task) => task.status === "concluido").length} de ${leafTasks.length} tarefas concluídas`} />
+          <MetricCard label="Duração" value={`${workingDaysInclusive(schedule.startDate!, schedule.endDate!)} dias úteis`} note={`${fmtDate(schedule.startDate)} — ${fmtDate(schedule.endDate)} · seg–sáb`} />
           <MetricCard label="Valor planeado" value={fmtMoney(schedule.plannedValue, project.currency)} note="Sem dupla contagem dos resumos" />
           <MetricCard label="Valor medido" value={fmtMoney(schedule.executedValue, project.currency)} note="Autos aprovados" />
         </div>
@@ -233,24 +252,24 @@ export default function ProjectSchedulePage() {
             })}
           </div>
           <div className="hidden overflow-x-auto md:block">
-            <div style={{ width: 600 + timeline!.width }}>
-              <div className="sticky top-0 z-10 grid border-b border-slate-200 bg-slate-950 text-white" style={{ gridTemplateColumns: `600px ${timeline!.width}px` }}>
-                <div className="grid grid-cols-[64px_minmax(260px,1fr)_82px_104px] items-center px-3 py-3 text-[10px] font-semibold uppercase tracking-[.08em]"><span>WBS</span><span>Actividade</span><span>Duração</span><span>Execução</span></div>
+            <div style={{ width: `min(100%, ${280 + timeline!.width}px)` }}>
+              <div className="sticky top-0 z-10 grid border-b border-slate-200 bg-slate-950 text-white" style={{ gridTemplateColumns: `minmax(240px, 360px) ${timeline!.width}px` }}>
+                <div className="grid grid-cols-[52px_minmax(140px,1fr)_72px_88px] items-center px-2 py-3 text-[10px] font-semibold uppercase tracking-[.08em] sm:px-3"><span>WBS</span><span>Actividade</span><span>Duração</span><span>Exec.</span></div>
                 <div className="relative border-l border-slate-700">{timeline!.markers.map((marker) => <span key={marker.label} className="absolute inset-y-0 border-l border-slate-600 px-2 py-3 text-[9px] font-bold uppercase tracking-wide" style={{ left: `${marker.left}%` }}>{marker.label}</span>)}</div>
               </div>
               {visibleTasks.map((task) => {
-                const left = dayOffset(schedule.startDate!, task.startDate) / timeline!.totalDays * 100;
-                const width = Math.max(1.2, daysBetween(task.startDate, task.endDate) / timeline!.totalDays * 100);
-                const baselineLeft = task.baselineStartDate ? dayOffset(schedule.startDate!, task.baselineStartDate) / timeline!.totalDays * 100 : left;
-                const baselineWidth = task.baselineStartDate && task.baselineEndDate ? daysBetween(task.baselineStartDate, task.baselineEndDate) / timeline!.totalDays * 100 : width;
+                const left = (workingDayOffset(schedule.startDate!, task.startDate) / Math.max(1, timeline!.totalWorkingDays - 1)) * 100;
+                const width = Math.max(1.5, (task.durationDays / timeline!.totalWorkingDays) * 100);
+                const baselineLeft = task.baselineStartDate ? (workingDayOffset(schedule.startDate!, task.baselineStartDate) / Math.max(1, timeline!.totalWorkingDays - 1)) * 100 : left;
+                const baselineWidth = task.baselineStartDate && task.baselineEndDate ? (workingDaysInclusive(task.baselineStartDate, task.baselineEndDate) / timeline!.totalWorkingDays) * 100 : width;
                 const childCount = task.isSummary ? schedule.tasks.filter((child) => child.parentId === task.id).length : 0;
                 const selectedRow = selectedId === task.id;
                 const rowHeight = task.isSummary ? 48 : 52;
                 const currentDay = today();
                 const todayVisible = currentDay >= schedule.startDate! && currentDay <= schedule.endDate!;
-                const todayLeft = todayVisible ? dayOffset(schedule.startDate!, currentDay) / timeline!.totalDays * 100 : 0;
-                return <div key={task.id} className={`grid w-full border-b transition ${task.isSummary ? "border-slate-200 bg-[#f2f5f8]" : "border-slate-100 bg-white hover:bg-orange-50/30"} ${selectedRow ? "shadow-[inset_4px_0_0_#ed6c22]" : ""}`} style={{ gridTemplateColumns: `600px ${timeline!.width}px`, height: rowHeight }}>
-                  <div className="grid grid-cols-[64px_minmax(260px,1fr)_82px_104px] items-center px-3">
+                const todayLeft = todayVisible ? (workingDayOffset(schedule.startDate!, currentDay) / Math.max(1, timeline!.totalWorkingDays - 1)) * 100 : 0;
+                return <div key={task.id} className={`grid w-full border-b transition ${task.isSummary ? "border-slate-200 bg-[#f2f5f8]" : "border-slate-100 bg-white hover:bg-orange-50/30"} ${selectedRow ? "shadow-[inset_4px_0_0_#ed6c22]" : ""}`} style={{ gridTemplateColumns: `minmax(240px, 360px) ${timeline!.width}px`, height: rowHeight }}>
+                  <div className="grid grid-cols-[52px_minmax(140px,1fr)_72px_88px] items-center px-2 sm:px-3">
                     <span className={`text-xs font-bold tabular-nums ${task.isSummary ? "text-slate-700" : "text-blue-700"}`}>{task.code}</span>
                     <div className={`relative min-w-0 ${task.parentId ? "pl-8" : ""}`}>
                       {task.parentId && <span className="absolute -bottom-4 -top-4 left-2 w-4 border-b border-l border-slate-300" />}
@@ -260,10 +279,13 @@ export default function ProjectSchedulePage() {
                       </div>
                       <p className={`relative mt-0.5 truncate text-[9px] text-slate-500 ${task.isSummary ? "pl-8" : ""}`}>{task.isSummary ? `${childCount} subactividade${childCount === 1 ? "" : "s"} · resumo automático` : `${fmtDate(task.startDate)} · ${STATUS_LABELS[task.status]} · ${PROGRESS_SOURCE_LABELS[task.progressSource]}`}</p>
                     </div>
-                    <span className="text-[11px] font-semibold tabular-nums text-slate-600">{task.durationDays} d</span>
+                    <span className="text-[11px] font-semibold tabular-nums text-slate-600">{task.durationDays} d úteis</span>
                     <div className="pr-3"><div className="flex items-center justify-between text-[10px] font-bold"><span>{task.progress.toFixed(0)}%</span><i className={`h-2 w-2 rounded-full ${STATUS_COLORS[task.status]}`} /></div><div className="mt-1 h-1 overflow-hidden rounded-full bg-slate-200"><i className={`block h-full ${STATUS_COLORS[task.status]}`} style={{ width: `${Math.min(100, task.progress)}%` }} /></div></div>
                   </div>
                   <button type="button" aria-label={`Editar ${task.name}`} onClick={() => setSelectedId(task.id)} className={`relative block border-l border-slate-200 text-left ${selectedRow ? "bg-orange-50/40" : ""}`}>
+                    {timeline!.weekendBands.map((band, index) => (
+                      <i key={`weekend-${index}`} className="pointer-events-none absolute inset-y-0 bg-slate-100/80" style={{ left: `${band.left}%`, width: `${band.width}%` }} />
+                    ))}
                     {timeline!.markers.map((marker) => <i key={marker.label} className="absolute inset-y-0 border-l border-dashed border-slate-200" style={{ left: `${marker.left}%` }} />)}
                     {todayVisible && <i className="absolute inset-y-0 z-[1] border-l border-red-400" style={{ left: `${todayLeft}%` }}><span className="absolute -left-1 top-1 h-2 w-2 rounded-full bg-red-500" /></i>}
                     <span className="absolute h-1 rounded bg-slate-300" style={{ left: `${baselineLeft}%`, width: `${baselineWidth}%`, top: task.isSummary ? 15 : 14 }} />
@@ -277,9 +299,10 @@ export default function ProjectSchedulePage() {
           </div>
         </section>
 
-        {selected && <TaskEditor task={selected} tasks={schedule.tasks} onClose={() => setSelectedId(null)} onSaved={async () => { setSelectedId(null); await reload(); }} onDeleted={async () => { setSelectedId(null); await reload(); }} setError={setError} />}
+        {selected && <TaskEditor task={selected} tasks={schedule.tasks} onClose={() => setSelectedId(null)} onSaved={async () => { setSelectedId(null); await reload(); }} onDeleted={async () => { setSelectedId(null); await reload(); }} setError={setError} confirm={confirm} />}
       </>}
-      {!schedule.tasks.length && !setupOpen && <div className="card card-pad py-14 text-center"><IconChart className="mx-auto mb-3 h-10 w-10 text-blue-600" /><h3 className="text-lg font-semibold">Transforme o orçamento num plano executável</h3><p className="mx-auto mt-2 max-w-xl text-sm text-slate-500">O SIGO cria a WBS com actividades e subactividades, distribui o prazo pelo peso financeiro e estabelece a linha de base. Depois, Diário e Autos alimentam o progresso real.</p><button onClick={() => setSetupOpen(true)} className="btn btn-primary mt-5">Configurar cronograma</button></div>}
+      {!schedule.tasks.length && !setupOpen && <div className="card card-pad py-14 text-center"><IconChart className="mx-auto mb-3 h-10 w-10 text-blue-600" /><h3 className="text-lg font-semibold">Transforme o orçamento num plano executável</h3><p className="mx-auto mt-2 max-w-xl text-sm text-slate-500">O SIGO cria a WBS com actividades e subactividades, distribui o prazo pelo peso das composições e estabelece a linha de base.</p><button onClick={() => setSetupOpen(true)} className="btn btn-primary mt-5">Configurar cronograma</button></div>}
+      {dialog}
     </div>
   </Layout>;
 }
@@ -312,7 +335,7 @@ function formFromTask(task: ScheduleTask): EditorForm {
   };
 }
 
-function TaskEditor({ task, tasks, onClose, onSaved, onDeleted, setError }: { task: ScheduleTask; tasks: ScheduleTask[]; onClose: () => void; onSaved: () => Promise<void>; onDeleted: () => Promise<void>; setError: (value: string | null) => void }) {
+function TaskEditor({ task, tasks, onClose, onSaved, onDeleted, setError, confirm }: { task: ScheduleTask; tasks: ScheduleTask[]; onClose: () => void; onSaved: () => Promise<void>; onDeleted: () => Promise<void>; setError: (value: string | null) => void; confirm: ReturnType<typeof useConfirmDialog>["confirm"] }) {
   const [form, setForm] = useState<EditorForm>(() => formFromTask(task));
   const [saving, setSaving] = useState(false);
   useEffect(() => setForm(formFromTask(task)), [task.id]);
@@ -334,8 +357,14 @@ function TaskEditor({ task, tasks, onClose, onSaved, onDeleted, setError }: { ta
   }
 
   async function remove() {
-    const detail = task.isSummary ? " As respectivas subactividades também serão eliminadas." : "";
-    if (!window.confirm(`Eliminar a actividade “${task.name}”?${detail}`)) return;
+    const ok = await confirm({
+      title: "Eliminar actividade?",
+      message: `Remover “${task.name}” do cronograma.`,
+      confirmLabel: "Eliminar",
+      danger: true,
+      details: task.isSummary ? ["As subactividades desta fase também serão eliminadas"] : undefined,
+    });
+    if (!ok) return;
     setSaving(true);
     try { await scheduleApi.deleteTask(task.id); await onDeleted(); } catch (cause) { setError(cause instanceof Error ? cause.message : "Erro ao eliminar actividade"); } finally { setSaving(false); }
   }

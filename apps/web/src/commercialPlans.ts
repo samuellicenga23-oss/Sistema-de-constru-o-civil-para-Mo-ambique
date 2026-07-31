@@ -51,6 +51,13 @@ export function findCommercialPlan(slug: string | undefined) {
   return COMMERCIAL_PLANS.find((plan) => plan.slug === slug) ?? null;
 }
 
+/** Plano interno SIGO activado pelo super_admin quando o cliente escolhe um plano comercial. */
+export const COMMERCIAL_TO_INTERNAL_PLAN = {
+  fundamento: "individual",
+  profissional: "profissional",
+  empresa: "empresa",
+} as const;
+
 export function formatMzn(value: number) {
   return `${value.toLocaleString("pt-MZ")} MZN`;
 }

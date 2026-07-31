@@ -6,7 +6,7 @@ import UserMenu from "./UserMenu";
 import InstallAppButton from "./InstallAppButton";
 import OfflineBanner from "./OfflineBanner";
 import { IconHome, IconFolder, IconTag, IconBuilding, IconLogout, IconSettings, IconRuler, IconUsers, IconMenu, IconClose } from "./icons";
-import { LogoIcon } from "./Logo";
+import { LogoFull, LogoIcon } from "./Logo";
 
 const ROLE_LABELS: Record<string, string> = {
   super_admin: "Super Admin",
@@ -84,9 +84,9 @@ export default function Layout({
   const bottomBarItems = navItems.slice(0, 5);
 
   return (
-    <div className="min-h-screen flex bg-[#f5f6f8]">
+    <div className="min-h-screen flex bg-surface">
       {/* Sidebar */}
-      <aside className={`hidden md:flex shrink-0 flex-col border-r border-slate-200 bg-[#f8f8f9] text-slate-700 transition-[width] duration-200 ${sidebarCollapsed ? "w-[4.5rem]" : "w-60"}`}>
+      <aside className={`hidden md:flex shrink-0 flex-col border-r border-slate-200 bg-surface-sidebar text-slate-700 transition-[width] duration-200 ${sidebarCollapsed ? "w-[4.5rem]" : "w-60"}`}>
         <div className={`flex h-16 items-center border-b border-slate-200 ${sidebarCollapsed ? "justify-center px-2" : "justify-between px-3"}`}>
           {logoUrl ? (
             <div className="flex min-w-0 items-center gap-2.5">
@@ -96,9 +96,12 @@ export default function Layout({
               {!sidebarCollapsed && <span className="truncate text-sm font-semibold text-slate-900">{companyName}</span>}
             </div>
           ) : (
-            <div className="flex items-center gap-3">
-              <LogoIcon className="h-9 w-9" />
-              {!sidebarCollapsed && <div><p className="text-base font-black tracking-[0.14em] text-slate-900">SIGO</p><p className="max-w-[150px] text-[8px] uppercase leading-3 tracking-[0.11em] text-slate-400">Sistema Integrado de Gestão de Obras</p></div>}
+            <div className="flex min-w-0 items-center">
+              {sidebarCollapsed ? (
+                <LogoIcon className="h-9 w-9" />
+              ) : (
+                <LogoFull tagline={false} />
+              )}
             </div>
           )}
           {!sidebarCollapsed && <button onClick={() => setSidebarCollapsed(true)} className="icon-btn border-0 bg-transparent shadow-none" title="Recolher menu"><IconClose className="h-4 w-4" /></button>}
@@ -124,11 +127,11 @@ export default function Layout({
               <Link
                 to={item.to}
                 title={sidebarCollapsed ? item.label : undefined}
-                className={`mb-0.5 flex items-center rounded-md text-sm font-medium ${sidebarCollapsed ? "h-10 justify-center px-2" : "gap-3 px-2.5 py-2"} ${
-                  active ? "bg-slate-200/80 text-slate-950" : "text-slate-600 hover:bg-slate-200/55 hover:text-slate-950"
+                className={`mb-0.5 flex items-center rounded-md text-sm font-medium transition-colors ${sidebarCollapsed ? "h-10 justify-center px-2" : "gap-3 px-2.5 py-2"} ${
+                  active ? "bg-white text-slate-950 shadow-sm ring-1 ring-slate-200/80" : "text-slate-600 hover:bg-slate-200/55 hover:text-slate-950"
                 }`}
               >
-                <Icon className={`w-[17px] h-[17px] shrink-0 ${active ? "text-[#d85f18]" : "text-slate-500"}`} />
+                <Icon className={`w-[17px] h-[17px] shrink-0 ${active ? "text-accent" : "text-slate-500"}`} />
                 {!sidebarCollapsed && <span className="truncate">{item.label}</span>}
               </Link>
               </div>
@@ -162,7 +165,7 @@ export default function Layout({
           <button onClick={() => setDrawerOpen(true)} aria-label="Abrir menu" className="grid h-10 w-10 place-items-center rounded-lg border border-white/10 text-brand-200 hover:bg-white/10 hover:text-white">
             <IconMenu className="w-5 h-5" />
           </button>
-          <p className="font-black tracking-[0.18em]">SIGO</p>
+          <LogoFull dark tagline={false} />
           <Link to="/perfil" aria-label="Perfil">
             {user?.avatarUrl ? (
               <img src={user.avatarUrl} alt={user.name} className="w-7 h-7 rounded-full object-cover" />
@@ -179,7 +182,7 @@ export default function Layout({
             <div className="absolute inset-0 bg-gray-900/50" onClick={() => setDrawerOpen(false)} />
             <div className="relative w-72 max-w-[80vw] bg-[#f8f8f9] text-slate-700 flex flex-col shadow-xl">
               <div className="px-4 py-4 flex items-center justify-between border-b border-slate-200">
-                <p className="text-lg font-black tracking-[0.18em] text-slate-900">SIGO</p>
+                <LogoFull tagline={false} />
                 <button onClick={() => setDrawerOpen(false)} aria-label="Fechar menu" className="icon-btn">
                   <IconClose className="w-5 h-5" />
                 </button>
@@ -231,7 +234,7 @@ export default function Layout({
               <h1 className="break-words text-lg font-black tracking-tight text-slate-900 md:text-xl">{title}</h1>
               {subtitle && <p className="mt-1 max-w-3xl break-words text-xs leading-4 text-slate-500">{subtitle}</p>}
             </div>
-            <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2 sm:justify-end">
+            <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2 sm:justify-end overflow-x-auto">
               <InstallAppButton />
               {actions && <div className="flex max-w-full flex-wrap items-center gap-2 sm:justify-end">{actions}</div>}
               <div className="hidden md:block">
@@ -243,7 +246,7 @@ export default function Layout({
 
         <OfflineBanner />
 
-        <main className="min-w-0 flex-1 overflow-x-hidden p-3 pb-20 sm:p-5 md:p-8 md:pb-8 xl:p-10">
+        <main className="min-w-0 flex-1 overflow-x-hidden p-3 pb-20 sm:p-5 md:p-8 md:pb-8 xl:p-10 page-enter">
           <div className="mx-auto w-full max-w-[1500px]">{children}</div>
         </main>
 

@@ -67,8 +67,8 @@ export const STANDARD_CHAPTERS: TemplateChapter[] = [
     code: "6",
     name: "REVESTIMENTO DE PAVIMENTOS E PAREDES",
     items: [
-      { code: "6.1", description: "Fornecimento e assentamento de mosaico cerâmico em pavimentos", unit: "m2", composition: "Assentamento de mosaico cerâmico" },
-      { code: "6.2", description: "Fornecimento e assentamento de mosaico cerâmico em paredes (wc/cozinha)", unit: "m2", composition: "Assentamento de mosaico cerâmico" },
+      { code: "6.1", description: "Mosaico cerâmico ou grès em pavimentos interiores, dimensões e acabamento conforme projecto, juntas de 2–3 mm, cola e rodapés incluídos; ou equivalente aprovado", unit: "m2", composition: "Assentamento de mosaico cerâmico" },
+      { code: "6.2", description: "Mosaico cerâmico em paredes de WC/cozinha, tratamento de impermeabilização prévia, acabamento e cor conforme projecto; ou equivalente aprovado", unit: "m2", composition: "Assentamento de mosaico cerâmico" },
     ],
   },
   {
@@ -122,12 +122,18 @@ export const STANDARD_CHAPTERS: TemplateChapter[] = [
     code: "12",
     name: "SANEAMENTO AUTÓNOMO (FOSSA SÉPTICA)",
     items: [
-      // Sem composição de custo associada de propósito: o volume/área vêm de tabelas de
-      // dimensionamento reais (nº de pessoas × capitação, tipo de solo — ver quickEstimate.ts),
-      // mas o custo de construção (pré-fabricada comprada vs betão armado no local) varia demais
-      // consoante o método, por isso o preço unitário fica sempre para o utilizador preencher.
-      { code: "12.1", description: "Fossa séptica (volume dimensionado para o nº de pessoas e capitação indicados)", unit: "m3" },
-      { code: "12.2", description: "Vala/poço de infiltração (área dimensionada para o tipo de solo indicado)", unit: "m2" },
+      {
+        code: "12.1",
+        description: "Fossa séptica (volume dimensionado para o nº de pessoas e capitação indicados)",
+        unit: "m3",
+        composition: "Fossa séptica pré-fabricada instalada (por m³ útil)",
+      },
+      {
+        code: "12.2",
+        description: "Vala/poço de infiltração (área dimensionada para o tipo de solo indicado)",
+        unit: "m2",
+        composition: "Vala/poço de infiltração com brita e geotêxtil",
+      },
     ],
   },
 ];

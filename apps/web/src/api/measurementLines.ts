@@ -29,4 +29,9 @@ export const measurementLinesApi = {
   update: (id: string, data: MeasurementLineInput) =>
     request<MeasurementLine>(`/measurement-lines/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   remove: (id: string) => request<{ ok: true; itemQuantity: number | null }>(`/measurement-lines/${id}`, { method: "DELETE" }),
+  fillFromPlant: (lineItemId: string) =>
+    request<{ linesCreated: number; roomCount: number; strategy: string; itemQuantity: number | null }>(
+      `/line-items/${lineItemId}/fill-from-plant`,
+      { method: "POST" },
+    ),
 };

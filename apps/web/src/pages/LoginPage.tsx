@@ -1,7 +1,8 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth, ApiError } from "../auth/AuthContext";
-import { LogoMark } from "../components/Logo";
+import { LogoFull } from "../components/Logo";
+import AlertBanner from "../components/AlertBanner";
 
 // Mensagens para os códigos de erro que a API devolve via query string depois de um callback do
 // Google mal sucedido (não há forma de devolver JSON num redirect de browser completo).
@@ -54,12 +55,8 @@ export default function LoginPage() {
     <div className="min-h-screen grid lg:grid-cols-2 bg-[#172033]">
       {/* Painel de marca */}
       <div className="hidden lg:flex flex-col justify-between text-white p-14 xl:p-20">
-        <Link to="/" className="flex items-center gap-3">
-          <LogoMark className="h-10 w-10" />
-          <div>
-            <p className="text-2xl font-black tracking-[0.2em]">SIGO</p>
-            <p className="text-[9px] uppercase tracking-[0.14em] text-slate-400">Sistema Integrado de Gestão de Obras</p>
-          </div>
+        <Link to="/" className="inline-block">
+          <LogoFull dark tagline={false} />
         </Link>
         <div className="max-w-lg">
           <h1 className="text-4xl font-bold leading-tight tracking-tight">Gestão de obras sem complicação.</h1>
@@ -81,9 +78,8 @@ export default function LoginPage() {
       {/* Formulário */}
       <div className="flex items-center justify-center bg-[#f4f6f8] px-6 py-12">
         <div className="w-full max-w-md">
-          <div className="lg:hidden flex items-center justify-center gap-2.5 mb-6">
-            <LogoMark className="h-8 w-8" />
-            <p className="text-2xl font-black tracking-[0.18em] text-brand-950">SIGO</p>
+          <div className="lg:hidden flex items-center justify-center mb-6">
+            <LogoFull />
           </div>
           <div className="rounded-xl border border-slate-200 bg-white p-7 md:p-9 shadow-sm">
             <h2 className="text-2xl font-bold tracking-tight text-slate-900">Entrar no SIGO</h2>
@@ -99,7 +95,7 @@ export default function LoginPage() {
                 <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className="input" placeholder="••••••••" />
               </div>
 
-              {error && <p className="text-sm text-red-600">{error}</p>}
+              {error && <AlertBanner tone="error" onDismiss={() => setError(null)}>{error}</AlertBanner>}
 
               <button type="submit" disabled={submitting} className="btn btn-primary w-full">
                 {submitting ? "A entrar..." : "Entrar"}

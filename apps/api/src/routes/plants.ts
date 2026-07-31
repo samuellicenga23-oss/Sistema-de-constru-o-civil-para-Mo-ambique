@@ -32,17 +32,39 @@ async function setPlantProgress(
 // Chama o plant-service e grava o resultado — partilhado entre o upload inicial e o
 // reprocessamento (mesmo ficheiro em disco, útil quando a lógica de extracção melhora e não se
 // quer obrigar o utilizador a carregar o PDF outra vez).
+function plantServiceUnavailableMessage(): string {
+  return env.isProduction
+    ? "O leitor de plantas está temporariamente indisponível. Tente novamente dentro de momentos."
+    : "O leitor de plantas não está a correr. Na raiz do projecto execute: npm run dev:plant";
+}
+
+async function fetchPlantService(form: FormData): Promise<Response> {
+  try {
+    return await fetch(`${env.plantServiceUrl}/parse-stream`, {
+      method: "POST",
+      body: form,
+      headers: env.plantServiceToken ? { "X-Internal-Token": env.plantServiceToken } : undefined,
+    });
+  } catch {
+    throw new Error(plantServiceUnavailableMessage());
+  }
+}
+
 export async function processPlantFile(plantId: string, buffer: Buffer, filename: string): Promise<void> {
   await setPlantProgress(plantId, 20, "A preparar o PDF para leitura");
   const form = new FormData();
   form.append("file", new Blob([new Uint8Array(buffer)], { type: "application/pdf" }), filename);
-  const response = await fetch(`${env.plantServiceUrl}/parse-stream`, {
-    method: "POST",
-    body: form,
-    headers: env.plantServiceToken ? { "X-Internal-Token": env.plantServiceToken } : undefined,
-  });
-  if (!response.ok) throw new Error(`plant-service devolveu ${response.status}`);
-  if (!response.body) throw new Error("plant-service não devolveu o fluxo de análise");
+  const response = await fetchPlantService(form);
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    if (response.status === 401) throw new Error("Autenticação interna com o leitor de plantas falhou");
+    throw new Error(
+      detail.trim()
+        ? `O leitor de plantas respondeu com erro: ${detail.slice(0, 240)}`
+        : `O leitor de plantas respondeu com erro (${response.status})`,
+    );
+  }
+  if (!response.body) throw new Error("O leitor de plantas não devolveu o fluxo de análise");
 
   await setPlantProgress(plantId, 28, "A iniciar leitura das páginas");
   const reader = response.body.getReader();

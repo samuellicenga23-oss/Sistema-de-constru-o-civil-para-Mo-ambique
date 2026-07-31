@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { boqApi, type Project } from "../api/boq";
 import { financialApi, type FinancialEntry, type FinancialSummary } from "../api/financial";
 import Layout from "../components/Layout";
+import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { MetricCard, SectionHeader } from "../components/WorkspaceUI";
 import ProjectWorkspaceNav from "../components/ProjectWorkspaceNav";
 import Modal from "../components/Modal";
@@ -22,6 +23,7 @@ function todayStr() {
 }
 
 export default function ProjectFinancialPage() {
+  const { confirm, dialog } = useConfirmDialog();
   const { projectId } = useParams<{ projectId: string }>();
   const [project, setProject] = useState<Project | null>(null);
   const [entries, setEntries] = useState<FinancialEntry[]>([]);
@@ -91,7 +93,13 @@ export default function ProjectFinancialPage() {
   }
 
   async function handleDelete(entry: FinancialEntry) {
-    if (!window.confirm(`Eliminar este lançamento (${entry.category}, ${entry.amount} ${entry.currency})? Esta acção não pode ser desfeita.`)) return;
+    const ok = await confirm({
+      title: "Eliminar lançamento?",
+      message: `Eliminar ${entry.category} (${entry.amount} ${entry.currency})?`,
+      confirmLabel: "Eliminar",
+      danger: true,
+    });
+    if (!ok) return;
     setError(null);
     try {
       await financialApi.delete(entry.id);
@@ -123,6 +131,7 @@ export default function ProjectFinancialPage() {
   const suggestions = type === "despesa" ? CATEGORY_SUGGESTIONS_DESPESA : CATEGORY_SUGGESTIONS_RECEITA;
 
   return (
+    <>
     <Layout
       title={`Financeiro — ${project.name}`}
       subtitle="Compromissos de compras, receitas dos autos, pagamentos e fluxo de caixa da obra"
@@ -279,5 +288,7 @@ export default function ProjectFinancialPage() {
         </section>
       </div>
     </Layout>
+    {dialog}
+    </>
   );
 }

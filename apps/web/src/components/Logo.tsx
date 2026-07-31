@@ -1,7 +1,7 @@
 // Marca SIGO: duas formas em S/relâmpago ponto-simétricas — mesma geometria usada em
 // scripts/generate_icons.py para os ícones PWA/favicon, para a marca ser sempre igual em toda a
 // aplicação.
-type LogoProps = { className?: string; color?: string };
+type LogoProps = { className?: string; color?: string; dark?: boolean; tagline?: boolean };
 
 export function LogoMark({ className = "h-6 w-6", color = "#1AADB4" }: LogoProps) {
   return (
@@ -34,4 +34,10 @@ export function LogoFull({ tagline = true, dark = false }: { tagline?: boolean; 
       </div>
     </div>
   );
+}
+
+/** Compatibilidade com usos que passavam `variant` durante a fase PNG. */
+export function Logo({ className, variant, dark }: { className?: string; variant?: "dark" | "light"; dark?: boolean }) {
+  const onDark = dark ?? variant === "light";
+  return <LogoFull dark={onDark} tagline={false} />;
 }

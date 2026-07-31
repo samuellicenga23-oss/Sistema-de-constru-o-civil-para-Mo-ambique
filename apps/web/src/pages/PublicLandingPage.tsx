@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { calculateVatTotals } from "@sigo/shared";
 import { useAuth } from "../auth/AuthContext";
 import { COMMERCIAL_PLANS, SIGO_CONTACT_EMAIL, SIGO_WHATSAPP_NUMBER, formatMzn } from "../commercialPlans";
-import { LogoIcon } from "../components/Logo";
+import { LogoFull } from "../components/Logo";
 import { IconClipboard, IconChart, IconRuler, IconFolder, IconDoc, IconMap } from "../components/icons";
 
 const productViews = {
@@ -67,11 +67,8 @@ function emailHref(plan?: string) {
   return `mailto:${SIGO_CONTACT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 }
 
-function Brand({ light = false }: { light?: boolean }) {
-  return <div className="flex items-center gap-3">
-    <LogoIcon className="h-10 w-10 rounded-[11px]" />
-    <div><p className={`text-lg font-display font-black tracking-[0.2em] ${light ? "text-white" : "text-[#142033]"}`}>SIGO</p><p className={`text-[8px] font-semibold uppercase tracking-[0.12em] ${light ? "text-slate-400" : "text-slate-500"}`}>Sistema Integrado de Gestão de Obras</p></div>
-  </div>;
+function Brand({ variant = "dark" }: { variant?: "dark" | "light" }) {
+  return <LogoFull dark={variant === "light"} tagline={false} />;
 }
 
 function HeroProduct() {
@@ -256,6 +253,6 @@ export default function PublicLandingPage() {
       <section id="contacto" className="bg-white pb-20 lg:pb-28"><div className="mx-auto max-w-[1280px] px-5 lg:px-8"><div className="overflow-hidden rounded-[28px] bg-[#ed6c22] px-7 py-12 text-white md:px-12 lg:flex lg:items-center lg:justify-between lg:px-16 lg:py-16"><div><p className="text-xs font-display font-black uppercase tracking-[0.16em] text-orange-100">Uma conversa, uma obra real</p><h2 className="mt-3 max-w-2xl text-4xl font-display font-black leading-tight tracking-[-0.04em]">Mostre-nos como gere a obra hoje.</h2><p className="mt-4 max-w-xl leading-7 text-orange-50">Usamos o seu fluxo para mostrar onde o SIGO reduz repetição, falhas e decisões tardias.</p></div><div className="mt-9 flex min-w-fit flex-col gap-3 lg:mt-0"><a className="rounded-lg bg-white px-6 py-3.5 text-center text-sm font-display font-black text-[#b8470a]" href={whatsappHref()} target="_blank" rel="noreferrer">WhatsApp · +258 86 638 4194</a><a className="rounded-lg border border-white/40 px-6 py-3.5 text-center text-sm font-bold text-white hover:bg-white/10" href={emailHref()}>{SIGO_CONTACT_EMAIL}</a></div></div></div></section>
     </main>
 
-    <footer className="border-t border-slate-800 bg-[#101827] py-10 text-white"><div className="mx-auto flex max-w-[1280px] flex-col gap-8 px-5 sm:flex-row sm:items-end sm:justify-between lg:px-8"><div><Brand light /><p className="mt-5 max-w-sm text-sm leading-6 text-slate-400">Custos, prazo e execução no mesmo sistema de gestão de obras.</p></div><div className="text-sm text-slate-400 sm:text-right"><p>Moçambique · MZN e USD</p><p className="mt-2">© 2026 SIGO. Todos os direitos reservados.</p></div></div></footer>
+    <footer className="border-t border-slate-800 bg-[#101827] py-10 text-white"><div className="mx-auto flex max-w-[1280px] flex-col gap-8 px-5 sm:flex-row sm:items-end sm:justify-between lg:px-8"><div><Brand variant="light" /><p className="mt-5 max-w-sm text-sm leading-6 text-slate-400">Custos, prazo e execução no mesmo sistema de gestão de obras.</p></div><div className="text-sm text-slate-400 sm:text-right"><p>Moçambique · MZN e USD</p><p className="mt-2">© 2026 SIGO. Todos os direitos reservados.</p></div></div></footer>
   </div>;
 }

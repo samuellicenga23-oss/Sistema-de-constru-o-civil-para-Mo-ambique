@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { boqApi, type BudgetDocumentSummary, type BudgetRepriceResult, type LineItemNode, type MeasurementImportResult, type Project } from "../api/boq";
+import { boqApi, type BudgetDocumentSummary, type BudgetRepriceResult, type LineItemNode, type MeasurementImportResult, type Project, type ProjectMaterialSpecification } from "../api/boq";
 import { catalogApi, type CostComposition } from "../api/catalog";
 import { measurementApi, type MeasurementDashboard } from "../api/measurement";
 import { plantsApi, type Plant, type ExtractedRoom } from "../api/plants";
@@ -13,9 +13,14 @@ import ModalPortal from "../components/ModalPortal";
 import Layout from "../components/Layout";
 import ProjectWorkspaceNav from "../components/ProjectWorkspaceNav";
 import PageSearch from "../components/PageSearch";
+import LoadingState from "../components/LoadingState";
+import AlertBanner from "../components/AlertBanner";
+import ActionMenu from "../components/ActionMenu";
+import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { SectionHeader } from "../components/WorkspaceUI";
-import { IconBack, IconChart, IconClipboard, IconDoc, IconDownload, IconPlus, IconRefresh, IconRuler, IconTrash } from "../components/icons";
+import { IconBack, IconChart, IconClipboard, IconDoc, IconDownload, IconPencil, IconPlus, IconRefresh, IconRuler, IconTrash } from "../components/icons";
 import { useAuth } from "../auth/AuthContext";
+import { collectUnpricedItems, filterTreeToUnpricedOnly } from "../utils/boqHelpers";
 
 function money(value: number, currency: string) {
   return `${value.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`;
@@ -24,6 +29,13 @@ function money(value: number, currency: string) {
 function countCompositionItems(items: LineItemNode[]): number {
   return items.reduce(
     (total, item) => total + (item.compositionId ? 1 : 0) + countCompositionItems(item.children),
+    0,
+  );
+}
+
+function countTechnicalSpecs(items: LineItemNode[]): number {
+  return items.reduce(
+    (total, item) => total + (item.technicalSpecification ? 1 : 0) + countTechnicalSpecs(item.children),
     0,
   );
 }
@@ -40,6 +52,7 @@ export default function BudgetDocumentPage() {
   const { documentId } = useParams<{ documentId: string }>();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const { confirm, dialog } = useConfirmDialog();
   const [summary, setSummary] = useState<BudgetDocumentSummary | null>(null);
   const [project, setProject] = useState<Project | null>(null);
   const [compositions, setCompositions] = useState<CostComposition[]>([]);
@@ -64,12 +77,18 @@ export default function BudgetDocumentPage() {
   const [showFinancialSummary, setShowFinancialSummary] = useState(false);
   const [savingFinancialSettings, setSavingFinancialSettings] = useState(false);
   const [itemQuery, setItemQuery] = useState("");
+  const [showOnlyUnpriced, setShowOnlyUnpriced] = useState(searchParams.get("semPreco") === "1");
   const [submittingToBudget, setSubmittingToBudget] = useState(false);
+  const [materialSpecs, setMaterialSpecs] = useState<ProjectMaterialSpecification[]>([]);
+  const [applyingSpecs, setApplyingSpecs] = useState(false);
+  const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
+  const [sectionNameDraft, setSectionNameDraft] = useState("");
   async function reload() {
     if (!documentId) return;
     const s = await boqApi.getBudgetDocumentSummary(documentId);
     setSummary(s);
     setDashboard(await measurementApi.dashboard(s.document.projectId, documentId));
+    boqApi.listProjectMaterialSpecifications(s.document.projectId).then(setMaterialSpecs).catch(() => setMaterialSpecs([]));
   }
 
   useEffect(() => {
@@ -123,6 +142,19 @@ export default function BudgetDocumentPage() {
   }, [documentId]);
 
   useEffect(() => {
+    if (searchParams.get("semPreco") === "1") setShowOnlyUnpriced(true);
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (!summary || searchParams.get("semPreco") !== "1") return;
+    const first = summary.sections.flatMap((s) => collectUnpricedItems(s.items, s.name))[0];
+    if (!first) return;
+    requestAnimationFrame(() => {
+      globalThis.document.getElementById(`line-item-${first.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  }, [summary, searchParams]);
+
+  useEffect(() => {
     if (searchParams.get("assistente") !== "1" || !summary || plantContextLoading) return;
     setShowWizard(true);
     setSearchParams({}, { replace: true });
@@ -143,12 +175,49 @@ export default function BudgetDocumentPage() {
 
   async function handleDeleteDocument() {
     if (!documentId || !summary) return;
-    if (!window.confirm(`Eliminar o documento "${summary.document.title}"? Isto apaga também os seus autos de medição associados. Esta acção não pode ser desfeita.`)) return;
+    const ok = await confirm({
+      title: "Eliminar documento?",
+      message: `Eliminar “${summary.document.title}”?`,
+      confirmLabel: "Eliminar",
+      danger: true,
+      details: ["Autos de medição associados", "Secções e linhas do mapa", "Acção irreversível"],
+    });
+    if (!ok) return;
     try {
       await boqApi.deleteBudgetDocument(documentId);
       navigate(`/projectos/${summary.document.projectId}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao eliminar documento");
+    }
+  }
+
+  async function handleRenameSection(e: FormEvent, sectionId: string) {
+    e.preventDefault();
+    if (!sectionNameDraft.trim()) return;
+    setError(null);
+    try {
+      await boqApi.updateSection(sectionId, { name: sectionNameDraft.trim() });
+      setEditingSectionId(null);
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao renomear secção");
+    }
+  }
+
+  async function handleDeleteSection(sectionId: string, name: string) {
+    const ok = await confirm({
+      title: "Eliminar secção?",
+      message: `Eliminar “${name}” e todos os capítulos/itens dentro?`,
+      confirmLabel: "Eliminar",
+      danger: true,
+    });
+    if (!ok) return;
+    setError(null);
+    try {
+      await boqApi.deleteSection(sectionId);
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao eliminar secção");
     }
   }
 
@@ -195,12 +264,13 @@ export default function BudgetDocumentPage() {
 
   async function handleStatusChange(status: "rascunho" | "submetido" | "aprovado") {
     if (!documentId) return;
-    const confirmation = status === "aprovado"
-      ? "Aprovar este orçamento? Fica protegido contra novo cálculo automático e passa a ser a referência do cronograma e dos Autos de Medição."
-      : status === "submetido"
-        ? "Submeter este orçamento para aprovação?"
-        : "Devolver este orçamento a rascunho?";
-    if (!window.confirm(confirmation)) return;
+    const prompts = {
+      aprovado: { title: "Aprovar orçamento?", message: "Passa a ser a referência do cronograma e dos autos.", confirmLabel: "Aprovar", danger: false },
+      submetido: { title: "Submeter para aprovação?", message: "O documento fica pendente de validação.", confirmLabel: "Submeter", danger: false },
+      rascunho: { title: "Devolver a rascunho?", message: "Volta a permitir edição livre.", confirmLabel: "Devolver", danger: true },
+    } as const;
+    const ok = await confirm(prompts[status]);
+    if (!ok) return;
     setChangingStatus(true);
     setError(null);
     try {
@@ -255,6 +325,21 @@ export default function BudgetDocumentPage() {
     }
   }
 
+  async function handleApplySpecifications() {
+    if (!documentId) return;
+    setApplyingSpecs(true);
+    setError(null);
+    try {
+      const { updated } = await boqApi.applySpecifications(documentId);
+      await reload();
+      if (updated > 0) setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível aplicar as especificações");
+    } finally {
+      setApplyingSpecs(false);
+    }
+  }
+
   async function handleSubmitToBudget() {
     if (!documentId) return;
     setSubmittingToBudget(true);
@@ -269,17 +354,28 @@ export default function BudgetDocumentPage() {
     }
   }
 
+  const unpricedItems = useMemo(() => {
+    if (!summary || summary.document.documentType === "medicao") return [];
+    return summary.sections.flatMap((section) => collectUnpricedItems(section.items, section.name));
+  }, [summary]);
+
   const visibleSections = useMemo(() => {
-    const sections = summary?.sections ?? [];
+    let sections = summary?.sections ?? [];
+    const isMedicao = summary?.document.documentType === "medicao";
+    if (showOnlyUnpriced && !isMedicao) {
+      sections = sections
+        .map((section) => ({ ...section, items: filterTreeToUnpricedOnly(section.items) }))
+        .filter((section) => section.items.length > 0);
+    }
     const needle = itemQuery.trim().toLocaleLowerCase("pt");
     if (!needle) return sections;
     return sections.filter((section) =>
       section.name.toLocaleLowerCase("pt").includes(needle) || containsBudgetMatch(section.items, needle),
     );
-  }, [summary?.sections, itemQuery]);
+  }, [summary?.sections, summary?.document.documentType, itemQuery, showOnlyUnpriced]);
 
   if (!summary) {
-    return <div className="min-h-screen flex items-center justify-center text-gray-400">A carregar...</div>;
+    return <LoadingState fullScreen label="A carregar documento..." />;
   }
 
   const { document, sections, subtotal1, siteCosts, indirectCosts, sellingSubtotal, contingencias, profitMargin, subtotal2, iva, total } = summary;
@@ -287,6 +383,7 @@ export default function BudgetDocumentPage() {
   const isClientView = user?.role === "visualizador";
   const isMeasurementDocument = document.documentType === "medicao";
   const compositionLinkedCount = sections.reduce((count, section) => count + countCompositionItems(section.items), 0);
+  const technicalSpecCount = sections.reduce((count, section) => count + countTechnicalSpecs(section.items), 0);
 
   return (
     <Layout
@@ -298,59 +395,115 @@ export default function BudgetDocumentPage() {
         <>
           {!isClientView && document.status === "rascunho" && (
             <button onClick={() => handleStatusChange("submetido")} disabled={changingStatus} className="btn btn-secondary btn-sm">
-              <IconChart className="w-3.5 h-3.5" /> Submeter para aprovação
+              <IconChart className="w-3.5 h-3.5" /> Submeter
             </button>
           )}
           {!isClientView && document.status === "submetido" && (
             <>
               <button onClick={() => handleStatusChange("rascunho")} disabled={changingStatus} className="btn btn-secondary btn-sm">Devolver</button>
-              <button onClick={() => handleStatusChange("aprovado")} disabled={changingStatus} className="btn btn-sm bg-emerald-600 text-white hover:bg-emerald-500">
+              <button onClick={() => handleStatusChange("aprovado")} disabled={changingStatus} className="btn btn-success btn-sm">
                 <IconChart className="w-3.5 h-3.5" /> Aprovar
               </button>
             </>
           )}
-          {!isClientView && <button
-            onClick={() => compositionLinkedCount > 0 ? setShowWizard(true) : handlePrepareAutomaticDocument()}
-            disabled={preparingAutomaticDocument}
-            className="btn btn-secondary btn-sm"
-          >
-            <IconRuler className="w-3.5 h-3.5" />
-            {compositionLinkedCount > 0 ? "Assistente de Medições" : preparingAutomaticDocument ? "A preparar..." : "Medir pelas plantas"}
-          </button>}
-          {!isMeasurementDocument && <button onClick={() => setShowMaterialsByPhase(true)} className="btn btn-secondary btn-sm">
-            <IconClipboard className="w-3.5 h-3.5" />
-            Materiais por Fase
-          </button>}
-          {!isMeasurementDocument && document.lastEstimateReport && (
-            <button onClick={() => setShowReport(true)} className="btn btn-secondary btn-sm">
-              <IconChart className="w-3.5 h-3.5" />
-              Relatório de Cálculos
+          {!isClientView && (
+            <button
+              onClick={() => compositionLinkedCount > 0 ? setShowWizard(true) : handlePrepareAutomaticDocument()}
+              disabled={preparingAutomaticDocument}
+              className="btn btn-primary btn-sm"
+            >
+              <IconRuler className="w-3.5 h-3.5" />
+              {compositionLinkedCount > 0 ? "Medições" : preparingAutomaticDocument ? "A preparar..." : "Medir"}
             </button>
           )}
-          <a href={isMeasurementDocument ? boqApi.measurementExcelUrl(document.id) : `/api/budget-documents/${document.id}/export.xlsx`} className="btn btn-secondary btn-sm">
-            <IconDownload className="w-3.5 h-3.5" />
-            {isMeasurementDocument ? "Quantidades Excel" : "Excel"}
-          </a>
-          <a href={isMeasurementDocument ? boqApi.measurementPdfUrl(document.id) : `/api/budget-documents/${document.id}/export.pdf`} className="btn btn-secondary btn-sm">
-            <IconDownload className="w-3.5 h-3.5" />
-            {isMeasurementDocument ? "Quantidades PDF" : "PDF"}
-          </a>
-          {isMeasurementDocument && !isClientView && <button type="button" onClick={handleSubmitToBudget} disabled={submittingToBudget} className="btn btn-primary btn-sm">
-            <IconDoc className="w-3.5 h-3.5" />
-            {submittingToBudget ? "A enviar..." : "Enviar para orçamento"}
-          </button>}
+          {isMeasurementDocument && !isClientView && (
+            <button type="button" onClick={handleSubmitToBudget} disabled={submittingToBudget} className="btn btn-primary btn-sm">
+              <IconDoc className="w-3.5 h-3.5" />
+              {submittingToBudget ? "A enviar..." : "→ Orçamento"}
+            </button>
+          )}
           <Link to={`/projectos/${document.projectId}`} className="btn btn-ghost btn-sm">
             <IconBack className="w-3.5 h-3.5" />
             Projecto
           </Link>
-          {!isClientView && <button onClick={handleDeleteDocument} className="icon-btn-danger" title="Eliminar documento">
-            <IconTrash className="w-3.5 h-3.5" />
-          </button>}
+          <ActionMenu
+            items={[
+              {
+                id: "materials",
+                label: "Materiais por fase",
+                icon: <IconClipboard className="w-3.5 h-3.5" />,
+                onClick: () => setShowMaterialsByPhase(true),
+                hidden: isMeasurementDocument,
+              },
+              {
+                id: "report",
+                label: "Relatório de cálculos",
+                icon: <IconChart className="w-3.5 h-3.5" />,
+                onClick: () => setShowReport(true),
+                hidden: isMeasurementDocument || !document.lastEstimateReport,
+              },
+              {
+                id: "excel",
+                label: isMeasurementDocument ? "Exportar Excel" : "Excel",
+                icon: <IconDownload className="w-3.5 h-3.5" />,
+                href: isMeasurementDocument ? boqApi.measurementExcelUrl(document.id) : `/api/budget-documents/${document.id}/export.xlsx`,
+              },
+              {
+                id: "pdf",
+                label: isMeasurementDocument ? "Exportar PDF" : "PDF",
+                icon: <IconDownload className="w-3.5 h-3.5" />,
+                href: isMeasurementDocument ? boqApi.measurementPdfUrl(document.id) : `/api/budget-documents/${document.id}/export.pdf`,
+              },
+              {
+                id: "delete",
+                label: "Eliminar documento",
+                icon: <IconTrash className="w-3.5 h-3.5" />,
+                onClick: handleDeleteDocument,
+                danger: true,
+                hidden: isClientView,
+              },
+            ]}
+          />
         </>
       }
     >
       <div className="space-y-5">
         <ProjectWorkspaceNav projectId={document.projectId} measurementOnly={isMeasurementDocument && project?.projectType === "medicao"} />
+        {!isMeasurementDocument && document.status === "rascunho" && !isClientView && (
+          <section className="card overflow-hidden">
+            <SectionHeader
+              title="Especificações técnicas"
+              description="Materiais e acabamentos definidos nas especificações do projecto — aplicados automaticamente aos itens do orçamento (sanitários, revestimentos, pinturas, etc.)"
+              actions={
+                <button type="button" onClick={handleApplySpecifications} disabled={applyingSpecs} className="btn btn-secondary btn-sm">
+                  {applyingSpecs ? "A aplicar..." : "Actualizar no mapa"}
+                </button>
+              }
+            />
+            <div className="border-t border-slate-100 px-5 py-4">
+              <div className="mb-3 flex flex-wrap gap-2 text-xs">
+                <span className="badge badge-brand">{technicalSpecCount} item(ns) com especificação</span>
+                <span className="badge badge-gray">{materialSpecs.length} material(is) no projecto</span>
+                <span className="badge badge-gray">{compositionLinkedCount} com composição</span>
+              </div>
+              {materialSpecs.length > 0 ? (
+                <ul className="grid gap-2 sm:grid-cols-2">
+                  {materialSpecs.slice(0, 8).map((m) => (
+                    <li key={m.id} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
+                      <strong className="text-slate-900">{m.name}</strong>
+                      {m.specification && <p className="mt-0.5 text-slate-600 line-clamp-2">{m.specification}</p>}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm text-slate-500">
+                  Ainda não há materiais especificados no projecto. Adicione na ficha do projecto (ex: tipo de sanita, acabamento de pavimento, cor de tinta) — o SIGO associa automaticamente aos capítulos 6, 7 e 11 do mapa.
+                </p>
+              )}
+              {materialSpecs.length > 8 && <p className="mt-2 text-xs text-slate-400">+ {materialSpecs.length - 8} materiais — ver ficha completa no projecto</p>}
+            </div>
+          </section>
+        )}
         {!isMeasurementDocument && <section className="card flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
           <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Valor do projecto</p>
@@ -368,7 +521,46 @@ export default function BudgetDocumentPage() {
 
         {/* Coluna principal: secções e itens */}
         <div className="min-w-0 space-y-5">
-          {error && <p className="text-sm text-red-600">{error}</p>}
+          {error && <AlertBanner tone="error" onDismiss={() => setError(null)}>{error}</AlertBanner>}
+
+          {isMeasurementDocument && !isClientView && (
+            <section className="card overflow-hidden border-l-4 border-l-emerald-500">
+              <SectionHeader
+                title="Importar medições do Excel"
+                description="Actualize quantidades ou crie itens novos a partir do Excel — colunas Item/Código e Quant. (Descrição e Un. opcionais)."
+              />
+              <div className="border-t border-slate-100 px-4 py-4 sm:px-5">
+                <form onSubmit={handleImportMeasurements} className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                  <div className="min-w-0 flex-1">
+                    <input
+                      type="file"
+                      name="measurementsFile"
+                      accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                      required
+                      className="input py-1.5 file:mr-3 file:rounded-md file:border-0 file:bg-brand-100 file:text-brand-800 file:px-2.5 file:py-1 file:text-xs file:font-medium"
+                    />
+                    <p className="mt-2 text-xs text-slate-500">
+                      Dica: exporte o modelo em «Exportar Excel» no menu ⋮. Códigos inexistentes criam capítulo e item automaticamente (com descrição do mapa padrão, se disponível).
+                    </p>
+                  </div>
+                  <button type="submit" disabled={importingMeasurements} className="btn btn-primary shrink-0">
+                    <IconDownload className="w-3.5 h-3.5" />
+                    {importingMeasurements ? "A importar..." : "Importar Excel"}
+                  </button>
+                </form>
+                {importResult && (
+                  <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm">
+                    <p className="font-medium text-emerald-800">
+                      {importResult.itemsUpdated} actualizado(s), {importResult.itemsCreated} criado(s) — {importResult.rowsRead} linha(s) lidas.
+                    </p>
+                    {importResult.unmatched.length > 0 && (
+                      <p className="mt-1 text-xs text-amber-800">{importResult.unmatched.length} linha(s) não corresponderam a itens do mapa — confira códigos e nomes das secções.</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
 
           {!isMeasurementDocument && !isClientView && <section className={`card card-pad border-l-4 ${compositionLinkedCount > 0 ? "border-l-brand-500" : "border-l-slate-300"}`}>
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -417,15 +609,127 @@ export default function BudgetDocumentPage() {
             )}
           </section>}
 
-          <PageSearch value={itemQuery} onChange={setItemQuery} placeholder="Pesquisar código, descrição, unidade ou secção…" resultLabel={`${visibleSections.length} secção(ões)`} />
+          {!isMeasurementDocument && unpricedItems.length > 0 && (
+            <section className="card overflow-hidden border-l-4 border-l-amber-500">
+              <div className="border-b border-amber-100 bg-amber-50 px-4 py-3 sm:px-5">
+                <h2 className="text-sm font-semibold text-amber-950">
+                  {unpricedItems.length} item(ns) sem preço — precisa de atenção
+                </h2>
+                <p className="mt-1 text-xs leading-relaxed text-amber-800">
+                  Cada linha abaixo está destacada a amarelo no mapa. Ligue ao catálogo (composição) ou preencha o preço unitário manualmente antes de submeter.
+                </p>
+              </div>
+              <ul className="divide-y divide-amber-100">
+                {unpricedItems.map((item) => (
+                  <li key={item.id}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        requestAnimationFrame(() => {
+                          globalThis.document.getElementById(`line-item-${item.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+                        });
+                      }}
+                      className="flex w-full flex-wrap items-baseline gap-x-2 px-4 py-2.5 text-left text-sm text-amber-950 hover:bg-amber-50 sm:px-5"
+                    >
+                      {item.code ? (
+                        <span className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 font-mono text-xs font-semibold text-amber-900">{item.code}</span>
+                      ) : (
+                        <span className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800">sem código</span>
+                      )}
+                      <span className="min-w-0 flex-1 font-medium">{item.description}</span>
+                      <span className="shrink-0 text-xs text-amber-700">{item.sectionName}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              <div className="flex flex-wrap gap-2 border-t border-amber-100 bg-amber-50/50 px-4 py-3 sm:px-5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowOnlyUnpriced(true);
+                    setSearchParams({ semPreco: "1" }, { replace: true });
+                  }}
+                  className="btn btn-secondary btn-sm"
+                >
+                  Ver só estes {unpricedItems.length} item(ns)
+                </button>
+                <Link to="/catalogo" className="btn btn-ghost btn-sm">Abrir catálogo</Link>
+              </div>
+            </section>
+          )}
+
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <PageSearch
+              value={itemQuery}
+              onChange={setItemQuery}
+              placeholder="Pesquisar código, descrição, unidade ou secção…"
+              resultLabel={
+                showOnlyUnpriced
+                  ? `${visibleSections.length} secção(ões) · filtro sem preço`
+                  : `${visibleSections.length} secção(ões)`
+              }
+            />
+            {!isMeasurementDocument && unpricedItems.length > 0 && (
+              <label className="flex shrink-0 cursor-pointer items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+                <input
+                  type="checkbox"
+                  checked={showOnlyUnpriced}
+                  onChange={(e) => {
+                    const on = e.target.checked;
+                    setShowOnlyUnpriced(on);
+                    setSearchParams(on ? { semPreco: "1" } : {}, { replace: true });
+                  }}
+                  className="rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+                />
+                Só sem preço ({unpricedItems.length})
+              </label>
+            )}
+          </div>
 
           {visibleSections.map((section) => (
             <section key={section.id} className="card overflow-hidden">
-              <SectionHeader title={section.name} description={`${section.items.length} capítulo(s) ou item(ns)`} actions={
-                isMeasurementDocument
-                  ? undefined
-                  : <span className="text-sm font-bold text-slate-900 tabular-nums">{money(section.sellingTotal, currency)}</span>
-              } />
+              <div className="flex flex-col gap-2 border-b border-slate-100 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+                {editingSectionId === section.id ? (
+                  <form onSubmit={(e) => handleRenameSection(e, section.id)} className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                    <input
+                      required
+                      value={sectionNameDraft}
+                      onChange={(e) => setSectionNameDraft(e.target.value)}
+                      className="input input-sm min-w-[200px] flex-1"
+                      autoFocus
+                    />
+                    <button type="submit" className="btn btn-primary btn-sm">Guardar</button>
+                    <button type="button" onClick={() => setEditingSectionId(null)} className="btn btn-ghost btn-sm">Cancelar</button>
+                  </form>
+                ) : (
+                  <>
+                    <div className="min-w-0">
+                      <h3 className="text-sm font-semibold text-slate-950">{section.name}</h3>
+                      <p className="text-xs text-slate-500">{section.items.length} capítulo(s) ou item(ns) — clique no lápis para editar descrições e especificações</p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {!isMeasurementDocument && !isClientView && (
+                        <span className="text-sm font-bold text-slate-900 tabular-nums">{money(section.sellingTotal, currency)}</span>
+                      )}
+                      {!isClientView && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => { setEditingSectionId(section.id); setSectionNameDraft(section.name); }}
+                            className="icon-btn"
+                            title="Renomear secção"
+                          >
+                            <IconPencil className="w-4 h-4" />
+                          </button>
+                          <button type="button" onClick={() => handleDeleteSection(section.id, section.name)} className="icon-btn-danger" title="Eliminar secção">
+                            <IconTrash className="w-4 h-4" />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
 
               <div className="px-3 py-2 overflow-x-auto">
                 {section.items.length === 0 ? (
@@ -436,7 +740,17 @@ export default function BudgetDocumentPage() {
                     <BoqTableHead readOnly={isClientView} measurementOnly={isMeasurementDocument} />
                     <tbody>
                       {section.items.map((item) => (
-                        <LineItemRow key={item.id} node={item} depth={0} sectionId={section.id} compositions={compositions} onChange={reload} readOnly={isClientView} measurementOnly={isMeasurementDocument} />
+                        <LineItemRow
+                          key={item.id}
+                          node={item}
+                          depth={0}
+                          sectionId={section.id}
+                          compositions={compositions}
+                          onChange={reload}
+                          readOnly={isClientView}
+                          measurementOnly={isMeasurementDocument}
+                          hasPlantRooms={architectureRooms.length > 0}
+                        />
                       ))}
                     </tbody>
                   </table>
@@ -464,7 +778,13 @@ export default function BudgetDocumentPage() {
               </div>}
             </section>
           ))}
-          {visibleSections.length === 0 && <div className="card px-5 py-12 text-center text-sm text-slate-500">Nenhum item do mapa corresponde à pesquisa.</div>}
+          {visibleSections.length === 0 && (
+            <div className="card px-5 py-12 text-center text-sm text-slate-500">
+              {showOnlyUnpriced
+                ? "Nenhum item sem preço neste orçamento."
+                : "Nenhum item do mapa corresponde à pesquisa."}
+            </div>
+          )}
 
           {!isClientView && <details className="card overflow-hidden">
             <summary className="cursor-pointer px-5 py-4 hover:bg-slate-50">
@@ -489,10 +809,10 @@ export default function BudgetDocumentPage() {
           </section>
 
           <section className="border-t border-slate-200">
-            <SectionHeader title="Importar medições" description="Actualize quantidades a partir de um ficheiro Excel" />
+            <SectionHeader title="Importar medições" description="Actualize quantidades ou crie itens a partir de um Excel" />
             <div className="p-5">
             <p className="text-xs text-gray-500 mb-3 max-w-3xl">
-              O Excel deve conter “Item”/“Código” e “Quant.”. Apenas as quantidades são actualizadas.
+              O Excel deve conter «Item»/«Código» e «Quant.». Itens novos são criados automaticamente quando o código ainda não existe.
             </p>
             <form onSubmit={handleImportMeasurements} className="flex gap-2 items-end flex-wrap">
               <div className="flex-1 min-w-[180px]">
@@ -512,7 +832,7 @@ export default function BudgetDocumentPage() {
             {importResult && (
               <div className="mt-3 rounded-lg bg-green-50 border border-green-200 p-3 text-sm">
                 <p className="font-medium text-green-800">
-                  {importResult.itemsUpdated} de {importResult.rowsRead} linha(s) do Excel aplicadas com sucesso.
+                  {importResult.itemsUpdated} actualizado(s), {importResult.itemsCreated} criado(s) — {importResult.rowsRead} linha(s) do Excel processadas.
                 </p>
                 {importResult.unmatched.length > 0 && (
                   <>
@@ -668,6 +988,7 @@ export default function BudgetDocumentPage() {
         />
       )}
 
+      {dialog}
     </Layout>
   );
 }

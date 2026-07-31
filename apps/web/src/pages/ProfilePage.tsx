@@ -7,6 +7,8 @@ import { getPlanDefinition } from "@sigo/shared";
 import Layout from "../components/Layout";
 import RoleBadge from "../components/RoleBadge";
 import ChangePasswordModal from "../components/ChangePasswordModal";
+import AlertBanner from "../components/AlertBanner";
+import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { applyTheme, getStoredTheme, type Theme } from "../theme";
 import { IconTrash } from "../components/icons";
 
@@ -19,8 +21,6 @@ function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString("pt-MZ");
 }
 
-// Resumo curto do user-agent gravado na sessão — não é detecção fiável de dispositivo, só o
-// suficiente para o utilizador reconhecer "isto é o meu telemóvel" vs "isto não sou eu".
 function summarizeUserAgent(ua: string | null): string {
   if (!ua) return "Dispositivo desconhecido";
   if (/Mobile|Android|iPhone/i.test(ua)) return "Telemóvel";
@@ -30,12 +30,12 @@ function summarizeUserAgent(ua: string | null): string {
 
 export default function ProfilePage() {
   const { user, refreshUser } = useAuth();
+  const { confirm, dialog } = useConfirmDialog();
   const [name, setName] = useState(user?.name ?? "");
   const [savingName, setSavingName] = useState(false);
   const [nameSaved, setNameSaved] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
   const [company, setCompany] = useState<Company | null>(null);
   const [sessions, setSessions] = useState<UserSession[]>([]);
   const [showChangePassword, setShowChangePassword] = useState(false);
@@ -50,8 +50,7 @@ export default function ProfilePage() {
       companiesApi.me().then((d) => setCompany(d.company)).catch(() => {});
     }
     reloadSessions().catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [user?.companyId]);
 
   useEffect(() => {
     setName(user?.name ?? "");
@@ -91,6 +90,13 @@ export default function ProfilePage() {
   }
 
   async function handleRemoveAvatar() {
+    const ok = await confirm({
+      title: "Remover fotografia?",
+      message: "A sua fotografia de perfil será eliminada.",
+      confirmLabel: "Remover",
+      danger: true,
+    });
+    if (!ok) return;
     setError(null);
     try {
       await api.deleteAvatar();
@@ -101,6 +107,13 @@ export default function ProfilePage() {
   }
 
   async function handleEndSession(id: string) {
+    const ok = await confirm({
+      title: "Terminar sessão?",
+      message: "Esse dispositivo terá de voltar a entrar com email e palavra-passe.",
+      confirmLabel: "Terminar sessão",
+      danger: true,
+    });
+    if (!ok) return;
     setError(null);
     try {
       await api.deleteSession(id);
@@ -111,7 +124,14 @@ export default function ProfilePage() {
   }
 
   async function handleEndOtherSessions() {
-    if (!window.confirm("Terminar todas as outras sessões? Vai continuar com sessão aqui.")) return;
+    const ok = await confirm({
+      title: "Terminar outras sessões?",
+      message: "Todos os outros dispositivos serão desligados. Mantém-se autenticado apenas neste ecrã.",
+      confirmLabel: "Terminar as outras",
+      danger: true,
+      details: ["Telemóveis, tablets e outros computadores", "Não afecta a sessão actual"],
+    });
+    if (!ok) return;
     setError(null);
     try {
       await api.terminateOtherSessions();
@@ -129,158 +149,143 @@ export default function ProfilePage() {
   if (!user) return null;
 
   const plan = company?.subscription ? getPlanDefinition(company.subscription.plan) : null;
+  const otherSessions = sessions.filter((s) => !s.current);
 
   return (
-    <Layout title="Perfil" subtitle="Dados pessoais, segurança e sessões activas">
-      <div className="space-y-5 max-w-2xl">
-        {error && <p className="text-sm text-red-600">{error}</p>}
-        {user.mustChangePassword && <div className="rounded-xl border border-amber-300 bg-amber-50 px-5 py-4"><p className="font-semibold text-amber-950">Proteja o seu acesso antes de continuar</p><p className="mt-1 text-sm leading-6 text-amber-800">Está a usar uma palavra-passe temporária definida pelo administrador. Escolha agora uma palavra-passe pessoal; as restantes áreas ficam disponíveis logo depois.</p><button onClick={() => setShowChangePassword(true)} className="btn btn-primary mt-3">Definir a minha palavra-passe</button></div>}
+    <Layout title="Perfil" subtitle="Conta, segurança e sessões activas">
+      <div className="mx-auto w-full max-w-3xl space-y-5">
+        {error && <AlertBanner tone="error" onDismiss={() => setError(null)}>{error}</AlertBanner>}
 
-        <section className="card card-pad">
-          <h2 className="section-title mb-4">Dados pessoais</h2>
-          <div className="flex items-start gap-4 mb-5">
-            <div className="shrink-0">
-              {user.avatarUrl ? (
-                <img src={user.avatarUrl} alt={user.name} className="w-16 h-16 rounded-full object-cover border border-gray-200" />
-              ) : (
-                <div className="w-16 h-16 rounded-full bg-brand-100 text-brand-800 flex items-center justify-center text-lg font-semibold">
-                  {user.name.trim().charAt(0).toUpperCase()}
+        {user.mustChangePassword && (
+          <AlertBanner tone="warning">
+            <p className="font-semibold">Defina a sua palavra-passe</p>
+            <p className="mt-1 text-sm opacity-90">Está a usar uma credencial temporária. Escolha uma palavra-passe pessoal para continuar.</p>
+            <button onClick={() => setShowChangePassword(true)} className="btn btn-primary btn-sm mt-3">Definir palavra-passe</button>
+          </AlertBanner>
+        )}
+
+        <section className="card overflow-hidden">
+          <div className="bg-gradient-to-br from-brand-950 to-brand-800 px-5 py-6 text-white sm:px-6">
+            <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-start">
+              <div className="relative shrink-0">
+                {user.avatarUrl ? (
+                  <img src={user.avatarUrl} alt={user.name} className="h-20 w-20 rounded-full border-2 border-white/30 object-cover" />
+                ) : (
+                  <div className="flex h-20 w-20 items-center justify-center rounded-full bg-white/15 text-2xl font-bold">
+                    {user.name.trim().charAt(0).toUpperCase()}
+                  </div>
+                )}
+              </div>
+              <div className="min-w-0 flex-1 text-center sm:text-left">
+                <h2 className="truncate text-xl font-bold">{user.name}</h2>
+                <p className="mt-0.5 truncate text-sm text-brand-200">{user.email}</p>
+                <div className="mt-2 flex flex-wrap items-center justify-center gap-2 sm:justify-start">
+                  <RoleBadge role={user.role} />
+                  {company && (
+                    <Link to="/empresa" className="badge badge-brand bg-white/15 text-white hover:bg-white/25">
+                      {company.name}
+                    </Link>
+                  )}
                 </div>
-              )}
-            </div>
-            <div className="flex-1">
-              <label className="input-sm inline-block cursor-pointer text-xs font-medium text-brand-700 hover:text-brand-900">
-                {uploadingAvatar ? "A carregar..." : "Mudar fotografia"}
-                <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={handleAvatarChange} disabled={uploadingAvatar} className="hidden" />
-              </label>
-              {user.avatarUrl && (
-                <button onClick={handleRemoveAvatar} className="ml-3 text-xs text-red-600 hover:underline">
-                  Remover
-                </button>
-              )}
+              </div>
             </div>
           </div>
-
-          <form onSubmit={handleSaveName} className="space-y-3">
-            <div>
-              <label className="label">Nome</label>
-              <div className="flex gap-2">
-                <input value={name} onChange={(e) => setName(e.target.value)} className="input flex-1" required />
-                <button type="submit" disabled={savingName || name === user.name} className="btn btn-primary">
-                  {savingName ? "A guardar..." : "Guardar"}
-                </button>
+          <div className="card-pad flex flex-wrap gap-2 border-b border-slate-100">
+            <label className="btn btn-secondary btn-sm cursor-pointer">
+              {uploadingAvatar ? "A carregar..." : "Mudar fotografia"}
+              <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={handleAvatarChange} disabled={uploadingAvatar} className="hidden" />
+            </label>
+            {user.avatarUrl && (
+              <button type="button" onClick={handleRemoveAvatar} className="btn btn-danger btn-sm">Remover fotografia</button>
+            )}
+            <button type="button" onClick={() => setShowChangePassword(true)} className="btn btn-ghost btn-sm">Palavra-passe</button>
+          </div>
+          <div className="card-pad">
+            <form onSubmit={handleSaveName} className="space-y-4">
+              <div>
+                <label className="label">Nome apresentado</label>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <input value={name} onChange={(e) => setName(e.target.value)} className="input flex-1" required />
+                  <button type="submit" disabled={savingName || name === user.name} className="btn btn-primary sm:shrink-0">
+                    {savingName ? "A guardar..." : "Guardar"}
+                  </button>
+                </div>
+                {nameSaved && <p className="mt-1 text-xs text-emerald-600">Nome actualizado.</p>}
               </div>
-              {nameSaved && <p className="text-xs text-green-600 mt-1">Nome actualizado.</p>}
-            </div>
-            <div>
-              <label className="label">Email</label>
-              <input value={user.email} disabled className="input bg-gray-50 text-gray-500" />
-              <p className="muted mt-1">O email é a sua identidade de acesso — para mudar, contacte um administrador.</p>
-            </div>
-          </form>
-
-          <div className="mt-4 pt-4 border-t border-gray-100 grid sm:grid-cols-2 gap-4">
-            <div>
-              <p className="label mb-1">Perfil</p>
-              <RoleBadge role={user.role} />
-            </div>
-            <div>
-              <p className="label mb-1">Empresa</p>
-              {company ? (
-                <Link to="/empresa" className="text-sm text-brand-700 hover:underline font-medium">
-                  {company.name}
-                </Link>
-              ) : (
-                <p className="text-sm text-gray-500">Sem empresa associada</p>
-              )}
-              {plan && <p className="muted mt-0.5">Plano {plan.label}</p>}
-            </div>
-            <div>
-              <p className="label mb-1">Membro desde</p>
-              <p className="text-sm text-gray-700">{fmtDate(user.createdAt)}</p>
-            </div>
-            <div>
-              <p className="label mb-1">Último acesso</p>
-              <p className="text-sm text-gray-700">{fmtDateTime(user.lastLoginAt)}</p>
-            </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <p className="label">Membro desde</p>
+                  <p className="text-sm text-slate-700">{fmtDate(user.createdAt)}</p>
+                </div>
+                <div>
+                  <p className="label">Último acesso</p>
+                  <p className="text-sm text-slate-700">{fmtDateTime(user.lastLoginAt)}</p>
+                </div>
+                {plan && (
+                  <div className="sm:col-span-2">
+                    <p className="label">Plano da empresa</p>
+                    <p className="text-sm text-slate-700">{plan.label}</p>
+                  </div>
+                )}
+              </div>
+            </form>
           </div>
         </section>
 
         <section className="card card-pad">
           <h2 className="section-title mb-3">Preferências</h2>
-          <div className="grid sm:grid-cols-2 gap-4">
+          <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <p className="label mb-1.5">Tema</p>
               <div className="flex gap-2">
-                <button
-                  onClick={() => handleThemeChange("light")}
-                  className={`btn btn-sm ${theme === "light" ? "btn-primary" : "btn-secondary"}`}
-                >
-                  Claro
-                </button>
-                <button
-                  onClick={() => handleThemeChange("dark")}
-                  className={`btn btn-sm ${theme === "dark" ? "btn-primary" : "btn-secondary"}`}
-                >
-                  Escuro
-                </button>
+                <button onClick={() => handleThemeChange("light")} className={`btn btn-sm ${theme === "light" ? "btn-primary" : "btn-secondary"}`}>Claro</button>
+                <button onClick={() => handleThemeChange("dark")} className={`btn btn-sm ${theme === "dark" ? "btn-primary" : "btn-secondary"}`} disabled title="Em breve">Escuro</button>
               </div>
+              <p className="muted mt-1">O tema escuro estará disponível numa actualização futura.</p>
             </div>
             <div>
               <p className="label mb-1.5">Idioma</p>
-              <select disabled className="input bg-gray-50 text-gray-500 max-w-[200px]">
-                <option>Português</option>
-              </select>
-              <p className="muted mt-1">Mais idiomas em breve.</p>
+              <select disabled className="input max-w-[200px] bg-slate-50 text-slate-500"><option>Português</option></select>
             </div>
           </div>
         </section>
 
-        <section className="card card-pad">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="section-title">Palavra-passe</h2>
-            <button onClick={() => setShowChangePassword(true)} className="btn btn-secondary btn-sm">
-              Mudar palavra-passe
-            </button>
-          </div>
-          <p className="muted">Mudar a palavra-passe termina automaticamente as restantes sessões noutros dispositivos.</p>
-        </section>
-
-        <section className="card">
-          <div className="flex items-center justify-between px-5 pt-4 pb-2 border-b border-gray-100">
-            <h2 className="section-title text-base">Sessões</h2>
-            {sessions.filter((s) => !s.current).length > 0 && (
-              <button onClick={handleEndOtherSessions} className="btn btn-secondary btn-sm">
-                Terminar as outras
-              </button>
+        <section className="card overflow-hidden">
+          <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="section-title">Sessões activas</h2>
+              <p className="muted mt-0.5">{sessions.length} dispositivo(s) com acesso</p>
+            </div>
+            {otherSessions.length > 0 && (
+              <button onClick={handleEndOtherSessions} className="btn btn-danger btn-sm w-full sm:w-auto">Terminar as outras</button>
             )}
           </div>
-          <ul>
+          <ul className="divide-y divide-slate-100">
             {sessions.map((s) => (
-              <li key={s.id} className="table-row flex items-center justify-between px-5 py-3">
-                <div>
-                  <p className="text-sm text-gray-900">
+              <li key={s.id} className="flex items-center justify-between gap-3 px-5 py-3.5">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-slate-900">
                     {summarizeUserAgent(s.userAgent)}
-                    {s.current && <span className="badge badge-green ml-2">Sessão actual</span>}
+                    {s.current && <span className="badge badge-green ml-2">Actual</span>}
                   </p>
-                  <p className="muted">
-                    Iniciada em {fmtDateTime(s.createdAt)}
-                    {s.ipAddress ? ` · ${s.ipAddress}` : ""}
+                  <p className="muted truncate">
+                    {fmtDateTime(s.createdAt)}{s.ipAddress ? ` · ${s.ipAddress}` : ""}
                   </p>
                 </div>
                 {!s.current && (
-                  <button onClick={() => handleEndSession(s.id)} className="icon-btn-danger" title="Terminar sessão">
+                  <button onClick={() => handleEndSession(s.id)} className="icon-btn-danger shrink-0" title="Terminar sessão">
                     <IconTrash className="w-3.5 h-3.5" />
                   </button>
                 )}
               </li>
             ))}
-            {sessions.length === 0 && <li className="px-5 py-4 text-sm text-gray-400">Sem sessões activas.</li>}
+            {sessions.length === 0 && <li className="px-5 py-6 text-sm text-slate-400">Sem sessões activas.</li>}
           </ul>
         </section>
       </div>
 
       {showChangePassword && <ChangePasswordModal onClose={() => setShowChangePassword(false)} onSuccess={refreshUser} />}
+      {dialog}
     </Layout>
   );
 }

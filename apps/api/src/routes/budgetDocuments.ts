@@ -15,6 +15,7 @@ import {
   getZoneIdForSection,
 } from "../services/accessControl.js";
 import { generateStandardBoq } from "../services/boqTemplate.js";
+import { applyProjectSpecificationsToDocument } from "../services/specEnrichment.js";
 import { importMeasurementsFromExcel } from "../services/measurementImport.js";
 import { CURRENCIES, DEFAULT_IVA_RATE, UNITS, LINE_ITEM_KINDS } from "@sigo/shared";
 
@@ -52,7 +53,22 @@ const lineItemSchema = z.object({
   compositionId: z.string().uuid().nullable().optional(),
   sortOrder: z.number().int().default(0),
 });
-const lineItemUpdateSchema = lineItemSchema.partial();
+const lineItemUpdateSchema = lineItemSchema.partial().extend({
+  technicalSpecification: z.string().nullable().optional(),
+});
+
+const SPEC_MARKER = "\n\n— Especificação técnica —\n";
+
+function stripEmbeddedSpec(description: string): string {
+  return description.split(SPEC_MARKER)[0].trim();
+}
+
+function mergeDescriptionWithSpec(baseDescription: string, spec: string | null | undefined): string {
+  const base = stripEmbeddedSpec(baseDescription);
+  if (spec === undefined) return baseDescription;
+  if (!spec?.trim()) return base;
+  return `${base}${SPEC_MARKER}${spec.trim()}`;
+}
 
 export async function budgetDocumentRoutes(app: FastifyInstance) {
   // ---------- Documentos (Mapas de Quantidades/Orçamentos) ----------
@@ -231,7 +247,21 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
       return created;
     });
 
+    await applyProjectSpecificationsToDocument(target.id, project.id);
+
     return reply.code(201).send({ document: target, created: true });
+  });
+
+  app.post("/api/budget-documents/:id/apply-specifications", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const companyId = companyIdOf(request);
+    const document = await assertDocumentOwned(id, companyId);
+    if (!document) return reply.code(404).send({ error: "Documento não encontrado" });
+    if (document.status !== "rascunho") {
+      return reply.code(409).send({ error: "Só pode aplicar especificações em documentos em rascunho." });
+    }
+    const result = await applyProjectSpecificationsToDocument(id, document.projectId);
+    return result;
   });
 
   // Actualiza, de forma EXPLÍCITA, os snapshots de preço dos itens ligados a composições.
@@ -377,7 +407,8 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
     const buffer = await data.toBuffer();
 
     try {
-      const result = await importMeasurementsFromExcel(id, buffer);
+      const createMissing = (request.query as { createMissing?: string }).createMissing !== "false";
+      const result = await importMeasurementsFromExcel(id, buffer, companyId, { createMissing });
       return result;
     } catch (err) {
       return reply.code(400).send({ error: err instanceof Error ? err.message : "Erro ao importar medições" });
@@ -405,6 +436,19 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
     if (!section) return reply.code(404).send({ error: "Secção não encontrada" });
     await db.delete(budgetSections).where(eq(budgetSections.id, id));
     return { ok: true };
+  });
+
+  app.patch("/api/sections/:id", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const companyId = companyIdOf(request);
+    const section = await assertSectionOwned(id, companyId);
+    if (!section) return reply.code(404).send({ error: "Secção não encontrada" });
+
+    const parsed = z.object({ name: z.string().min(1) }).safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+
+    const [updated] = await db.update(budgetSections).set({ name: parsed.data.name }).where(eq(budgetSections.id, id)).returning();
+    return updated;
   });
 
   // ---------- Itens (árvore: capítulo/grupo/item/nota) ----------
@@ -454,7 +498,13 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
 
     const parsed = lineItemUpdateSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
-    const data = parsed.data;
+    const { technicalSpecification, ...data } = parsed.data;
+
+    let description = data.description;
+    if (technicalSpecification !== undefined) {
+      const base = description !== undefined ? stripEmbeddedSpec(description) : stripEmbeddedSpec(existing.description);
+      description = mergeDescriptionWithSpec(base, technicalSpecification);
+    }
 
     let unitPrice = data.unitPrice;
     let origin: "manual" | "planta" | "composicao" | undefined;
@@ -473,6 +523,7 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
       .update(lineItems)
       .set({
         ...data,
+        ...(description !== undefined ? { description } : {}),
         unitPrice: unitPrice !== undefined ? (unitPrice !== null ? unitPrice.toString() : null) : undefined,
         quantity: data.quantity !== undefined ? (data.quantity !== null ? data.quantity.toString() : null) : undefined,
         origin,
@@ -489,5 +540,31 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
     if (!existing) return reply.code(404).send({ error: "Item não encontrado" });
     await db.delete(lineItems).where(eq(lineItems.id, id));
     return { ok: true };
+  });
+
+  // Actualização em massa de especificações técnicas (editor por capítulo).
+  app.post("/api/line-items/bulk-specifications", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
+    const companyId = companyIdOf(request);
+    const parsed = z
+      .object({
+        items: z.array(
+          z.object({
+            id: z.string().uuid(),
+            technicalSpecification: z.string().max(8000).nullable(),
+          }),
+        ),
+      })
+      .safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+
+    let updated = 0;
+    for (const entry of parsed.data.items) {
+      const existing = await assertLineItemOwned(entry.id, companyId);
+      if (!existing || existing.kind !== "item") continue;
+      const description = mergeDescriptionWithSpec(stripEmbeddedSpec(existing.description), entry.technicalSpecification);
+      await db.update(lineItems).set({ description }).where(eq(lineItems.id, entry.id));
+      updated++;
+    }
+    return { updated };
   });
 }
