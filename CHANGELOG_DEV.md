@@ -4,6 +4,25 @@ Este ficheiro coordena o trabalho paralelo entre Codex e Claude. Antes de inicia
 consultar o estado do Git e as entradas mais recentes. Cada intervenção deve indicar branch,
 âmbito, validação e estado de publicação.
 
+## 2026-07-31 — Claude — Deploy do trabalho acumulado (custos, cronograma real, UI)
+
+- **Branch:** `codex/project-costs-measurements` → fast-forward para `main` (commit `fc44544`).
+- **Âmbito:** consolidou num único commit as entradas anteriores desta secção (separação
+  medições/orçamento, custos globais, materiais técnicos) ainda por publicar, mais o trabalho
+  desta sessão: cronograma sem perguntar dias (duração calculada de baixo para cima a partir das
+  horas de mão-de-obra de cada pacote de trabalho), upload de plantas deixa de bloquear o pedido
+  HTTP durante a leitura, landing page (logótipo real, tipografia própria, preços mensal/anual),
+  painel de utilizadores da empresa reformulado (badges por perfil, aviso de plano cheio, secção
+  de perfis recolhida por omissão).
+- **Base de dados:** migrações `0028`, `0029`, `0030` aplicadas em produção (custos do documento,
+  especificações técnicas de materiais, separação medição/orçamento). Backup pré-deploy em
+  `/home/sigo/backups/sigo-predeploy-<data>-<sha>.dump`.
+- **Validação:** `npm run build` (shared→api→web) sem erros; 44 testes da API e 14 do frontend a
+  passar; verificação de deriva de esquema sem diferenças por commitar.
+- **Produção:** publicado — `git pull --ff-only`, `npm ci`, `npm run build`, `npm run db:migrate`,
+  `pm2 reload sigo-api --update-env`. Health check interno confirmado
+  (`{"status":"ok"}`).
+
 ## 2026-07-29 — Codex — Separação entre Medições e Orçamentos
 
 - **Branch:** `codex/project-costs-measurements`
