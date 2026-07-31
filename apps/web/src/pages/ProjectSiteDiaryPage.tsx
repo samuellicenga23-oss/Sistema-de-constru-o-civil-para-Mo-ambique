@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { boqApi, type Project } from "../api/boq";
 import { siteDiaryApi, type SiteDiaryEntry } from "../api/siteDiary";
@@ -7,6 +7,7 @@ import { purchasingApi, type StockSummaryLine } from "../api/purchasing";
 import Layout from "../components/Layout";
 import ProjectWorkspaceNav from "../components/ProjectWorkspaceNav";
 import Modal from "../components/Modal";
+import PageSearch from "../components/PageSearch";
 import { SectionHeader } from "../components/WorkspaceUI";
 import { IconBack, IconPlus, IconTrash, IconDownload, IconUpload } from "../components/icons";
 
@@ -28,6 +29,7 @@ export default function ProjectSiteDiaryPage() {
   const [saving, setSaving] = useState(false);
   const [uploadingPhotoFor, setUploadingPhotoFor] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [query, setQuery] = useState("");
 
   const [date, setDate] = useState(todayStr());
   const [weather, setWeather] = useState("Sol");
@@ -135,6 +137,22 @@ export default function ProjectSiteDiaryPage() {
     }
   }
 
+  const filteredEntries = useMemo(() => {
+    const needle = query.trim().toLocaleLowerCase("pt");
+    if (!needle) return entries;
+    return entries.filter((entry) => [
+      entry.date,
+      entry.weather,
+      entry.workDone,
+      entry.materialsReceived,
+      entry.materialsConsumed,
+      entry.visitors,
+      entry.inspectorInstructions,
+      entry.incidents,
+      entry.decisions,
+    ].filter(Boolean).join(" ").toLocaleLowerCase("pt").includes(needle));
+  }, [entries, query]);
+
   if (!project) {
     return <div className="min-h-screen flex items-center justify-center text-gray-400">A carregar...</div>;
   }
@@ -150,11 +168,12 @@ export default function ProjectSiteDiaryPage() {
         </Link>
       }
     >
-      <div className="space-y-5 max-w-7xl">
+      <div className="mx-auto w-full max-w-7xl space-y-5">
         <ProjectWorkspaceNav projectId={projectId!} />
         {error && <p className="text-sm text-red-600">{error}</p>}
 
         <section className="card"><SectionHeader title="Registos do diário" description="Trabalhos, equipa, ocorrências e evidências por dia" actions={<button type="button" onClick={() => setShowForm(true)} className="btn btn-primary btn-sm"><IconPlus className="h-3.5 w-3.5" /> Registar dia</button>} /></section>
+        <PageSearch value={query} onChange={setQuery} placeholder="Pesquisar por data, trabalho, material ou ocorrência…" resultLabel={`${filteredEntries.length} registo(s)`} />
         {showForm && <Modal title="Novo registo do Diário" subtitle={`${date} · ${project.name}`} onClose={() => !saving && setShowForm(false)} maxWidth="max-w-6xl">
           <form onSubmit={handleCreate} className="space-y-3">
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -231,7 +250,7 @@ export default function ProjectSiteDiaryPage() {
         </Modal>}
 
         <section className="space-y-3">
-          {entries.map((entry) => {
+          {filteredEntries.map((entry) => {
             const expanded = expandedId === entry.id;
             return (
               <div key={entry.id} className="card">
@@ -331,6 +350,7 @@ export default function ProjectSiteDiaryPage() {
               </div>
             );
           })}
+          {filteredEntries.length === 0 && <div className="card px-5 py-10 text-center text-sm text-slate-500">{query ? "Nenhum registo corresponde à pesquisa." : "Ainda não existem registos no diário."}</div>}
           {entries.length === 0 && <p className="text-sm text-gray-400 text-center py-6">Sem registos ainda — registe o primeiro dia acima.</p>}
         </section>
       </div>

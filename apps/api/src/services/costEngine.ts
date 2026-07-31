@@ -59,17 +59,11 @@ export function calculateCompositionTotals(input: {
   labourCost: number;
   materialCost: number;
   equipmentCost: number;
-  auxiliaryCostPct?: number;
-  indirectCostPct?: number;
-  profitMarginPct?: number;
 }) {
   const directCost = input.labourCost + input.materialCost + input.equipmentCost;
-  const auxiliaryCost = directCost * ((input.auxiliaryCostPct ?? 0) / 100);
-  const costBeforeIndirects = directCost + auxiliaryCost;
-  const indirectCost = costBeforeIndirects * ((input.indirectCostPct ?? 0) / 100);
-  const costBeforeProfit = costBeforeIndirects + indirectCost;
-  const profit = costBeforeProfit * ((input.profitMarginPct ?? 0) / 100);
-  return { directCost, auxiliaryCost, indirectCost, profit, unitCost: costBeforeProfit + profit };
+  // A composição representa apenas o custo técnico directo. Custos de estaleiro,
+  // contingências, margem e IVA são parâmetros globais do Mapa de Quantidades.
+  return { directCost, auxiliaryCost: 0, indirectCost: 0, profit: 0, unitCost: directCost };
 }
 
 export type CompositionCostBreakdown = {
@@ -359,9 +353,6 @@ export async function computeCompositionUnitCost(
     labourCost,
     materialCost,
     equipmentCost,
-    auxiliaryCostPct: Number(composition.auxiliaryCostPct),
-    indirectCostPct: Number(composition.indirectCostPct),
-    profitMarginPct: Number(composition.profitMarginPct),
   });
 
   const qualityWarnings: string[] = [];

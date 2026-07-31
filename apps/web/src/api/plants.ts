@@ -59,20 +59,25 @@ export type PlantProcessingProgress = Pick<
 
 const wait = (milliseconds: number) => new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 
-async function watchProgress(id: string, onProgress: ((progress: PlantProcessingProgress) => void) | undefined, isStopped: () => boolean) {
-  if (!onProgress) return;
+// Devolve o último estado conhecido quando o polling termina (sucesso, erro, ou parado
+// externamente) — quem chama pode assim esperar pelo fim real da leitura em segundo plano em
+// vez de assumir que a resposta do POST já é o resultado final.
+async function watchProgress(id: string, onProgress: ((progress: PlantProcessingProgress) => void) | undefined, isStopped: () => boolean): Promise<PlantProcessingProgress | null> {
+  let last: PlantProcessingProgress | null = null;
   while (!isStopped()) {
     await wait(450);
     if (isStopped()) break;
     try {
       const progress = await request<PlantProcessingProgress>(`/plants/${id}/status`);
-      onProgress(progress);
+      last = progress;
+      onProgress?.(progress);
       if (progress.processingStatus === "concluido" || progress.processingStatus === "erro") break;
     } catch (error) {
       if (error instanceof ApiError && error.status === 404) continue;
       break;
     }
   }
+  return last;
 }
 
 export type ExtractedRoom = {
@@ -107,12 +112,17 @@ export const plantsApi = {
     try {
       const res = await fetch(`/api/projects/${projectId}/plants`, { method: "POST", credentials: "include", body: form });
       if (!res.ok) {
+        stopped = true;
         const body = await res.json().catch(() => ({}));
         throw new ApiError(res.status, body.error ?? `Erro ${res.status}`);
       }
       const plant = await res.json() as Plant;
       onProgress?.(plant);
-      return plant;
+      // O POST devolve logo que o ficheiro fica gravado — a leitura continua no servidor. Espera
+      // aqui que o polling confirme "concluido"/"erro" antes de devolver, para quem chama
+      // continuar a receber o resultado final da leitura, não apenas a confirmação do upload.
+      const finalProgress = await watcher;
+      return finalProgress ? { ...plant, ...finalProgress } : plant;
     } finally {
       stopped = true;
       await watcher;
@@ -127,7 +137,8 @@ export const plantsApi = {
     try {
       const plant = await request<Plant>(`/plants/${id}/reprocess`, { method: "POST" });
       onProgress?.(plant);
-      return plant;
+      const finalProgress = await watcher;
+      return finalProgress ? { ...plant, ...finalProgress } : plant;
     } finally {
       stopped = true;
       await watcher;

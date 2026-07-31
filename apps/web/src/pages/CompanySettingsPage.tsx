@@ -151,7 +151,7 @@ export default function CompanySettingsPage() {
 
   return (
     <Layout title="Definições da Empresa" subtitle="Identidade, parâmetros de cálculo, subscrição e acessos da equipa">
-      <div className="max-w-6xl">
+      <div className="mx-auto w-full max-w-6xl">
         {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
 
         <div className="workspace-tabs mb-5">

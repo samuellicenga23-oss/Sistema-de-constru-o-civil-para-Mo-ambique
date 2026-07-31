@@ -1,0 +1,2 @@
+ALTER TABLE "budget_documents" ADD COLUMN "indirect_costs_rate" numeric(5, 4) DEFAULT '0' NOT NULL;--> statement-breakpoint
+ALTER TABLE "projects" ADD COLUMN "indirect_costs_rate" numeric(5, 4) DEFAULT '0' NOT NULL;

@@ -13,6 +13,7 @@
   --color-brand-900: #1e3a8a;
   --color-brand-950: #172033;
   --font-sans: "Aptos", "Segoe UI Variable", "Segoe UI", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-display: "Space Grotesk", "Aptos", ui-sans-serif, system-ui, -apple-system, sans-serif;
 }
 
 * {

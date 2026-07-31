@@ -11,6 +11,7 @@ import {
   siteDiaryTaskProgress,
 } from "../db/schema.js";
 import { getBudgetDocumentSummary, type LineItemNode } from "./boqEngine.js";
+import { getCompositionLabourQuantities } from "./costEngine.js";
 
 const DAY_MS = 86_400_000;
 
@@ -35,30 +36,6 @@ export function workingDaysInclusive(startDate: string, endDate: string) {
   return Math.max(1, count);
 }
 
-export function allocateDurations(weights: number[], requestedTotal: number, minimum = 3) {
-  return allocateDurationsWithMinimums(weights, requestedTotal, weights.map(() => minimum));
-}
-
-export function allocateDurationsWithMinimums(weights: number[], requestedTotal: number, minimums: number[]) {
-  if (!weights.length) return [];
-  if (weights.length !== minimums.length) throw new Error("Pesos e mínimos do cronograma devem ter o mesmo tamanho");
-  const safeMinimums = minimums.map((minimum) => Math.max(1, Math.floor(minimum)));
-  const minimumTotal = safeMinimums.reduce((sum, minimum) => sum + minimum, 0);
-  const total = Math.max(requestedTotal, minimumTotal);
-  const positiveWeights = weights.map((weight) => Math.max(0, weight));
-  const safeWeights = positiveWeights.some((weight) => weight > 0) ? positiveWeights : weights.map(() => 1);
-  const sum = safeWeights.reduce((value, weight) => value + weight, 0);
-  const raw = safeWeights.map((weight, index) => safeMinimums[index] + ((total - minimumTotal) * weight) / sum);
-  const result = raw.map(Math.floor);
-  let remaining = total - result.reduce((value, days) => value + days, 0);
-  raw
-    .map((value, index) => ({ index, fraction: value - Math.floor(value) }))
-    .sort((a, b) => b.fraction - a.fraction)
-    .slice(0, remaining)
-    .forEach(({ index }) => { result[index] += 1; remaining -= 1; });
-  return result;
-}
-
 function collectScheduleRoots(summary: Awaited<ReturnType<typeof getBudgetDocumentSummary>>) {
   if (!summary) return [];
   const roots: LineItemNode[] = [];
@@ -70,81 +47,163 @@ function collectScheduleRoots(summary: Awaited<ReturnType<typeof getBudgetDocume
   return roots;
 }
 
+// Horas de mão-de-obra por unidade de saída de cada composição, em cache por composição (a
+// mesma composição repete-se em muitos itens do mapa, ex: "Alvenaria de bloco 20").
+async function buildLabourHoursPerUnitCache(
+  node: LineItemNode,
+  companyId: string | null,
+  zoneId: string | null,
+  cache: Map<string, number>,
+): Promise<void> {
+  if (node.kind === "item" && node.compositionId && !cache.has(node.compositionId)) {
+    const lines = await getCompositionLabourQuantities(node.compositionId, companyId, zoneId);
+    cache.set(node.compositionId, lines.reduce((sum, line) => sum + line.hoursPerUnit, 0));
+  }
+  for (const child of node.children) await buildLabourHoursPerUnitCache(child, companyId, zoneId, cache);
+}
+
+const HOURS_PER_WORKING_DAY = 8;
+// Preço médio de referência (MZN) que uma frente sem composição ligada processa por dia — só
+// entra quando o item não tem mão-de-obra conhecida (preço manual, sem composição). É uma
+// aproximação grosseira assumida, nunca escondida: fica marcada como tal no resultado.
+const GENERIC_MZN_PER_DAY = 12_000;
+
+// Duração de UM pacote de trabalho (item medido), calculada a partir do seu próprio conteúdo —
+// nunca de uma fatia proporcional de um total maior. Horas reais = horas/unidade da composição ×
+// quantidade medida deste item; a equipa é dimensionada ao volume do PRÓPRIO item (tecto baixo —
+// uma linha de 5 m³ de betão não ganha uma equipa de 40 pessoas só porque a obra é grande).
+export function computeItemDurationDays(item: LineItemNode, hoursCache: Map<string, number>): { days: number; basis: "horas" | "valor" | "minimo" } {
+  if (item.compositionId && item.quantity) {
+    const hoursPerUnit = hoursCache.get(item.compositionId) ?? 0;
+    const totalHours = hoursPerUnit * item.quantity;
+    if (totalHours > 0) {
+      const crewSize = Math.max(1, Math.min(12, Math.round(Math.sqrt(totalHours / HOURS_PER_WORKING_DAY))));
+      return { days: Math.max(1, Math.round(totalHours / (crewSize * HOURS_PER_WORKING_DAY))), basis: "horas" };
+    }
+  }
+  if (item.totalPrice > 0) {
+    return { days: Math.max(1, Math.round(item.totalPrice / GENERIC_MZN_PER_DAY)), basis: "valor" };
+  }
+  return { days: 1, basis: "minimo" };
+}
+
+type ScheduledNode = {
+  node: LineItemNode;
+  durationDays: number;
+  basis: "horas" | "valor" | "minimo" | "soma";
+  children: ScheduledNode[];
+};
+
+// Calcula a duração de cada nó da árvore de baixo para cima: um item (pacote de trabalho) tem
+// duração própria, calculada do seu conteúdo real; um capítulo/grupo é sempre a SOMA das suas
+// subactividades (encadeadas em sequência), nunca um número inventado ao nível do capítulo. Isto
+// substitui o desenho anterior (repartir proporcionalmente um total pré-calculado), que perdia
+// detalhe e produzia números pouco realistas para pacotes de trabalho individuais.
+export function computeNodeDurations(node: LineItemNode, hoursCache: Map<string, number>): ScheduledNode | null {
+  if (node.kind === "nota") return null;
+  if (node.kind === "item") {
+    const { days, basis } = computeItemDurationDays(node, hoursCache);
+    return { node, durationDays: days, basis, children: [] };
+  }
+  const children = node.children.map((child) => computeNodeDurations(child, hoursCache)).filter((c): c is ScheduledNode => c !== null);
+  const durationDays = children.reduce((sum, c) => sum + c.durationDays, 0) || 1;
+  return { node, durationDays, basis: "soma", children };
+}
+
+// Escala só as folhas (pacotes de trabalho) por um factor uniforme e recalcula os totais dos
+// capítulos/grupos como soma — usado apenas quando o utilizador escolhe substituir o cálculo
+// automático por um prazo próprio; nunca inventa uma duração ao nível do capítulo.
+export function scaleScheduledTree(node: ScheduledNode, factor: number): ScheduledNode {
+  if (!node.children.length) return { ...node, durationDays: Math.max(1, Math.round(node.durationDays * factor)) };
+  const children = node.children.map((child) => scaleScheduledTree(child, factor));
+  return { ...node, durationDays: children.reduce((sum, child) => sum + child.durationDays, 0) || 1, children };
+}
+
+async function insertScheduledNode(
+  node: ScheduledNode,
+  args: { projectId: string; budgetDocumentId: string },
+  parentId: string | null,
+  fallbackCode: string,
+  startDate: string,
+  sortOrderRef: { value: number },
+  dependencyValues: Array<typeof scheduleDependencies.$inferInsert>,
+): Promise<typeof scheduleTasks.$inferSelect> {
+  const code = node.node.code ?? fallbackCode;
+  const endDate = addWorkingDays(startDate, node.durationDays - 1);
+  const [task] = await db.insert(scheduleTasks).values({
+    projectId: args.projectId,
+    parentId,
+    budgetDocumentId: args.budgetDocumentId,
+    code,
+    name: node.node.description,
+    budgetChapterCode: code,
+    startDate,
+    endDate,
+    baselineStartDate: startDate,
+    baselineEndDate: endDate,
+    durationDays: node.durationDays,
+    sortOrder: sortOrderRef.value++,
+  }).returning();
+
+  let childCursor = startDate;
+  let previousChild: typeof scheduleTasks.$inferSelect | null = null;
+  for (let childIndex = 0; childIndex < node.children.length; childIndex += 1) {
+    const childTask = await insertScheduledNode(node.children[childIndex], args, task.id, `${code}.${childIndex + 1}`, childCursor, sortOrderRef, dependencyValues);
+    if (previousChild) dependencyValues.push({ predecessorTaskId: previousChild.id, successorTaskId: childTask.id, type: "FS", lagDays: 0 });
+    previousChild = childTask;
+    childCursor = addWorkingDays(childTask.endDate, 1);
+  }
+  return task;
+}
+
+function collectLeafBasis(node: ScheduledNode, into: Set<string>) {
+  if (!node.children.length) into.add(node.basis);
+  for (const child of node.children) collectLeafBasis(child, into);
+}
+
+// Gera o cronograma directamente do que foi medido: cada pacote de trabalho (item do Mapa de
+// Quantidades, em qualquer profundidade — capítulo, grupo ou item) recebe a sua própria duração,
+// calculada das suas próprias horas de mão-de-obra e quantidade — nunca de uma fatia
+// proporcional de um total maior. A duração total nunca é uma pergunta obrigatória: é sempre a
+// soma real do trabalho medido; só é substituída quando o utilizador escolhe explicitamente um
+// prazo próprio (nesse caso, escala todas as folhas pelo mesmo factor, mantendo as proporções
+// reais entre pacotes de trabalho).
 export async function generateSchedule(args: {
   projectId: string;
   budgetDocumentId: string;
   startDate: string;
-  totalDurationDays: number;
+  totalDurationDays?: number;
+  companyId?: string | null;
+  zoneId?: string | null;
 }) {
   const summary = await getBudgetDocumentSummary(args.budgetDocumentId);
   if (!summary) throw new Error("Mapa de Quantidades não encontrado");
   const roots = collectScheduleRoots(summary);
   if (!roots.length) throw new Error("O Mapa de Quantidades ainda não tem capítulos para gerar a WBS");
-  const childrenByRoot = roots.map((root) => root.children);
-  const durations = allocateDurationsWithMinimums(
-    roots.map((root) => root.totalPrice),
-    args.totalDurationDays,
-    childrenByRoot.map((children) => Math.max(3, children.length)),
-  );
+
+  const hoursCache = new Map<string, number>();
+  for (const root of roots) await buildLabourHoursPerUnitCache(root, args.companyId ?? null, args.zoneId ?? null, hoursCache);
+
+  let scheduledRoots = roots
+    .map((root) => computeNodeDurations(root, hoursCache))
+    .filter((node): node is ScheduledNode => node !== null);
+  if (!scheduledRoots.length) throw new Error("O Mapa de Quantidades ainda não tem itens medidos para gerar a WBS");
+
+  if (args.totalDurationDays) {
+    const naturalTotal = scheduledRoots.reduce((sum, root) => sum + root.durationDays, 0) || 1;
+    const factor = args.totalDurationDays / naturalTotal;
+    scheduledRoots = scheduledRoots.map((root) => scaleScheduledTree(root, factor));
+  }
 
   await db.delete(scheduleTasks).where(eq(scheduleTasks.projectId, args.projectId));
   let cursor = args.startDate;
-  let sortOrder = 0;
+  const sortOrderRef = { value: 0 };
   const rootTasks: Array<typeof scheduleTasks.$inferSelect> = [];
   const dependencyValues: Array<typeof scheduleDependencies.$inferInsert> = [];
-  for (let index = 0; index < roots.length; index += 1) {
-    const root = roots[index];
-    const durationDays = durations[index];
-    const endDate = addWorkingDays(cursor, durationDays - 1);
-    const [rootTask] = await db.insert(scheduleTasks).values({
-      projectId: args.projectId,
-      budgetDocumentId: args.budgetDocumentId,
-      code: root.code ?? String(index + 1),
-      name: root.description,
-      budgetChapterCode: root.code ?? String(index + 1),
-      startDate: cursor,
-      endDate,
-      baselineStartDate: cursor,
-      baselineEndDate: endDate,
-      durationDays,
-      sortOrder: sortOrder++,
-    }).returning();
+  for (let index = 0; index < scheduledRoots.length; index += 1) {
+    const rootTask = await insertScheduledNode(scheduledRoots[index], args, null, String(index + 1), cursor, sortOrderRef, dependencyValues);
     rootTasks.push(rootTask);
-
-    const children = childrenByRoot[index];
-    if (children.length) {
-      const childDurations = allocateDurations(children.map((child) => child.totalPrice), durationDays, 1);
-      let childCursor = cursor;
-      let previousChild: typeof scheduleTasks.$inferSelect | null = null;
-      for (let childIndex = 0; childIndex < children.length; childIndex += 1) {
-        const child = children[childIndex];
-        const childDuration = childDurations[childIndex];
-        const childEndDate = addWorkingDays(childCursor, childDuration - 1);
-        const [childTask] = await db.insert(scheduleTasks).values({
-          projectId: args.projectId,
-          parentId: rootTask.id,
-          budgetDocumentId: args.budgetDocumentId,
-          code: child.code ?? `${rootTask.code}.${childIndex + 1}`,
-          name: child.description,
-          budgetChapterCode: child.code ?? rootTask.budgetChapterCode,
-          startDate: childCursor,
-          endDate: childEndDate,
-          baselineStartDate: childCursor,
-          baselineEndDate: childEndDate,
-          durationDays: childDuration,
-          sortOrder: sortOrder++,
-        }).returning();
-        if (previousChild) dependencyValues.push({
-          predecessorTaskId: previousChild.id,
-          successorTaskId: childTask.id,
-          type: "FS",
-          lagDays: 0,
-        });
-        previousChild = childTask;
-        childCursor = addWorkingDays(childEndDate, 1);
-      }
-    }
-    cursor = addWorkingDays(endDate, 1);
+    cursor = addWorkingDays(rootTask.endDate, 1);
   }
   if (rootTasks.length > 1) {
     dependencyValues.push(...rootTasks.slice(1).map((task, index) => ({
@@ -155,7 +214,14 @@ export async function generateSchedule(args: {
     })));
   }
   if (dependencyValues.length) await db.insert(scheduleDependencies).values(dependencyValues);
-  return getProjectSchedule(args.projectId);
+  const schedule = await getProjectSchedule(args.projectId);
+
+  const basisSet = new Set<string>();
+  for (const root of scheduledRoots) collectLeafBasis(root, basisSet);
+  const weightBasis = basisSet.has("horas") ? (basisSet.size > 1 ? "misto" : "horas") : basisSet.has("valor") ? "valor" : "minimo";
+  // Informa a origem do cálculo — permite à interface avisar quando o cronograma ainda não
+  // reflecte trabalho real (itens sem composição ligada, a usar a aproximação por valor).
+  return { ...schedule, weightBasis };
 }
 
 function findNodeByCode(nodes: LineItemNode[], code: string): LineItemNode | null {
@@ -343,3 +409,4 @@ export async function validateTaskDependency(projectId: string, taskId: string, 
     cursor = predecessorBySuccessor.get(cursor);
   }
 }
+

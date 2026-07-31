@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { validateMeasuredQuantity } from "../src/services/measurementEngine.js";
-import { addWorkingDays, allocateDurations, allocateDurationsWithMinimums } from "../src/services/scheduleEngine.js";
+import { addWorkingDays, computeItemDurationDays, computeNodeDurations } from "../src/services/scheduleEngine.js";
+import type { LineItemNode } from "../src/services/boqEngine.js";
 import { resolveSchedulePrintOptions } from "../src/services/schedulePdf.js";
 import { calculateProcurementQuantity } from "../src/services/procurementEngine.js";
 import { calculateVatTotals, DEFAULT_IVA_RATE, priceExcludingVat } from "@sigo/shared";
@@ -16,23 +17,57 @@ describe("Regras dos Autos de Medição", () => {
   });
 });
 
-describe("Regras do Cronograma", () => {
-  it("distribui exactamente o prazo total mesmo quando os capítulos não têm valor", () => {
-    const durations = allocateDurations([0, 0, 0], 30);
-    expect(durations).toHaveLength(3);
-    expect(durations.reduce((sum, value) => sum + value, 0)).toBe(30);
-    expect(durations.every((value) => value >= 3)).toBe(true);
-  });
+function itemNode(overrides: Partial<LineItemNode> = {}): LineItemNode {
+  return {
+    id: "item-1", sectionId: "sec-1", parentId: "cap-1", kind: "item", code: "01.001",
+    description: "Item de teste", unit: "m3", quantity: 1, unitPrice: 0, sellingUnitPrice: 0,
+    compositionId: null, origin: "manual", sortOrder: 0, totalPrice: 0, sellingTotalPrice: 0,
+    children: [], ...overrides,
+  };
+}
 
+describe("Regras do Cronograma", () => {
   it("usa calendário de obra de segunda a sábado", () => {
     expect(addWorkingDays("2026-07-25", 1)).toBe("2026-07-27"); // sábado + 1 dia útil = segunda
   });
 
-  it("reserva duração suficiente para todas as subactividades da WBS", () => {
-    const durations = allocateDurationsWithMinimums([70, 30], 12, [8, 2]);
-    expect(durations.reduce((sum, value) => sum + value, 0)).toBe(12);
-    expect(durations[0]).toBeGreaterThanOrEqual(8);
-    expect(durations[1]).toBeGreaterThanOrEqual(2);
+  it("calcula a duração de um pacote de trabalho a partir das suas próprias horas, não de uma fatia de um total maior", () => {
+    const hoursCache = new Map([["comp-1", 8]]); // 8 h/m3
+    const small = itemNode({ compositionId: "comp-1", quantity: 5 }); // 40 h → ~1 pessoa, ~5 dias
+    const large = itemNode({ compositionId: "comp-1", quantity: 200 }); // 1600 h → equipa maior, mas proporcional
+    const smallResult = computeItemDurationDays(small, hoursCache);
+    const largeResult = computeItemDurationDays(large, hoursCache);
+    expect(smallResult.basis).toBe("horas");
+    expect(largeResult.days).toBeGreaterThan(smallResult.days);
+  });
+
+  it("cai para uma estimativa por valor quando o item não tem composição, e para o mínimo quando não há dados", () => {
+    const withValue = computeItemDurationDays(itemNode({ compositionId: null, totalPrice: 24_000 }), new Map());
+    expect(withValue.basis).toBe("valor");
+    expect(withValue.days).toBeGreaterThanOrEqual(1);
+
+    const withNothing = computeItemDurationDays(itemNode({ compositionId: null, totalPrice: 0 }), new Map());
+    expect(withNothing).toEqual({ days: 1, basis: "minimo" });
+  });
+
+  it("soma as subactividades para obter a duração do capítulo — nunca reparte um total pré-calculado", () => {
+    const hoursCache = new Map([["comp-1", 8]]);
+    const chapter: LineItemNode = {
+      ...itemNode({ id: "cap-1", kind: "capitulo", parentId: null, quantity: null }),
+      children: [
+        itemNode({ id: "item-1", compositionId: "comp-1", quantity: 40 }),
+        itemNode({ id: "item-2", compositionId: "comp-1", quantity: 80 }),
+      ],
+    };
+    const scheduled = computeNodeDurations(chapter, hoursCache)!;
+    const childSum = scheduled.children.reduce((sum, child) => sum + child.durationDays, 0);
+    expect(scheduled.durationDays).toBe(childSum);
+    expect(scheduled.basis).toBe("soma");
+  });
+
+  it("ignora notas ao calcular a WBS", () => {
+    const note = itemNode({ id: "nota-1", kind: "nota" });
+    expect(computeNodeDurations(note, new Map())).toBeNull();
   });
 
   it("escolhe a folha pela densidade e respeita uma folha manual com ajuste de escala", () => {

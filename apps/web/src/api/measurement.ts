@@ -38,7 +38,14 @@ export type MeasurementLine = {
 export type MeasurementCertificateDetail = {
   certificate: MeasurementCertificate;
   lines: MeasurementLine[];
-  financialParameters: { currency: string; ivaRate: number; contingenciasRate: number };
+  financialParameters: {
+    currency: string;
+    ivaRate: number;
+    contingenciasRate: number;
+    siteCostsRate: number;
+    indirectCostsRate: number;
+    profitMarginRate: number;
+  };
 };
 
 export type PhaseLabourLine = {

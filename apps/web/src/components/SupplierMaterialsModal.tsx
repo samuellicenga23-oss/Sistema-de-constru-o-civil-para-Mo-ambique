@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   suppliersApi,
   type Supplier,
@@ -8,6 +8,7 @@ import {
 } from "../api/suppliers";
 import { catalogApi, type Material, type LabourCategory, type Equipment, type PriceZone } from "../api/catalog";
 import Modal from "./Modal";
+import PageSearch from "./PageSearch";
 import { IconPlus, IconTrash } from "./icons";
 
 type Tab = "materiais" | "mao-de-obra" | "maquinas";
@@ -33,6 +34,7 @@ export default function SupplierMaterialsModal({ supplier, onClose }: { supplier
   const [equipmentId, setEquipmentId] = useState("");
   const [zoneId, setZoneId] = useState("");
   const [cost, setCost] = useState("");
+  const [query, setQuery] = useState("");
 
   async function reload() {
     const [mats, labs, eqs, zns, matPrices, labPrices, eqPrices] = await Promise.all([
@@ -100,21 +102,24 @@ export default function SupplierMaterialsModal({ supplier, onClose }: { supplier
     (tab === "materiais" && materials.length === 0) ||
     (tab === "mao-de-obra" && labourCategories.length === 0) ||
     (tab === "maquinas" && equipmentList.length === 0);
+  const needle = query.trim().toLocaleLowerCase("pt");
+  const filteredMaterialPrices = useMemo(() => materialPrices.filter((price) => !needle || [price.materialName, price.zoneName].some((value) => String(value ?? "").toLocaleLowerCase("pt").includes(needle))), [materialPrices, needle]);
+  const filteredLabourPrices = useMemo(() => labourPrices.filter((price) => !needle || [price.labourName, price.zoneName].some((value) => String(value ?? "").toLocaleLowerCase("pt").includes(needle))), [labourPrices, needle]);
+  const filteredEquipmentPrices = useMemo(() => equipmentPrices.filter((price) => !needle || [price.equipmentName, price.zoneName].some((value) => String(value ?? "").toLocaleLowerCase("pt").includes(needle))), [equipmentPrices, needle]);
+  const visiblePriceCount = tab === "materiais" ? filteredMaterialPrices.length : tab === "mao-de-obra" ? filteredLabourPrices.length : filteredEquipmentPrices.length;
 
   return (
-    <Modal title={`${supplier.name}`} subtitle="Materiais, mão-de-obra e máquinas ligados ao Catálogo — usados para sugerir preços ao criar ordens de compra." onClose={onClose} maxWidth="max-w-2xl">
+    <Modal title={supplier.name} subtitle="Recursos e cotações deste fornecedor usados nas compras e estimativas da obra." onClose={onClose} maxWidth="max-w-4xl">
       {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
 
-      <div className="flex gap-1 border-b border-gray-200 mb-4">
+      <div className="workspace-tabs mb-5">
         {TABS.map((t) => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
-            className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px ${
-              tab === t.id ? "border-brand-700 text-brand-800" : "border-transparent text-gray-500 hover:text-gray-800"
-            }`}
+            className={`workspace-tab ${tab === t.id ? "workspace-tab-active" : ""}`}
           >
-            {t.label}
+            {t.label} <span className="ml-1 text-[10px] text-slate-400">({t.id === "materiais" ? materialPrices.length : t.id === "mao-de-obra" ? labourPrices.length : equipmentPrices.length})</span>
           </button>
         ))}
       </div>
@@ -122,11 +127,11 @@ export default function SupplierMaterialsModal({ supplier, onClose }: { supplier
       {optionsEmpty ? (
         <p className="text-xs text-gray-400 mb-3">Sem opções no Catálogo ainda para este tipo de recurso.</p>
       ) : (
-        <form onSubmit={handleAdd} className="flex gap-2 items-end flex-wrap mb-4">
-          <div>
+        <form onSubmit={handleAdd} className="mb-5 grid items-end gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_9rem_auto]">
+          <div className="min-w-0">
             <label className="label">{tab === "materiais" ? "Material" : tab === "mao-de-obra" ? "Categoria" : "Equipamento"}</label>
             {tab === "materiais" && (
-              <select value={materialId} onChange={(e) => setMaterialId(e.target.value)} className="input input-sm">
+              <select value={materialId} onChange={(e) => setMaterialId(e.target.value)} className="input">
                 {materials.map((m) => (
                   <option key={m.id} value={m.id}>
                     {m.name} ({m.unit})
@@ -135,7 +140,7 @@ export default function SupplierMaterialsModal({ supplier, onClose }: { supplier
               </select>
             )}
             {tab === "mao-de-obra" && (
-              <select value={labourCategoryId} onChange={(e) => setLabourCategoryId(e.target.value)} className="input input-sm">
+              <select value={labourCategoryId} onChange={(e) => setLabourCategoryId(e.target.value)} className="input">
                 {labourCategories.map((l) => (
                   <option key={l.id} value={l.id}>
                     {l.name}
@@ -144,7 +149,7 @@ export default function SupplierMaterialsModal({ supplier, onClose }: { supplier
               </select>
             )}
             {tab === "maquinas" && (
-              <select value={equipmentId} onChange={(e) => setEquipmentId(e.target.value)} className="input input-sm">
+              <select value={equipmentId} onChange={(e) => setEquipmentId(e.target.value)} className="input">
                 {equipmentList.map((eq) => (
                   <option key={eq.id} value={eq.id}>
                     {eq.name}
@@ -153,9 +158,9 @@ export default function SupplierMaterialsModal({ supplier, onClose }: { supplier
               </select>
             )}
           </div>
-          <div>
+          <div className="min-w-0">
             <label className="label">Zona (opcional)</label>
-            <select value={zoneId} onChange={(e) => setZoneId(e.target.value)} className="input input-sm">
+            <select value={zoneId} onChange={(e) => setZoneId(e.target.value)} className="input">
               <option value="">Preço geral (todas as zonas)</option>
               {zones.map((z) => (
                 <option key={z.id} value={z.id}>
@@ -166,17 +171,21 @@ export default function SupplierMaterialsModal({ supplier, onClose }: { supplier
           </div>
           <div>
             <label className="label">{tab === "materiais" ? "Preço" : "Preço/hora"}</label>
-            <input type="number" step="0.01" min="0" value={cost} onChange={(e) => setCost(e.target.value)} className="input input-sm w-28" />
+            <input type="number" step="0.01" min="0" value={cost} onChange={(e) => setCost(e.target.value)} className="input" />
           </div>
-          <button type="submit" className="btn btn-primary btn-sm">
+          <button type="submit" className="btn btn-primary w-full lg:w-auto">
             <IconPlus className="w-3.5 h-3.5" />
             Guardar
           </button>
         </form>
       )}
 
-      <div className="rounded-lg border border-gray-200 overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="mb-3">
+        <PageSearch value={query} onChange={setQuery} placeholder="Pesquisar recurso ou zona…" resultLabel={`${visiblePriceCount} preço(s)`} />
+      </div>
+
+      <div className="overflow-x-auto rounded-lg border border-gray-200">
+        <table className="w-full min-w-[600px] text-sm">
           <thead>
             <tr className="table-head-row">
               <th className="text-left py-2 px-3 font-medium">{tab === "materiais" ? "Material" : tab === "mao-de-obra" ? "Categoria" : "Equipamento"}</th>
@@ -187,7 +196,7 @@ export default function SupplierMaterialsModal({ supplier, onClose }: { supplier
           </thead>
           <tbody>
             {tab === "materiais" &&
-              materialPrices.map((p) => (
+              filteredMaterialPrices.map((p) => (
                 <tr key={p.id} className="table-row">
                   <td className="py-1.5 px-3">{p.materialName}</td>
                   <td className="text-gray-500">{p.zoneName ?? "Geral"}</td>
@@ -202,7 +211,7 @@ export default function SupplierMaterialsModal({ supplier, onClose }: { supplier
                 </tr>
               ))}
             {tab === "mao-de-obra" &&
-              labourPrices.map((p) => (
+              filteredLabourPrices.map((p) => (
                 <tr key={p.id} className="table-row">
                   <td className="py-1.5 px-3">{p.labourName}</td>
                   <td className="text-gray-500">{p.zoneName ?? "Geral"}</td>
@@ -217,7 +226,7 @@ export default function SupplierMaterialsModal({ supplier, onClose }: { supplier
                 </tr>
               ))}
             {tab === "maquinas" &&
-              equipmentPrices.map((p) => (
+              filteredEquipmentPrices.map((p) => (
                 <tr key={p.id} className="table-row">
                   <td className="py-1.5 px-3">{p.equipmentName}</td>
                   <td className="text-gray-500">{p.zoneName ?? "Geral"}</td>
@@ -231,12 +240,10 @@ export default function SupplierMaterialsModal({ supplier, onClose }: { supplier
                   </td>
                 </tr>
               ))}
-            {((tab === "materiais" && materialPrices.length === 0) ||
-              (tab === "mao-de-obra" && labourPrices.length === 0) ||
-              (tab === "maquinas" && equipmentPrices.length === 0)) && (
+            {visiblePriceCount === 0 && (
               <tr>
                 <td colSpan={4} className="py-3 text-center text-gray-400">
-                  Sem preços cadastrados ainda.
+                  {query ? "Nenhum preço corresponde à pesquisa." : "Sem preços cadastrados ainda."}
                 </td>
               </tr>
             )}

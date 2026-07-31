@@ -37,6 +37,8 @@ const EXTRA_MATERIALS: Array<{
   unit: "m" | "m2" | "m3" | "ml" | "kg" | "un" | "vg" | "h";
   baseUnitCost: number;
   importFactor?: number;
+  category?: string;
+  specification?: string;
   // Unidade de compra de mercado, quando difere da unidade de medida (ver nota em seedCatalog.ts).
   purchasePackage?: { label: string; qty: number };
 }> = [
@@ -45,8 +47,20 @@ const EXTRA_MATERIALS: Array<{
   { name: "Prego", unit: "kg", baseUnitCost: 115 },
   { name: "Arame de amarração", unit: "kg", baseUnitCost: 120 },
   { name: "Terras de empréstimo (posto em obra)", unit: "m3", baseUnitCost: 880, purchasePackage: { label: "Camião 10m³", qty: 10 } },
-  { name: "Tinta acrílica exterior", unit: "un", baseUnitCost: 4500 },
-  { name: "Tinta esmalte aquoso interior", unit: "un", baseUnitCost: 3800 },
+  {
+    name: "Tinta acrílica exterior",
+    unit: "un",
+    baseUnitCost: 4500,
+    category: "Tintas e revestimentos",
+    specification: "Tinta aquosa 100% acrílica para exterior, resistente a intempéries e radiação UV, acabamento e cor conforme projecto, em embalagem original. Aplicar primário compatível e mínimo de duas demãos segundo a ficha do fabricante; marca indicada apenas como referência, admitindo equivalente aprovado.",
+  },
+  {
+    name: "Tinta esmalte aquoso interior",
+    unit: "un",
+    baseUnitCost: 3800,
+    category: "Tintas e revestimentos",
+    specification: "Tinta aquosa estireno-acrílica lavável para interior, resistência à esfrega tipo II ou superior, acabamento mate e cor conforme projecto, em embalagem original. Aplicar primário compatível e mínimo de duas demãos segundo a ficha do fabricante; ou equivalente aprovado.",
+  },
   { name: "Verniz para madeira", unit: "un", baseUnitCost: 3200 },
   { name: "Mosaico cerâmico", unit: "m2", baseUnitCost: 800, purchasePackage: { label: "Caixa 2m²", qty: 2 } },
   { name: "Cimento cola", unit: "kg", baseUnitCost: 60, purchasePackage: { label: "Saco 20kg", qty: 20 } },
@@ -82,11 +96,41 @@ const EXTRA_MATERIALS: Array<{
   { name: "Luminária LED", unit: "un", baseUnitCost: 950 },
   { name: "Quadro eléctrico parcial", unit: "un", baseUnitCost: 3500 },
   { name: "Disjuntores e acessórios eléctricos", unit: "vg", baseUnitCost: 600 },
-  { name: "Sanita completa com autoclismo (kit)", unit: "un", baseUnitCost: 4500 },
-  { name: "Lavatório com torneira (kit)", unit: "un", baseUnitCost: 2800 },
-  { name: "Chuveiro com misturadora (kit)", unit: "un", baseUnitCost: 2200 },
-  { name: "Pia de cozinha inox com torneira (kit)", unit: "un", baseUnitCost: 3200 },
-  { name: "Tanque de lavandaria com torneira (kit)", unit: "un", baseUnitCost: 1800 },
+  {
+    name: "Sanita completa com autoclismo (kit)",
+    unit: "un",
+    baseUnitCost: 4500,
+    category: "Aparelhos sanitários",
+    specification: "Sanita de louça vitrificada branca, autoclismo de dupla descarga 3/6 L, assento, mecanismo, válvula, flexível, fixações e vedantes. Saída horizontal ou vertical conforme a rede do projecto; conjunto completo instalado, ensaiado e estanque; ou equivalente aprovado.",
+  },
+  {
+    name: "Lavatório com torneira (kit)",
+    unit: "un",
+    baseUnitCost: 2800,
+    category: "Aparelhos sanitários",
+    specification: "Lavatório de louça vitrificada branca com 50–60 cm, pedestal ou suportes conforme projecto, torneira monocomando cromada, válvula, sifão, flexíveis e fixações; conjunto completo instalado e ensaiado; ou equivalente aprovado.",
+  },
+  {
+    name: "Chuveiro com misturadora (kit)",
+    unit: "un",
+    baseUnitCost: 2200,
+    category: "Aparelhos sanitários",
+    specification: "Misturadora de duche cromada para água quente e fria, ligações 1/2 polegada, chuveiro, flexível, suportes, excêntricos e vedantes; pressão de serviço compatível com a rede, instalação e ensaio incluídos; ou equivalente aprovado.",
+  },
+  {
+    name: "Pia de cozinha inox com torneira (kit)",
+    unit: "un",
+    baseUnitCost: 3200,
+    category: "Aparelhos sanitários",
+    specification: "Lava-louça em aço inoxidável AISI 304, uma cuba, espessura mínima 0,8 mm, válvula e sifão, torneira monocomando cromada, flexíveis, fixações e vedação; dimensões conforme bancada do projecto; ou equivalente aprovado.",
+  },
+  {
+    name: "Tanque de lavandaria com torneira (kit)",
+    unit: "un",
+    baseUnitCost: 1800,
+    category: "Aparelhos sanitários",
+    specification: "Tanque de lavandaria resistente, capacidade e dimensões conforme projecto, torneira de serviço cromada, válvula, sifão, ligações, suportes e vedação; conjunto instalado e ensaiado; ou equivalente aprovado.",
+  },
   { name: "Reservatório de água 500L com suportes (kit)", unit: "un", baseUnitCost: 18000 },
 ];
 
@@ -202,10 +246,26 @@ async function ensureExtraMaterials() {
       .from(materials)
       .where(and(eq(materials.name, m.name), isNull(materials.companyId)))
       .limit(1);
-    if (existing) continue;
+    if (existing) {
+      if (
+        (m.category && existing.category !== m.category) ||
+        (m.specification && existing.specification !== m.specification)
+      ) {
+        await db
+          .update(materials)
+          .set({
+            category: m.category ?? existing.category,
+            specification: m.specification ?? existing.specification,
+          })
+          .where(eq(materials.id, existing.id));
+      }
+      continue;
+    }
     await db.insert(materials).values({
       companyId: null,
       name: m.name,
+      category: m.category ?? "Outros",
+      specification: m.specification ?? null,
       unit: m.unit,
       baseUnitCost: m.baseUnitCost.toString(),
       importFactor: (m.importFactor ?? 1).toString(),

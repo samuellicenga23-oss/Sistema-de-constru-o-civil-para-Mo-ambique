@@ -186,7 +186,7 @@ export default function PlantReviewPage() {
         </div>
       }
     >
-      <div className="space-y-5 max-w-4xl">
+      <div className="mx-auto w-full max-w-4xl space-y-5">
         {error && <p className="text-sm text-red-600">{error}</p>}
 
         <section className="card overflow-hidden border-t-4 border-t-brand-600">

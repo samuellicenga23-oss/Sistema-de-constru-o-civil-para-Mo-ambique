@@ -110,20 +110,53 @@ function LineEditor({
   }
 
   return (
-    <section className="card card-pad">
-      <div className="flex items-center justify-between mb-3">
+    <section className="card overflow-hidden">
+      <div className="flex items-center justify-between gap-4 border-b border-slate-200 px-5 py-4">
         <h2 className="section-title">{title}</h2>
-        <span className="text-sm font-semibold text-brand-800 tabular-nums">{money(subtotal)} MZN</span>
+        <span className="shrink-0 text-sm font-semibold tabular-nums text-brand-800">{money(subtotal)} MZN</span>
       </div>
-      <table className="w-full text-sm">
+      <div className="divide-y divide-slate-100 md:hidden">
+        {lines.map((line) => {
+          const cost = resolveCost(line.refId);
+          const effectiveQty = line.qtyPerUnit * (1 + Number(line.wastePct ?? 0) / 100);
+          return (
+            <div key={`mobile-${line.refId}`} className="p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <strong className="block text-sm text-slate-900">{resolveName(line.refId)}</strong>
+                  {hint?.(line.refId) && <p className="mt-1 text-[11px] leading-4 text-slate-500">{hint(line.refId)}</p>}
+                </div>
+                <button onClick={() => removeLine(line.refId)} className="icon-btn-danger shrink-0" title="Remover recurso">
+                  <IconTrash className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              <div className={`mt-3 grid gap-2 ${supportsWaste ? "grid-cols-2" : "grid-cols-1"}`}>
+                <label className="text-xs text-slate-500">{unitLabel}
+                  <input type="number" step="any" value={line.qtyPerUnit} onChange={(event) => updateQty(line.refId, Number(event.target.value))} className="input input-sm mt-1 w-full" />
+                </label>
+                {supportsWaste && <label className="text-xs text-slate-500">Perda (%)
+                  <input type="number" min="0" max="100" step="any" value={line.wastePct ?? 0} onChange={(event) => updateWaste(line.refId, Number(event.target.value))} className="input input-sm mt-1 w-full" />
+                </label>}
+              </div>
+              <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3 text-xs">
+                <span className="text-slate-500">{money(cost)} por unidade</span>
+                <strong className="tabular-nums text-slate-900">{money(effectiveQty * cost)} MZN</strong>
+              </div>
+            </div>
+          );
+        })}
+        {lines.length === 0 && <p className="px-4 py-6 text-center text-xs text-slate-400">Sem recursos nesta secção.</p>}
+      </div>
+      <div className="hidden overflow-x-auto px-4 py-3 md:block">
+      <table className="w-full min-w-[720px] border-separate border-spacing-0 overflow-hidden rounded-lg border border-slate-200 text-sm">
         <thead>
           <tr className="table-head-row">
-            <th className="py-1.5 font-medium">Recurso</th>
-            <th className="w-32 font-medium">{unitLabel}</th>
-            {supportsWaste && <th className="w-24 font-medium">Perda</th>}
-            <th className="w-28 text-right font-medium">Custo unitário</th>
-            <th className="w-28 text-right font-medium">Subtotal</th>
-            <th className="w-8"></th>
+            <th className="px-3 py-2.5 font-medium">Recurso</th>
+            <th className="w-32 px-3 py-2.5 font-medium">{unitLabel}</th>
+            {supportsWaste && <th className="w-28 px-3 py-2.5 font-medium">Perda</th>}
+            <th className="w-32 px-3 py-2.5 text-right font-medium">Custo unitário</th>
+            <th className="w-32 px-3 py-2.5 text-right font-medium">Subtotal</th>
+            <th className="w-12 px-2 py-2.5"></th>
           </tr>
         </thead>
         <tbody>
@@ -132,11 +165,11 @@ function LineEditor({
             const effectiveQty = l.qtyPerUnit * (1 + Number(l.wastePct ?? 0) / 100);
             return (
               <tr key={l.refId} className="table-row">
-                <td className="py-1.5">
+                <td className="px-3 py-2.5">
                   {resolveName(l.refId)}
                   {hint?.(l.refId) && <p className="text-[11px] text-gray-400">{hint(l.refId)}</p>}
                 </td>
-                <td>
+                <td className="px-3 py-2">
                   <input
                     type="number"
                     step="any"
@@ -145,10 +178,10 @@ function LineEditor({
                     className="input input-sm w-24"
                   />
                 </td>
-                {supportsWaste && <td><div className="flex items-center gap-1"><input type="number" min="0" max="100" step="any" value={l.wastePct ?? 0} onChange={(e) => updateWaste(l.refId, Number(e.target.value))} className="input input-sm w-16" /><span className="text-xs text-slate-400">%</span></div></td>}
-                <td className="text-right tabular-nums text-gray-600">{money(cost)}</td>
-                <td className="text-right tabular-nums font-medium">{money(effectiveQty * cost)}</td>
-                <td className="text-right">
+                {supportsWaste && <td className="px-3 py-2"><div className="flex items-center gap-1"><input type="number" min="0" max="100" step="any" value={l.wastePct ?? 0} onChange={(e) => updateWaste(l.refId, Number(e.target.value))} className="input input-sm w-16" /><span className="text-xs text-slate-400">%</span></div></td>}
+                <td className="px-3 py-2.5 text-right tabular-nums text-gray-600">{money(cost)}</td>
+                <td className="px-3 py-2.5 text-right tabular-nums font-medium">{money(effectiveQty * cost)}</td>
+                <td className="px-2 py-2 text-right">
                   <button onClick={() => removeLine(l.refId)} className="icon-btn-danger">
                     <IconTrash className="w-3.5 h-3.5" />
                   </button>
@@ -165,9 +198,10 @@ function LineEditor({
           )}
         </tbody>
       </table>
+      </div>
 
       {available.length > 0 && (
-        <div className="flex gap-1.5 items-end mt-3">
+        <div className="grid gap-3 border-t border-slate-200 bg-slate-50/70 p-4 sm:grid-cols-[minmax(0,1fr)_9rem_auto] sm:items-end">
           <select value={newRefId} onChange={(e) => setNewRefId(e.target.value)} className="input input-sm flex-1">
             <option value="">— escolher recurso —</option>
             {available.map((o) => (
@@ -176,8 +210,8 @@ function LineEditor({
               </option>
             ))}
           </select>
-          <input type="number" step="any" placeholder={unitLabel} value={newQty} onChange={(e) => setNewQty(e.target.value)} className="input input-sm w-28" />
-          <button onClick={addLine} type="button" className="btn btn-secondary btn-sm">
+          <input type="number" step="any" placeholder={unitLabel} value={newQty} onChange={(e) => setNewQty(e.target.value)} className="input input-sm w-full" />
+          <button onClick={addLine} type="button" className="btn btn-secondary btn-sm w-full sm:w-auto">
             <IconPlus className="w-3.5 h-3.5" />
             Adicionar
           </button>
@@ -200,9 +234,6 @@ export default function CompositionDetailPage() {
   const [description, setDescription] = useState("");
   const [measurementCriteria, setMeasurementCriteria] = useState("");
   const [executionNotes, setExecutionNotes] = useState("");
-  const [auxiliaryCostPct, setAuxiliaryCostPct] = useState("0");
-  const [indirectCostPct, setIndirectCostPct] = useState("0");
-  const [profitMarginPct, setProfitMarginPct] = useState("0");
   const [sourceName, setSourceName] = useState("");
   const [sourceReference, setSourceReference] = useState("");
   const [isActive, setIsActive] = useState(true);
@@ -233,9 +264,6 @@ export default function CompositionDetailPage() {
     setDescription(d.description ?? "");
     setMeasurementCriteria(d.measurementCriteria ?? "");
     setExecutionNotes(d.executionNotes ?? "");
-    setAuxiliaryCostPct(d.auxiliaryCostPct);
-    setIndirectCostPct(d.indirectCostPct);
-    setProfitMarginPct(d.profitMarginPct);
     setSourceName(d.sourceName ?? "");
     setSourceReference(d.sourceReference ?? "");
     setIsActive(d.isActive);
@@ -288,9 +316,6 @@ export default function CompositionDetailPage() {
         executionNotes: executionNotes.trim() || null,
         outputUnit: detail.outputUnit,
         currency: detail.currency,
-        auxiliaryCostPct: Number(auxiliaryCostPct),
-        indirectCostPct: Number(indirectCostPct),
-        profitMarginPct: Number(profitMarginPct),
         sourceName: sourceName.trim() || null,
         sourceReference: sourceReference.trim() || null,
         isActive,
@@ -338,53 +363,25 @@ export default function CompositionDetailPage() {
     0
   );
   const directCost = labourCost + materialCost + equipmentCost;
-  const auxiliaryCost = directCost * Number(auxiliaryCostPct || 0) / 100;
-  const indirectCost = (directCost + auxiliaryCost) * Number(indirectCostPct || 0) / 100;
-  const profit = (directCost + auxiliaryCost + indirectCost) * Number(profitMarginPct || 0) / 100;
-  const unitCost = directCost + auxiliaryCost + indirectCost + profit;
+  const unitCost = directCost;
 
   return (
     <Layout
       title={detail.name}
       subtitle={`Composição de custo · ${detail.category} · por ${detail.outputUnit}`}
       actions={
-        <Link to="/catalogo" className="btn btn-ghost btn-sm">
-          <IconBack className="w-3.5 h-3.5" />
-          Catálogo
-        </Link>
+        <>
+          <span className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold tabular-nums text-slate-900">{money(unitCost)} MZN/{detail.outputUnit}</span>
+          <label className="flex min-h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600"><input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} /> Disponível</label>
+          <button onClick={handleSave} disabled={saving} className="btn btn-primary btn-sm">{saving ? "A gravar..." : "Gravar"}</button>
+          <Link to="/catalogo" className="btn btn-ghost btn-sm"><IconBack className="w-3.5 h-3.5" /> Catálogo</Link>
+        </>
       }
     >
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_18rem] max-w-5xl">
+      <div className="mx-auto w-full max-w-6xl space-y-5">
         <div className="space-y-5 min-w-0">
           {error && <p className="text-sm text-red-600">{error}</p>}
           {message && <p className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">{message}</p>}
-
-          <section className="card card-pad">
-            <div className="flex items-start justify-between gap-4 mb-4"><div><p className="text-[11px] font-semibold uppercase tracking-wide text-brand-700">Ficha técnica · revisão {detail.version}</p><h2 className="text-lg font-bold text-slate-900">Identificação e critérios</h2></div><label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} /> Disponível</label></div>
-            <div className="grid sm:grid-cols-[10rem_1fr_1fr] gap-3">
-              <div><label className="label">Código</label><input value={code} onChange={(e) => setCode(e.target.value)} className="input" placeholder="COMP-BET-001" /></div>
-              <div>
-                <label className="label">Nome da composição</label>
-                <input value={name} onChange={(e) => setName(e.target.value)} className="input" />
-              </div>
-              <div>
-                <label className="label">Categoria</label>
-                <input value={category} onChange={(e) => setCategory(e.target.value)} className="input" placeholder="ex: Betões, Aços e Cofragens" />
-              </div>
-            </div>
-            <div className="grid sm:grid-cols-2 gap-3 mt-3"><div><label className="label">Descrição / âmbito</label><textarea value={description} onChange={(e) => setDescription(e.target.value)} className="input min-h-20" placeholder="O que está incluído e excluído neste serviço" /></div><div><label className="label">Critério de medição e pagamento</label><textarea value={measurementCriteria} onChange={(e) => setMeasurementCriteria(e.target.value)} className="input min-h-20" placeholder={`Como é medida e aceite cada ${detail.outputUnit}`} /></div></div>
-            <div className="grid sm:grid-cols-2 gap-3 mt-3"><div><label className="label">Condições de execução</label><textarea value={executionNotes} onChange={(e) => setExecutionNotes(e.target.value)} className="input min-h-16" placeholder="Método, equipa, equipamento, acessos e premissas" /></div><div><label className="label">Fonte técnica</label><input value={sourceName} onChange={(e) => setSourceName(e.target.value)} className="input" placeholder="Caderno de encargos / SINAPI / composição própria" /><input value={sourceReference} onChange={(e) => setSourceReference(e.target.value)} className="input mt-2" placeholder="Referência, norma, URL ou observação" /></div></div>
-            <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4"><p className="text-xs font-semibold text-slate-700 mb-3">Formação do preço</p><div className="grid grid-cols-3 gap-3"><div><label className="label">Auxiliares (%)</label><input min="0" max="100" type="number" step="any" value={auxiliaryCostPct} onChange={(e) => setAuxiliaryCostPct(e.target.value)} className="input" /></div><div><label className="label">Indirectos (%)</label><input min="0" max="100" type="number" step="any" value={indirectCostPct} onChange={(e) => setIndirectCostPct(e.target.value)} className="input" /></div><div><label className="label">Margem (%)</label><input min="0" max="100" type="number" step="any" value={profitMarginPct} onChange={(e) => setProfitMarginPct(e.target.value)} className="input" /></div></div><p className="mt-2 text-[11px] text-slate-500">O custo directo permanece separado. Auxiliares, indirectos e margem são aplicados em sequência e ficam visíveis no orçamento.</p></div>
-            <div className="flex justify-between items-center mt-4">
-              <button onClick={handleDelete} className="btn btn-ghost btn-sm text-red-600 hover:bg-red-50">
-                <IconTrash className="w-3.5 h-3.5" />
-                Eliminar composição
-              </button>
-              <button onClick={handleSave} disabled={saving} className="btn btn-primary">
-                {saving ? "A gravar..." : "Gravar composição"}
-              </button>
-            </div>
-          </section>
 
           <LineEditor
             title="Mão-de-obra"
@@ -421,46 +418,14 @@ export default function CompositionDetailPage() {
             fallback={equipmentFallback}
             hint={(refId) => formatSupplierHint(supplierSummaryByEquipment, refId)}
           />
-        </div>
-
-        <div className="space-y-5">
-          <section className="card overflow-hidden xl:sticky xl:top-24">
-            <div className="bg-gradient-to-br from-brand-800 to-brand-950 text-white p-5">
-              <h2 className="text-sm uppercase tracking-wider text-brand-200 font-semibold mb-3">Preço unitário</h2>
-              <dl className="space-y-1.5 text-sm">
-                <div className="flex justify-between text-brand-200">
-                  <dt>Mão-de-obra</dt>
-                  <dd className="tabular-nums">{money(labourCost)}</dd>
-                </div>
-                <div className="flex justify-between text-brand-200">
-                  <dt>Materiais</dt>
-                  <dd className="tabular-nums">{money(materialCost)}</dd>
-                </div>
-                <div className="flex justify-between text-brand-200">
-                  <dt>Máquinas</dt>
-                  <dd className="tabular-nums">{money(equipmentCost)}</dd>
-                </div>
-                <div className="flex justify-between border-t border-white/15 pt-2 mt-2 text-white"><dt>Custo directo</dt><dd className="tabular-nums font-semibold">{money(directCost)}</dd></div>
-                <div className="flex justify-between text-brand-200"><dt>Auxiliares ({money(auxiliaryCostPct)}%)</dt><dd className="tabular-nums">{money(auxiliaryCost)}</dd></div>
-                <div className="flex justify-between text-brand-200"><dt>Indirectos ({money(indirectCostPct)}%)</dt><dd className="tabular-nums">{money(indirectCost)}</dd></div>
-                <div className="flex justify-between text-brand-200"><dt>Margem ({money(profitMarginPct)}%)</dt><dd className="tabular-nums">{money(profit)}</dd></div>
-              </dl>
-              <div className="flex justify-between items-baseline border-t border-white/20 pt-3 mt-3">
-                <span className="text-sm font-medium">por {detail.outputUnit}</span>
-                <span className="text-xl font-bold tabular-nums">{money(unitCost)} MZN</span>
-              </div>
-            </div>
-          </section>
-          <section className="card card-pad">
-            <div className="flex items-center justify-between"><p className="text-sm font-semibold text-slate-800">Qualidade da composição</p><span className={`badge ${detail.isReady ? "badge-green" : "badge-yellow"}`}>{detail.qualityScore}%</span></div>
-            {detail.qualityWarnings.length ? <ul className="mt-3 space-y-2">{detail.qualityWarnings.map((warning) => <li key={warning} className="flex gap-2 text-xs leading-5 text-amber-800"><span>•</span><span>{warning}</span></li>)}</ul> : <p className="mt-2 text-xs text-emerald-700">A composição tem os dados essenciais para uso.</p>}
-            <p className="mt-3 border-t border-slate-100 pt-3 text-[11px] leading-4 text-slate-500">A validação é recalculada depois de gravar. Itens já emitidos mantêm o preço original; novos itens usam esta revisão.</p>
-          </section>
-          <div className="card card-pad text-xs text-gray-500 leading-relaxed">
-            <p className="font-medium text-gray-700 mb-1">Como funciona</p>
-            <p>Ajuste qualquer rendimento ou adicione/remova recursos livremente. Ao gravar, a sua empresa fica sempre com a sua própria versão — o catálogo base partilhado nunca é alterado.</p>
+          <div className="flex justify-end">
+            <button onClick={handleDelete} className="btn btn-ghost btn-sm text-red-600 hover:bg-red-50"><IconTrash className="h-3.5 w-3.5" /> Eliminar composição</button>
           </div>
         </div>
+
+        <section className="card grid overflow-hidden sm:grid-cols-4">
+          {[["Mão-de-obra", labourCost], ["Materiais", materialCost], ["Máquinas", equipmentCost], ["Custo directo", directCost]].map(([label, value], index) => <div key={String(label)} className={`p-4 ${index ? "border-t sm:border-l sm:border-t-0" : ""} border-slate-200`}><span className="text-xs text-slate-500">{label}</span><strong className="mt-1 block text-lg tabular-nums text-slate-950">{money(Number(value))} MZN</strong></div>)}
+        </section>
       </div>
     </Layout>
   );

@@ -6,6 +6,7 @@ import UserMenu from "./UserMenu";
 import InstallAppButton from "./InstallAppButton";
 import OfflineBanner from "./OfflineBanner";
 import { IconHome, IconFolder, IconTag, IconBuilding, IconLogout, IconSettings, IconRuler, IconUsers, IconMenu, IconClose } from "./icons";
+import { LogoIcon } from "./Logo";
 
 const ROLE_LABELS: Record<string, string> = {
   super_admin: "Super Admin",
@@ -64,7 +65,8 @@ export default function Layout({
       ? [{ to: "/admin", label: "Painel da Plataforma", icon: IconSettings }]
       : [
           { to: "/painel", label: "Painel", icon: IconHome, exact: true },
-          { to: "/projectos", label: "Projectos e Orçamentos", icon: IconFolder },
+          { to: "/medicoes", label: "Medições", icon: IconRuler },
+          { to: "/orcamentos", label: "Orçamentos", icon: IconFolder },
           { to: "/catalogo", label: "Catálogo de Preços", icon: IconTag },
           { to: "/fornecedores", label: "Fornecedores", icon: IconUsers },
           { to: "/calculos-rapidos", label: "Cálculos Rápidos", icon: IconRuler },
@@ -95,7 +97,7 @@ export default function Layout({
             </div>
           ) : (
             <div className="flex items-center gap-3">
-              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[#e86f25] text-white font-black">S</span>
+              <LogoIcon className="h-9 w-9" />
               {!sidebarCollapsed && <div><p className="text-base font-black tracking-[0.14em] text-slate-900">SIGO</p><p className="max-w-[150px] text-[8px] uppercase leading-3 tracking-[0.11em] text-slate-400">Sistema Integrado de Gestão de Obras</p></div>}
             </div>
           )}
@@ -223,23 +225,27 @@ export default function Layout({
           </div>
         )}
 
-        <header className="sticky top-0 z-10 flex flex-col gap-3 border-b border-slate-200 bg-white px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between md:px-8 md:py-4">
-          <div className="min-w-0 max-w-full">
-            <h1 className="break-words text-lg font-black tracking-tight text-slate-900 md:text-xl">{title}</h1>
-            {subtitle && <p className="mt-1 max-w-3xl break-words text-xs leading-4 text-slate-500">{subtitle}</p>}
-          </div>
-          <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2 sm:justify-end">
-            <InstallAppButton />
-            {actions && <div className="flex max-w-full flex-wrap items-center gap-2 sm:justify-end">{actions}</div>}
-            <div className="hidden md:block">
-              <UserMenu />
+        <header className="sticky top-0 z-10 border-b border-slate-200 bg-white">
+          <div className="mx-auto flex w-full max-w-[1500px] flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between md:px-8 md:py-4 xl:px-10">
+            <div className="min-w-0 max-w-full">
+              <h1 className="break-words text-lg font-black tracking-tight text-slate-900 md:text-xl">{title}</h1>
+              {subtitle && <p className="mt-1 max-w-3xl break-words text-xs leading-4 text-slate-500">{subtitle}</p>}
+            </div>
+            <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2 sm:justify-end">
+              <InstallAppButton />
+              {actions && <div className="flex max-w-full flex-wrap items-center gap-2 sm:justify-end">{actions}</div>}
+              <div className="hidden md:block">
+                <UserMenu />
+              </div>
             </div>
           </div>
         </header>
 
         <OfflineBanner />
 
-        <main className="min-w-0 flex-1 overflow-x-hidden p-3 pb-20 sm:p-5 md:p-8 md:pb-8 xl:p-10">{children}</main>
+        <main className="min-w-0 flex-1 overflow-x-hidden p-3 pb-20 sm:p-5 md:p-8 md:pb-8 xl:p-10">
+          <div className="mx-auto w-full max-w-[1500px]">{children}</div>
+        </main>
 
         {/* Barra inferior móvel — só os módulos principais, ícone + rótulo curto, tocável. */}
         <nav className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-white border-t border-gray-200 flex items-stretch">

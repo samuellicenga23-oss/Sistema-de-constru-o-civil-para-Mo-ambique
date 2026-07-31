@@ -12,20 +12,17 @@ describe("motor de custos do catálogo", () => {
     expect(rate).toBe(100);
   });
 
-  it("separa custo directo, auxiliares, indirectos e margem", () => {
+  it("mantém a composição no custo técnico directo", () => {
     const result = calculateCompositionTotals({
       labourCost: 100,
       materialCost: 300,
       equipmentCost: 100,
-      auxiliaryCostPct: 5,
-      indirectCostPct: 10,
-      profitMarginPct: 20,
     });
 
     expect(result.directCost).toBe(500);
-    expect(result.auxiliaryCost).toBe(25);
-    expect(result.indirectCost).toBe(52.5);
-    expect(result.profit).toBe(115.5);
-    expect(result.unitCost).toBe(693);
+    expect(result.auxiliaryCost).toBe(0);
+    expect(result.indirectCost).toBe(0);
+    expect(result.profit).toBe(0);
+    expect(result.unitCost).toBe(500);
   });
 });

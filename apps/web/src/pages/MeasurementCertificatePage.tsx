@@ -62,20 +62,34 @@ export default function MeasurementCertificatePage() {
   const contractValue = lines.reduce((sum, line) => sum + (line.budgetedQty ?? 0) * line.unitPrice, 0);
   const periodValue = lines.reduce((sum, line) => sum + line.periodValue, 0);
   const cumulativeValue = lines.reduce((sum, line) => sum + line.cumulativeValue, 0);
+  const siteCostsRate = data.financialParameters.siteCostsRate;
+  const indirectCostsRate = data.financialParameters.indirectCostsRate;
   const contingenciesRate = data.financialParameters.contingenciasRate;
+  const profitMarginRate = data.financialParameters.profitMarginRate;
   const ivaRate = data.financialParameters.ivaRate;
-  const periodContingencies = periodValue * contingenciesRate;
-  const periodTaxable = periodValue + periodContingencies;
+  const totalWithRates = (base: number) => {
+    const withCharges = base + base * siteCostsRate + base * indirectCostsRate;
+    const withMargin = withCharges + withCharges * profitMarginRate;
+    const withContingencies = withMargin + withMargin * contingenciesRate;
+    return withContingencies + withContingencies * ivaRate;
+  };
+  const periodSiteCosts = periodValue * siteCostsRate;
+  const periodIndirectCosts = periodValue * indirectCostsRate;
+  const periodProfitBase = periodValue + periodSiteCosts + periodIndirectCosts;
+  const periodProfit = periodProfitBase * profitMarginRate;
+  const periodSellingSubtotal = periodProfitBase + periodProfit;
+  const periodContingencies = periodSellingSubtotal * contingenciesRate;
+  const periodTaxable = periodSellingSubtotal + periodContingencies;
   const periodIva = periodTaxable * ivaRate;
   const periodTotal = periodTaxable + periodIva;
-  const cumulativeTotal = cumulativeValue * (1 + contingenciesRate) * (1 + ivaRate);
-  const contractTotal = contractValue * (1 + contingenciesRate) * (1 + ivaRate);
+  const cumulativeTotal = totalWithRates(cumulativeValue);
+  const contractTotal = totalWithRates(contractValue);
   const progress = contractValue > 0 ? cumulativeValue / contractValue * 100 : 0;
   const measuredItems = lines.filter((line) => line.periodQty > 0).length;
   const overruns = lines.filter((line) => line.hasOverrun).length;
 
   return <Layout title={`Auto de Medição n.º ${certificate.number}`} subtitle={`${certificate.periodStartDate ? `${certificate.periodStartDate} — ` : "Até "}${certificate.periodDate} · ${STATUS_LABEL[certificate.status]}`} actions={<><button type="button" onClick={() => setShowLabour(true)} className="btn btn-secondary btn-sm"><IconClipboard className="h-4 w-4" /> Mão de obra por fase</button><Link to={`/projectos/${certificate.projectId}`} className="btn btn-ghost btn-sm"><IconBack className="h-4 w-4" /> Projecto</Link></>}>
-    <div className="max-w-[1500px] space-y-5">
+    <div className="mx-auto w-full max-w-[1500px] space-y-5">
       {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
 
       <section className="card card-pad">

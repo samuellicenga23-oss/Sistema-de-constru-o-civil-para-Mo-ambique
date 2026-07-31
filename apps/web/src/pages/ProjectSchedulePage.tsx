@@ -6,6 +6,7 @@ import Layout from "../components/Layout";
 import { MetricCard } from "../components/WorkspaceUI";
 import ProjectWorkspaceNav from "../components/ProjectWorkspaceNav";
 import Modal from "../components/Modal";
+import PageSearch from "../components/PageSearch";
 import { IconBack, IconChart, IconDownload, IconPlus, IconRefresh, IconTrash } from "../components/icons";
 
 const DAY_MS = 86_400_000;
@@ -40,12 +41,17 @@ export default function ProjectSchedulePage() {
   const [setupOpen, setSetupOpen] = useState(false);
   const [documentId, setDocumentId] = useState("");
   const [startDate, setStartDate] = useState(today());
-  const [duration, setDuration] = useState("180");
+  // Vazio = duração calculada automaticamente a partir do trabalho real das composições (horas
+  // de mão-de-obra ÷ equipa estimada) — nunca obrigamos o utilizador a adivinhar quantos dias a
+  // obra vai demorar. Só preenche isto quem quiser substituir o cálculo por um prazo próprio.
+  const [duration, setDuration] = useState("");
+  const [manualDuration, setManualDuration] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [printPaper, setPrintPaper] = useState<SchedulePaper>("auto");
   const [printScale, setPrintScale] = useState<SchedulePrintScale>("fit");
   const [timelineZoom, setTimelineZoom] = useState<"compacto" | "normal" | "detalhe">("normal");
+  const [taskQuery, setTaskQuery] = useState("");
 
   async function reload() {
     if (!projectId) return;
@@ -65,11 +71,16 @@ export default function ProjectSchedulePage() {
 
   async function handleGenerate(event: FormEvent) {
     event.preventDefault();
-    if (!projectId || !documentId) return;
+    if (!projectId) return;
+    if (!documentId) return;
     if (schedule?.tasks.length && !window.confirm("Recriar substitui o cronograma actual, as subactividades e a linha de base. Continuar?")) return;
     setSaving(true); setError(null);
     try {
-      const next = await scheduleApi.generate(projectId, { budgetDocumentId: documentId, startDate, totalDurationDays: Number(duration) });
+      const next = await scheduleApi.generate(projectId, {
+        budgetDocumentId: documentId,
+        startDate,
+        ...(manualDuration && duration ? { totalDurationDays: Number(duration) } : {}),
+      });
       setSchedule(next); setSetupOpen(false); setSelectedId(next.tasks[0]?.id ?? null); setCollapsed(new Set());
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Erro ao gerar cronograma"); } finally { setSaving(false); }
   }
@@ -115,7 +126,19 @@ export default function ProjectSchedulePage() {
 
   const selected = schedule?.tasks.find((task) => task.id === selectedId) ?? null;
   const leafTasks = schedule?.tasks.filter((task) => !task.isSummary) ?? [];
-  const visibleTasks = useMemo(() => schedule?.tasks.filter((task) => !task.parentId || !collapsed.has(task.parentId)) ?? [], [schedule?.tasks, collapsed]);
+  const visibleTasks = useMemo(() => {
+    const tasks = schedule?.tasks ?? [];
+    const needle = taskQuery.trim().toLocaleLowerCase("pt");
+    if (!needle) return tasks.filter((task) => !task.parentId || !collapsed.has(task.parentId));
+    const visibleIds = new Set<string>();
+    tasks.forEach((task) => {
+      const text = `${task.code} ${task.name} ${task.status} ${task.notes ?? ""}`.toLocaleLowerCase("pt");
+      if (!text.includes(needle)) return;
+      visibleIds.add(task.id);
+      if (task.parentId) visibleIds.add(task.parentId);
+    });
+    return tasks.filter((task) => visibleIds.has(task.id));
+  }, [schedule?.tasks, collapsed, taskQuery]);
   const timeline = useMemo(() => {
     if (!schedule?.startDate || !schedule.endDate) return null;
     const totalDays = daysBetween(schedule.startDate, schedule.endDate);
@@ -141,7 +164,7 @@ export default function ProjectSchedulePage() {
   if (!project || !schedule) return <div className="min-h-screen grid place-items-center text-slate-400">A carregar cronograma...</div>;
 
   return <Layout title={`Cronograma — ${project.name}`} subtitle="Planeamento WBS ligado ao orçamento, diário de obra, compras e autos de medição" actions={<><div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-1"><select className="h-7 rounded border-0 bg-transparent px-2 text-xs font-semibold text-slate-700 outline-none" aria-label="Formato do PDF" value={printPaper} onChange={(event) => setPrintPaper(event.target.value as SchedulePaper)}><option value="auto">Folha automática</option><option value="A3">A3</option><option value="A2">A2</option><option value="A1">A1</option></select><span className="h-5 border-l border-slate-200" /><select className="h-7 rounded border-0 bg-transparent px-2 text-xs font-semibold text-slate-700 outline-none" aria-label="Escala do PDF" value={printScale} onChange={(event) => setPrintScale(event.target.value === "fit" ? "fit" : Number(event.target.value) as SchedulePrintScale)}><option value="fit">Ajustar à folha</option><option value="100">Escala 100%</option><option value="85">Escala 85%</option><option value="70">Escala 70%</option><option value="55">Escala 55%</option></select></div><a className={`btn btn-secondary btn-sm ${!schedule.tasks.length ? "pointer-events-none opacity-50" : ""}`} href={schedule.tasks.length ? scheduleApi.exportPdfUrl(project.id, { paper: printPaper, scale: printScale }) : undefined} aria-disabled={!schedule.tasks.length}><IconDownload className="h-4 w-4" /> Exportar PDF</a><Link className="btn btn-ghost btn-sm" to={`/projectos/${project.id}`}><IconBack className="h-4 w-4" /> Projecto</Link></>}>
-    <div className="max-w-[1600px] space-y-5">
+    <div className="mx-auto w-full max-w-[1500px] space-y-5">
       <ProjectWorkspaceNav projectId={project.id} />
       {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
 
@@ -154,11 +177,21 @@ export default function ProjectSchedulePage() {
         </div>
       </div>
 
-      {setupOpen && <form onSubmit={handleGenerate} className="card card-pad grid gap-4 md:grid-cols-[minmax(260px,1fr)_180px_160px_auto] items-end">
-        <div><label className="label">Mapa de Quantidades de referência</label><select className="input" required value={documentId} onChange={(event) => setDocumentId(event.target.value)}><option value="">Seleccionar...</option>{documents.map((document) => <option key={document.id} value={document.id}>{document.title} · {document.status}</option>)}</select></div>
-        <div><label className="label">Início planeado</label><input className="input" type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} /></div>
-        <div><label className="label">Prazo (dias úteis)</label><input className="input" type="number" min="7" value={duration} onChange={(event) => setDuration(event.target.value)} /></div>
-        <button className="btn btn-primary" disabled={saving || !documentId}><IconChart className="h-4 w-4" /> {schedule.tasks.length ? "Recriar WBS e linha de base" : "Gerar cronograma"}</button>
+      {setupOpen && <form onSubmit={handleGenerate} className="card card-pad space-y-4">
+        <div className="grid gap-4 md:grid-cols-[minmax(260px,1fr)_180px_auto] items-end">
+          <div><label className="label">Mapa de Quantidades de referência</label><select className="input" required value={documentId} onChange={(event) => setDocumentId(event.target.value)}><option value="">Seleccionar...</option>{documents.map((document) => <option key={document.id} value={document.id}>{document.title} · {document.status}</option>)}</select></div>
+          <div><label className="label">Início planeado</label><input className="input" type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} /></div>
+          <button className="btn btn-primary" disabled={saving || !documentId}><IconChart className="h-4 w-4" /> {schedule.tasks.length ? "Recriar WBS e linha de base" : "Gerar cronograma"}</button>
+        </div>
+        <p className="text-xs text-slate-500">A duração é calculada automaticamente a partir das horas de mão-de-obra das composições e das quantidades medidas — não precisa de indicar quantos dias a obra vai demorar.</p>
+        {!manualDuration ? (
+          <button type="button" className="text-xs font-semibold text-blue-700 hover:underline" onClick={() => setManualDuration(true)}>Substituir por um prazo próprio</button>
+        ) : (
+          <div className="flex flex-wrap items-end gap-3">
+            <div><label className="label">Prazo total (dias úteis)</label><input className="input w-40" type="number" min="7" value={duration} onChange={(event) => setDuration(event.target.value)} /></div>
+            <button type="button" className="text-xs font-semibold text-slate-500 hover:underline" onClick={() => { setManualDuration(false); setDuration(""); }}>Voltar ao cálculo automático</button>
+          </div>
+        )}
       </form>}
 
       {schedule.tasks.length > 0 && <>
@@ -168,6 +201,13 @@ export default function ProjectSchedulePage() {
           <MetricCard label="Valor planeado" value={fmtMoney(schedule.plannedValue, project.currency)} note="Sem dupla contagem dos resumos" />
           <MetricCard label="Valor medido" value={fmtMoney(schedule.executedValue, project.currency)} note="Autos aprovados" />
         </div>
+
+        <PageSearch
+          value={taskQuery}
+          onChange={setTaskQuery}
+          placeholder="Pesquisar actividade, código, estado ou nota…"
+          resultLabel={`${visibleTasks.length} actividade(s) visível(is)`}
+        />
 
         <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3">

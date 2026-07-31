@@ -31,7 +31,7 @@ export default defineConfig({
         name: "SIGO — Sistema Integrado de Gestão de Obras",
         short_name: "SIGO",
         description: "Mapas de quantidades, orçamentos, autos de medição e catálogo de custos para construção civil.",
-        theme_color: "#4338ca",
+        theme_color: "#0E2033",
         background_color: "#f4f5f7",
         display: "standalone",
         start_url: "/painel",

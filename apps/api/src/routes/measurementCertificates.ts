@@ -12,6 +12,7 @@ import {
   updateCertificateLinePeriod,
 } from "../services/measurementEngine.js";
 import { computeLabourByPhase } from "../services/labourByPhase.js";
+import { calculateBudgetTotals } from "../services/budgetTotals.js";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista", "engenheiro_fiscal"] as const;
 const createSchema = z.object({
@@ -51,8 +52,40 @@ export async function measurementCertificateRoutes(app: FastifyInstance) {
     const certificate = await assertCertificateOwned(id, request.currentUser!.companyId!);
     if (!certificate) return reply.code(404).send({ error: "Auto de medição não encontrado" });
     const detail = await getCertificateDetail(id);
-    const [document] = await db.select({ currency: budgetDocuments.currency, ivaRate: budgetDocuments.ivaRate, contingenciasRate: budgetDocuments.contingenciasRate }).from(budgetDocuments).where(eq(budgetDocuments.id, certificate.budgetDocumentId)).limit(1);
-    return { ...detail, financialParameters: { currency: document?.currency ?? "MZN", ivaRate: Number(document?.ivaRate ?? 0.16), contingenciasRate: Number(document?.contingenciasRate ?? 0) } };
+    const [document] = await db.select({
+      currency: budgetDocuments.currency,
+      ivaRate: budgetDocuments.ivaRate,
+      contingenciasRate: budgetDocuments.contingenciasRate,
+      siteCostsRate: budgetDocuments.siteCostsRate,
+      indirectCostsRate: budgetDocuments.indirectCostsRate,
+      profitMarginRate: budgetDocuments.profitMarginRate,
+    }).from(budgetDocuments).where(eq(budgetDocuments.id, certificate.budgetDocumentId)).limit(1);
+    const commercialRates = {
+      siteCostsRate: Number(document?.siteCostsRate ?? 0),
+      indirectCostsRate: Number(document?.indirectCostsRate ?? 0),
+      profitMarginRate: Number(document?.profitMarginRate ?? 0),
+    };
+    const unitPriceFactor = calculateBudgetTotals(1, commercialRates).unitPriceFactor;
+    const clientLines = detail?.lines.map((line) => ({
+      ...line,
+      unitPrice: line.unitPrice * unitPriceFactor,
+      periodValue: line.periodValue * unitPriceFactor,
+      cumulativeValue: line.cumulativeValue * unitPriceFactor,
+    })) ?? [];
+    return {
+      ...detail,
+      lines: clientLines,
+      financialParameters: {
+        currency: document?.currency ?? "MZN",
+        ivaRate: Number(document?.ivaRate ?? 0.16),
+        contingenciasRate: Number(document?.contingenciasRate ?? 0),
+        // O auto é um documento contratual: recebe o preço de venda carregado,
+        // nunca a decomposição interna de estaleiro, indirectos e margem.
+        siteCostsRate: 0,
+        indirectCostsRate: 0,
+        profitMarginRate: 0,
+      },
+    };
   });
 
   app.get("/api/measurement-certificates/:id/labour-by-phase", { preHandler: requireCompanyUser }, async (request, reply) => {
@@ -96,7 +129,13 @@ export async function measurementCertificateRoutes(app: FastifyInstance) {
     if (parsed.data.status === "aprovado") {
       const [document] = await db.select().from(budgetDocuments).where(eq(budgetDocuments.id, certificate.budgetDocumentId)).limit(1);
       const periodSubtotal = detail!.lines.reduce((sum, line) => sum + line.periodValue, 0);
-      const grossAmount = periodSubtotal * (1 + Number(document?.contingenciasRate ?? 0)) * (1 + Number(document?.ivaRate ?? 0));
+      const grossAmount = calculateBudgetTotals(periodSubtotal, {
+        siteCostsRate: Number(document?.siteCostsRate ?? 0),
+        indirectCostsRate: Number(document?.indirectCostsRate ?? 0),
+        contingenciasRate: Number(document?.contingenciasRate ?? 0),
+        profitMarginRate: Number(document?.profitMarginRate ?? 0),
+        ivaRate: Number(document?.ivaRate ?? 0),
+      }).total;
       const [existing] = await db.select().from(financialEntries).where(and(
         eq(financialEntries.projectId, certificate.projectId),
         eq(financialEntries.sourceType, "measurement_certificate"),

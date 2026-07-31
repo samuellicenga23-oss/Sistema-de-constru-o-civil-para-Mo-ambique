@@ -67,16 +67,18 @@ export async function scheduleRoutes(app: FastifyInstance) {
     const { projectId } = request.params as { projectId: string };
     const companyId = companyIdOf(request);
     if (!(await assertProjectOwned(projectId, companyId))) return reply.code(404).send({ error: "Projecto não encontrado" });
-    const parsed = z.object({ budgetDocumentId: z.string().uuid(), startDate: z.string(), totalDurationDays: z.number().int().min(7).max(3650) }).safeParse(request.body);
+    const parsed = z.object({ budgetDocumentId: z.string().uuid(), startDate: z.string(), totalDurationDays: z.number().int().min(7).max(3650).optional() }).safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     const document = await assertDocumentOwned(parsed.data.budgetDocumentId, companyId);
     if (!document || document.projectId !== projectId) return reply.code(404).send({ error: "Mapa de Quantidades não encontrado" });
+    const project = await assertProjectOwned(projectId, companyId);
     try {
-      return await generateSchedule({ projectId, ...parsed.data });
+      return await generateSchedule({ projectId, ...parsed.data, companyId, zoneId: project?.zoneId ?? null });
     } catch (error) {
       return reply.code(409).send({ error: error instanceof Error ? error.message : "Não foi possível gerar o cronograma" });
     }
   });
+
 
   app.post("/api/projects/:projectId/schedule/tasks", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
     const { projectId } = request.params as { projectId: string };

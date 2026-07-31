@@ -4,6 +4,114 @@ Este ficheiro coordena o trabalho paralelo entre Codex e Claude. Antes de inicia
 consultar o estado do Git e as entradas mais recentes. Cada intervenção deve indicar branch,
 âmbito, validação e estado de publicação.
 
+## 2026-07-29 — Codex — Separação entre Medições e Orçamentos
+
+- **Branch:** `codex/project-costs-measurements`
+- **Arquitectura funcional:** Medições e Orçamentos passam a ser áreas independentes no menu.
+  A medição trabalha apenas com plantas, memória de cálculo e quantidades; o orçamento recebe
+  quantidades e acrescenta composições, preços, custos, margens, IVA e restantes operações da obra.
+- **Criação:** em Medições, o utilizador pode ler plantas PDF ou medir manualmente. Em Orçamentos,
+  pode criar um orçamento manual, importar medições externas em Excel ou abrir a área de Medições
+  para produzir e enviar um levantamento técnico.
+- **Conversão controlada:** o comando “Enviar para orçamento” cria um documento comercial separado,
+  copia secções, itens, quantidades e memória de cálculo, aplica os preços actuais das composições
+  e mantém a medição original inalterada. A operação é idempotente e regista a origem do orçamento.
+- **Projecto integrado:** a visão geral mostra cartões distintos para Medições e Orçamentos. Depois
+  da conversão, o projecto passa a modo híbrido e fica visível nas duas áreas. Diário, cronograma,
+  compras, stock e financeiro aparecem apenas quando existe contexto orçamental.
+- **Exportações técnicas:** adicionados Excel e PDF próprios de medições, sem preços, margens,
+  impostos ou totais monetários.
+- **Dados:** adicionados `projects.project_type`, `budget_documents.document_type` e
+  `budget_documents.source_measurement_document_id`; migração `0030_majestic_christian_walker.sql`
+  gerada e aplicada na base local. Projectos anteriores continuam tratados como orçamentos.
+- **Validação:** build completo aprovado durante a implementação; teste dedicado do fluxo aprovado
+  (4/4); criação, exportação, conversão, listas e visão integrada confirmadas no navegador local;
+  Medições e Orçamentos verificados a 390 px sem overflow horizontal. A execução final da suite
+  completa ficou indisponível por limite temporário da ferramenta de execução.
+- **Produção:** ainda não publicada.
+
+## 2026-07-29 — Codex — Fluxo de compras, fornecedores e pesquisa operacional
+
+- **Branch:** `codex/project-costs-measurements`
+- **Compras e Armazém:** a página passou a seguir três etapas explícitas: “O que comprar”,
+  “Pedidos” e “Stock e movimentos”. A grelha larga de aprovisionamento foi substituída por
+  cartões responsivos que mostram necessidade, cobertura, quantidade a comprar, embalagem,
+  prazo, fornecedor/cotação e total com IVA antes da acção.
+- **Fornecedores:** criado um directório pesquisável com indicadores de qualidade do cadastro,
+  cartões responsivos e acesso directo aos recursos e cotações de cada empresa.
+- **Cotações do fornecedor:** o modal separa materiais, mão-de-obra e máquinas, apresenta
+  contagens por separador, formulário responsivo para recurso/zona/preço e pesquisa nos preços
+  já registados.
+- **Pesquisa contextual:** introduzido o componente reutilizável `PageSearch`; aplicado a
+  Compras/Stock, Fornecedores, Mapa de Quantidades, Cronograma, Diário de Obra e Financeiro,
+  complementando as pesquisas já existentes em Projectos e Catálogo.
+- **Referências de processo:** fluxo alinhado com a separação entre requisição/cotação,
+  compromisso de compra, recepção e movimento de stock usada em Procore e Autodesk
+  Construction Cloud.
+- **Validação:** build completo aprovado; 14 testes do frontend aprovados; Compras e
+  Fornecedores verificados no navegador local em 390 px e largura de desktop sem overflow
+  horizontal; alternância entre necessidades, pedidos e stock confirmada sem erros de consola.
+- **Produção:** ainda não publicada.
+
+## 2026-07-29 — Codex — Espaçamento global e revisão responsiva
+
+- **Branch:** `codex/project-costs-measurements`
+- **Contentor global:** cabeçalhos e conteúdo interno passam a usar uma largura máxima centralizada
+  de 1500 px, com margens laterais equilibradas e padding progressivo em desktop, tablet e móvel.
+- **Consistência entre módulos:** Projectos, Catálogo, Composições, Diário, Cronograma, Compras,
+  Financeiro, Autos, Fornecedores, Empresa, Perfil de planta e Administração foram centralizados;
+  páginas com limites próprios preservam a largura adequada ao tipo de informação.
+- **Composições:** largura útil reduzida para leitura confortável; tabelas ganharam recuo interno,
+  células com espaçamento consistente, limites visuais e área de adição separada do conteúdo.
+- **Visão geral:** cartões deixam de esticar artificialmente à mesma altura; mapas e projectos
+  técnicos usam uma só coluna em tablet e duas apenas quando existe largura real. Formulários de
+  criação e upload deixam de cortar campos e botões.
+- **Validação:** build completo aprovado; 14 testes do frontend aprovados; composição e visão geral
+  revistas visualmente em 1920 px, 1024 px e 375 px. Diário, Cronograma, Compras, Financeiro, Mapa
+  e Catálogo verificados em tablet, todos sem overflow horizontal da página.
+- **Produção:** ainda não publicada.
+
+## 2026-07-29 — Codex — Hierarquia do projecto e catálogo responsivo
+
+- **Branch:** `codex/project-costs-measurements`
+- **Visão geral do projecto:** indicadores e zona de preços passaram para o topo; o fluxo de
+  medição foi compactado; mapas e projectos técnicos ficaram lado a lado; materiais e validações
+  secundárias passaram a secções recolhidas.
+- **Ficheiros técnicos:** nomes longos, estados de processamento, reprocessamento, eliminação e
+  carregamento foram ajustados para não cortar nem sobrepor acções em ecrãs estreitos.
+- **Catálogo:** composições, mão-de-obra, materiais e zonas deixaram de depender de tabelas largas.
+  A informação passou para cartões responsivos, com preço, origem, estado e acções legíveis em
+  desktop e telemóvel.
+- **Composições:** removida a área “Ficha técnica · identificação e critérios”; o editor concentra-se
+  nos recursos e rendimentos. Mão-de-obra, materiais e equipamento possuem edição móvel própria e
+  resumo compacto do custo directo.
+- **Mapa de Quantidades:** incluída a navegação contínua para Visão geral, Diário, Cronograma,
+  Compras/stock e Financeiro. O resumo financeiro passou para um botão no topo e abre num painel
+  responsivo, libertando toda a largura para os itens.
+- **Validação:** build completo aprovado; 41 testes da API aprovados; validação no navegador a
+  375 px e 1440 px sem overflow horizontal. Catálogo validado sem tabelas visíveis e composição
+  confirmada sem a antiga ficha técnica.
+- **Produção:** ainda não publicada.
+
+## 2026-07-29 — Codex — Preço de venda e especificações técnicas
+
+- **Branch:** `codex/project-costs-measurements`
+- **Formação do preço:** adicionados custos indirectos ao Mapa de Quantidades. Estaleiro,
+  indirectos e margem passam a ser distribuídos por todos os preços unitários de venda;
+  contingências e IVA continuam separados no resumo.
+- **Confidencialidade comercial:** o perfil `visualizador`, os autos de medição e as exportações
+  PDF/Excel recebem apenas preços de venda. Custos directos, estaleiro, indirectos e margem não
+  são expostos ao cliente.
+- **Catálogo técnico:** tintas e aparelhos sanitários receberam especificações de desempenho,
+  material, acessórios, aplicação/ensaio e aceitação de equivalentes. Novos Mapas de Quantidades
+  descrevem sanita, lavatório, duche, lava-louça e pinturas sem itens genéricos.
+- **Interface:** Catálogo e detalhe do projecto foram compactados; validações secundárias ficam
+  recolhidas e o resumo financeiro distingue claramente custo interno e preço de venda.
+- **Base de dados:** migração `0029_sweet_wallow.sql` aplicada localmente.
+- **Validação:** build completo aprovado; 41 testes da API aprovados; validação visual no
+  localhost aprovada em desktop e 375 px, sem overflow horizontal da página.
+- **Produção:** ainda não publicada.
+
 ## 2026-07-27 — Codex — Renovação visual, primeira fase
 
 - **Branch:** `codex/siga-visual-refresh`
@@ -610,3 +718,28 @@ publicação.
   `/home/sigo/backups/sigo-predeploy-20260729-197a5e4-manual-measurements.dump` (`164093` bytes).
   Não houve migração de base de dados nem alteração do leitor Python. Build de produção aprovado,
   API recarregada no PM2, novo bundle `index-DphZlpKZ.js` confirmado por HTTPS e health check activo.
+
+## 2026-07-29 — Codex — Custos globais, três entradas de medição e materiais técnicos
+
+- **Branch:** `codex/project-costs-measurements`.
+- **Composições:** os campos legados Auxiliares, Indirectos e Margem foram retirados do editor.
+  A composição passou a representar apenas o custo técnico directo de mão-de-obra, materiais e
+  equipamento; novas gravações zeram os três campos legados para compatibilidade.
+- **Mapa de Quantidades:** Estaleiro, Contingências, Margem de lucro e IVA são agora percentagens
+  editáveis no resumo do documento. A ordem de cálculo é custo directo → estaleiro/contingências →
+  margem → IVA. O mesmo motor alimenta o total do orçamento, Autos aprovados, Financeiro, Excel e PDF.
+- **Criação do projecto:** o utilizador escolhe entre `Ler projectos`, `Medir manualmente` e
+  `Importar medições`. O modo manual abre directamente o Assistente; a importação lê o Excel para o
+  mapa inicial; só o modo de plantas passa pelo fluxo de análise dos PDFs.
+- **Especificações técnicas:** podem ser indicados materiais na criação ou na ficha do projecto.
+  O sistema reutiliza um material existente pelo nome normalizado e, quando não encontra, cria-o no
+  Catálogo da empresa com custo zero e estado `Preço pendente`, conservando unidade e especificação.
+- **Interface:** textos explicativos foram reduzidos, as animações de progresso restantes foram
+  removidas e o resumo lateral do Mapa só passa para duas colunas em ecrãs largos, evitando comprimir
+  ou cortar a tabela. O novo modal foi inspeccionado no desktop e a `390 × 844`.
+- **Base de dados:** migração `0028_luxuriant_obadiah_stane.sql`, com os campos
+  `measurement_mode`, `site_costs_rate`, `profit_margin_rate` e a tabela
+  `project_material_specifications`.
+- **Validação:** migração local aplicada; build integral aprovado (117 módulos); 41 testes da API
+  aprovados; fluxo de projecto, ficha da obra e percentagens do orçamento validados no localhost.
+- **Produção:** ainda não publicada.

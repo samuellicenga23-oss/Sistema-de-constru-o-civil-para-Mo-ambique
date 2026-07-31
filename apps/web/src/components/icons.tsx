@@ -62,6 +62,15 @@ export function IconPlus(p: IconProps) {
   );
 }
 
+export function IconSearch(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <circle cx="11" cy="11" r="7" />
+      <path d="m20 20-4-4" />
+    </Svg>
+  );
+}
+
 export function IconTrash(p: IconProps) {
   return (
     <Svg {...p}>

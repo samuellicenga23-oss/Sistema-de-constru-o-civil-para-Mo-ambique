@@ -12,15 +12,16 @@ const KIND_LABELS: Record<LineItemKind, string> = {
   nota: "Nota",
 };
 
-const COLUMN_COUNT = 7;
-
 function money(value: number) {
   return value.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 // Larguras fixas para as colunas numéricas — a DESCRIÇÃO fica com o espaço restante e
 // quebra dentro da sua própria coluna, nunca "empurrando" as colunas seguintes.
-export function BoqHeaderRow() {
+export function BoqHeaderRow({ measurementOnly = false }: { measurementOnly?: boolean }) {
+  if (measurementOnly) {
+    return <colgroup><col className="w-16" /><col /><col className="w-14" /><col className="w-28" /><col className="w-24" /></colgroup>;
+  }
   return (
     <colgroup>
       <col className="w-16" />
@@ -34,7 +35,7 @@ export function BoqHeaderRow() {
   );
 }
 
-export function BoqTableHead() {
+export function BoqTableHead({ readOnly = false, measurementOnly = false }: { readOnly?: boolean; measurementOnly?: boolean }) {
   return (
     <thead>
       <tr className="table-head-row">
@@ -42,9 +43,9 @@ export function BoqTableHead() {
         <th className="font-medium">Descrição</th>
         <th className="hidden font-medium sm:table-cell">Un</th>
         <th className="text-right font-medium">Quant.</th>
-        <th className="hidden text-right font-medium sm:table-cell">P. Unit.</th>
-        <th className="text-right font-medium">Total</th>
-        <th className="text-right font-medium pr-2">Acções</th>
+        {!measurementOnly && <th className="hidden text-right font-medium sm:table-cell">P. Unit.</th>}
+        {!measurementOnly && <th className="text-right font-medium">Total</th>}
+        <th className="text-right font-medium pr-2">{readOnly ? "" : "Acções"}</th>
       </tr>
     </thead>
   );
@@ -54,11 +55,13 @@ function AddChildForm({
   sectionId,
   parentId,
   compositions,
+  measurementOnly,
   onDone,
 }: {
   sectionId: string;
   parentId: string | null;
   compositions: CostComposition[];
+  measurementOnly?: boolean;
   onDone: () => void;
 }) {
   const [kind, setKind] = useState<LineItemKind>("item");
@@ -81,8 +84,8 @@ function AddChildForm({
         description,
         unit: kind === "item" ? (unit as any) : null,
         quantity: kind === "item" && quantity ? Number(quantity) : null,
-        unitPrice: kind === "item" && !compositionId && unitPrice ? Number(unitPrice) : null,
-        compositionId: kind === "item" && compositionId ? compositionId : null,
+        unitPrice: !measurementOnly && kind === "item" && !compositionId && unitPrice ? Number(unitPrice) : null,
+        compositionId: !measurementOnly && kind === "item" && compositionId ? compositionId : null,
       });
       onDone();
     } finally {
@@ -117,16 +120,16 @@ function AddChildForm({
             ))}
           </select>
           <input type="number" step="any" placeholder="quant." value={quantity} onChange={(e) => setQuantity(e.target.value)} className="input input-sm w-20" />
-          <select value={compositionId} onChange={(e) => setCompositionId(e.target.value)} className="input input-sm w-auto max-w-[180px]">
+          {!measurementOnly && <select value={compositionId} onChange={(e) => setCompositionId(e.target.value)} className="input input-sm w-auto max-w-[180px]">
             <option value="">preço manual</option>
             {compositions.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name} ({money(c.unitCost)})
               </option>
             ))}
-          </select>
-          {!compositionId && (
-            <input type="number" step="any" placeholder="preço unit." value={unitPrice} onChange={(e) => setUnitPrice(e.target.value)} className="input input-sm w-24" />
+          </select>}
+          {!measurementOnly && !compositionId && (
+            <input type="number" step="any" placeholder="custo directo" title="Custo directo interno, antes de estaleiro, indirectos e margem" value={unitPrice} onChange={(e) => setUnitPrice(e.target.value)} className="input input-sm w-28" />
           )}
         </>
       )}
@@ -144,12 +147,16 @@ export default function LineItemRow({
   sectionId,
   compositions,
   onChange,
+  readOnly = false,
+  measurementOnly = false,
 }: {
   node: LineItemNode;
   depth: number;
   sectionId: string;
   compositions: CostComposition[];
   onChange: () => void;
+  readOnly?: boolean;
+  measurementOnly?: boolean;
 }) {
   const [showAdd, setShowAdd] = useState(false);
   const [showMeasurements, setShowMeasurements] = useState(false);
@@ -179,13 +186,13 @@ export default function LineItemRow({
         </td>
         <td className="hidden align-top text-xs text-gray-400 whitespace-nowrap sm:table-cell">{node.kind === "item" ? node.unit : ""}</td>
         <td className="align-top text-right text-gray-600 tabular-nums whitespace-nowrap">{node.kind === "item" ? node.quantity : ""}</td>
-        <td className="hidden align-top text-right text-gray-600 tabular-nums whitespace-nowrap sm:table-cell">{node.kind === "item" ? money(node.unitPrice ?? 0) : ""}</td>
-        <td className={`align-top text-right tabular-nums whitespace-nowrap ${isChapter ? "font-bold" : "font-medium"} ${isNote ? "text-transparent" : "text-gray-900"}`}>
-          {isNote ? "" : money(node.totalPrice)}
-        </td>
+        {!measurementOnly && <td className="hidden align-top text-right text-gray-600 tabular-nums whitespace-nowrap sm:table-cell">{node.kind === "item" ? money(node.sellingUnitPrice ?? node.unitPrice ?? 0) : ""}</td>}
+        {!measurementOnly && <td className={`align-top text-right tabular-nums whitespace-nowrap ${isChapter ? "font-bold" : "font-medium"} ${isNote ? "text-transparent" : "text-gray-900"}`}>
+          {isNote ? "" : money(node.sellingTotalPrice ?? node.totalPrice)}
+        </td>}
         <td className="align-top text-right pr-2 whitespace-nowrap">
           <span className="inline-flex gap-1">
-            {node.kind === "item" && (
+            {!readOnly && node.kind === "item" && (
               <button
                 onClick={() => setShowMeasurements((s) => !s)}
                 className={`icon-btn ${showMeasurements ? "icon-btn-active opacity-100" : ""}`}
@@ -194,21 +201,21 @@ export default function LineItemRow({
                 <IconRuler className="w-4 h-4" />
               </button>
             )}
-            {(isChapter || isGroup) && (
+            {!readOnly && (isChapter || isGroup) && (
               <button onClick={() => setShowAdd((s) => !s)} className="icon-btn" title="Adicionar sub-item">
                 <IconPlus className="w-4 h-4" />
               </button>
             )}
-            <button onClick={handleDelete} className="icon-btn-danger" title="Eliminar">
+            {!readOnly && <button onClick={handleDelete} className="icon-btn-danger" title="Eliminar">
               <IconTrash className="w-4 h-4" />
-            </button>
+            </button>}
           </span>
         </td>
       </tr>
 
       {showMeasurements && node.kind === "item" && (
         <tr>
-          <td colSpan={COLUMN_COUNT} className="bg-white pb-2">
+          <td colSpan={measurementOnly ? 5 : 7} className="bg-white pb-2">
             <MeasurementGrid lineItemId={node.id} onQuantityChange={onChange} />
           </td>
         </tr>
@@ -216,11 +223,12 @@ export default function LineItemRow({
 
       {showAdd && (
         <tr>
-          <td colSpan={COLUMN_COUNT} className="pb-2" style={{ paddingLeft: depth * 16 }}>
+          <td colSpan={measurementOnly ? 5 : 7} className="pb-2" style={{ paddingLeft: depth * 16 }}>
             <AddChildForm
               sectionId={sectionId}
               parentId={node.id}
               compositions={compositions}
+              measurementOnly={measurementOnly}
               onDone={() => {
                 setShowAdd(false);
                 onChange();
@@ -231,7 +239,7 @@ export default function LineItemRow({
       )}
 
       {node.children.map((child) => (
-        <LineItemRow key={child.id} node={child} depth={depth + 1} sectionId={sectionId} compositions={compositions} onChange={onChange} />
+          <LineItemRow key={child.id} node={child} depth={depth + 1} sectionId={sectionId} compositions={compositions} onChange={onChange} readOnly={readOnly} measurementOnly={measurementOnly} />
       ))}
     </Fragment>
   );

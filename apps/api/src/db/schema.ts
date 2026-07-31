@@ -291,21 +291,49 @@ export const projects = pgTable("projects", {
   // catálogo ao calcular o custo unitário de composições usadas neste projecto.
   zoneId: uuid("zone_id").references(() => priceZones.id),
   currency: currencyEnum("currency").notNull().default("MZN"),
+  // Define onde o trabalho aparece na aplicação. "hibrido" significa que uma medição
+  // técnica já foi submetida e passou também a alimentar um orçamento comercial.
+  projectType: varchar("project_type", { length: 20 }).notNull().default("orcamento"),
+  measurementMode: varchar("measurement_mode", { length: 20 }).notNull().default("plantas"),
   ivaRate: numeric("iva_rate", { precision: 5, scale: 4 }).notNull().default("0.16"),
   contingenciasRate: numeric("contingencias_rate", { precision: 5, scale: 4 }).notNull().default("0.10"),
+  siteCostsRate: numeric("site_costs_rate", { precision: 5, scale: 4 }).notNull().default("0"),
+  indirectCostsRate: numeric("indirect_costs_rate", { precision: 5, scale: 4 }).notNull().default("0"),
+  profitMarginRate: numeric("profit_margin_rate", { precision: 5, scale: 4 }).notNull().default("0"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
+
+export const projectMaterialSpecifications = pgTable(
+  "project_material_specifications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+    materialId: uuid("material_id").notNull().references(() => materials.id),
+    specification: text("specification"),
+    source: varchar("source", { length: 40 }).notNull().default("manual"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [unique().on(table.projectId, table.materialId)]
+);
 
 export const budgetDocuments = pgTable("budget_documents", {
   id: uuid("id").primaryKey().defaultRandom(),
   projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
   title: varchar("title", { length: 200 }).notNull(),
+  // Uma medição contém quantidades e memória de cálculo, sem formação comercial do preço.
+  // Um orçamento pode nascer dessa medição ou ser importado/criado directamente.
+  documentType: varchar("document_type", { length: 20 }).notNull().default("orcamento"),
+  sourceMeasurementDocumentId: uuid("source_measurement_document_id")
+    .references((): AnyPgColumn => budgetDocuments.id, { onDelete: "set null" }),
   revision: varchar("revision", { length: 20 }),
   fileNumber: varchar("file_number", { length: 50 }),
   currency: currencyEnum("currency").notNull().default("MZN"),
   documentDate: date("document_date"),
   ivaRate: numeric("iva_rate", { precision: 5, scale: 4 }).notNull().default("0.16"),
   contingenciasRate: numeric("contingencias_rate", { precision: 5, scale: 4 }).notNull().default("0.10"),
+  siteCostsRate: numeric("site_costs_rate", { precision: 5, scale: 4 }).notNull().default("0"),
+  indirectCostsRate: numeric("indirect_costs_rate", { precision: 5, scale: 4 }).notNull().default("0"),
+  profitMarginRate: numeric("profit_margin_rate", { precision: 5, scale: 4 }).notNull().default("0"),
   status: documentStatusEnum("status").notNull().default("rascunho"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   // Relatório da última estimativa aplicada pelo Assistente de Medições — uma linha por item
@@ -678,6 +706,12 @@ export const projectsRelations = relations(projects, ({ one, many }) => ({
   company: one(companies, { fields: [projects.companyId], references: [companies.id] }),
   budgetDocuments: many(budgetDocuments),
   plants: many(plants),
+  materialSpecifications: many(projectMaterialSpecifications),
+}));
+
+export const projectMaterialSpecificationsRelations = relations(projectMaterialSpecifications, ({ one }) => ({
+  project: one(projects, { fields: [projectMaterialSpecifications.projectId], references: [projects.id] }),
+  material: one(materials, { fields: [projectMaterialSpecifications.materialId], references: [materials.id] }),
 }));
 
 export const budgetDocumentsRelations = relations(budgetDocuments, ({ one, many }) => ({

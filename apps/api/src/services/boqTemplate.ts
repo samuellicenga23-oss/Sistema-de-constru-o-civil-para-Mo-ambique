@@ -75,9 +75,9 @@ export const STANDARD_CHAPTERS: TemplateChapter[] = [
     code: "7",
     name: "PINTURAS",
     items: [
-      { code: "7.1", description: "Pintura acrílica em paredes exteriores (2 demãos, incl. primário)", unit: "m2", composition: "Pintura acrílica exterior (2 demãos + primário)" },
-      { code: "7.2", description: "Pintura de esmalte aquoso em paredes interiores (2 demãos, incl. primário)", unit: "m2", composition: "Pintura esmalte aquoso interior (2 demãos + primário)" },
-      { code: "7.3", description: "Pintura de esmalte aquoso em tectos interiores (2 demãos, incl. primário)", unit: "m2", composition: "Pintura esmalte aquoso interior (2 demãos + primário)" },
+      { code: "7.1", description: "Pintura exterior 100% acrílica, resistente a intempéries/UV, primário e mínimo 2 demãos; acabamento e cor conforme projecto; ou equivalente aprovado", unit: "m2", composition: "Pintura acrílica exterior (2 demãos + primário)" },
+      { code: "7.2", description: "Pintura interior estireno-acrílica lavável, esfrega tipo II ou superior, primário e mínimo 2 demãos; acabamento mate e cor conforme projecto; ou equivalente", unit: "m2", composition: "Pintura esmalte aquoso interior (2 demãos + primário)" },
+      { code: "7.3", description: "Pintura de tectos estireno-acrílica lavável, primário e mínimo 2 demãos; acabamento mate branco ou cor conforme projecto; ou equivalente", unit: "m2", composition: "Pintura esmalte aquoso interior (2 demãos + primário)" },
     ],
   },
   {
@@ -109,10 +109,10 @@ export const STANDARD_CHAPTERS: TemplateChapter[] = [
     code: "11",
     name: "INSTALAÇÃO HIDRÁULICA",
     items: [
-      { code: "11.1", description: "Fornecimento e montagem de sanita completa com autoclismo", unit: "un", composition: "Sanita completa montada (com autoclismo)" },
-      { code: "11.2", description: "Fornecimento e montagem de lavatório com torneira", unit: "un", composition: "Lavatório com torneira montado" },
-      { code: "11.3", description: "Fornecimento e montagem de base de duche/chuveiro com misturadora", unit: "un", composition: "Chuveiro com misturadora montado" },
-      { code: "11.4", description: "Fornecimento e montagem de pia de cozinha com torneira", unit: "un", composition: "Pia de cozinha com torneira montada" },
+      { code: "11.1", description: "Sanita de louça vitrificada branca, autoclismo dual 3/6 L, assento, ligações e ensaio; saída conforme projecto; ou equivalente aprovado", unit: "un", composition: "Sanita completa montada (com autoclismo)" },
+      { code: "11.2", description: "Lavatório de louça vitrificada 50–60 cm com torneira monocomando, sifão, ligações e ensaio; pedestal/suporte conforme projecto; ou equivalente", unit: "un", composition: "Lavatório com torneira montado" },
+      { code: "11.3", description: "Misturadora de duche cromada, ligações 1/2 polegada, chuveiro, flexível, acessórios e ensaio; ou equivalente aprovado", unit: "un", composition: "Chuveiro com misturadora montado" },
+      { code: "11.4", description: "Lava-louça em aço inox AISI 304, cuba e dimensões conforme projecto, torneira monocomando, sifão, ligações e ensaio; ou equivalente", unit: "un", composition: "Pia de cozinha com torneira montada" },
       { code: "11.5", description: "Fornecimento e montagem de tanque de lavandaria com torneira", unit: "un", composition: "Tanque de lavandaria com torneira montado" },
       { code: "11.6", description: "Rede de distribuição interna de água fria em tubo PPR Ø20mm, incluindo acessórios", unit: "ml", composition: "Rede de distribuição de água fria (tubo PPR Ø20mm)" },
       { code: "11.7", description: "Fornecimento e instalação de reservatório de água (500L), incluindo suportes", unit: "un", composition: "Reservatório de água instalado (500L, com suportes)" },
@@ -135,7 +135,13 @@ export const STANDARD_CHAPTERS: TemplateChapter[] = [
 // Gera a estrutura padrão dentro de um documento acabado de criar. As composições são
 // procuradas no catálogo visível à empresa (globais + próprias); se uma composição não
 // existir, o item é criado na mesma com preço vazio (a preencher manualmente).
-export async function generateStandardBoq(documentId: string, companyId: string, zoneId?: string | null, sectionName = "Edifício Principal") {
+export async function generateStandardBoq(
+  documentId: string,
+  companyId: string,
+  zoneId?: string | null,
+  sectionName = "Edifício Principal",
+  includePricing = true,
+) {
   const visibleCompositions = await db
     .select()
     .from(costCompositions)
@@ -175,7 +181,7 @@ export async function generateStandardBoq(documentId: string, companyId: string,
     let itemOrder = 0;
     for (const item of chapter.items) {
       const compositionId = item.composition ? byName.get(item.composition) ?? null : null;
-      const unitPrice = compositionId ? await unitCostOf(compositionId) : null;
+      const unitPrice = compositionId && includePricing ? await unitCostOf(compositionId) : null;
       await db.insert(lineItems).values({
         sectionId: section.id,
         parentId: chapterRow.id,

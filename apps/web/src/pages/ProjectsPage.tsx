@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent, type MouseEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { boqApi, type Project } from "../api/boq";
 import { catalogApi, type PriceZone } from "../api/catalog";
 import { plantsApi, type PlantProcessingProgress, type PlantUploadDiscipline } from "../api/plants";
@@ -7,14 +7,22 @@ import Layout from "../components/Layout";
 import Modal from "../components/Modal";
 import ConfirmDialog from "../components/ConfirmDialog";
 import { IconFolder, IconPlus, IconTrash } from "../components/icons";
+import { UNITS, type Unit } from "@sigo/shared";
+
+type ProjectStartMode = "plantas" | "manual" | "importar";
+type MaterialSpecificationDraft = { name: string; unit: Unit; specification: string };
 
 export default function ProjectsPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const workspace = location.pathname.startsWith("/medicoes") ? "medicoes" : "orcamentos";
   const [projects, setProjects] = useState<Project[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
   const [client, setClient] = useState("");
   const [currency, setCurrency] = useState<"MZN" | "USD">("MZN");
+  const [startMode, setStartMode] = useState<ProjectStartMode>("plantas");
+  const [materialSpecifications, setMaterialSpecifications] = useState<MaterialSpecificationDraft[]>([]);
   const [zoneId, setZoneId] = useState("");
   const [zones, setZones] = useState<PriceZone[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -45,8 +53,19 @@ export default function ProjectsPage() {
     catalogApi.listPriceZones().then(setZones).catch(() => {});
   }, []);
 
+  useEffect(() => {
+    setStartMode(workspace === "medicoes" ? "plantas" : "manual");
+    setShowForm(false);
+    setQuery("");
+  }, [workspace]);
+
   const zoneName = (id: string | null) => zones.find((z) => z.id === id)?.name;
-  const filteredProjects = projects.filter((project) =>
+  const workspaceProjects = projects.filter((project) =>
+    workspace === "medicoes"
+      ? project.projectType === "medicao" || project.projectType === "hibrido"
+      : project.projectType === "orcamento" || project.projectType === "hibrido",
+  );
+  const filteredProjects = workspaceProjects.filter((project) =>
     `${project.name} ${project.client ?? ""} ${zoneName(project.zoneId) ?? ""}`.toLocaleLowerCase("pt").includes(query.toLocaleLowerCase("pt")),
   );
 
@@ -73,16 +92,21 @@ export default function ProjectsPage() {
   async function handleCreate(e: FormEvent) {
     e.preventDefault();
     const form = e.currentTarget as HTMLFormElement;
-    const completeFile = (form.elements.namedItem("completeProjectFile") as HTMLInputElement | null)?.files?.[0];
-    const architectureFile = (form.elements.namedItem("architectureFile") as HTMLInputElement | null)?.files?.[0];
-    const structuralFile = (form.elements.namedItem("structuralFile") as HTMLInputElement | null)?.files?.[0];
+    const completeFile = workspace === "medicoes" && startMode === "plantas" ? (form.elements.namedItem("completeProjectFile") as HTMLInputElement | null)?.files?.[0] : undefined;
+    const architectureFile = workspace === "medicoes" && startMode === "plantas" ? (form.elements.namedItem("architectureFile") as HTMLInputElement | null)?.files?.[0] : undefined;
+    const structuralFile = workspace === "medicoes" && startMode === "plantas" ? (form.elements.namedItem("structuralFile") as HTMLInputElement | null)?.files?.[0] : undefined;
+    const measurementsFile = workspace === "orcamentos" && startMode === "importar" ? (form.elements.namedItem("measurementsFile") as HTMLInputElement | null)?.files?.[0] : undefined;
     setError(null);
     if (completeFile && (architectureFile || structuralFile)) {
       setError("Escolha o projecto completo ou os ficheiros separados — não é necessário enviar os dois formatos ao mesmo tempo.");
       return;
     }
+    if (startMode === "importar" && !measurementsFile) {
+      setError("Seleccione o ficheiro Excel com as medições.");
+      return;
+    }
     setCreating(true);
-    setCreateProgress("A criar projecto...");
+    setCreateProgress(workspace === "medicoes" ? "A criar medição..." : "A criar orçamento...");
     const technicalFiles: { file: File; discipline: PlantUploadDiscipline; label: string }[] = completeFile
       ? [{ file: completeFile, discipline: "auto", label: "projecto completo" }]
       : [
@@ -92,7 +116,17 @@ export default function ProjectsPage() {
     if (technicalFiles.length) setAnalysisProgress({ percent: 1, filePercent: 0, stage: "A criar o projecto", fileName: technicalFiles[0].file.name, currentFile: 1, totalFiles: technicalFiles.length, currentPage: null, totalPages: null });
     let createdProjectId: string | null = null;
     try {
-      const created = await boqApi.createProject({ name, client: client || undefined, currency, zoneId: zoneId || undefined });
+      const created = await boqApi.createProject({
+        name,
+        client: client || undefined,
+        currency,
+        zoneId: zoneId || undefined,
+        projectType: workspace === "medicoes" ? "medicao" : "orcamento",
+        measurementMode: startMode,
+        materialSpecifications: materialSpecifications
+          .filter((item) => item.name.trim())
+          .map((item) => ({ ...item, name: item.name.trim(), specification: item.specification.trim() || undefined })),
+      });
       createdProjectId = created.id;
 
       const uploadedPlants = [];
@@ -116,9 +150,15 @@ export default function ProjectsPage() {
         uploadedPlants.push(await plantsApi.upload(created.id, entry.file, entry.discipline, updateProgress));
       }
 
-      // Com plantas, segue directamente para confirmar o que foi extraído; sem plantas, abre a
-      // obra no passo de carregamento. Nunca envia primeiro para a estrutura manual do orçamento.
-      navigate(uploadedPlants.length > 0 ? `/plantas/${uploadedPlants[0].id}` : `/projectos/${created.id}#plantas-do-projecto`);
+      if (startMode === "importar" && measurementsFile && created.defaultDocumentId) {
+        setCreateProgress("A importar medições...");
+        await boqApi.importMeasurements(created.defaultDocumentId, measurementsFile);
+        navigate(`/documentos/${created.defaultDocumentId}`);
+      } else if (startMode === "manual" && created.defaultDocumentId) {
+        navigate(workspace === "medicoes" ? `/documentos/${created.defaultDocumentId}?assistente=1` : `/documentos/${created.defaultDocumentId}`);
+      } else {
+        navigate(uploadedPlants.length > 0 ? `/plantas/${uploadedPlants[0].id}` : `/projectos/${created.id}#plantas-do-projecto`);
+      }
     } catch (err) {
       if (createdProjectId) {
         navigate(`/projectos/${createdProjectId}?uploadErro=1`);
@@ -134,20 +174,27 @@ export default function ProjectsPage() {
 
   return (
     <Layout
-      title="Projectos"
-      subtitle={`${projects.length} projecto(s)`}
+      title={workspace === "medicoes" ? "Medições" : "Orçamentos"}
+      subtitle={workspace === "medicoes"
+        ? `${workspaceProjects.length} trabalho(s) de medição · plantas, memória de cálculo e quantidades`
+        : `${workspaceProjects.length} orçamento(s) · quantidades, composições e preços`}
       actions={
         <button onClick={() => setShowForm((s) => !s)} className="btn btn-primary btn-sm">
           <IconPlus className="w-3.5 h-3.5" />
-          Novo projecto
+          {workspace === "medicoes" ? "Nova medição" : "Novo orçamento"}
         </button>
       }
     >
-      <div className="space-y-5 max-w-6xl">
+      <div className="mx-auto w-full max-w-6xl space-y-5">
         {error && <p className="text-sm text-red-600">{error}</p>}
 
         {showForm && (
-          <Modal title="Novo projecto" subtitle="Identifique a obra e, se já os tiver, carregue os projectos para iniciar a medição automaticamente." onClose={() => !creating && setShowForm(false)} maxWidth="max-w-2xl">
+          <Modal
+            title={workspace === "medicoes" ? "Nova medição" : "Novo orçamento"}
+            subtitle={workspace === "medicoes" ? "Identifique a obra e escolha como obter as quantidades." : "Crie o orçamento ou importe medições já concluídas."}
+            onClose={() => !creating && setShowForm(false)}
+            maxWidth="max-w-2xl"
+          >
             <form onSubmit={handleCreate} className="grid gap-4 sm:grid-cols-2 items-end">
               <div className="sm:col-span-2">
                 <label className="label">Nome do projecto *</label>
@@ -175,15 +222,45 @@ export default function ProjectsPage() {
                   <option value="USD">USD</option>
                 </select>
               </div>
-              <div className="sm:col-span-2 rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <div className="sm:col-span-2">
+                <label className="label">{workspace === "medicoes" ? "Como deseja medir?" : "Origem das quantidades"}</label>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {(workspace === "medicoes"
+                    ? ([
+                        ["plantas", "Ler plantas", "PDF técnico"],
+                        ["manual", "Medir manualmente", "Sem plantas"],
+                      ] as const)
+                    : ([
+                        ["manual", "Criar orçamento", "Introduzir quantidades"],
+                        ["importar", "Importar medições", "Excel externo"],
+                      ] as const)
+                  ).map(([value, label, hint]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setStartMode(value)}
+                      className={`rounded-lg border px-3 py-3 text-left ${startMode === value ? "border-brand-600 bg-brand-50 ring-1 ring-brand-600" : "border-slate-200 bg-white hover:border-slate-300"}`}
+                    >
+                      <strong className="block text-sm text-slate-900">{label}</strong>
+                      <span className="mt-0.5 block text-xs text-slate-500">{hint}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {workspace === "orcamentos" && (
+                <div className="sm:col-span-2 flex flex-col gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900 sm:flex-row sm:items-center sm:justify-between">
+                  <span>Já mediu esta obra no SIGO?</span>
+                  <Link to="/medicoes" onClick={() => setShowForm(false)} className="font-semibold text-blue-800 hover:underline">Abrir Medições e enviar para orçamento →</Link>
+                </div>
+              )}
+              {workspace === "medicoes" && startMode === "plantas" && <div className="sm:col-span-2 rounded-xl border border-slate-200 bg-slate-50 p-4">
                 <div className="mb-3">
-                  <p className="text-sm font-semibold text-slate-900">Projectos técnicos (opcional)</p>
-                  <p className="mt-0.5 text-xs text-slate-500">Envie um PDF completo ou as especialidades separadas. O SIGO identifica e organiza cada uma.</p>
+                  <p className="text-sm font-semibold text-slate-900">Projectos técnicos</p>
+                  <p className="mt-0.5 text-xs text-slate-500">Envie o conjunto completo ou as especialidades separadas.</p>
                 </div>
                 <div className="mb-4 rounded-lg border border-blue-200 bg-white p-3">
                   <label className="label">Projecto completo ou conjunto de especialidades (PDF)</label>
                   <input type="file" name="completeProjectFile" accept="application/pdf" disabled={creating} className="input py-1.5 file:mr-2 file:rounded-md file:border-0 file:bg-blue-50 file:px-2 file:py-1 file:text-xs file:text-blue-800" />
-                  <p className="mt-1.5 text-[11px] text-slate-500">Recomendado para conjuntos de pranchas. O original é preservado.</p>
                 </div>
                 <div className="mb-3 flex items-center gap-3 text-[11px] font-semibold uppercase tracking-wide text-slate-400"><span className="h-px flex-1 bg-slate-200" /><span>ou carregue separadamente</span><span className="h-px flex-1 bg-slate-200" /></div>
                 <div className="grid gap-3 sm:grid-cols-2">
@@ -196,51 +273,80 @@ export default function ProjectsPage() {
                     <input type="file" name="structuralFile" accept="application/pdf" disabled={creating} className="input py-1.5 file:mr-2 file:rounded-md file:border-0 file:bg-white file:px-2 file:py-1 file:text-xs" />
                   </div>
                 </div>
-              </div>
+              </div>}
+              {startMode === "manual" && (
+                <div className="sm:col-span-2 rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+                  {workspace === "medicoes"
+                    ? "A medição abrirá sem preços para introduzir áreas, comprimentos e quantidades."
+                    : "O orçamento abrirá com a estrutura de trabalhos para introduzir quantidades e aplicar preços."}
+                </div>
+              )}
+              {startMode === "importar" && (
+                <div className="sm:col-span-2 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <label className="label">Medições em Excel *</label>
+                  <input type="file" name="measurementsFile" accept=".xlsx,.xls" disabled={creating} className="input py-1.5 file:mr-2 file:rounded-md file:border-0 file:bg-white file:px-2 file:py-1 file:text-xs" />
+                  <p className="mt-1.5 text-xs text-slate-500">O sistema associa as quantidades aos códigos do Mapa de Quantidades.</p>
+                </div>
+              )}
+              <details className="sm:col-span-2 rounded-lg border border-slate-200 bg-white">
+                <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-800">Materiais definidos nas especificações</summary>
+                <div className="space-y-3 border-t border-slate-100 p-4">
+                  {materialSpecifications.map((item, index) => (
+                    <div key={index} className="grid gap-2 sm:grid-cols-[1fr_7rem_1.2fr_auto]">
+                      <input aria-label="Material" value={item.name} onChange={(event) => setMaterialSpecifications((rows) => rows.map((row, rowIndex) => rowIndex === index ? { ...row, name: event.target.value } : row))} className="input" placeholder="Material" />
+                      <select aria-label="Unidade" value={item.unit} onChange={(event) => setMaterialSpecifications((rows) => rows.map((row, rowIndex) => rowIndex === index ? { ...row, unit: event.target.value as Unit } : row))} className="input">
+                        {UNITS.map((unit) => <option key={unit} value={unit}>{unit}</option>)}
+                      </select>
+                      <input aria-label="Especificação" value={item.specification} onChange={(event) => setMaterialSpecifications((rows) => rows.map((row, rowIndex) => rowIndex === index ? { ...row, specification: event.target.value } : row))} className="input" placeholder="Classe, marca ou norma" />
+                      <button type="button" onClick={() => setMaterialSpecifications((rows) => rows.filter((_, rowIndex) => rowIndex !== index))} className="icon-btn-danger" aria-label="Remover material"><IconTrash className="h-4 w-4" /></button>
+                    </div>
+                  ))}
+                  <button type="button" onClick={() => setMaterialSpecifications((rows) => [...rows, { name: "", unit: "un", specification: "" }])} className="btn btn-secondary btn-sm">
+                    <IconPlus className="h-3.5 w-3.5" /> Adicionar material
+                  </button>
+                  <p className="text-xs text-slate-500">Materiais existentes são reutilizados. Os novos entram no Catálogo com preço pendente de cotação.</p>
+                </div>
+              </details>
               <div className="sm:col-span-2 flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-4">
               {creating && analysisProgress && (
                 <div className="w-full rounded-xl border border-blue-100 bg-blue-50/70 p-4 mb-1" aria-live="polite">
                   <div className="flex items-start justify-between gap-4"><div><p className="text-sm font-semibold text-blue-950">{analysisProgress.stage}</p><p className="mt-0.5 text-xs text-blue-800/70 truncate">Ficheiro {analysisProgress.currentFile} de {analysisProgress.totalFiles} · {analysisProgress.fileName}{analysisProgress.currentPage && analysisProgress.totalPages ? ` · página ${analysisProgress.currentPage} de ${analysisProgress.totalPages}` : ""}</p></div><strong className="text-2xl tabular-nums text-blue-950">{analysisProgress.percent}%</strong></div>
-                  <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-blue-100" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={analysisProgress.percent}><div className="h-full rounded-full bg-blue-600 transition-[width] duration-300" style={{ width: `${analysisProgress.percent}%` }} /></div>
+                  <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-blue-100" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={analysisProgress.percent}><div className="h-full rounded-full bg-blue-600" style={{ width: `${analysisProgress.percent}%` }} /></div>
                   {analysisProgress.totalFiles > 1 && <p className="mt-2 text-[11px] text-blue-800/65">Este ficheiro: {analysisProgress.filePercent}% · progresso total considera os {analysisProgress.totalFiles} ficheiros.</p>}
                 </div>
               )}
               <button type="button" onClick={() => setShowForm(false)} disabled={creating} className="btn btn-secondary">Cancelar</button>
               <button type="submit" disabled={creating} className="btn btn-primary min-w-44">
-                {creating ? analysisProgress ? `${analysisProgress.percent}% concluído` : createProgress : "Criar projecto"}
+                {creating ? analysisProgress ? `${analysisProgress.percent}% concluído` : createProgress : workspace === "medicoes" ? "Criar medição" : "Criar orçamento"}
               </button>
               </div>
             </form>
-            <details className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
-              <summary className="font-semibold text-slate-700">Como funcionam zona e moeda?</summary>
-              <p className="pt-2 leading-5">A zona selecciona os preços locais do Catálogo. Documentos em moedas diferentes permanecem separados e nunca são convertidos silenciosamente.</p>
-            </details>
           </Modal>
         )}
 
-        {!loading && projects.length > 0 && (
+        {!loading && workspaceProjects.length > 0 && (
           <div className="toolbar">
             <div className="min-w-[240px] flex-1 max-w-md">
-              <label className="label">Pesquisar projectos</label>
+              <label className="label">Pesquisar {workspace === "medicoes" ? "medições" : "orçamentos"}</label>
               <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} className="input" placeholder="Nome, cliente ou zona" />
             </div>
             <div className="flex items-center gap-6 px-2 text-sm">
-              <div><span className="block text-xs text-slate-400">Total</span><strong className="text-slate-900">{projects.length}</strong></div>
-              <div><span className="block text-xs text-slate-400">Em MZN</span><strong className="text-slate-900">{projects.filter((p) => p.currency === "MZN").length}</strong></div>
-              <div><span className="block text-xs text-slate-400">Em USD</span><strong className="text-slate-900">{projects.filter((p) => p.currency === "USD").length}</strong></div>
+              <div><span className="block text-xs text-slate-400">Total</span><strong className="text-slate-900">{workspaceProjects.length}</strong></div>
+              <div><span className="block text-xs text-slate-400">Em MZN</span><strong className="text-slate-900">{workspaceProjects.filter((p) => p.currency === "MZN").length}</strong></div>
+              <div><span className="block text-xs text-slate-400">Em USD</span><strong className="text-slate-900">{workspaceProjects.filter((p) => p.currency === "USD").length}</strong></div>
             </div>
           </div>
         )}
 
         {loading ? (
           <p className="text-sm text-gray-400 py-8 text-center">A carregar...</p>
-        ) : projects.length === 0 && !showForm ? (
+        ) : workspaceProjects.length === 0 && !showForm ? (
           <div className="card p-12 text-center">
             <IconFolder className="w-10 h-10 mx-auto text-gray-300 mb-3" />
-            <p className="text-gray-500 mb-4">Ainda não há projectos. Crie o primeiro para começar a orçamentar.</p>
+            <p className="text-gray-500 mb-4">{workspace === "medicoes" ? "Ainda não há medições. Crie a primeira para obter quantidades a partir das plantas." : "Ainda não há orçamentos. Crie um ou envie uma medição concluída."}</p>
             <button onClick={() => setShowForm(true)} className="btn btn-primary">
               <IconPlus className="w-4 h-4" />
-              Criar projecto
+              {workspace === "medicoes" ? "Criar medição" : "Criar orçamento"}
             </button>
           </div>
         ) : (
@@ -262,7 +368,7 @@ export default function ProjectsPage() {
                 <button onClick={(e) => handleDelete(e, p.id, p.name)} className="icon-btn-danger mr-3 sm:mr-4" title={`Eliminar ${p.name}`} aria-label={`Eliminar ${p.name}`}><IconTrash className="h-3.5 w-3.5" /></button>
               </div>
             ))}
-            {filteredProjects.length === 0 && <p className="px-5 py-10 text-center text-sm text-slate-500">Nenhum projecto corresponde à pesquisa.</p>}
+            {workspaceProjects.length > 0 && filteredProjects.length === 0 && <p className="px-5 py-10 text-center text-sm text-slate-500">Nenhum projecto corresponde à pesquisa.</p>}
           </div>
         )}
       </div>

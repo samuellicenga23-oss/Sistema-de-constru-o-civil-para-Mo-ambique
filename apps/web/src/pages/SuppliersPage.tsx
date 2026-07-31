@@ -1,9 +1,10 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { suppliersApi, type Supplier } from "../api/suppliers";
 import SupplierMaterialsModal from "../components/SupplierMaterialsModal";
 import Layout from "../components/Layout";
 import Modal from "../components/Modal";
 import ConfirmDialog from "../components/ConfirmDialog";
+import PageSearch from "../components/PageSearch";
 import { IconPlus, IconTrash, IconUsers } from "../components/icons";
 
 export default function SuppliersPage() {
@@ -13,6 +14,7 @@ export default function SuppliersPage() {
   const [saving, setSaving] = useState(false);
   const [materialsModalSupplier, setMaterialsModalSupplier] = useState<Supplier | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Supplier | null>(null);
+  const [query, setQuery] = useState("");
 
   const [name, setName] = useState("");
   const [contact, setContact] = useState("");
@@ -26,6 +28,16 @@ export default function SuppliersPage() {
   useEffect(() => {
     reload().catch((err) => setError(err.message));
   }, []);
+
+  const filteredSuppliers = useMemo(() => {
+    const needle = query.trim().toLocaleLowerCase("pt");
+    if (!needle) return suppliers;
+    return suppliers.filter((supplier) =>
+      [supplier.name, supplier.contact, supplier.location, supplier.nuit]
+        .filter(Boolean)
+        .some((value) => String(value).toLocaleLowerCase("pt").includes(needle)),
+    );
+  }, [query, suppliers]);
 
   async function handleCreate(e: FormEvent) {
     e.preventDefault();
@@ -63,20 +75,32 @@ export default function SuppliersPage() {
   }
 
   return (
-    <Layout title="Fornecedores" subtitle="Cadastro de fornecedores da empresa — materiais e preços ligados ao Catálogo de Preços">
-      <div className="max-w-4xl">
+    <Layout
+      title="Fornecedores"
+      subtitle="Directório de empresas, contactos e cotações usadas nas compras"
+      actions={<button onClick={() => setShowForm(true)} className="btn btn-primary btn-sm"><IconPlus className="h-3.5 w-3.5" /> Novo fornecedor</button>}
+    >
+      <div className="mx-auto w-full max-w-7xl space-y-5">
         {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
 
-        <section className="card">
-          <div className="flex items-center justify-between px-5 pt-4 pb-2 border-b border-gray-100">
-            <div className="flex items-center gap-2">
-              <IconUsers className="w-4 h-4 text-brand-700" />
-              <h2 className="section-title text-base">Fornecedores</h2>
+        <section className="grid gap-3 sm:grid-cols-3">
+          <div className="card card-pad"><span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Fornecedores</span><strong className="mt-1 block text-2xl text-slate-950">{suppliers.length}</strong></div>
+          <div className="card card-pad"><span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Com contacto</span><strong className="mt-1 block text-2xl text-slate-950">{suppliers.filter((supplier) => supplier.contact).length}</strong></div>
+          <div className="card card-pad"><span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Com NUIT</span><strong className="mt-1 block text-2xl text-slate-950">{suppliers.filter((supplier) => supplier.nuit).length}</strong></div>
+        </section>
+
+        <section className="card overflow-hidden">
+          <div className="border-b border-slate-200 p-4 sm:p-5">
+            <div className="mb-4 flex items-center gap-2">
+              <IconUsers className="h-4 w-4 text-brand-700" />
+              <div><h2 className="section-title text-base">Directório de fornecedores</h2><p className="mt-0.5 text-xs text-slate-500">Seleccione um fornecedor para gerir os recursos e preços que pode fornecer.</p></div>
             </div>
-            <button onClick={() => setShowForm((s) => !s)} className="btn btn-secondary btn-sm">
-              <IconPlus className="w-3.5 h-3.5" />
-              Adicionar
-            </button>
+            <PageSearch
+              value={query}
+              onChange={setQuery}
+              placeholder="Pesquisar por nome, contacto, localização ou NUIT…"
+              resultLabel={`${filteredSuppliers.length} resultado(s)`}
+            />
           </div>
 
           {showForm && (
@@ -108,33 +132,36 @@ export default function SuppliersPage() {
             </Modal>
           )}
 
-          <ul>
-            {suppliers.map((s) => (
-              <li key={s.id} className="table-row group flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-                <div className="min-w-0">
-                  <p className="font-medium text-gray-900">{s.name}</p>
-                  <p className="mt-0.5 break-words text-xs text-gray-500">
-                    {[s.contact, s.location, s.nuit ? `NUIT ${s.nuit}` : null].filter(Boolean).join(" · ") || "Sem dados de contacto"}
-                  </p>
+          <div className="grid gap-px bg-slate-200 sm:grid-cols-2 xl:grid-cols-3">
+            {filteredSuppliers.map((supplier) => (
+              <article key={supplier.id} className="flex min-w-0 flex-col bg-white p-5">
+                <div className="flex items-start gap-3">
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-slate-100 text-sm font-bold text-slate-700">{supplier.name.trim().slice(0, 2).toUpperCase()}</span>
+                  <div className="min-w-0">
+                    <h3 className="break-words font-semibold text-slate-950">{supplier.name}</h3>
+                    <p className="mt-1 text-xs text-slate-500">{supplier.location || "Localização por definir"}</p>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2 sm:shrink-0">
-                  <button onClick={() => setMaterialsModalSupplier(s)} className="btn btn-secondary btn-sm flex-1 sm:flex-none">
-                    Gerir materiais e preços
+                <dl className="mt-4 space-y-2 border-t border-slate-100 pt-4 text-xs">
+                  <div className="flex justify-between gap-3"><dt className="text-slate-500">Contacto</dt><dd className="break-all text-right font-medium text-slate-700">{supplier.contact || "Por definir"}</dd></div>
+                  <div className="flex justify-between gap-3"><dt className="text-slate-500">NUIT</dt><dd className="text-right font-medium text-slate-700">{supplier.nuit || "Por definir"}</dd></div>
+                </dl>
+                <div className="mt-auto flex items-center gap-2 pt-5">
+                  <button onClick={() => setMaterialsModalSupplier(supplier)} className="btn btn-secondary btn-sm flex-1">
+                    Ver recursos e preços
                   </button>
-                  <button
-                    onClick={() => setPendingDelete(s)}
-                    className="icon-btn-danger"
-                    title="Eliminar fornecedor"
-                  >
-                    <IconTrash className="w-3.5 h-3.5" />
+                  <button onClick={() => setPendingDelete(supplier)} className="icon-btn-danger" title="Eliminar fornecedor">
+                    <IconTrash className="h-3.5 w-3.5" />
                   </button>
                 </div>
-              </li>
+              </article>
             ))}
-            {suppliers.length === 0 && !showForm && (
-              <li className="px-5 py-6 text-sm text-gray-400 text-center">Sem fornecedores ainda — adicione o primeiro acima.</li>
+            {filteredSuppliers.length === 0 && !showForm && (
+              <div className="bg-white px-5 py-10 text-center text-sm text-slate-500 sm:col-span-2 xl:col-span-3">
+                {suppliers.length === 0 ? "Ainda não existem fornecedores. Registe o primeiro para começar a comparar cotações." : "Nenhum fornecedor corresponde à pesquisa."}
+              </div>
             )}
-          </ul>
+          </div>
         </section>
 
         {materialsModalSupplier && <SupplierMaterialsModal supplier={materialsModalSupplier} onClose={() => setMaterialsModalSupplier(null)} />}

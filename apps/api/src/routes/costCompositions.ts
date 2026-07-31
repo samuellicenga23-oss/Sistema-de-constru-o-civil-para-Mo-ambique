@@ -194,9 +194,10 @@ export async function costCompositionRoutes(app: FastifyInstance) {
     const [composition] = await db.insert(costCompositions).values({
       ...data,
       companyId,
-      auxiliaryCostPct: data.auxiliaryCostPct.toString(),
-      indirectCostPct: data.indirectCostPct.toString(),
-      profitMarginPct: data.profitMarginPct.toString(),
+      // Colunas legadas preservadas para compatibilidade; os custos globais são definidos no orçamento.
+      auxiliaryCostPct: "0",
+      indirectCostPct: "0",
+      profitMarginPct: "0",
     }).returning();
 
     if (labourLines.length) {
@@ -262,9 +263,9 @@ export async function costCompositionRoutes(app: FastifyInstance) {
 
     await db.update(costCompositions).set({
       ...data,
-      auxiliaryCostPct: data.auxiliaryCostPct.toString(),
-      indirectCostPct: data.indirectCostPct.toString(),
-      profitMarginPct: data.profitMarginPct.toString(),
+      auxiliaryCostPct: "0",
+      indirectCostPct: "0",
+      profitMarginPct: "0",
       version: target.version + 1,
       updatedAt: new Date(),
     }).where(eq(costCompositions.id, targetId));

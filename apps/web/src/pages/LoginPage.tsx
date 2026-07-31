@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth, ApiError } from "../auth/AuthContext";
+import { LogoMark } from "../components/Logo";
 
 // Mensagens para os códigos de erro que a API devolve via query string depois de um callback do
 // Google mal sucedido (não há forma de devolver JSON num redirect de browser completo).
@@ -54,7 +55,7 @@ export default function LoginPage() {
       {/* Painel de marca */}
       <div className="hidden lg:flex flex-col justify-between text-white p-14 xl:p-20">
         <Link to="/" className="flex items-center gap-3">
-          <span className="grid h-10 w-10 place-items-center rounded-lg bg-[#e86f25] text-white text-lg font-black">S</span>
+          <LogoMark className="h-10 w-10" />
           <div>
             <p className="text-2xl font-black tracking-[0.2em]">SIGO</p>
             <p className="text-[9px] uppercase tracking-[0.14em] text-slate-400">Sistema Integrado de Gestão de Obras</p>
@@ -68,7 +69,7 @@ export default function LoginPage() {
           <div className="mt-8 space-y-3 text-sm text-slate-200">
             {["Planeamento e orçamento", "Acompanhamento da execução", "Controlo de custos e compras"].map((item) => (
               <div key={item} className="flex items-center gap-3">
-                <span className="grid h-5 w-5 place-items-center rounded-full bg-white/10 text-[#f59b5f] text-xs">✓</span>
+                <span className="grid h-5 w-5 place-items-center rounded-full bg-white/10 text-[#1AADB4] text-xs">✓</span>
                 <span>{item}</span>
               </div>
             ))}
@@ -80,7 +81,8 @@ export default function LoginPage() {
       {/* Formulário */}
       <div className="flex items-center justify-center bg-[#f4f6f8] px-6 py-12">
         <div className="w-full max-w-md">
-          <div className="lg:hidden text-center mb-6">
+          <div className="lg:hidden flex items-center justify-center gap-2.5 mb-6">
+            <LogoMark className="h-8 w-8" />
             <p className="text-2xl font-black tracking-[0.18em] text-brand-950">SIGO</p>
           </div>
           <div className="rounded-xl border border-slate-200 bg-white p-7 md:p-9 shadow-sm">

@@ -30,11 +30,11 @@ const CERT_STATUS_LABELS: Record<string, string> = { rascunho: "Rascunho", subme
 const CERT_STATUS_TONE: Record<string, string> = { rascunho: "badge-gray", submetido: "badge-yellow", aprovado: "badge-green" };
 
 const OPERATION_FLOW = [
-  { step: "01", label: "Preços e composições", detail: "Base de custo", to: "/catalogo" },
-  { step: "02", label: "Projectos e orçamento", detail: "Quantidades e margem", to: "/projectos" },
-  { step: "03", label: "Cronograma", detail: "Prazo e necessidades", to: "/projectos" },
-  { step: "04", label: "Compras e campo", detail: "Execução real", to: "/projectos" },
-  { step: "05", label: "Autos e financeiro", detail: "Validação e resultado", to: "/projectos" },
+  { step: "01", label: "Medir", detail: "Plantas e quantidades", to: "/medicoes" },
+  { step: "02", label: "Orçamentar", detail: "Composições e margem", to: "/orcamentos" },
+  { step: "03", label: "Planear", detail: "Cronograma e necessidades", to: "/orcamentos" },
+  { step: "04", label: "Comprar e executar", detail: "Stock e campo", to: "/orcamentos" },
+  { step: "05", label: "Certificar", detail: "Autos e financeiro", to: "/orcamentos" },
 ];
 
 function StatCard({ label, value, icon, tint }: { label: string; value: string | number; icon: ReactNode; tint: string }) {
@@ -88,9 +88,9 @@ export default function DashboardPage() {
       title="Visão geral"
       subtitle="Estado das obras, decisões pendentes e desempenho"
       actions={
-        <Link to="/projectos" className="btn btn-primary btn-sm">
+        <Link to="/medicoes" className="btn btn-primary btn-sm">
           <IconPlus className="w-3.5 h-3.5" />
-          Novo projecto
+          Nova medição
         </Link>
       }
     >
@@ -192,16 +192,16 @@ export default function DashboardPage() {
             <section className="card">
               <div className="flex items-center justify-between px-5 pt-4 pb-2 border-b border-gray-100">
                 <h2 className="section-title text-base">Projectos por valor orçamentado</h2>
-                <Link to="/projectos" className="action-link">
+                <Link to="/orcamentos" className="action-link">
                   Ver todos →
                 </Link>
               </div>
               {data.projects.length === 0 ? (
                 <div className="p-10 text-center">
                   <p className="text-gray-500 mb-3">Ainda não há projectos.</p>
-                  <Link to="/projectos" className="btn btn-primary">
+                  <Link to="/orcamentos" className="btn btn-primary">
                     <IconPlus className="w-4 h-4" />
-                    Criar o primeiro projecto
+                    Criar o primeiro orçamento
                   </Link>
                 </div>
               ) : (

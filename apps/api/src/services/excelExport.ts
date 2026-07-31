@@ -62,7 +62,7 @@ function writeNode(ws: ExcelJS.Worksheet, node: LineItemNode, row: number, depth
   if (node.kind === "item") {
     r.getCell(3).value = node.unit ?? "";
     r.getCell(4).value = node.quantity ?? 0;
-    r.getCell(5).value = node.unitPrice ?? 0;
+    r.getCell(5).value = node.sellingUnitPrice ?? node.unitPrice ?? 0;
     r.getCell(6).value = { formula: `D${row}*E${row}` } as ExcelJS.CellFormulaValue;
   }
   if (node.kind === "capitulo" || node.kind === "grupo") {
@@ -150,8 +150,8 @@ export async function buildBudgetDocumentExcel(summary: BudgetDocumentSummary): 
   row++;
 
   const subtotal2Row = row;
-  resumo.getRow(row).getCell(2).value = "Subtotal 2";
-  resumo.getRow(row).getCell(6).value = { formula: `F${contingRow}+F${subtotal1Row}` } as ExcelJS.CellFormulaValue;
+  resumo.getRow(row).getCell(2).value = "Base tributável";
+  resumo.getRow(row).getCell(6).value = { formula: `F${subtotal1Row}+F${contingRow}` } as ExcelJS.CellFormulaValue;
   resumo.getRow(row).font = { bold: true };
   row++;
 
@@ -168,6 +168,45 @@ export async function buildBudgetDocumentExcel(summary: BudgetDocumentSummary): 
 
   await writeMeasurementsSheet(workbook, summary);
 
+  return workbook.xlsx.writeBuffer();
+}
+
+// Exportação técnica: mantém apenas código, descrição, unidade e quantidade. Não transporta
+// preços, margens, IVA ou qualquer outra informação comercial para fora da medição.
+export async function buildMeasurementDocumentExcel(summary: BudgetDocumentSummary): Promise<ExcelJS.Buffer> {
+  const workbook = new ExcelJS.Workbook();
+  const ws = workbook.addWorksheet("QUANTIDADES");
+  ws.columns = [{ width: 12 }, { width: 65 }, { width: 10 }, { width: 16 }];
+  ws.getCell("A1").value = "MAPA DE MEDIÇÕES E QUANTIDADES";
+  ws.getCell("A2").value = sanitizeExcelText(summary.document.title);
+  ws.getRow(1).font = { bold: true, size: 13 };
+  ws.getRow(4).values = ["ITEM", "DESCRIÇÃO", "UN", "QUANTIDADE"];
+  ws.getRow(4).font = { bold: true };
+  ws.getRow(4).eachCell((cell) => (cell.border = { bottom: { style: "thin" } }));
+
+  let row = 5;
+  const writeQuantityNode = (node: LineItemNode, depth: number) => {
+    const current = ws.getRow(row++);
+    current.getCell(1).value = node.code ?? "";
+    current.getCell(2).value = sanitizeExcelText(node.description);
+    current.getCell(2).alignment = { indent: depth };
+    if (node.kind === "item") {
+      current.getCell(3).value = node.unit ?? "";
+      current.getCell(4).value = node.quantity ?? 0;
+    } else if (node.kind === "capitulo" || node.kind === "grupo") {
+      current.font = { bold: true };
+    }
+    node.children.forEach((child) => writeQuantityNode(child, depth + 1));
+  };
+
+  for (const section of summary.sections) {
+    const sectionRow = ws.getRow(row++);
+    sectionRow.getCell(2).value = sanitizeExcelText(section.name.toUpperCase());
+    sectionRow.font = { bold: true };
+    section.items.forEach((node) => writeQuantityNode(node, 0));
+    row++;
+  }
+  await writeMeasurementsSheet(workbook, summary);
   return workbook.xlsx.writeBuffer();
 }
 

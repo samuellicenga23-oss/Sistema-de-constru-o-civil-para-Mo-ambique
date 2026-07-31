@@ -1,10 +1,10 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { budgetDocuments, budgetSections, lineItems, measurementCertificates } from "../db/schema.js";
+import { budgetDocuments, budgetSections, lineItems, measurementCertificates, projects } from "../db/schema.js";
 import { requireCompanyUser, requireRole } from "../auth/middleware.js";
-import { getBudgetDocumentSummary } from "../services/boqEngine.js";
+import { getBudgetDocumentSummary, hideInternalPricing } from "../services/boqEngine.js";
 import { computeCompositionUnitCost } from "../services/costEngine.js";
 import {
   assertProjectOwned,
@@ -32,7 +32,11 @@ const documentSchema = z.object({
   documentDate: z.string().optional(),
   ivaRate: z.number().min(0).max(1).default(DEFAULT_IVA_RATE),
   contingenciasRate: z.number().min(0).max(1).default(0.1),
+  siteCostsRate: z.number().min(0).max(1).default(0),
+  indirectCostsRate: z.number().min(0).max(1).default(0),
+  profitMarginRate: z.number().min(0).max(1).default(0),
   template: z.enum(["padrao", "vazio"]).default("padrao"),
+  documentType: z.enum(["medicao", "orcamento"]).default("orcamento"),
 });
 
 const sectionSchema = z.object({ name: z.string().min(1), sortOrder: z.number().int().default(0) });
@@ -68,7 +72,7 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
 
     const parsed = documentSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
-    const { ivaRate, contingenciasRate, template, ...rest } = parsed.data;
+    const { ivaRate, contingenciasRate, siteCostsRate, indirectCostsRate, profitMarginRate, template, ...rest } = parsed.data;
 
     // As composições do catálogo e os preços por zona são actualmente mantidos em MZN.
     // Nunca criar uma estrutura automática rotulada USD sem uma taxa de câmbio explícita:
@@ -81,7 +85,15 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
 
     const [document] = await db
       .insert(budgetDocuments)
-      .values({ ...rest, projectId, ivaRate: ivaRate.toString(), contingenciasRate: contingenciasRate.toString() })
+      .values({
+        ...rest,
+        projectId,
+        ivaRate: ivaRate.toString(),
+        contingenciasRate: contingenciasRate.toString(),
+        siteCostsRate: siteCostsRate.toString(),
+        indirectCostsRate: indirectCostsRate.toString(),
+        profitMarginRate: profitMarginRate.toString(),
+      })
       .returning();
 
     if (template === "padrao") {
@@ -95,7 +107,131 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
     const companyId = companyIdOf(request);
     const document = await assertDocumentOwned(id, companyId);
     if (!document) return reply.code(404).send({ error: "Documento não encontrado" });
-    return getBudgetDocumentSummary(id);
+    const summary = await getBudgetDocumentSummary(id);
+    return summary && request.currentUser!.role === "visualizador" ? hideInternalPricing(summary) : summary;
+  });
+
+  // Fluxo de aprovação do orçamento — mesma máquina de estados dos Autos de Medição
+  // (rascunho → submetido → aprovado, com devolução possível de submetido para rascunho).
+  // Um orçamento aprovado bloqueia o reprice automático (ver POST .../reprice) e passa a ser a
+  // referência usada pelo cronograma e pelos Autos de Medição desse documento.
+  app.patch("/api/budget-documents/:id/status", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const companyId = companyIdOf(request);
+    const document = await assertDocumentOwned(id, companyId);
+    if (!document) return reply.code(404).send({ error: "Documento não encontrado" });
+
+    const parsed = z.object({ status: z.enum(["rascunho", "submetido", "aprovado"]) }).safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+
+    const transitions: Record<typeof document.status, (typeof document.status)[]> = {
+      rascunho: ["submetido"],
+      submetido: ["rascunho", "aprovado"],
+      aprovado: [],
+    };
+    if (parsed.data.status !== document.status && !transitions[document.status].includes(parsed.data.status)) {
+      return reply.code(409).send({ error: `O documento em ${document.status} não pode passar para ${parsed.data.status}` });
+    }
+
+    const [updated] = await db.update(budgetDocuments).set({ status: parsed.data.status }).where(eq(budgetDocuments.id, id)).returning();
+    return updated;
+  });
+
+  // Entrega formal da medição ao orçamento. A medição original permanece intacta e continua
+  // exportável; o orçamento recebe uma cópia das quantidades e calcula os custos a partir das
+  // composições/cotações actualmente aplicáveis à zona da obra.
+  app.post("/api/budget-documents/:id/create-budget", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const companyId = companyIdOf(request);
+    const source = await assertDocumentOwned(id, companyId);
+    if (!source) return reply.code(404).send({ error: "Medição não encontrada" });
+    if (source.documentType !== "medicao") {
+      return reply.code(409).send({ error: "Só documentos de medição podem ser enviados para orçamento." });
+    }
+
+    const [existing] = await db
+      .select()
+      .from(budgetDocuments)
+      .where(and(eq(budgetDocuments.projectId, source.projectId), eq(budgetDocuments.sourceMeasurementDocumentId, id)))
+      .limit(1);
+    if (existing) return { document: existing, created: false };
+
+    const project = await assertProjectOwned(source.projectId, companyId);
+    if (!project) return reply.code(404).send({ error: "Projecto não encontrado" });
+    const sourceSections = await db.select().from(budgetSections).where(eq(budgetSections.documentId, id)).orderBy(budgetSections.sortOrder);
+    const sourceItems = sourceSections.length
+      ? await db.select().from(lineItems).where(inArray(lineItems.sectionId, sourceSections.map((section) => section.id))).orderBy(lineItems.sortOrder)
+      : [];
+
+    const computedPrices = new Map<string, number | null>();
+    for (const item of sourceItems) {
+      if (!item.compositionId || item.kind !== "item") {
+        computedPrices.set(item.id, null);
+        continue;
+      }
+      try {
+        const breakdown = await computeCompositionUnitCost(item.compositionId, companyId, project.zoneId);
+        computedPrices.set(item.id, breakdown.unitCost);
+      } catch {
+        computedPrices.set(item.id, null);
+      }
+    }
+
+    const target = await db.transaction(async (tx) => {
+      const [created] = await tx
+        .insert(budgetDocuments)
+        .values({
+          projectId: source.projectId,
+          title: `Orçamento — ${project.name}`,
+          documentType: "orcamento",
+          sourceMeasurementDocumentId: source.id,
+          revision: "0",
+          currency: "MZN",
+          ivaRate: project.ivaRate,
+          contingenciasRate: project.contingenciasRate,
+          siteCostsRate: project.siteCostsRate,
+          indirectCostsRate: project.indirectCostsRate,
+          profitMarginRate: project.profitMarginRate,
+        })
+        .returning();
+
+      for (const sourceSection of sourceSections) {
+        const [targetSection] = await tx
+          .insert(budgetSections)
+          .values({ documentId: created.id, name: sourceSection.name, sortOrder: sourceSection.sortOrder })
+          .returning();
+
+        const copyLevel = async (sourceParentId: string | null, targetParentId: string | null): Promise<void> => {
+          const siblings = sourceItems.filter((item) => item.sectionId === sourceSection.id && item.parentId === sourceParentId);
+          for (const item of siblings) {
+            const unitPrice = computedPrices.get(item.id) ?? null;
+            const [targetItem] = await tx
+              .insert(lineItems)
+              .values({
+                sectionId: targetSection.id,
+                parentId: targetParentId,
+                kind: item.kind,
+                code: item.code,
+                description: item.description,
+                unit: item.unit,
+                quantity: item.quantity,
+                unitPrice: unitPrice !== null ? unitPrice.toString() : null,
+                compositionId: item.compositionId,
+                origin: item.compositionId ? "composicao" : item.origin,
+                sortOrder: item.sortOrder,
+              })
+              .returning();
+            await copyLevel(item.id, targetItem.id);
+          }
+        };
+        await copyLevel(null, null);
+      }
+
+      await tx.update(projects).set({ projectType: "hibrido" }).where(eq(projects.id, project.id));
+      return created;
+    });
+
+    return reply.code(201).send({ document: target, created: true });
   });
 
   // Actualiza, de forma EXPLÍCITA, os snapshots de preço dos itens ligados a composições.
@@ -196,7 +332,7 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
 
     const parsed = documentSchema.partial().safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
-    const { ivaRate, contingenciasRate, ...rest } = parsed.data;
+    const { ivaRate, contingenciasRate, siteCostsRate, indirectCostsRate, profitMarginRate, ...rest } = parsed.data;
 
     const [row] = await db
       .update(budgetDocuments)
@@ -204,6 +340,9 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
         ...rest,
         ivaRate: ivaRate !== undefined ? ivaRate.toString() : undefined,
         contingenciasRate: contingenciasRate !== undefined ? contingenciasRate.toString() : undefined,
+        siteCostsRate: siteCostsRate !== undefined ? siteCostsRate.toString() : undefined,
+        indirectCostsRate: indirectCostsRate !== undefined ? indirectCostsRate.toString() : undefined,
+        profitMarginRate: profitMarginRate !== undefined ? profitMarginRate.toString() : undefined,
       })
       .where(eq(budgetDocuments.id, id))
       .returning();

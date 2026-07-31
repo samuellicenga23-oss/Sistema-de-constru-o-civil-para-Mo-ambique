@@ -1,6 +1,8 @@
 import { eq, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { budgetDocuments, budgetSections, lineItems } from "../db/schema.js";
+import { calculateBudgetTotals } from "./budgetTotals.js";
+import { technicalDescription } from "./technicalDescriptions.js";
 
 export type LineItemNode = {
   id: string;
@@ -12,10 +14,12 @@ export type LineItemNode = {
   unit: string | null;
   quantity: number | null;
   unitPrice: number | null;
+  sellingUnitPrice: number | null;
   compositionId: string | null;
   origin: "manual" | "planta" | "composicao";
   sortOrder: number;
   totalPrice: number; // calculado on-the-fly: item = quantidade*preço; capítulo/grupo = soma dos filhos
+  sellingTotalPrice: number;
   children: LineItemNode[];
 };
 
@@ -25,26 +29,71 @@ export type SectionNode = {
   sortOrder: number;
   items: LineItemNode[];
   total: number;
+  sellingTotal: number;
 };
 
 export type BudgetDocumentSummary = {
   document: typeof budgetDocuments.$inferSelect;
   sections: SectionNode[];
   subtotal1: number;
+  siteCosts: number;
+  indirectCosts: number;
+  sellingSubtotal: number;
+  unitPriceFactor: number;
   contingencias: number;
+  profitMargin: number;
   subtotal2: number;
   iva: number;
   total: number;
 };
+
+function clientNode(node: LineItemNode): LineItemNode {
+  return {
+    ...node,
+    unitPrice: node.sellingUnitPrice,
+    totalPrice: node.sellingTotalPrice,
+    children: node.children.map(clientNode),
+  };
+}
+
+/**
+ * Remove a decomposição comercial da resposta destinada ao perfil Visualizador.
+ * O preço contratual continua exacto, mas custos directos, estaleiro, indirectos
+ * e margem não ficam recuperáveis pela interface nem pela resposta JSON.
+ */
+export function hideInternalPricing(summary: BudgetDocumentSummary): BudgetDocumentSummary {
+  return {
+    ...summary,
+    document: {
+      ...summary.document,
+      siteCostsRate: "0",
+      indirectCostsRate: "0",
+      profitMarginRate: "0",
+    },
+    sections: summary.sections.map((section) => ({
+      ...section,
+      total: section.sellingTotal,
+      items: section.items.map(clientNode),
+    })),
+    subtotal1: summary.sellingSubtotal,
+    siteCosts: 0,
+    indirectCosts: 0,
+    profitMargin: 0,
+    unitPriceFactor: 1,
+  };
+}
 
 function buildTree(flatItems: (typeof lineItems.$inferSelect)[]): LineItemNode[] {
   const byId = new Map<string, LineItemNode>();
   for (const item of flatItems) {
     byId.set(item.id, {
       ...item,
+      description: technicalDescription(item.description),
       quantity: item.quantity !== null ? Number(item.quantity) : null,
       unitPrice: item.unitPrice !== null ? Number(item.unitPrice) : null,
+      sellingUnitPrice: null,
       totalPrice: 0,
+      sellingTotalPrice: 0,
       children: [],
     } as LineItemNode);
   }
@@ -98,14 +147,35 @@ export async function getBudgetDocumentSummary(documentId: string): Promise<Budg
   const sectionNodes: SectionNode[] = sections.map((section) => {
     const items = buildTree(allItems.filter((i) => i.sectionId === section.id));
     const total = items.reduce((sum, i) => sum + i.totalPrice, 0);
-    return { id: section.id, name: section.name, sortOrder: section.sortOrder, items, total };
+    return { id: section.id, name: section.name, sortOrder: section.sortOrder, items, total, sellingTotal: 0 };
   });
 
   const subtotal1 = sectionNodes.reduce((sum, s) => sum + s.total, 0);
-  const contingencias = subtotal1 * Number(document.contingenciasRate);
-  const subtotal2 = subtotal1 + contingencias;
-  const iva = subtotal2 * Number(document.ivaRate);
-  const total = subtotal2 + iva;
+  const totals = calculateBudgetTotals(subtotal1, {
+    siteCostsRate: Number(document.siteCostsRate),
+    indirectCostsRate: Number(document.indirectCostsRate),
+    contingenciasRate: Number(document.contingenciasRate),
+    profitMarginRate: Number(document.profitMarginRate),
+    ivaRate: Number(document.ivaRate),
+  });
 
-  return { document, sections: sectionNodes, subtotal1, contingencias, subtotal2, iva, total };
+  function applySellingPrices(node: LineItemNode): number {
+    if (node.kind === "item") {
+      node.sellingUnitPrice = (node.unitPrice ?? 0) * totals.unitPriceFactor;
+      node.sellingTotalPrice = (node.quantity ?? 0) * node.sellingUnitPrice;
+    } else if (node.kind === "nota") {
+      node.sellingUnitPrice = null;
+      node.sellingTotalPrice = 0;
+    } else {
+      node.sellingUnitPrice = null;
+      node.sellingTotalPrice = node.children.reduce((sum, child) => sum + applySellingPrices(child), 0);
+    }
+    return node.sellingTotalPrice;
+  }
+
+  for (const section of sectionNodes) {
+    section.sellingTotal = section.items.reduce((sum, item) => sum + applySellingPrices(item), 0);
+  }
+
+  return { document, sections: sectionNodes, ...totals };
 }

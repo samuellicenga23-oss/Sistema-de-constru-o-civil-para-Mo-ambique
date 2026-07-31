@@ -194,15 +194,16 @@ export async function plantRoutes(app: FastifyInstance) {
       })
       .returning();
 
-    try {
-      await processPlantFile(plant.id, buffer, data.filename);
-      const [updated] = await db.select().from(plants).where(eq(plants.id, plant.id)).limit(1);
-      return reply.code(201).send(updated);
-    } catch (err) {
+    // O upload responde assim que o ficheiro fica gravado — a leitura do PDF corre em segundo
+    // plano e o progresso é consultado via GET /api/plants/:id/status (já usado pelo frontend
+    // para a barra de progresso). Antes disto, o pedido HTTP ficava aberto durante toda a
+    // análise (por vezes minutos), o que em produção esbarra em timeouts do proxy/CloudPanel —
+    // nunca esperar aqui pela leitura inteira antes de responder.
+    processPlantFile(plant.id, buffer, data.filename).catch(async (err) => {
       const message = err instanceof Error ? err.message : "Erro desconhecido a processar a planta";
       await db.update(plants).set({ processingStatus: "erro", processingStage: "Análise interrompida", processingUpdatedAt: new Date(), errorMessage: message }).where(eq(plants.id, plant.id));
-      return reply.code(502).send({ error: `Falha ao processar a planta: ${message}` });
-    }
+    });
+    return reply.code(201).send(plant);
   });
 
   // Reprocessa o mesmo ficheiro já guardado (sem carregar de novo) — útil depois de uma melhoria
@@ -226,7 +227,10 @@ export async function plantRoutes(app: FastifyInstance) {
     }).where(eq(plants.id, id));
     try {
       const buffer = await readFile(plant.filePath);
-      await processPlantFile(id, buffer, plant.originalFileName ?? "planta.pdf");
+      processPlantFile(id, buffer, plant.originalFileName ?? "planta.pdf").catch(async (err) => {
+        const message = err instanceof Error ? err.message : "Erro desconhecido a reprocessar a planta";
+        await db.update(plants).set({ processingStatus: "erro", processingStage: "Análise interrompida", processingUpdatedAt: new Date(), errorMessage: message }).where(eq(plants.id, id));
+      });
       const [updated] = await db.select().from(plants).where(eq(plants.id, id)).limit(1);
       return updated;
     } catch (err) {

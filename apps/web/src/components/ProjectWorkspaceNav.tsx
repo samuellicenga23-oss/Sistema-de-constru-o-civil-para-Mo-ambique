@@ -1,15 +1,16 @@
 import { Link, useLocation } from "react-router-dom";
 import { IconHome, IconClipboard, IconUpload, IconChart } from "./icons";
 
-export default function ProjectWorkspaceNav({ projectId }: { projectId: string }) {
+export default function ProjectWorkspaceNav({ projectId, measurementOnly = false }: { projectId: string; measurementOnly?: boolean }) {
   const location = useLocation();
-  const items = [
+  const allItems = [
     { to: `/projectos/${projectId}`, label: "Visão geral", icon: IconHome, exact: true },
     { to: `/projectos/${projectId}/diario`, label: "Diário de obra", icon: IconClipboard },
     { to: `/projectos/${projectId}/cronograma`, label: "Cronograma", icon: IconChart },
     { to: `/projectos/${projectId}/compras`, label: "Compras e stock", icon: IconUpload },
     { to: `/projectos/${projectId}/financeiro`, label: "Financeiro", icon: IconChart },
   ];
+  const items = measurementOnly ? allItems.slice(0, 1) : allItems;
 
   return (
     <nav aria-label="Áreas do projecto" className="-mt-1 max-w-full overflow-x-auto pb-1 [scrollbar-width:thin]">

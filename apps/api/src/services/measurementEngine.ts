@@ -2,10 +2,13 @@ import { and, desc, eq, inArray, lt } from "drizzle-orm";
 import { db } from "../db/index.js";
 import {
   budgetSections,
+  budgetDocuments,
   lineItems,
   measurementCertificateLines,
   measurementCertificates,
 } from "../db/schema.js";
+import { calculateBudgetTotals } from "./budgetTotals.js";
+import { technicalDescription } from "./technicalDescriptions.js";
 
 async function getLeafItemIds(budgetDocumentId: string): Promise<string[]> {
   const sections = await db.select({ id: budgetSections.id }).from(budgetSections).where(eq(budgetSections.documentId, budgetDocumentId));
@@ -172,6 +175,7 @@ export async function getCertificateDetail(certificateId: string) {
       const periodQty = Number(line.periodQty);
       return {
         ...line,
+        description: technicalDescription(line.description),
         unitPrice,
         budgetedQty,
         cumulativeQty,
@@ -196,14 +200,26 @@ export async function getMeasurementDashboard(budgetDocumentId: string) {
     .limit(1);
   if (!latest) return { hasCertificates: false as const };
   const detail = await getCertificateDetail(latest.id);
-  const previstoTotal = detail!.lines.reduce((sum, line) => sum + (line.budgetedQty ?? 0) * line.unitPrice, 0);
-  const executadoTotal = detail!.lines.reduce((sum, line) => sum + line.cumulativeValue, 0);
+  const [document] = await db.select().from(budgetDocuments).where(eq(budgetDocuments.id, budgetDocumentId)).limit(1);
+  const unitPriceFactor = calculateBudgetTotals(1, {
+    siteCostsRate: Number(document?.siteCostsRate ?? 0),
+    indirectCostsRate: Number(document?.indirectCostsRate ?? 0),
+    profitMarginRate: Number(document?.profitMarginRate ?? 0),
+  }).unitPriceFactor;
+  const clientLines = detail!.lines.map((line) => ({
+    ...line,
+    unitPrice: line.unitPrice * unitPriceFactor,
+    periodValue: line.periodValue * unitPriceFactor,
+    cumulativeValue: line.cumulativeValue * unitPriceFactor,
+  }));
+  const previstoTotal = clientLines.reduce((sum, line) => sum + (line.budgetedQty ?? 0) * line.unitPrice, 0);
+  const executadoTotal = clientLines.reduce((sum, line) => sum + line.cumulativeValue, 0);
   return {
     hasCertificates: true as const,
     latestCertificateNumber: latest.number,
     previstoTotal,
     executadoTotal,
     percentExecutado: previstoTotal ? (executadoTotal / previstoTotal) * 100 : 0,
-    linhas: detail!.lines,
+    linhas: clientLines,
   };
 }

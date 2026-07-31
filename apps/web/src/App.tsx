@@ -80,13 +80,22 @@ function AppRoutes() {
         }
       />
       <Route
-        path="/projectos"
+        path="/medicoes"
         element={
           <ProtectedRoute>
             <ProjectsPage />
           </ProtectedRoute>
         }
       />
+      <Route
+        path="/orcamentos"
+        element={
+          <ProtectedRoute>
+            <ProjectsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route path="/projectos" element={<Navigate to="/orcamentos" replace />} />
       <Route
         path="/projectos/:projectId"
         element={

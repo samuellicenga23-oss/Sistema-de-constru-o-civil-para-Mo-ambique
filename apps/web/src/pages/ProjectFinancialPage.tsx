@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { boqApi, type Project } from "../api/boq";
 import { financialApi, type FinancialEntry, type FinancialSummary } from "../api/financial";
@@ -6,6 +6,7 @@ import Layout from "../components/Layout";
 import { MetricCard, SectionHeader } from "../components/WorkspaceUI";
 import ProjectWorkspaceNav from "../components/ProjectWorkspaceNav";
 import Modal from "../components/Modal";
+import PageSearch from "../components/PageSearch";
 import { IconBack, IconPlus, IconTrash } from "../components/icons";
 
 const CATEGORY_SUGGESTIONS_DESPESA = ["Mão-de-obra", "Materiais", "Equipamento", "Subcontratação", "Transporte", "Outros"];
@@ -28,6 +29,7 @@ export default function ProjectFinancialPage() {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  const [query, setQuery] = useState("");
 
   const [type, setType] = useState<"receita" | "despesa">("despesa");
   const [category, setCategory] = useState("Materiais");
@@ -99,6 +101,20 @@ export default function ProjectFinancialPage() {
     }
   }
 
+  const filteredEntries = useMemo(() => {
+    const needle = query.trim().toLocaleLowerCase("pt");
+    if (!needle) return entries;
+    return entries.filter((entry) => [
+      entry.type,
+      entry.category,
+      entry.description,
+      entry.status,
+      entry.dueDate,
+      entry.paidDate,
+      entry.sourceType,
+    ].filter(Boolean).join(" ").toLocaleLowerCase("pt").includes(needle));
+  }, [entries, query]);
+
   if (!project || !summary) {
     return <div className="min-h-screen flex items-center justify-center text-gray-400">A carregar...</div>;
   }
@@ -117,7 +133,7 @@ export default function ProjectFinancialPage() {
         </Link>
       }
     >
-      <div className="space-y-5 max-w-7xl">
+      <div className="mx-auto w-full max-w-7xl space-y-5">
         <ProjectWorkspaceNav projectId={projectId!} />
         {error && <p className="text-sm text-red-600">{error}</p>}
         <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm leading-6 text-blue-900"><strong>Sincronizado com compras e autos.</strong> Aqui confirma pagamentos e regista excepções.</div>
@@ -209,7 +225,8 @@ export default function ProjectFinancialPage() {
         {/* Lista de lançamentos */}
         <section className="card">
           <SectionHeader title="Lançamentos" description={`${entries.length} movimento(s) registado(s)`} />
-          <div className="divide-y divide-slate-100 md:hidden">{entries.map((entry) => <article key={`mobile-${entry.id}`} className="p-4"><div className="flex items-start justify-between gap-3"><div><span className={`badge ${entry.type === "receita" ? "badge-green" : "badge-red"}`}>{entry.type === "receita" ? "Receita" : "Despesa"}</span><strong className="mt-2 block text-sm text-slate-900">{entry.category}</strong><p className="mt-1 text-xs text-slate-500">{entry.description ?? (entry.sourceType === "purchase_order" ? "Ordem de compra" : entry.sourceType === "measurement_certificate" ? "Auto de medição" : "Sem descrição")}</p></div><div className="text-right"><strong className="block text-sm tabular-nums">{fmt(Number(entry.amount), entry.currency)}</strong><span className={`badge mt-2 ${entry.status === "pago" ? "badge-green" : "badge-yellow"}`}>{entry.status === "pago" ? "Pago" : "Pendente"}</span></div></div><div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3"><span className="text-xs text-slate-500">Vence {entry.dueDate || "—"}</span><div className="flex gap-2">{entry.status === "pendente" && <button onClick={() => handleMarkPaid(entry)} className="btn btn-secondary btn-sm text-green-700">Marcar pago</button>}{!entry.sourceType && <button onClick={() => handleDelete(entry)} className="icon-btn-danger" title="Eliminar lançamento"><IconTrash className="h-3.5 w-3.5" /></button>}</div></div></article>)}</div>
+          <div className="border-b border-slate-100 px-4 py-3 sm:px-5"><PageSearch value={query} onChange={setQuery} placeholder="Pesquisar categoria, descrição, estado ou data…" resultLabel={`${filteredEntries.length} movimento(s)`} /></div>
+          <div className="divide-y divide-slate-100 md:hidden">{filteredEntries.map((entry) => <article key={`mobile-${entry.id}`} className="p-4"><div className="flex items-start justify-between gap-3"><div><span className={`badge ${entry.type === "receita" ? "badge-green" : "badge-red"}`}>{entry.type === "receita" ? "Receita" : "Despesa"}</span><strong className="mt-2 block text-sm text-slate-900">{entry.category}</strong><p className="mt-1 text-xs text-slate-500">{entry.description ?? (entry.sourceType === "purchase_order" ? "Ordem de compra" : entry.sourceType === "measurement_certificate" ? "Auto de medição" : "Sem descrição")}</p></div><div className="text-right"><strong className="block text-sm tabular-nums">{fmt(Number(entry.amount), entry.currency)}</strong><span className={`badge mt-2 ${entry.status === "pago" ? "badge-green" : "badge-yellow"}`}>{entry.status === "pago" ? "Pago" : "Pendente"}</span></div></div><div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3"><span className="text-xs text-slate-500">Vence {entry.dueDate || "—"}</span><div className="flex gap-2">{entry.status === "pendente" && <button onClick={() => handleMarkPaid(entry)} className="btn btn-secondary btn-sm text-green-700">Marcar pago</button>}{!entry.sourceType && <button onClick={() => handleDelete(entry)} className="icon-btn-danger" title="Eliminar lançamento"><IconTrash className="h-3.5 w-3.5" /></button>}</div></div></article>)}</div>
           <div className="hidden overflow-x-auto md:block">
             <table className="w-full text-sm min-w-[640px]">
               <thead>
@@ -224,7 +241,7 @@ export default function ProjectFinancialPage() {
                 </tr>
               </thead>
               <tbody>
-                {entries.map((e) => (
+                {filteredEntries.map((e) => (
                   <tr key={e.id} className="table-row group">
                     <td className="py-2 px-5">
                       <span className={`badge ${e.type === "receita" ? "badge-green" : "badge-red"}`}>{e.type === "receita" ? "Receita" : "Despesa"}</span>
@@ -258,6 +275,7 @@ export default function ProjectFinancialPage() {
               </tbody>
             </table>
           </div>
+          {filteredEntries.length === 0 && <div className="px-5 py-10 text-center text-sm text-slate-500">{query ? "Nenhum lançamento corresponde à pesquisa." : "Ainda não existem lançamentos."}</div>}
         </section>
       </div>
     </Layout>
