@@ -4,6 +4,65 @@ Este ficheiro coordena o trabalho paralelo entre Codex e Claude. Antes de inicia
 consultar o estado do Git e as entradas mais recentes. Cada intervenção deve indicar branch,
 âmbito, validação e estado de publicação.
 
+## 2026-08-02 — Codex — Etapa 2: base de auditoria e aprovações
+
+- **Branch:** `main`.
+- **Auditoria:** criada a tabela imutável `audit_events` e a rota de consulta por obra. Não existem rotas para alterar ou apagar eventos.
+- **Fluxos abrangidos:** estados de Mapas de Quantidades, Autos e Ordens de Compra; lançamentos financeiros e stock manual.
+- **Migração:** adicionada `apps/api/drizzle/0031_concerned_mandrill.sql`; ainda não aplicada em produção.
+- **Desenho:** `AUDIT_AND_APPROVALS_ROADMAP.md` define matriz de aprovação e controlos seguintes.
+- **Validação:** API compilada; 8 testes de isolamento/multiempresa aprovados, incluindo evento de auditoria; `git diff --check` sem erros.
+- **Produção:** ainda não publicada.
+
+## 2026-08-01 — Codex — Regras operacionais e experiência minimalista
+
+- **Branch:** `main`.
+- **Protecção documental:** documentos submetidos ou aprovados ficam efectivamente bloqueados
+  no frontend e na API. Quantidades, medições dimensionais, secções, preços, especificações,
+  importações e percentagens só podem ser alterados em rascunho; documentos aprovados exigem
+  nova revisão.
+- **Controlo de qualidade:** uma medição vazia já não pode ser enviada para orçamento. Antes de
+  submeter ou aprovar, o SIGO confirma que existe trabalho medido, que os itens usados têm unidade
+  e, no orçamento, preço unitário positivo. Itens não aplicáveis com quantidade zero não bloqueiam.
+- **Execução contratual:** Autos de Medição só podem ser abertos sobre um orçamento aprovado.
+  A lista do projecto mostra apenas orçamentos elegíveis, preservando a sequência orçamento →
+  aprovação → execução → certificação → financeiro.
+- **Armazém:** saídas manuais de material são recusadas quando ultrapassam o saldo disponível;
+  consumos do Diário de Obra já seguem a mesma regra.
+- **UX:** os vários avisos da visão geral foram consolidados num único bloco “Próximo passo”.
+  Verificações secundárias ficam recolhidas, mantendo as acções acessíveis sem encher o ecrã.
+  Documentos bloqueados recebem um indicador curto e deixam de mostrar controlos de edição.
+- **Páginas operacionais:** Fornecedores passou a apresentar um directório mais compacto, sem
+  campos vazios e com a acção “Cotações e recursos” clara. Compras, Financeiro, Diário e
+  Cronograma receberam cabeçalhos e avisos mais curtos, preservando a informação decisiva e
+  libertando espaço para listas, acções e dados da obra.
+- **Contexto moçambicano:** regras alinhadas com o fluxo do Guião Prático do MEF para empreitadas
+  (orçamento/cronograma físico-financeiro, auto emitido pelo empreiteiro, certificação pela
+  fiscalização e suporte ao pagamento) e com a necessidade de decisão/justificação escrita do
+  Decreto n.º 79/2022 para contratação pública.
+- **Validação:** build completo aprovado; 48 testes da API e 14 do frontend aprovados; `git diff
+  --check` sem erros. O arranque visual local não pôde ser repetido nesta sessão por falta de
+  memória do processo `tsx` no Windows (`uv_os_get_passwd ENOMEM`), não por falha do código.
+- **Produção:** ainda não publicada.
+
+## 2026-08-01 — Codex — Etapa 1 de preparação para produção: isolamento multiempresa
+
+- **Branch:** `main`.
+- **Correcção de segurança:** a clonagem automática de material, mão-de-obra, equipamento e
+  composições aceita agora exclusivamente recursos do catálogo global. Uma empresa já não pode
+  copiar um recurso privado de outra empresa através do UUID. O mesmo bloqueio foi aplicado à
+  clonagem de zonas de preço.
+- **Catálogo/zona:** preços por zona são lidos apenas depois de validar a visibilidade da zona;
+  a rota de preços filtra também pela empresa dona da zona.
+- **Testes:** acrescentados cenários negativos de clonagem e leitura de zona entre Empresas A/B
+  em `apps/api/test/isolation.test.ts`.
+- **Validação:** compilação TypeScript da API aprovada e `git diff --check` sem erros. A suite de
+  testes não arrancou nesta máquina por `uv_os_get_passwd ENOMEM` durante o `tsx` que prepara a
+  base de testes; deve ser repetida num ambiente com memória disponível antes do deploy.
+- **Documento:** criado `SECURITY_PRODUCTION_BASELINE.md`, com bloqueadores, controlos existentes
+  e critérios de release.
+- **Produção:** ainda não publicada.
+
 ## 2026-07-31 — Claude — Deploy do trabalho acumulado (custos, cronograma real, UI)
 
 - **Branch:** `codex/project-costs-measurements` → fast-forward para `main` (commit `fc44544`).

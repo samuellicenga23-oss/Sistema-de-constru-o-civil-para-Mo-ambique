@@ -362,6 +362,7 @@ export default function CatalogPage() {
             onCount={setChapterCount}
             onError={setError}
             onSaved={flash}
+            onCompositionsChanged={() => { reload().catch((err) => setError(err.message)); }}
           />
         )}
 

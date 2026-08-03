@@ -344,13 +344,26 @@ export default function BudgetDocumentPage() {
     }
   }
 
-  async function handleSubmitToBudget() {
+  async function handleSubmitToBudget(createScenario = false) {
     if (!documentId) return;
     setSubmittingToBudget(true);
     setError(null);
     try {
-      const { document } = await boqApi.createBudgetFromMeasurement(documentId);
-      navigate(`/documentos/${document.id}`);
+      const result = await boqApi.createBudgetFromMeasurement(documentId, { createScenario });
+      if (!result.created && !createScenario) {
+        const makeScenario = await confirm({
+          title: "Já existe orçamento desta medição",
+          message: "Pode abrir o orçamento existente ou criar outro cenário comercial com os preços actuais do catálogo/zona — sem repetir as quantidades.",
+          confirmLabel: "Criar outro cenário",
+          details: ["As quantidades vêm da mesma medição", "Os preços são recalculados agora", "O orçamento anterior mantém-se"],
+        });
+        if (makeScenario) {
+          const scenario = await boqApi.createBudgetFromMeasurement(documentId, { createScenario: true });
+          navigate(`/documentos/${scenario.document.id}`);
+          return;
+        }
+      }
+      navigate(`/documentos/${result.document.id}`);
     } catch (err) {
       if (err instanceof ApiError && err.code === "MEASUREMENT_CHANGED") {
         const createRevision = await confirm({
@@ -361,7 +374,7 @@ export default function BudgetDocumentPage() {
         });
         if (createRevision) {
           try {
-            const { document } = await boqApi.createBudgetFromMeasurement(documentId, true);
+            const { document } = await boqApi.createBudgetFromMeasurement(documentId, { createRevision: true });
             navigate(`/documentos/${document.id}`);
             return;
           } catch (revisionError) {
@@ -444,9 +457,9 @@ export default function BudgetDocumentPage() {
             </button>
           )}
           {isMeasurementDocument && !isClientView && (
-            <button type="button" onClick={handleSubmitToBudget} disabled={submittingToBudget} className="btn btn-primary btn-sm">
+            <button type="button" onClick={() => handleSubmitToBudget(false)} disabled={submittingToBudget} className="btn btn-primary btn-sm">
               <IconDoc className="w-3.5 h-3.5" />
-              {submittingToBudget ? "A enviar..." : "→ Orçamento"}
+              {submittingToBudget ? "A enviar..." : "Criar orçamento"}
             </button>
           )}
           <Link to={`/projectos/${document.projectId}`} className="btn btn-ghost btn-sm">
@@ -455,6 +468,13 @@ export default function BudgetDocumentPage() {
           </Link>
           <ActionMenu
             items={[
+              {
+                id: "scenario",
+                label: "Criar outro cenário de orçamento",
+                icon: <IconDoc className="w-3.5 h-3.5" />,
+                onClick: () => handleSubmitToBudget(true),
+                hidden: !isMeasurementDocument || isClientView,
+              },
               {
                 id: "materials",
                 label: "Materiais por fase",

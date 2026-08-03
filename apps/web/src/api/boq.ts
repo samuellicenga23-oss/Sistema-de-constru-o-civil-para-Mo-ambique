@@ -171,11 +171,19 @@ export const boqApi = {
     profitMarginRate: number;
   }>) => request<BudgetDocument>(`/budget-documents/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteBudgetDocument: (id: string) => request<{ ok: true }>(`/budget-documents/${id}`, { method: "DELETE" }),
-  createBudgetFromMeasurement: (id: string, createRevision = false) =>
-    request<{ document: BudgetDocument; created: boolean; revisionCreated?: boolean }>(`/budget-documents/${id}/create-budget`, {
-      method: "POST",
-      body: JSON.stringify({ createRevision }),
-    }),
+  createBudgetFromMeasurement: (
+    id: string,
+    options: boolean | { createRevision?: boolean; createScenario?: boolean } = false,
+  ) => {
+    const body =
+      typeof options === "boolean"
+        ? { createRevision: options, createScenario: false }
+        : { createRevision: options.createRevision ?? false, createScenario: options.createScenario ?? false };
+    return request<{ document: BudgetDocument; created: boolean; revisionCreated?: boolean; scenarioCreated?: boolean }>(
+      `/budget-documents/${id}/create-budget`,
+      { method: "POST", body: JSON.stringify(body) },
+    );
+  },
   applySpecifications: (id: string) =>
     request<{ updated: number }>(`/budget-documents/${id}/apply-specifications`, { method: "POST" }),
   measurementExcelUrl: (id: string) => `/api/budget-documents/${id}/export-measurements.xlsx`,

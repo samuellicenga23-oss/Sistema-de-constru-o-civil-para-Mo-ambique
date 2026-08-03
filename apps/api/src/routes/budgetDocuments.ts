@@ -251,7 +251,13 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
     if (source.documentType !== "medicao") {
       return reply.code(409).send({ error: "Só documentos de medição podem ser enviados para orçamento." });
     }
-    const options = z.object({ createRevision: z.boolean().default(false) }).safeParse(request.body ?? {});
+    const options = z
+      .object({
+        createRevision: z.boolean().default(false),
+        // Novo orçamento comercial a partir da mesma medição (mesmo fingerprint), para cenários de preço.
+        createScenario: z.boolean().default(false),
+      })
+      .safeParse(request.body ?? {});
     if (!options.success) return reply.code(400).send({ error: options.error.flatten() });
 
     const readiness = evaluateDocumentReadiness("medicao", await getDocumentItems(id));
@@ -273,16 +279,19 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
       : [];
     const fingerprint = measurementFingerprint(sourceSections, sourceItems);
     const latestBudget = existingBudgets[0];
-    if (latestBudget?.sourceMeasurementFingerprint === fingerprint || (latestBudget && !latestBudget.sourceMeasurementFingerprint)) {
-      return { document: latestBudget, created: false, revisionCreated: false };
-    }
-    if (latestBudget && !options.data.createRevision) {
-      return reply.code(409).send({
-        code: "MEASUREMENT_CHANGED",
-        error: "A medição mudou depois do último orçamento. Crie uma nova revisão para incorporar os novos capítulos e quantidades.",
-        existingDocumentId: latestBudget.id,
-        existingRevision: latestBudget.revision,
-      });
+    const forceNew = options.data.createScenario || options.data.createRevision;
+    if (!forceNew) {
+      if (latestBudget?.sourceMeasurementFingerprint === fingerprint || (latestBudget && !latestBudget.sourceMeasurementFingerprint)) {
+        return { document: latestBudget, created: false, revisionCreated: false, scenarioCreated: false };
+      }
+      if (latestBudget) {
+        return reply.code(409).send({
+          code: "MEASUREMENT_CHANGED",
+          error: "A medição mudou depois do último orçamento. Crie uma nova revisão para incorporar os novos capítulos e quantidades.",
+          existingDocumentId: latestBudget.id,
+          existingRevision: latestBudget.revision,
+        });
+      }
     }
 
     const computedPrices = new Map<string, number | null>();
@@ -299,12 +308,18 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
       }
     }
 
+    const scenarioIndex = existingBudgets.length + 1;
+    const title =
+      existingBudgets.length === 0
+        ? `Orçamento — ${project.name}`
+        : `Orçamento — ${project.name} (cenário ${scenarioIndex})`;
+
     const target = await db.transaction(async (tx) => {
       const [created] = await tx
         .insert(budgetDocuments)
         .values({
           projectId: source.projectId,
-          title: `Orçamento — ${project.name}`,
+          title,
           documentType: "orcamento",
           sourceMeasurementDocumentId: source.id,
           sourceMeasurementFingerprint: fingerprint,
@@ -357,7 +372,12 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
 
     await applyProjectSpecificationsToDocument(target.id, project.id);
 
-    return reply.code(201).send({ document: target, created: true, revisionCreated: existingBudgets.length > 0 });
+    return reply.code(201).send({
+      document: target,
+      created: true,
+      revisionCreated: options.data.createRevision && existingBudgets.length > 0,
+      scenarioCreated: options.data.createScenario && existingBudgets.length > 0,
+    });
   });
 
   app.post("/api/budget-documents/:id/apply-specifications", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {

@@ -11,6 +11,7 @@ import {
 import { getStandardSectionId } from "./quickEstimate.js";
 
 export type WorkflowCycleId =
+  | "preparar_obra"
   | "sem_plantas"
   | "planta_servico_indisponivel"
   | "planta_erro_total"
@@ -19,6 +20,7 @@ export type WorkflowCycleId =
   | "medicoes_vazias"
   | "medicoes_sem_assistente"
   | "import_excel_pendente"
+  | "pronto_para_orcamento"
   | "orcamento_sem_preco"
   | "orcamento_nao_aprovado"
   | "certificacao_disponivel"
@@ -82,6 +84,21 @@ export async function getProjectWorkflowStatus(projectId: string): Promise<Proje
 
   const usesPlants = project.measurementMode === "plantas";
   const usesImport = project.measurementMode === "importar";
+
+  if (!project.zoneId && budgetDocs.length === 0) {
+    guidance.push({
+      id: "preparar_obra",
+      severity: "warning",
+      title: "Prepare a obra antes de medir e orçamentar",
+      message:
+        "Defina a zona de preços e confirme cotações/composições no catálogo. Assim, ao enviar a medição para orçamento, os custos unitários já vêm correctos — evita vários mapas sem preço.",
+      actions: [
+        { label: "Preparar obra", anchor: "preparar-obra" },
+        { label: "Catálogo", path: "/catalogo" },
+        { label: "Fornecedores", path: "/fornecedores" },
+      ],
+    });
+  }
 
   if (usesPlants) {
     if (plantRows.length === 0) {
@@ -214,7 +231,7 @@ export async function getProjectWorkflowStatus(projectId: string): Promise<Proje
     const emptyQty = await countLeafItemsWithoutQuantity(measurementDocs[0].id);
     if (emptyQty === 0 && budgetDocs.length === 0) {
       guidance.push({
-        id: "certificacao_disponivel",
+        id: "pronto_para_orcamento",
         severity: "info",
         title: "Medições completas — pronto para orçamento",
         message: "Todas as quantidades estão preenchidas. Envie para orçamento para aplicar composições e preços.",

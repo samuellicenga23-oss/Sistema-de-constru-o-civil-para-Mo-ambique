@@ -445,22 +445,43 @@ export default function ProjectDetailPage() {
           </div>
         </section>
 
-        {budgetDocuments.length > 0 && <details className="card order-7 overflow-hidden xl:col-span-2">
-          <summary className="cursor-pointer list-none px-5 py-4 font-semibold text-slate-900">Validação de preços e composições</summary>
+        <details
+          id="preparar-obra"
+          open={!project.zoneId || costReadiness.compositions === 0 || (costReadiness.suppliers > 0 && costReadiness.quoted === 0)}
+          className="card order-2 overflow-hidden xl:col-span-2"
+        >
+          <summary className="cursor-pointer list-none px-5 py-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <strong className="text-slate-900">Preparar obra (antes das medições e orçamentos)</strong>
+              <span className="text-xs text-slate-500">Zona · cotações · composições · capítulos com custo</span>
+            </div>
+          </summary>
+          <div className="border-t border-slate-200 px-5 py-3 text-sm text-slate-600">
+            Faça isto uma vez por obra. Depois pode criar várias medições e vários orçamentos/cenários sem repetir a preparação de preços.
+          </div>
           <div className="grid gap-px border-t border-slate-200 bg-slate-200 sm:grid-cols-2 xl:grid-cols-4">
             {[
-              { n: 1, title: "Zona da obra", value: project.zoneId ? "Definida" : "Em falta", detail: project.zoneId ? zones.find((zone) => zone.id === project.zoneId)?.name ?? "Zona seleccionada" : "Defina a zona antes de validar preços.", ok: Boolean(project.zoneId) },
-              { n: 2, title: "Fornecedores e cotações", value: `${costReadiness.quoted}/${costReadiness.materials}`, detail: `${costReadiness.suppliers} fornecedor(es); materiais com cotação aplicável.`, ok: costReadiness.suppliers > 0 && costReadiness.quoted > 0 },
-              { n: 3, title: "Preços adoptados", value: `${costReadiness.zonePriced}/${costReadiness.materials}`, detail: project.zoneId ? "Preços próprios da zona; restantes usam preço base." : "A aguardar zona para validar cobertura.", ok: Boolean(project.zoneId) && costReadiness.zonePriced === costReadiness.materials },
-              { n: 4, title: "Composições", value: String(costReadiness.compositions), detail: "Mão-de-obra + materiais + máquinas alimentam o orçamento.", ok: costReadiness.compositions > 0 },
+              { n: 1, title: "Zona da obra", value: project.zoneId ? "Definida" : "Em falta", detail: project.zoneId ? zones.find((zone) => zone.id === project.zoneId)?.name ?? "Zona seleccionada" : "Defina a zona no cartão de dados da obra.", ok: Boolean(project.zoneId), href: undefined as string | undefined },
+              { n: 2, title: "Fornecedores e cotações", value: `${costReadiness.quoted}/${costReadiness.materials}`, detail: `${costReadiness.suppliers} fornecedor(es); materiais com cotação aplicável.`, ok: costReadiness.suppliers > 0 && costReadiness.quoted > 0, href: "/fornecedores" },
+              { n: 3, title: "Preços adoptados", value: `${costReadiness.zonePriced}/${costReadiness.materials}`, detail: project.zoneId ? "Preços próprios da zona; restantes usam preço base." : "A aguardar zona para validar cobertura.", ok: Boolean(project.zoneId) && costReadiness.zonePriced === costReadiness.materials, href: "/catalogo" },
+              { n: 4, title: "Composições / capítulos", value: String(costReadiness.compositions), detail: "Ligue capítulos a composições no Catálogo para o custo unitário entrar no orçamento.", ok: costReadiness.compositions > 0, href: "/catalogo" },
             ].map((item) => (
               <div key={item.n} className="bg-white p-4">
-                <div className="flex items-center gap-2"><span className={`grid h-6 w-6 place-items-center rounded-full text-xs font-bold ${item.ok ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{item.ok ? "✓" : item.n}</span><p className="text-sm font-semibold text-slate-900">{item.title}</p></div>
-                <p className="mt-2 text-lg font-bold text-slate-900">{item.value}</p><p className="mt-1 text-xs text-slate-500">{item.detail}</p>
+                <div className="flex items-center gap-2">
+                  <span className={`grid h-6 w-6 place-items-center rounded-full text-xs font-bold ${item.ok ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{item.ok ? "✓" : item.n}</span>
+                  <p className="text-sm font-semibold text-slate-900">{item.title}</p>
+                </div>
+                <p className="mt-2 text-lg font-bold text-slate-900">{item.value}</p>
+                <p className="mt-1 text-xs text-slate-500">{item.detail}</p>
+                {item.href && !item.ok && (
+                  <Link to={item.href} className="mt-2 inline-block text-xs font-semibold text-brand-700 hover:underline">
+                    Resolver →
+                  </Link>
+                )}
               </div>
             ))}
           </div>
-        </details>}
+        </details>
 
         {/* Medições técnicas */}
         <section className="card order-3">
@@ -484,15 +505,31 @@ export default function ProjectDetailPage() {
 
         {/* Orçamentos */}
         <section className="card order-3">
-          <SectionHeader title="Orçamentos" description="Medições recebidas, composições, preços e revisões comerciais" actions={<IconDoc className="w-4 h-4 text-blue-700" />} />
+          <SectionHeader title="Orçamentos" description="Cenários comerciais a partir das medições — sem repetir quantidades" actions={<IconDoc className="w-4 h-4 text-blue-700" />} />
           <ul>
-            {budgetDocuments.map((d) => (
+            {budgetDocuments.map((d) => {
+              const sourceMeasurement = d.sourceMeasurementDocumentId
+                ? measurementDocuments.find((m) => m.id === d.sourceMeasurementDocumentId)
+                : undefined;
+              const siblingCount = d.sourceMeasurementDocumentId
+                ? budgetDocuments.filter((other) => other.sourceMeasurementDocumentId === d.sourceMeasurementDocumentId).length
+                : 0;
+              return (
               <li key={d.id} className="table-row group">
                 <Link to={`/documentos/${d.id}`} className="flex flex-col gap-2 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
-                  <span className="min-w-0 break-words font-medium text-gray-900">
-                    {d.title} {d.revision ? <span className="text-gray-400 font-normal">rev. {d.revision}</span> : ""}
+                  <span className="min-w-0">
+                    <span className="block break-words font-medium text-gray-900">
+                      {d.title} {d.revision ? <span className="text-gray-400 font-normal">rev. {d.revision}</span> : ""}
+                    </span>
+                    {sourceMeasurement && (
+                      <span className="mt-1 block text-xs text-slate-500">
+                        A partir de «{sourceMeasurement.title}»
+                        {siblingCount > 1 ? ` · ${siblingCount} cenários desta medição` : ""}
+                      </span>
+                    )}
                   </span>
                   <span className="flex shrink-0 flex-wrap items-center gap-2">
+                    {siblingCount > 1 && <span className="badge badge-brand">Cenário</span>}
                     <span className="badge badge-gray">{d.currency}</span>
                     <span className={`badge ${DOC_STATUS_BADGE[d.status] ?? "badge-gray"}`}>{d.status}</span>
                     <button
@@ -505,8 +542,9 @@ export default function ProjectDetailPage() {
                   </span>
                 </Link>
               </li>
-            ))}
-            {budgetDocuments.length === 0 && <li className="px-5 py-4 text-sm text-gray-400">Sem orçamento. Abra uma medição concluída e escolha “Enviar para orçamento”.</li>}
+              );
+            })}
+            {budgetDocuments.length === 0 && <li className="px-5 py-4 text-sm text-gray-400">Sem orçamento. Abra uma medição concluída e escolha “Criar orçamento”. Pode criar vários cenários a partir da mesma medição.</li>}
           </ul>
           <details className="border-t border-gray-100">
             <summary className="cursor-pointer px-5 py-3 text-xs font-semibold text-slate-600 hover:bg-slate-50">Criar outro mapa ou revisão manual</summary>

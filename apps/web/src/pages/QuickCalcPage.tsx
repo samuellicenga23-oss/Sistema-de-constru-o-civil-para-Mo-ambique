@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
+import { buildRebarPurchasePlan, rebarWeightPerMeter } from "@sigo/shared";
 import { catalogApi, type CostComposition, type CostCompositionDetail, type PriceZone } from "../api/catalog";
 import { quickCalcApi, downloadBlob, type QuickCalcResult } from "../api/quickCalc";
 import Layout from "../components/Layout";
 import { IconRuler, IconDownload } from "../components/icons";
+
+type ConcreteMixing = "obra_betoneira" | "caminho_betoneira";
 
 function normalize(text: string) {
   return text
@@ -11,15 +14,25 @@ function normalize(text: string) {
     .replace(/\p{Diacritic}/gu, "");
 }
 
-function fmt(n: number) {
-  return n.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function isBetoneiraLine(name: string) {
+  return normalize(name).includes("betoneira");
 }
 
-// Peso por metro linear de um varão, a partir do diâmetro (mm) — fórmula universal
-// (π/4 × diâmetro² × densidade do aço, 7850 kg/m³), não depende de nenhuma tabela.
-function steelWeightPerMeter(diameterMm: number): number {
-  const d = diameterMm / 1000;
-  return (Math.PI / 4) * d * d * 7850;
+function compositionCostWithoutMixer(detail: CostCompositionDetail, volumeM3: number, mixing: ConcreteMixing) {
+  if (mixing === "obra_betoneira") {
+    return { total: volumeM3 * detail.unitCost, mixerRemoved: 0 };
+  }
+  const mixerPerUnit = detail.equipmentLines
+    .filter((line) => isBetoneiraLine(line.name))
+    .reduce((sum, line) => sum + Number(line.qtyPerUnit) * Number(line.unitCost), 0);
+  return {
+    total: Math.max(0, volumeM3 * (detail.unitCost - mixerPerUnit)),
+    mixerRemoved: volumeM3 * mixerPerUnit,
+  };
+}
+
+function fmt(n: number) {
+  return n.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 // Rácios de desperdício de corte (aço) e de arame de amarração por kg de aço aplicado — vêm da
@@ -91,9 +104,12 @@ export default function QuickCalcPage() {
   const [thicknessCm, setThicknessCm] = useState("7");
   const [lajeCompId, setLajeCompId] = useState("");
   const [lajeCompDetail, setLajeCompDetail] = useState<CostCompositionDetail | null>(null);
-  const [barDiameterMm, setBarDiameterMm] = useState("6");
-  const [spacingCm, setSpacingCm] = useState("15");
+  const [longDiameterMm, setLongDiameterMm] = useState("8");
+  const [longSpacingCm, setLongSpacingCm] = useState("15");
+  const [transDiameterMm, setTransDiameterMm] = useState("6");
+  const [transSpacingCm, setTransSpacingCm] = useState("15");
   const [barLengthM, setBarLengthM] = useState("5.75");
+  const [lajeMixing, setLajeMixing] = useState<ConcreteMixing>("obra_betoneira");
   const [acoCompDetail, setAcoCompDetail] = useState<CostCompositionDetail | null>(null);
 
   // --- Betão (volume simples) ---
@@ -104,7 +120,11 @@ export default function QuickCalcPage() {
   const [dimHeight, setDimHeight] = useState("");
   const [betaoCompId, setBetaoCompId] = useState("");
   const [betaoCompDetail, setBetaoCompDetail] = useState<CostCompositionDetail | null>(null);
+  const [betaoMixing, setBetaoMixing] = useState<ConcreteMixing>("obra_betoneira");
   const [includeSteelRatio, setIncludeSteelRatio] = useState(false);
+  const [betaoLongDiameterMm, setBetaoLongDiameterMm] = useState("12");
+  const [betaoTransDiameterMm, setBetaoTransDiameterMm] = useState("8");
+  const [betaoLongSharePct, setBetaoLongSharePct] = useState("70");
 
   // --- Qualquer composição ---
   const [genericoTitle, setGenericoTitle] = useState("Cálculo Rápido");
@@ -183,8 +203,10 @@ export default function QuickCalcPage() {
   const lajeResult = useMemo(() => {
     const area = Number(areaM2);
     const thickness = Number(thicknessCm);
-    const diameter = Number(barDiameterMm);
-    const spacing = Number(spacingCm);
+    const longDiameter = Number(longDiameterMm);
+    const longSpacing = Number(longSpacingCm);
+    const transDiameter = Number(transDiameterMm);
+    const transSpacing = Number(transSpacingCm);
     const barLength = Number(barLengthM);
     if (!lajeCompDetail || !(area > 0) || !(thickness > 0)) return null;
 
@@ -199,24 +221,65 @@ export default function QuickCalcPage() {
       priceSource: zoneId ? "Preço ajustado à zona seleccionada" : "Preço base do Catálogo",
     }));
 
-    let steelNetKg = 0;
-    let steelPurchaseKg = 0;
-    let steelLengthM = 0;
-    let barsNeeded = 0;
-    let tieWireKg = 0;
-    if (diameter > 0 && spacing > 0) {
-      const weightPerMeter = steelWeightPerMeter(diameter);
-      // Peso líquido de aço "aplicado" na malha (regra prática: 2 × peso/metro ÷ espaçamento, por m²).
-      steelNetKg = area * 2 * (weightPerMeter / (spacing / 100));
-      // Aço em bruto a comprar, já incluindo o desperdício de corte (rácio real do Catálogo).
-      steelPurchaseKg = steelNetKg * steelCutWasteRatio;
-      steelLengthM = steelPurchaseKg / weightPerMeter;
-      if (barLength > 0) barsNeeded = Math.ceil(steelLengthM / barLength);
-      tieWireKg = steelNetKg * tieWireRatio;
+    const weightLines: Array<{ diameterMm: number; weightKg: number; role: string }> = [];
+    if (longDiameter > 0 && longSpacing > 0) {
+      const w = rebarWeightPerMeter(longDiameter);
+      weightLines.push({
+        diameterMm: longDiameter,
+        weightKg: area * (w / (longSpacing / 100)),
+        role: "longitudinal",
+      });
+    }
+    if (transDiameter > 0 && transSpacing > 0) {
+      const w = rebarWeightPerMeter(transDiameter);
+      weightLines.push({
+        diameterMm: transDiameter,
+        weightKg: area * (w / (transSpacing / 100)),
+        role: "transversal",
+      });
     }
 
-    return { volumeM3, materialLines, concreteTotal: volumeM3 * lajeCompDetail.unitCost, currency: lajeCompDetail.currency, steelNetKg, steelPurchaseKg, steelLengthM, barsNeeded, tieWireKg, diameter, spacing, barLength };
-  }, [lajeCompDetail, areaM2, thicknessCm, barDiameterMm, spacingCm, barLengthM, steelCutWasteRatio, tieWireRatio, zoneId]);
+    const steelNetKg = weightLines.reduce((sum, line) => sum + line.weightKg, 0);
+    const purchasePlan = buildRebarPurchasePlan(
+      weightLines.map((line) => ({ diameterMm: line.diameterMm, weightKg: line.weightKg * steelCutWasteRatio })),
+      barLength > 0 ? barLength : 5.75,
+    );
+    const steelPurchaseKg = purchasePlan.reduce((sum, line) => sum + line.purchaseWeightKg, 0);
+    const steelLengthM = purchasePlan.reduce((sum, line) => sum + line.requiredLengthM, 0);
+    const barsNeeded = purchasePlan.reduce((sum, line) => sum + line.barsToBuy, 0);
+    const tieWireKg = steelNetKg * tieWireRatio;
+    const concrete = compositionCostWithoutMixer(lajeCompDetail, volumeM3, lajeMixing);
+
+    return {
+      volumeM3,
+      materialLines,
+      concreteTotal: concrete.total,
+      mixerRemoved: concrete.mixerRemoved,
+      mixing: lajeMixing,
+      currency: lajeCompDetail.currency,
+      steelNetKg,
+      steelPurchaseKg,
+      steelLengthM,
+      barsNeeded,
+      tieWireKg,
+      barLength,
+      weightLines,
+      purchasePlan,
+    };
+  }, [
+    lajeCompDetail,
+    areaM2,
+    thicknessCm,
+    longDiameterMm,
+    longSpacingCm,
+    transDiameterMm,
+    transSpacingCm,
+    barLengthM,
+    steelCutWasteRatio,
+    tieWireRatio,
+    zoneId,
+    lajeMixing,
+  ]);
 
   const betaoVolumeM3 = useMemo(() => {
     if (volumeMode === "directo") return Number(volumeM3Input) || 0;
@@ -238,17 +301,51 @@ export default function QuickCalcPage() {
     let steelNetKg = 0;
     let steelPurchaseKg = 0;
     let tieWireKg = 0;
+    let purchasePlan: ReturnType<typeof buildRebarPurchasePlan> = [];
+    let weightLines: Array<{ diameterMm: number; weightKg: number; role: string }> = [];
     if (includeSteelRatio) {
-      // O rácio genérico de 80 kg/m³ representa uma mistura de diâmetros (longitudinais +
-      // estribos) — não se converte para metros/nº de varões como na Laje (lá o utilizador
-      // indica UM diâmetro só, aqui não há um diâmetro único a que a mistura corresponda).
       steelNetKg = betaoVolumeM3 * 0.95 * 80;
-      steelPurchaseKg = steelNetKg * steelCutWasteRatio;
+      const longShare = Math.min(100, Math.max(0, Number(betaoLongSharePct) || 70)) / 100;
+      const longKg = steelNetKg * longShare;
+      const transKg = steelNetKg * (1 - longShare);
+      const longDiameter = Number(betaoLongDiameterMm);
+      const transDiameter = Number(betaoTransDiameterMm);
+      if (longDiameter > 0 && longKg > 0) weightLines.push({ diameterMm: longDiameter, weightKg: longKg, role: "longitudinal" });
+      if (transDiameter > 0 && transKg > 0) weightLines.push({ diameterMm: transDiameter, weightKg: transKg, role: "transversal" });
+      purchasePlan = buildRebarPurchasePlan(
+        weightLines.map((line) => ({ diameterMm: line.diameterMm, weightKg: line.weightKg * steelCutWasteRatio })),
+        Number(barLengthM) > 0 ? Number(barLengthM) : 5.75,
+      );
+      steelPurchaseKg = purchasePlan.reduce((sum, line) => sum + line.purchaseWeightKg, 0);
       tieWireKg = steelNetKg * tieWireRatio;
     }
 
-    return { materialLines, compositionTotal: betaoVolumeM3 * betaoCompDetail.unitCost, currency: betaoCompDetail.currency, steelNetKg, steelPurchaseKg, tieWireKg };
-  }, [betaoCompDetail, betaoVolumeM3, includeSteelRatio, steelCutWasteRatio, tieWireRatio, zoneId]);
+    const concrete = compositionCostWithoutMixer(betaoCompDetail, betaoVolumeM3, betaoMixing);
+    return {
+      materialLines,
+      compositionTotal: concrete.total,
+      mixerRemoved: concrete.mixerRemoved,
+      mixing: betaoMixing,
+      currency: betaoCompDetail.currency,
+      steelNetKg,
+      steelPurchaseKg,
+      tieWireKg,
+      weightLines,
+      purchasePlan,
+    };
+  }, [
+    betaoCompDetail,
+    betaoVolumeM3,
+    includeSteelRatio,
+    steelCutWasteRatio,
+    tieWireRatio,
+    zoneId,
+    betaoMixing,
+    betaoLongDiameterMm,
+    betaoTransDiameterMm,
+    betaoLongSharePct,
+    barLengthM,
+  ]);
 
   const genericoCompositionsByCategory = useMemo(() => {
     const map = new Map<string, CostComposition[]>();
@@ -298,25 +395,45 @@ export default function QuickCalcPage() {
         `Área: ${fmt(Number(areaM2))} m²`,
         `Espessura: ${fmt(Number(thicknessCm))} cm`,
         `Classe do betão: ${lajeCompDetail.name}`,
-        `Malha de varões: Ø${barDiameterMm}mm a cada ${spacingCm}cm (nas duas direcções)`,
+        `Produção do betão: ${lajeResult.mixing === "obra_betoneira" ? "Betoneira de obra" : "Camião betoneira (betão pronto)"}`,
+        `Armadura longitudinal: Ø${longDiameterMm} mm a cada ${longSpacingCm} cm`,
+        `Armadura transversal: Ø${transDiameterMm} mm a cada ${transSpacingCm} cm`,
         `Comprimento comercial da barra: ${fmt(lajeResult.barLength)} m`,
       ],
       lines: [
         { name: "Volume de betão", quantity: lajeResult.volumeM3, unit: "m³" },
         ...lajeResult.materialLines,
-        { name: "Composição de betão completa", quantity: lajeResult.volumeM3, unit: "m³", unitPrice: lajeCompDetail.unitCost, totalPrice: lajeResult.concreteTotal, currency: lajeResult.currency, priceSource: "Materiais + mão-de-obra + equipamento" },
-        { name: "Aço líquido (aplicado na malha)", quantity: lajeResult.steelNetKg, unit: "kg" },
-        { name: "Aço a comprar (com desperdício de corte)", quantity: lajeResult.steelPurchaseKg, unit: "kg" },
-        { name: "Aço a comprar, em metros lineares", quantity: lajeResult.steelLengthM, unit: "m" },
-        { name: `Nº de varões a comprar (barras de ${fmt(lajeResult.barLength)}m)`, quantity: lajeResult.barsNeeded, unit: "varões" },
+        {
+          name: lajeResult.mixing === "obra_betoneira" ? "Composição de betão (obra / betoneira)" : "Composição de betão (camião betoneira — sem horas de betoneira de obra)",
+          quantity: lajeResult.volumeM3,
+          unit: "m³",
+          unitPrice: lajeResult.volumeM3 > 0 ? lajeResult.concreteTotal / lajeResult.volumeM3 : 0,
+          totalPrice: lajeResult.concreteTotal,
+          currency: lajeResult.currency,
+          priceSource: "Materiais + mão-de-obra + equipamento aplicável",
+        },
+        ...lajeResult.weightLines.map((line) => ({
+          name: `Aço líquido ${line.role} Ø${line.diameterMm} mm`,
+          quantity: line.weightKg,
+          unit: "kg",
+        })),
+        { name: "Aço líquido total", quantity: lajeResult.steelNetKg, unit: "kg" },
+        ...lajeResult.purchasePlan.map((line) => ({
+          name: `Aço a comprar Ø${line.diameterMm} mm (${line.barsToBuy} varões × ${fmt(line.commercialBarLengthM)} m)`,
+          quantity: line.purchaseWeightKg,
+          unit: "kg",
+        })),
+        { name: "Aço a comprar total", quantity: lajeResult.steelPurchaseKg, unit: "kg" },
         { name: "Arame de amarração", quantity: lajeResult.tieWireKg, unit: "kg" },
       ],
       notes: [
         "Volume de betão = área × espessura.",
-        "Quantidades de cimento/areia/brita/água = volume de betão × rácio da composição escolhida no Catálogo de Preços.",
-        "Aço líquido estimado por uma malha com o mesmo espaçamento nas duas direcções (regra prática de obra: 2 × peso/metro do varão ÷ espaçamento, por m²) — não substitui um projecto de armadura detalhado.",
-        "Aço a comprar e arame de amarração usam os mesmos rácios já definidos na composição \"Aço A400 aplicado\" do Catálogo de Preços.",
-        "Nº de varões arredondado sempre para cima (não se compram barras parciais).",
+        "Armadura longitudinal e transversal calculadas em separado: kg/m² = peso/metro ÷ espaçamento.",
+        "Quantidades por diâmetro usam o plano de compra comercial (barras inteiras).",
+        lajeResult.mixing === "caminho_betoneira"
+          ? "Modo camião betoneira: horas de betoneira de obra foram retiradas do custo da composição."
+          : "Modo betoneira de obra: custo inclui o equipamento da composição do catálogo.",
+        "Não substitui um projecto de armadura detalhado.",
       ],
     };
     await exportResult(result);
@@ -329,8 +446,13 @@ export default function QuickCalcPage() {
         ? `Volume: ${fmt(betaoVolumeM3)} m³`
         : `Dimensões: ${fmt(Number(dimLength))} × ${fmt(Number(dimWidth))} × ${fmt(Number(dimHeight))} m = ${fmt(betaoVolumeM3)} m³`,
       `Classe do betão: ${betaoCompDetail.name}`,
+      `Produção do betão: ${betaoResult.mixing === "obra_betoneira" ? "Betoneira de obra" : "Camião betoneira (betão pronto)"}`,
     ];
-    if (includeSteelRatio) inputsSummary.push("Aço incluído com rácio genérico de 80 kg por m³ de betão estrutural (95% do volume)");
+    if (includeSteelRatio) {
+      inputsSummary.push(
+        `Aço: 80 kg/m³ (95% do volume) — longitudinal Ø${betaoLongDiameterMm} mm (${betaoLongSharePct}%) · transversal Ø${betaoTransDiameterMm} mm`,
+      );
+    }
     const result: QuickCalcResult = {
       title: betaoTitle.trim() || "Cálculo Rápido — Betão (volume simples)",
       reference: reference.trim() || undefined,
@@ -338,11 +460,28 @@ export default function QuickCalcPage() {
       lines: [
         { name: "Volume de betão", quantity: betaoVolumeM3, unit: "m³" },
         ...betaoResult.materialLines,
-        { name: "Composição de betão completa", quantity: betaoVolumeM3, unit: "m³", unitPrice: betaoCompDetail.unitCost, totalPrice: betaoResult.compositionTotal, currency: betaoResult.currency, priceSource: "Materiais + mão-de-obra + equipamento" },
+        {
+          name: betaoResult.mixing === "obra_betoneira" ? "Composição de betão (obra / betoneira)" : "Composição de betão (camião betoneira — sem horas de betoneira de obra)",
+          quantity: betaoVolumeM3,
+          unit: "m³",
+          unitPrice: betaoVolumeM3 > 0 ? betaoResult.compositionTotal / betaoVolumeM3 : 0,
+          totalPrice: betaoResult.compositionTotal,
+          currency: betaoResult.currency,
+          priceSource: "Materiais + mão-de-obra + equipamento aplicável",
+        },
         ...(includeSteelRatio
           ? [
-              { name: "Aço líquido (rácio genérico 80 kg/m³)", quantity: betaoResult.steelNetKg, unit: "kg" },
-              { name: "Aço a comprar (com desperdício de corte)", quantity: betaoResult.steelPurchaseKg, unit: "kg" },
+              ...betaoResult.weightLines.map((line) => ({
+                name: `Aço líquido ${line.role} Ø${line.diameterMm} mm`,
+                quantity: line.weightKg,
+                unit: "kg",
+              })),
+              { name: "Aço líquido total", quantity: betaoResult.steelNetKg, unit: "kg" },
+              ...betaoResult.purchasePlan.map((line) => ({
+                name: `Aço a comprar Ø${line.diameterMm} mm (${line.barsToBuy} varões)`,
+                quantity: line.purchaseWeightKg,
+                unit: "kg",
+              })),
               { name: "Arame de amarração", quantity: betaoResult.tieWireKg, unit: "kg" },
             ]
           : []),
@@ -489,7 +628,7 @@ export default function QuickCalcPage() {
               <IconRuler className="w-4 h-4 text-brand-700" />
               <h2 className="section-title">Laje — área e espessura</h2>
             </div>
-            <p className="text-xs leading-5 text-gray-500">Volume, materiais e estimativa de aço para uma laje sem armadura detalhada.</p>
+            <p className="text-xs leading-5 text-gray-500">Volume, materiais e armadura longitudinal/transversal por diâmetro — com modo de produção do betão.</p>
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
                 <label className="label">Área (m²)</label>
@@ -510,12 +649,27 @@ export default function QuickCalcPage() {
                 </select>
               </div>
               <div>
-                <label className="label">Diâmetro do varão (mm)</label>
-                <input type="number" step="0.01" min="0" value={barDiameterMm} onChange={(e) => setBarDiameterMm(e.target.value)} className="input" />
+                <label className="label">Produção do betão</label>
+                <select value={lajeMixing} onChange={(e) => setLajeMixing(e.target.value as ConcreteMixing)} className="input">
+                  <option value="obra_betoneira">Betoneira de obra</option>
+                  <option value="caminho_betoneira">Camião betoneira (betão pronto)</option>
+                </select>
               </div>
               <div>
-                <label className="label">Espaçamento da malha (cm)</label>
-                <input type="number" step="0.01" min="0" value={spacingCm} onChange={(e) => setSpacingCm(e.target.value)} className="input" />
+                <label className="label">Ø longitudinal (mm)</label>
+                <input type="number" step="0.01" min="0" value={longDiameterMm} onChange={(e) => setLongDiameterMm(e.target.value)} className="input" />
+              </div>
+              <div>
+                <label className="label">Espaçamento longitudinal (cm)</label>
+                <input type="number" step="0.01" min="0" value={longSpacingCm} onChange={(e) => setLongSpacingCm(e.target.value)} className="input" />
+              </div>
+              <div>
+                <label className="label">Ø transversal (mm)</label>
+                <input type="number" step="0.01" min="0" value={transDiameterMm} onChange={(e) => setTransDiameterMm(e.target.value)} className="input" />
+              </div>
+              <div>
+                <label className="label">Espaçamento transversal (cm)</label>
+                <input type="number" step="0.01" min="0" value={transSpacingCm} onChange={(e) => setTransSpacingCm(e.target.value)} className="input" />
               </div>
               <div>
                 <label className="label">Comprimento comercial da barra (m)</label>
@@ -551,31 +705,32 @@ export default function QuickCalcPage() {
                       </tr>
                     ))}
                     <tr className="table-row">
-                      <td className="py-2 px-4">Aço líquido (aplicado na malha)</td>
-                      <td className="text-right pr-4 tabular-nums">{fmt(lajeResult.steelNetKg)} kg</td>
-                      <td className="text-right pr-4 text-slate-400">—</td><td className="text-right pr-4 text-slate-400">—</td>
+                      <td className="py-2 px-4" colSpan={4}>
+                        <span className={`badge ${lajeResult.mixing === "obra_betoneira" ? "badge-brand" : "badge-gray"}`}>
+                          {lajeResult.mixing === "obra_betoneira" ? "Betoneira de obra" : "Camião betoneira"}
+                        </span>
+                      </td>
                     </tr>
-                    <tr className="table-row bg-brand-50/60">
-                      <td className="py-2 px-4 font-medium">Aço a comprar (com desperdício de corte)</td>
-                      <td className="text-right pr-4 tabular-nums font-semibold">{fmt(lajeResult.steelPurchaseKg)} kg</td>
-                      <td className="text-right pr-4 text-slate-400">—</td><td className="text-right pr-4 text-slate-400">—</td>
-                    </tr>
-                    <tr className="table-row">
-                      <td className="py-2 px-4">Aço a comprar, em metros lineares</td>
-                      <td className="text-right pr-4 tabular-nums">{fmt(lajeResult.steelLengthM)} m</td>
-                      <td className="text-right pr-4 text-slate-400">—</td><td className="text-right pr-4 text-slate-400">—</td>
-                    </tr>
-                    <tr className="table-row bg-brand-50/60">
-                      <td className="py-2 px-4 font-medium">Nº de varões a comprar (barras de {fmt(lajeResult.barLength)}m)</td>
-                      <td className="text-right pr-4 tabular-nums font-semibold">{lajeResult.barsNeeded} varões</td>
-                      <td className="text-right pr-4 text-slate-400">—</td><td className="text-right pr-4 text-slate-400">—</td>
-                    </tr>
+                    {lajeResult.weightLines.map((line) => (
+                      <tr key={`net-${line.role}-${line.diameterMm}`} className="table-row">
+                        <td className="py-2 px-4">Aço líquido {line.role} Ø{line.diameterMm} mm</td>
+                        <td className="text-right pr-4 tabular-nums">{fmt(line.weightKg)} kg</td>
+                        <td className="text-right pr-4 text-slate-400">—</td><td className="text-right pr-4 text-slate-400">—</td>
+                      </tr>
+                    ))}
+                    {lajeResult.purchasePlan.map((line) => (
+                      <tr key={`buy-${line.diameterMm}`} className="table-row bg-brand-50/60">
+                        <td className="py-2 px-4 font-medium">Aço a comprar Ø{line.diameterMm} mm ({line.barsToBuy} varões × {fmt(line.commercialBarLengthM)} m)</td>
+                        <td className="text-right pr-4 tabular-nums font-semibold">{fmt(line.purchaseWeightKg)} kg</td>
+                        <td className="text-right pr-4 text-slate-400">—</td><td className="text-right pr-4 text-slate-400">—</td>
+                      </tr>
+                    ))}
                     <tr className="table-row">
                       <td className="py-2 px-4">Arame de amarração</td>
                       <td className="text-right pr-4 tabular-nums">{fmt(lajeResult.tieWireKg)} kg</td>
                       <td className="text-right pr-4 text-slate-400">—</td><td className="text-right pr-4 text-slate-400">—</td>
                     </tr>
-                    <tr className="table-row bg-slate-900 text-white"><td className="py-2 px-4 font-semibold" colSpan={3}>Composição completa (inclui mão-de-obra e equipamento)</td><td className="text-right pr-4 font-semibold">{fmt(lajeResult.concreteTotal)} {lajeResult.currency}</td></tr>
+                    <tr className="table-row bg-slate-900 text-white"><td className="py-2 px-4 font-semibold" colSpan={3}>Custo do betão ({lajeResult.mixing === "obra_betoneira" ? "com betoneira de obra" : "camião — sem betoneira de obra"})</td><td className="text-right pr-4 font-semibold">{fmt(lajeResult.concreteTotal)} {lajeResult.currency}</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -632,15 +787,24 @@ export default function QuickCalcPage() {
               </div>
             )}
 
-            <div>
-              <label className="label">Classe do betão</label>
-              <select value={betaoCompId} onChange={(e) => setBetaoCompId(e.target.value)} className="input max-w-xs">
-                {concreteOptions.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <label className="label">Classe do betão</label>
+                <select value={betaoCompId} onChange={(e) => setBetaoCompId(e.target.value)} className="input">
+                  {concreteOptions.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="label">Produção do betão</label>
+                <select value={betaoMixing} onChange={(e) => setBetaoMixing(e.target.value as ConcreteMixing)} className="input">
+                  <option value="obra_betoneira">Betoneira de obra</option>
+                  <option value="caminho_betoneira">Camião betoneira (betão pronto)</option>
+                </select>
+              </div>
             </div>
 
             <label className="flex items-center gap-2 text-sm text-gray-700">
@@ -650,8 +814,24 @@ export default function QuickCalcPage() {
                 onChange={(e) => setIncludeSteelRatio(e.target.checked)}
                 className="w-4 h-4 rounded border-gray-300 text-brand-700 focus:ring-brand-500"
               />
-              Incluir estimativa de aço (rácio genérico de 80 kg/m³ — ajuste se souber o valor real)
+              Incluir estimativa de aço (80 kg/m³) com diâmetros longitudinal e transversal
             </label>
+            {includeSteelRatio && (
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div>
+                  <label className="label">Ø longitudinal (mm)</label>
+                  <input type="number" step="0.01" min="0" value={betaoLongDiameterMm} onChange={(e) => setBetaoLongDiameterMm(e.target.value)} className="input" />
+                </div>
+                <div>
+                  <label className="label">Ø transversal (mm)</label>
+                  <input type="number" step="0.01" min="0" value={betaoTransDiameterMm} onChange={(e) => setBetaoTransDiameterMm(e.target.value)} className="input" />
+                </div>
+                <div>
+                  <label className="label">% longitudinal</label>
+                  <input type="number" step="1" min="0" max="100" value={betaoLongSharePct} onChange={(e) => setBetaoLongSharePct(e.target.value)} className="input" />
+                </div>
+              </div>
+            )}
 
             {betaoResult && (
               <div className="overflow-x-auto rounded-lg border border-gray-200">
@@ -680,18 +860,29 @@ export default function QuickCalcPage() {
                         <td className="text-right pr-4 tabular-nums font-medium">{fmt(l.totalPrice)} {l.currency}</td>
                       </tr>
                     ))}
+                    <tr className="table-row">
+                      <td className="py-2 px-4" colSpan={4}>
+                        <span className={`badge ${betaoResult.mixing === "obra_betoneira" ? "badge-brand" : "badge-gray"}`}>
+                          {betaoResult.mixing === "obra_betoneira" ? "Betoneira de obra" : "Camião betoneira"}
+                        </span>
+                      </td>
+                    </tr>
                     {includeSteelRatio && (
                       <>
-                        <tr className="table-row">
-                          <td className="py-2 px-4">Aço líquido (rácio genérico)</td>
-                          <td className="text-right pr-4 tabular-nums">{fmt(betaoResult.steelNetKg)} kg</td>
-                          <td className="text-right pr-4 text-slate-400">—</td><td className="text-right pr-4 text-slate-400">—</td>
-                        </tr>
-                        <tr className="table-row bg-brand-50/60">
-                          <td className="py-2 px-4 font-medium">Aço a comprar (com desperdício de corte)</td>
-                          <td className="text-right pr-4 tabular-nums font-semibold">{fmt(betaoResult.steelPurchaseKg)} kg</td>
-                          <td className="text-right pr-4 text-slate-400">—</td><td className="text-right pr-4 text-slate-400">—</td>
-                        </tr>
+                        {betaoResult.weightLines.map((line) => (
+                          <tr key={`bnet-${line.role}-${line.diameterMm}`} className="table-row">
+                            <td className="py-2 px-4">Aço líquido {line.role} Ø{line.diameterMm} mm</td>
+                            <td className="text-right pr-4 tabular-nums">{fmt(line.weightKg)} kg</td>
+                            <td className="text-right pr-4 text-slate-400">—</td><td className="text-right pr-4 text-slate-400">—</td>
+                          </tr>
+                        ))}
+                        {betaoResult.purchasePlan.map((line) => (
+                          <tr key={`bbuy-${line.diameterMm}`} className="table-row bg-brand-50/60">
+                            <td className="py-2 px-4 font-medium">Aço a comprar Ø{line.diameterMm} mm ({line.barsToBuy} varões)</td>
+                            <td className="text-right pr-4 tabular-nums font-semibold">{fmt(line.purchaseWeightKg)} kg</td>
+                            <td className="text-right pr-4 text-slate-400">—</td><td className="text-right pr-4 text-slate-400">—</td>
+                          </tr>
+                        ))}
                         <tr className="table-row">
                           <td className="py-2 px-4">Arame de amarração</td>
                           <td className="text-right pr-4 tabular-nums">{fmt(betaoResult.tieWireKg)} kg</td>
@@ -699,7 +890,7 @@ export default function QuickCalcPage() {
                         </tr>
                       </>
                     )}
-                    <tr className="table-row bg-slate-900 text-white"><td className="py-2 px-4 font-semibold" colSpan={3}>Composição completa (inclui mão-de-obra e equipamento)</td><td className="text-right pr-4 font-semibold">{fmt(betaoResult.compositionTotal)} {betaoResult.currency}</td></tr>
+                    <tr className="table-row bg-slate-900 text-white"><td className="py-2 px-4 font-semibold" colSpan={3}>Custo do betão ({betaoResult.mixing === "obra_betoneira" ? "com betoneira de obra" : "camião — sem betoneira de obra"})</td><td className="text-right pr-4 font-semibold">{fmt(betaoResult.compositionTotal)} {betaoResult.currency}</td></tr>
                   </tbody>
                 </table>
               </div>
