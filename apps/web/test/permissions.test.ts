@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { canAccessPath } from "../src/permissions";
+import { canAccessPath, isModuleEnabled } from "../src/permissions";
 
 describe("canAccessPath", () => {
   it("super_admin só acede ao painel, perfil e administração", () => {
@@ -29,5 +29,16 @@ describe("canAccessPath", () => {
       expect(canAccessPath(role, "/catalogo")).toBe(true);
       expect(canAccessPath(role, "/perfil")).toBe(true);
     }
+  });
+});
+
+describe("isModuleEnabled", () => {
+  it("bloqueia páginas de módulos desligados sem afectar perfil e definições", () => {
+    const enabled = ["dashboard", "budgets"] as const;
+    expect(isModuleEnabled("/painel", [...enabled])).toBe(true);
+    expect(isModuleEnabled("/orcamentos", [...enabled])).toBe(true);
+    expect(isModuleEnabled("/fornecedores", [...enabled])).toBe(false);
+    expect(isModuleEnabled("/projectos/abc/compras", [...enabled])).toBe(false);
+    expect(isModuleEnabled("/perfil", [...enabled])).toBe(true);
   });
 });

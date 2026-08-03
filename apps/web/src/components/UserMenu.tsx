@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { roleLabel } from "./RoleBadge";
 import { IconLogout } from "./icons";
+import { useLanguage } from "../i18n";
 
 function initials(name: string | undefined): string {
   if (!name) return "?";
@@ -15,6 +16,7 @@ function initials(name: string | undefined): string {
 // lateral). Fecha ao clicar fora.
 export default function UserMenu() {
   const { user, logout } = useAuth();
+  const { t } = useLanguage();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -30,9 +32,9 @@ export default function UserMenu() {
 
   return (
     <div className="relative" ref={ref}>
-      <button onClick={() => setOpen((o) => !o)} className="flex items-center gap-2" title={user.name}>
+      <button type="button" onClick={() => setOpen((o) => !o)} className="grid h-10 w-10 shrink-0 appearance-none place-items-center overflow-hidden rounded-full border-0 bg-transparent p-1" title={user.name} aria-label={`${t("profile")}: ${user.name}`}>
         {user.avatarUrl ? (
-          <img src={user.avatarUrl} alt={user.name} className="w-8 h-8 rounded-full object-cover" />
+          <img src={user.avatarUrl} alt={user.name} draggable={false} className="block h-8 w-8 rounded-full object-cover" />
         ) : (
           <div className="w-8 h-8 rounded-full bg-brand-100 text-brand-800 flex items-center justify-center text-xs font-semibold">
             {initials(user.name)}
@@ -46,14 +48,14 @@ export default function UserMenu() {
             <p className="muted">{roleLabel(user.role)}</p>
           </div>
           <Link to="/perfil" onClick={() => setOpen(false)} className="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-md">
-            Perfil
+            {t("profile")}
           </Link>
           <button
             onClick={() => logout()}
             className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-md flex items-center gap-2"
           >
             <IconLogout className="w-3.5 h-3.5" />
-            Sair
+            {t("logout")}
           </button>
         </div>
       )}

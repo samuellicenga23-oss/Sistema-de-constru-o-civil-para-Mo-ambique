@@ -1,4 +1,5 @@
 import { request, ApiError } from "./http";
+import type { CompanyModuleKey } from "./companies";
 
 export type CurrentUser = {
   id: string;
@@ -11,6 +12,7 @@ export type CurrentUser = {
   isActive: boolean;
   mustChangePassword: boolean;
   preferredLanguage: string;
+  enabledModules: CompanyModuleKey[];
   createdAt: string;
 };
 

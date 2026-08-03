@@ -11,6 +11,7 @@ import AlertBanner from "../components/AlertBanner";
 import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { applyTheme, getStoredTheme, type Theme } from "../theme";
 import { IconTrash } from "../components/icons";
+import { useLanguage, type Language } from "../i18n";
 
 function fmtDateTime(iso: string | null) {
   if (!iso) return "Nunca";
@@ -30,6 +31,7 @@ function summarizeUserAgent(ua: string | null): string {
 
 export default function ProfilePage() {
   const { user, refreshUser } = useAuth();
+  const { t } = useLanguage();
   const { confirm, dialog } = useConfirmDialog();
   const [name, setName] = useState(user?.name ?? "");
   const [savingName, setSavingName] = useState(false);
@@ -40,6 +42,8 @@ export default function ProfilePage() {
   const [sessions, setSessions] = useState<UserSession[]>([]);
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [theme, setTheme] = useState<Theme>(getStoredTheme());
+  const [savingLanguage, setSavingLanguage] = useState(false);
+  const [languageSaved, setLanguageSaved] = useState(false);
 
   async function reloadSessions() {
     setSessions(await api.listSessions());
@@ -146,13 +150,28 @@ export default function ProfilePage() {
     applyTheme(next);
   }
 
+  async function handleLanguageChange(language: Language) {
+    setSavingLanguage(true);
+    setLanguageSaved(false);
+    setError(null);
+    try {
+      await api.updateProfile({ preferredLanguage: language });
+      await refreshUser();
+      setLanguageSaved(true);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Erro ao actualizar idioma");
+    } finally {
+      setSavingLanguage(false);
+    }
+  }
+
   if (!user) return null;
 
   const plan = company?.subscription ? getPlanDefinition(company.subscription.plan) : null;
   const otherSessions = sessions.filter((s) => !s.current);
 
   return (
-    <Layout title="Perfil" subtitle="Conta, segurança e sessões activas">
+    <Layout title={t("profile")} subtitle={t("accountSecurity")}>
       <div className="mx-auto w-full max-w-3xl space-y-5">
         {error && <AlertBanner tone="error" onDismiss={() => setError(null)}>{error}</AlertBanner>}
 
@@ -233,7 +252,7 @@ export default function ProfilePage() {
         </section>
 
         <section className="card card-pad">
-          <h2 className="section-title mb-3">Preferências</h2>
+          <h2 className="section-title mb-3">{t("preferences")}</h2>
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <p className="label mb-1.5">Tema</p>
@@ -244,8 +263,12 @@ export default function ProfilePage() {
               <p className="muted mt-1">O tema escuro estará disponível numa actualização futura.</p>
             </div>
             <div>
-              <p className="label mb-1.5">Idioma</p>
-              <select disabled className="input max-w-[200px] bg-slate-50 text-slate-500"><option>Português</option></select>
+              <p className="label mb-1.5">{t("language")}</p>
+              <select value={user.preferredLanguage === "en" ? "en" : "pt"} disabled={savingLanguage} onChange={(event) => handleLanguageChange(event.target.value as Language)} className="input max-w-[240px]">
+                <option value="pt">{t("portuguese")}</option>
+                <option value="en">{t("english")}</option>
+              </select>
+              {languageSaved && <p className="mt-1 text-xs text-emerald-600">{t("languageSaved")}</p>}
             </div>
           </div>
         </section>

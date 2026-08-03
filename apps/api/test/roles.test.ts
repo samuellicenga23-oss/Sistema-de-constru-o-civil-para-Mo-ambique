@@ -122,4 +122,42 @@ describe("Permissões por perfil", () => {
     const res = await app.inject({ method: "GET", url: "/api/companies", headers: { cookie } });
     expect(res.statusCode).toBe(403);
   });
+
+  it("super_admin gere utilizadores de qualquer empresa", async () => {
+    const company = await createCompany("Empresa Gerida");
+    await createUser(null, "super_admin", "platform@test.local");
+    const cookie = await loginCookie(app, "platform@test.local");
+    const created = await app.inject({
+      method: "POST",
+      url: `/api/admin/companies/${company.id}/users`,
+      headers: { cookie },
+      payload: { name: "Gestor Externo", email: "gestor-externo@test.local", password: "password123", role: "admin_empresa", preferredLanguage: "en" },
+    });
+    expect(created.statusCode).toBe(201);
+    expect((created.json() as { preferredLanguage: string }).preferredLanguage).toBe("en");
+    const listed = await app.inject({ method: "GET", url: `/api/admin/users?companyId=${company.id}`, headers: { cookie } });
+    expect(listed.statusCode).toBe(200);
+    expect((listed.json() as Array<{ email: string }>).some((member) => member.email === "gestor-externo@test.local")).toBe(true);
+  });
+
+  it("módulo desligado desaparece da sessão e é bloqueado na API", async () => {
+    const company = await createCompany("Empresa Modular");
+    await createUser(company.id, "orcamentista", "modular@test.local");
+    await createUser(null, "super_admin", "module-admin@test.local");
+    const adminCookie = await loginCookie(app, "module-admin@test.local");
+    const change = await app.inject({
+      method: "PATCH",
+      url: `/api/admin/companies/${company.id}`,
+      headers: { cookie: adminCookie },
+      payload: { enabledModules: ["dashboard", "budgets"] },
+    });
+    expect(change.statusCode).toBe(200);
+
+    const userCookie = await loginCookie(app, "modular@test.local");
+    const me = await app.inject({ method: "GET", url: "/api/auth/me", headers: { cookie: userCookie } });
+    expect((me.json() as { enabledModules: string[] }).enabledModules).toEqual(["dashboard", "budgets"]);
+    const blocked = await app.inject({ method: "GET", url: "/api/projects/00000000-0000-4000-8000-000000000000/procurement-plan", headers: { cookie: userCookie } });
+    expect(blocked.statusCode).toBe(403);
+    expect((blocked.json() as { error: string }).error).toContain("módulo");
+  });
 });

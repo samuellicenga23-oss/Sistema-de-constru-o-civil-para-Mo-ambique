@@ -15,7 +15,7 @@ import {
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
-import type { DocumentAnalysis } from "@sigo/shared";
+import { COMPANY_MODULE_KEYS, type CompanyModuleKey, type DocumentAnalysis } from "@sigo/shared";
 
 export const userRoleEnum = pgEnum("user_role", [
   "super_admin",
@@ -59,6 +59,11 @@ export const companies = pgTable("companies", {
   // gravado já para quando essa integração for feita.
   documentFooter: text("document_footer"),
   responsibleName: varchar("responsible_name", { length: 150 }),
+  enabledModules: jsonb("enabled_modules").$type<CompanyModuleKey[]>().notNull().default([...COMPANY_MODULE_KEYS]),
+  brandName: varchar("brand_name", { length: 100 }),
+  primaryColor: varchar("primary_color", { length: 7 }).notNull().default("#1AADB4"),
+  accentColor: varchar("accent_color", { length: 7 }).notNull().default("#ED6C22"),
+  defaultLanguage: varchar("default_language", { length: 10 }).notNull().default("pt"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

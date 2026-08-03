@@ -7,6 +7,8 @@ import InstallAppButton from "./InstallAppButton";
 import OfflineBanner from "./OfflineBanner";
 import { IconHome, IconFolder, IconTag, IconBuilding, IconLogout, IconSettings, IconRuler, IconUsers, IconMenu, IconClose } from "./icons";
 import { LogoFull, LogoIcon } from "./Logo";
+import { useLanguage } from "../i18n";
+import type { CompanyModuleKey } from "../api/companies";
 
 const ROLE_LABELS: Record<string, string> = {
   super_admin: "Super Admin",
@@ -16,7 +18,7 @@ const ROLE_LABELS: Record<string, string> = {
   visualizador: "Visualizador",
 };
 
-type NavItem = { to: string; label: string; icon: (p: { className?: string }) => ReactNode; exact?: boolean };
+type NavItem = { to: string; label: string; icon: (p: { className?: string }) => ReactNode; exact?: boolean; module?: CompanyModuleKey };
 
 function initials(name: string | undefined): string {
   if (!name) return "?";
@@ -36,6 +38,7 @@ export default function Layout({
   children: ReactNode;
 }) {
   const { user, logout } = useAuth();
+  const { t } = useLanguage();
   const location = useLocation();
   const [companyName, setCompanyName] = useState<string | null>(null);
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
@@ -53,25 +56,40 @@ export default function Layout({
       companiesApi
         .me()
         .then((data) => {
-          setCompanyName(data.company.name);
+          setCompanyName(data.company.brandName || data.company.name);
           setLogoUrl(data.company.logoUrl);
+          document.documentElement.style.setProperty("--color-brand-500", data.company.primaryColor);
+          document.documentElement.style.setProperty("--color-brand-600", `color-mix(in srgb, ${data.company.primaryColor} 88%, black)`);
+          document.documentElement.style.setProperty("--color-brand-700", `color-mix(in srgb, ${data.company.primaryColor} 76%, black)`);
+          document.documentElement.style.setProperty("--color-accent", data.company.accentColor);
+          document.documentElement.style.setProperty("--color-accent-hover", `color-mix(in srgb, ${data.company.accentColor} 88%, black)`);
+          document.documentElement.style.setProperty("--color-accent-active", `color-mix(in srgb, ${data.company.accentColor} 76%, black)`);
         })
         .catch(() => {});
+    } else {
+      setCompanyName(null);
+      setLogoUrl(null);
+      document.documentElement.style.setProperty("--color-brand-500", "#1AADB4");
+      document.documentElement.style.setProperty("--color-brand-600", "#0F8A90");
+      document.documentElement.style.setProperty("--color-brand-700", "#0C6F74");
+      document.documentElement.style.setProperty("--color-accent", "#ED6C22");
+      document.documentElement.style.setProperty("--color-accent-hover", "#D85F18");
+      document.documentElement.style.setProperty("--color-accent-active", "#C75112");
     }
   }, [user?.companyId]);
 
   const navItems: NavItem[] =
     user?.role === "super_admin"
-      ? [{ to: "/admin", label: "Painel da Plataforma", icon: IconSettings }]
+      ? [{ to: "/admin", label: t("platformPanel"), icon: IconSettings }]
       : [
-          { to: "/painel", label: "Painel", icon: IconHome, exact: true },
-          { to: "/medicoes", label: "Medições", icon: IconRuler },
-          { to: "/orcamentos", label: "Orçamentos", icon: IconFolder },
-          { to: "/catalogo", label: "Catálogo de Preços", icon: IconTag },
-          { to: "/fornecedores", label: "Fornecedores", icon: IconUsers },
-          { to: "/calculos-rapidos", label: "Cálculos Rápidos", icon: IconRuler },
-          ...(user?.role === "admin_empresa" ? [{ to: "/empresa", label: "Definições da Empresa", icon: IconBuilding }] : []),
-        ];
+          { to: "/painel", label: t("dashboard"), icon: IconHome, exact: true, module: "dashboard" as const },
+          { to: "/medicoes", label: t("measurements"), icon: IconRuler, module: "measurements" as const },
+          { to: "/orcamentos", label: t("budgets"), icon: IconFolder, module: "budgets" as const },
+          { to: "/catalogo", label: t("catalog"), icon: IconTag, module: "catalog" as const },
+          { to: "/fornecedores", label: t("suppliers"), icon: IconUsers, module: "suppliers" as const },
+          { to: "/calculos-rapidos", label: t("quickCalculations"), icon: IconRuler, module: "quick_calculations" as const },
+          ...(user?.role === "admin_empresa" ? [{ to: "/empresa", label: t("companySettings"), icon: IconBuilding }] : []),
+        ].filter((item) => !item.module || user?.enabledModules.includes(item.module));
 
   function isActive(item: NavItem) {
     if (item.exact) return location.pathname === item.to;
@@ -104,10 +122,10 @@ export default function Layout({
               )}
             </div>
           )}
-          {!sidebarCollapsed && <button onClick={() => setSidebarCollapsed(true)} className="icon-btn border-0 bg-transparent shadow-none" title="Recolher menu"><IconClose className="h-4 w-4" /></button>}
+          {!sidebarCollapsed && <button type="button" onClick={() => setSidebarCollapsed(true)} className="icon-btn border-0 bg-transparent shadow-none" title={t("collapseMenu")}><IconClose className="h-4 w-4" /></button>}
         </div>
 
-        {sidebarCollapsed && <button onClick={() => setSidebarCollapsed(false)} className="icon-btn mx-auto mt-3" title="Expandir menu"><IconMenu className="h-4 w-4" /></button>}
+        {sidebarCollapsed && <button type="button" onClick={() => setSidebarCollapsed(false)} className="icon-btn mx-auto mt-3" title={t("expandMenu")}><IconMenu className="h-4 w-4" /></button>}
 
         {companyName && !sidebarCollapsed && (
           <div className="mx-3 mt-3 flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2.5 py-2 text-xs font-medium text-slate-700">
@@ -120,7 +138,7 @@ export default function Layout({
           {navItems.map((item) => {
             const active = isActive(item);
             const Icon = item.icon;
-            const sectionLabel = item.to === "/painel" || item.to === "/admin" ? "Trabalho" : item.to === "/fornecedores" ? "Operações" : item.to === "/empresa" ? "Administração" : null;
+            const sectionLabel = item.to === "/painel" || item.to === "/admin" ? t("work") : item.to === "/fornecedores" ? t("operations") : item.to === "/empresa" ? t("administration") : null;
             return (
               <div key={item.to}>
               {sectionLabel && !sidebarCollapsed && <p className="mb-1 mt-4 px-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400 first:mt-0">{sectionLabel}</p>}
@@ -165,7 +183,7 @@ export default function Layout({
       <div className="flex-1 min-w-0 flex flex-col">
         {/* Barra superior móvel (ecrãs pequenos, sem sidebar) */}
         <div className="md:hidden bg-[#172033] text-white px-3 py-2.5 flex items-center justify-between shadow-sm">
-          <button onClick={() => setDrawerOpen(true)} aria-label="Abrir menu" className="grid h-10 w-10 place-items-center rounded-lg border border-white/10 text-brand-200 hover:bg-white/10 hover:text-white">
+          <button type="button" onClick={() => setDrawerOpen(true)} aria-label={t("openMenu")} className="grid h-10 w-10 place-items-center rounded-lg border border-white/10 text-brand-200 hover:bg-white/10 hover:text-white">
             <IconMenu className="w-5 h-5" />
           </button>
           <LogoFull dark tagline={false} />
@@ -186,7 +204,7 @@ export default function Layout({
             <div className="relative w-72 max-w-[80vw] bg-[#f8f8f9] text-slate-700 flex flex-col shadow-xl">
               <div className="px-4 py-4 flex items-center justify-between border-b border-slate-200">
                 <LogoFull tagline={false} />
-                <button onClick={() => setDrawerOpen(false)} aria-label="Fechar menu" className="icon-btn">
+                <button type="button" onClick={() => setDrawerOpen(false)} aria-label={t("closeMenu")} className="icon-btn">
                   <IconClose className="w-5 h-5" />
                 </button>
               </div>
@@ -217,14 +235,14 @@ export default function Layout({
                       {initials(user?.name)}
                     </span>
                   )}
-                  Perfil
+                  {t("profile")}
                 </Link>
                 <button
                   onClick={() => logout()}
                   className="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-200/60 hover:text-slate-950"
                 >
                   <IconLogout className="w-[18px] h-[18px]" />
-                  Sair
+                  {t("logout")}
                 </button>
               </div>
             </div>

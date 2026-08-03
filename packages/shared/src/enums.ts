@@ -5,6 +5,20 @@ export const USER_ROLES = [
   "engenheiro_fiscal",
   "visualizador",
 ] as const;
+
+export const COMPANY_MODULE_KEYS = [
+  "dashboard",
+  "measurements",
+  "budgets",
+  "catalog",
+  "suppliers",
+  "purchasing",
+  "schedule",
+  "site_diary",
+  "financial",
+  "quick_calculations",
+] as const;
+export type CompanyModuleKey = (typeof COMPANY_MODULE_KEYS)[number];
 export type UserRole = (typeof USER_ROLES)[number];
 
 export const CURRENCIES = ["MZN", "USD"] as const;

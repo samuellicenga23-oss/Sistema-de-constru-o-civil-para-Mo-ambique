@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { eq, and, desc, count } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { users, subscriptions, sessions } from "../db/schema.js";
+import { companies, users, subscriptions, sessions } from "../db/schema.js";
 import { requireRole } from "../auth/middleware.js";
 import { hashPassword } from "../auth/password.js";
 import { getPlanDefinition } from "@sigo/shared";
@@ -13,6 +13,7 @@ const createUserSchema = z.object({
   email: z.string().trim().toLowerCase().email(),
   password: z.string().min(8, "A password deve ter pelo menos 8 caracteres"),
   role: z.enum(["admin_empresa", "orcamentista", "engenheiro_fiscal", "visualizador"]),
+  preferredLanguage: z.enum(["pt", "en"]).optional(),
 });
 
 const updateUserSchema = z.object({
@@ -85,9 +86,10 @@ export async function userRoutes(app: FastifyInstance) {
     }
 
     const passwordHash = await hashPassword(password);
+    const [company] = await db.select({ defaultLanguage: companies.defaultLanguage }).from(companies).where(eq(companies.id, companyId)).limit(1);
     const [user] = await db
       .insert(users)
-      .values({ companyId, name, email, passwordHash, role, mustChangePassword: true })
+      .values({ companyId, name, email, passwordHash, role, preferredLanguage: parsed.data.preferredLanguage ?? company?.defaultLanguage ?? "pt", mustChangePassword: true })
       .returning();
     await recordAuditEvent({ companyId, actorUserId: request.currentUser!.id, entityType: "user", entityId: user.id, action: "created", after: { role: user.role, isActive: user.isActive, mustChangePassword: user.mustChangePassword } });
 

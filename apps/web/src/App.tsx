@@ -1,6 +1,6 @@
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
-import { canAccessPath } from "./permissions";
+import { canAccessPath, isModuleEnabled } from "./permissions";
 import LoadingState from "./components/LoadingState";
 import LoginPage from "./pages/LoginPage";
 import DashboardPage from "./pages/DashboardPage";
@@ -45,6 +45,9 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
         </div>
       </div>
     );
+  }
+  if (user.role !== "super_admin" && !isModuleEnabled(location.pathname, user.enabledModules)) {
+    return <Navigate to={user.enabledModules.includes("dashboard") ? "/painel" : "/perfil"} replace />;
   }
   return <>{children}</>;
 }

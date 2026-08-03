@@ -6,7 +6,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { db } from "../db/index.js";
-import { users, subscriptions } from "../db/schema.js";
+import { companies, users, subscriptions } from "../db/schema.js";
 import { hashPassword, verifyPassword } from "../auth/password.js";
 import {
   createSession,
@@ -98,6 +98,10 @@ export async function authRoutes(app: FastifyInstance) {
         }
       }
 
+      const [company] = user.companyId
+        ? await db.select({ enabledModules: companies.enabledModules }).from(companies).where(eq(companies.id, user.companyId)).limit(1)
+        : [];
+
       const session = await createSession(user.id, sessionMetaOf(request));
       const lastLoginAt = new Date();
       await db.update(users).set({ lastLoginAt }).where(eq(users.id, user.id));
@@ -114,6 +118,7 @@ export async function authRoutes(app: FastifyInstance) {
         isActive: user.isActive,
         mustChangePassword: user.mustChangePassword,
         preferredLanguage: user.preferredLanguage,
+        enabledModules: company?.enabledModules ?? [],
         createdAt: user.createdAt,
       };
     }
@@ -263,6 +268,7 @@ export async function authRoutes(app: FastifyInstance) {
       isActive: updated.isActive,
       mustChangePassword: updated.mustChangePassword,
       preferredLanguage: updated.preferredLanguage,
+      enabledModules: request.currentUser!.enabledModules,
       createdAt: updated.createdAt,
     };
   });

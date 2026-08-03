@@ -1,17 +1,18 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { eq, desc, count } from "drizzle-orm";
+import { and, eq, desc, count } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { db } from "../db/index.js";
-import { companies, users, subscriptions, projects } from "../db/schema.js";
+import { companies, users, subscriptions, projects, sessions } from "../db/schema.js";
 import { requireRole, requireCompanyUser } from "../auth/middleware.js";
 import { hashPassword } from "../auth/password.js";
 import { env } from "../env.js";
-import { CURRENCIES, SUBSCRIPTION_STATUSES, SUBSCRIPTION_PLAN_KEYS } from "@sigo/shared";
+import { COMPANY_MODULE_KEYS, CURRENCIES, SUBSCRIPTION_STATUSES, SUBSCRIPTION_PLAN_KEYS } from "@sigo/shared";
 import { detectImageExtension } from "../services/imageValidation.js";
 import { syncSigoPricesForCompany } from "../services/sigoPrices.js";
+import { recordAuditEvent } from "../services/auditTrail.js";
 
 const createCompanySchema = z.object({
   name: z.string().min(1),
@@ -22,6 +23,32 @@ const createCompanySchema = z.object({
   adminEmail: z.string().trim().toLowerCase().email(),
   adminPassword: z.string().min(8, "A password deve ter pelo menos 8 caracteres"),
 });
+
+const colourSchema = z.string().regex(/^#[0-9A-Fa-f]{6}$/, "Use uma cor hexadecimal válida");
+const adminCompanySettingsSchema = z.object({
+  name: z.string().trim().min(2).max(200).optional(),
+  defaultCurrency: z.enum(CURRENCIES).optional(),
+  enabledModules: z.array(z.enum(COMPANY_MODULE_KEYS)).min(1).optional(),
+  brandName: z.string().trim().max(100).nullable().optional(),
+  primaryColor: colourSchema.optional(),
+  accentColor: colourSchema.optional(),
+  defaultLanguage: z.enum(["pt", "en"]).optional(),
+}).refine((data) => Object.keys(data).length > 0, "Indique pelo menos uma alteração");
+
+const adminCreateUserSchema = z.object({
+  name: z.string().trim().min(2),
+  email: z.string().trim().toLowerCase().email(),
+  password: z.string().min(8),
+  role: z.enum(["admin_empresa", "orcamentista", "engenheiro_fiscal", "visualizador"]),
+  preferredLanguage: z.enum(["pt", "en"]).default("pt"),
+});
+
+const adminUpdateUserSchema = z.object({
+  name: z.string().trim().min(2).optional(),
+  role: z.enum(["admin_empresa", "orcamentista", "engenheiro_fiscal", "visualizador"]).optional(),
+  isActive: z.boolean().optional(),
+  preferredLanguage: z.enum(["pt", "en"]).optional(),
+}).refine((data) => Object.keys(data).length > 0, "Indique pelo menos uma alteração");
 
 async function getLatestSubscription(companyId: string) {
   const [sub] = await db
@@ -51,6 +78,76 @@ export async function companyRoutes(app: FastifyInstance) {
       .from(users)
       .where(eq(users.companyId, id));
     return { company, subscription: await getLatestSubscription(id), users: companyUsers };
+  });
+
+  app.patch("/api/admin/companies/:id", { preHandler: requireRole("super_admin") }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const parsed = adminCompanySettingsSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    const [before] = await db.select().from(companies).where(eq(companies.id, id)).limit(1);
+    if (!before) return reply.code(404).send({ error: "Empresa não encontrada" });
+    const [updated] = await db.update(companies).set(parsed.data).where(eq(companies.id, id)).returning();
+    await recordAuditEvent({ companyId: id, actorUserId: request.currentUser!.id, entityType: "company", entityId: id, action: "platform_settings_updated", before: { name: before.name, enabledModules: before.enabledModules }, after: { name: updated.name, enabledModules: updated.enabledModules } });
+    return { ...updated, subscription: await getLatestSubscription(id) };
+  });
+
+  app.get("/api/admin/users", { preHandler: requireRole("super_admin") }, async (request) => {
+    const { companyId } = request.query as { companyId?: string };
+    const rows = await db
+      .select({ user: users, companyName: companies.name })
+      .from(users)
+      .innerJoin(companies, eq(users.companyId, companies.id))
+      .where(companyId ? eq(users.companyId, companyId) : undefined)
+      .orderBy(companies.name, users.name);
+    return rows.map(({ user, companyName }) => ({
+      id: user.id, companyId: user.companyId!, companyName, name: user.name, email: user.email,
+      role: user.role, isActive: user.isActive, mustChangePassword: user.mustChangePassword,
+      preferredLanguage: user.preferredLanguage, lastLoginAt: user.lastLoginAt, createdAt: user.createdAt,
+    }));
+  });
+
+  app.post("/api/admin/companies/:id/users", { preHandler: requireRole("super_admin") }, async (request, reply) => {
+    const { id: companyId } = request.params as { id: string };
+    const parsed = adminCreateUserSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    const [company] = await db.select().from(companies).where(eq(companies.id, companyId)).limit(1);
+    if (!company) return reply.code(404).send({ error: "Empresa não encontrada" });
+    const [existing] = await db.select({ id: users.id }).from(users).where(eq(users.email, parsed.data.email)).limit(1);
+    if (existing) return reply.code(409).send({ error: "Já existe um utilizador com este email" });
+    const passwordHash = await hashPassword(parsed.data.password);
+    const [created] = await db.insert(users).values({ companyId, name: parsed.data.name, email: parsed.data.email, passwordHash, role: parsed.data.role, preferredLanguage: parsed.data.preferredLanguage, mustChangePassword: true }).returning();
+    await recordAuditEvent({ companyId, actorUserId: request.currentUser!.id, entityType: "user", entityId: created.id, action: "platform_user_created", after: { role: created.role, isActive: created.isActive } });
+    return reply.code(201).send({ id: created.id, companyId, companyName: company.name, name: created.name, email: created.email, role: created.role, isActive: created.isActive, mustChangePassword: created.mustChangePassword, preferredLanguage: created.preferredLanguage, lastLoginAt: created.lastLoginAt, createdAt: created.createdAt });
+  });
+
+  app.patch("/api/admin/users/:id", { preHandler: requireRole("super_admin") }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const parsed = adminUpdateUserSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    const [target] = await db.select().from(users).where(eq(users.id, id)).limit(1);
+    if (!target?.companyId) return reply.code(404).send({ error: "Utilizador empresarial não encontrado" });
+    const removesAdmin = target.role === "admin_empresa" && target.isActive && ((parsed.data.role && parsed.data.role !== "admin_empresa") || parsed.data.isActive === false);
+    if (removesAdmin) {
+      const [{ value }] = await db.select({ value: count() }).from(users).where(and(eq(users.companyId, target.companyId), eq(users.role, "admin_empresa"), eq(users.isActive, true)));
+      if (value <= 1) return reply.code(409).send({ error: "A empresa deve manter pelo menos um administrador activo" });
+    }
+    const [updated] = await db.update(users).set(parsed.data).where(eq(users.id, id)).returning();
+    if (parsed.data.isActive === false) await db.delete(sessions).where(eq(sessions.userId, id));
+    await recordAuditEvent({ companyId: target.companyId, actorUserId: request.currentUser!.id, entityType: "user", entityId: id, action: "platform_user_updated", before: { role: target.role, isActive: target.isActive }, after: { role: updated.role, isActive: updated.isActive } });
+    const [company] = await db.select({ name: companies.name }).from(companies).where(eq(companies.id, target.companyId)).limit(1);
+    return { id: updated.id, companyId: target.companyId, companyName: company?.name ?? "", name: updated.name, email: updated.email, role: updated.role, isActive: updated.isActive, mustChangePassword: updated.mustChangePassword, preferredLanguage: updated.preferredLanguage, lastLoginAt: updated.lastLoginAt, createdAt: updated.createdAt };
+  });
+
+  app.post("/api/admin/users/:id/reset-password", { preHandler: requireRole("super_admin") }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const parsed = z.object({ password: z.string().min(8) }).safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    const [target] = await db.select().from(users).where(eq(users.id, id)).limit(1);
+    if (!target?.companyId) return reply.code(404).send({ error: "Utilizador empresarial não encontrado" });
+    await db.update(users).set({ passwordHash: await hashPassword(parsed.data.password), mustChangePassword: true }).where(eq(users.id, id));
+    await db.delete(sessions).where(eq(sessions.userId, id));
+    await recordAuditEvent({ companyId: target.companyId, actorUserId: request.currentUser!.id, entityType: "user", entityId: id, action: "platform_password_reset", after: { mustChangePassword: true, sessionsRevoked: true } });
+    return { ok: true };
   });
 
   app.post("/api/companies", { preHandler: requireRole("super_admin") }, async (request, reply) => {

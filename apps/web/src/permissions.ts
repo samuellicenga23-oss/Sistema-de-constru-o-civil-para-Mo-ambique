@@ -1,4 +1,5 @@
 import type { CurrentUser } from "./api/client";
+import type { CompanyModuleKey } from "./api/companies";
 
 export type Role = CurrentUser["role"];
 
@@ -23,4 +24,22 @@ export function canAccessPath(role: Role, pathname: string): boolean {
   // autos, plantas): todos os perfis de empresa podem ABRIR — o que cada perfil consegue
   // EDITAR lá dentro já é decidido pelo backend em cada rota (`requireRole`), não aqui.
   return true;
+}
+
+const PATH_MODULES: Array<{ match: (path: string) => boolean; module: CompanyModuleKey }> = [
+  { match: (path) => path === "/painel", module: "dashboard" },
+  { match: (path) => path === "/medicoes" || path.startsWith("/plantas/"), module: "measurements" },
+  { match: (path) => path === "/orcamentos" || path.startsWith("/documentos/"), module: "budgets" },
+  { match: (path) => path.startsWith("/catalogo"), module: "catalog" },
+  { match: (path) => path === "/fornecedores", module: "suppliers" },
+  { match: (path) => path.endsWith("/compras"), module: "purchasing" },
+  { match: (path) => path.endsWith("/cronograma"), module: "schedule" },
+  { match: (path) => path.endsWith("/diario"), module: "site_diary" },
+  { match: (path) => path.endsWith("/financeiro") || path.startsWith("/autos/"), module: "financial" },
+  { match: (path) => path === "/calculos-rapidos", module: "quick_calculations" },
+];
+
+export function isModuleEnabled(pathname: string, enabledModules: CompanyModuleKey[]): boolean {
+  const required = PATH_MODULES.find((entry) => entry.match(pathname))?.module;
+  return !required || enabledModules.includes(required);
 }

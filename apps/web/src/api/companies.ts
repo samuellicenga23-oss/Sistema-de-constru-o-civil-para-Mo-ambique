@@ -25,8 +25,29 @@ export type Company = {
   bankDetails: string | null;
   documentFooter: string | null;
   responsibleName: string | null;
+  enabledModules: CompanyModuleKey[];
+  brandName: string | null;
+  primaryColor: string;
+  accentColor: string;
+  defaultLanguage: "pt" | "en";
   createdAt: string;
   subscription?: Subscription | null;
+};
+
+export type CompanyModuleKey = "dashboard" | "measurements" | "budgets" | "catalog" | "suppliers" | "purchasing" | "schedule" | "site_diary" | "financial" | "quick_calculations";
+
+export type AdminCompanyUser = {
+  id: string;
+  companyId: string;
+  companyName: string;
+  name: string;
+  email: string;
+  role: "admin_empresa" | "orcamentista" | "engenheiro_fiscal" | "visualizador";
+  isActive: boolean;
+  mustChangePassword: boolean;
+  preferredLanguage: "pt" | "en";
+  lastLoginAt: string | null;
+  createdAt: string;
 };
 
 export type CompanyUpdateInput = Partial<{
@@ -52,6 +73,14 @@ export const companiesApi = {
     request<{ company: Company }>("/companies", { method: "POST", body: JSON.stringify(data) }),
   updateSubscription: (companyId: string, data: { status?: "trial" | "activo" | "suspenso"; plan?: string }) =>
     request<Subscription>(`/companies/${companyId}/subscription`, { method: "PUT", body: JSON.stringify(data) }),
+  updateAdminSettings: (companyId: string, data: Partial<Pick<Company, "name" | "defaultCurrency" | "enabledModules" | "brandName" | "primaryColor" | "accentColor" | "defaultLanguage">>) =>
+    request<Company>(`/admin/companies/${companyId}`, { method: "PATCH", body: JSON.stringify(data) }),
+  listAdminUsers: (companyId?: string) => request<AdminCompanyUser[]>(`/admin/users${companyId ? `?companyId=${companyId}` : ""}`),
+  createAdminUser: (companyId: string, data: { name: string; email: string; password: string; role: AdminCompanyUser["role"]; preferredLanguage: "pt" | "en" }) =>
+    request<AdminCompanyUser>(`/admin/companies/${companyId}/users`, { method: "POST", body: JSON.stringify(data) }),
+  updateAdminUser: (userId: string, data: Partial<Pick<AdminCompanyUser, "name" | "role" | "isActive" | "preferredLanguage">>) =>
+    request<AdminCompanyUser>(`/admin/users/${userId}`, { method: "PATCH", body: JSON.stringify(data) }),
+  resetAdminUserPassword: (userId: string, password: string) => request<{ ok: true }>(`/admin/users/${userId}/reset-password`, { method: "POST", body: JSON.stringify({ password }) }),
 
   me: () => request<{ company: Company; subscription: Subscription | null }>("/companies/me"),
   updateMe: (data: CompanyUpdateInput) => request<Company>("/companies/me", { method: "PUT", body: JSON.stringify(data) }),

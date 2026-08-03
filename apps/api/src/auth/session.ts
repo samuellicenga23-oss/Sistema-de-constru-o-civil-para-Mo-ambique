@@ -1,7 +1,7 @@
 import { eq, gt, and, ne } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { sessions, users } from "../db/schema.js";
-import type { UserRole } from "@sigo/shared";
+import { companies, sessions, users } from "../db/schema.js";
+import { COMPANY_MODULE_KEYS, type CompanyModuleKey, type UserRole } from "@sigo/shared";
 
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 dias
 
@@ -16,6 +16,7 @@ export type SessionUser = {
   isActive: boolean;
   mustChangePassword: boolean;
   preferredLanguage: string;
+  enabledModules: CompanyModuleKey[];
   createdAt: Date;
 };
 
@@ -43,13 +44,16 @@ export async function getSessionUser(sessionId: string): Promise<SessionUser | n
       isActive: users.isActive,
       mustChangePassword: users.mustChangePassword,
       preferredLanguage: users.preferredLanguage,
+      enabledModules: companies.enabledModules,
       createdAt: users.createdAt,
     })
     .from(sessions)
     .innerJoin(users, eq(sessions.userId, users.id))
+    .leftJoin(companies, eq(users.companyId, companies.id))
     .where(and(eq(sessions.id, sessionId), gt(sessions.expiresAt, new Date()), eq(users.isActive, true)))
     .limit(1);
-  return rows[0] ?? null;
+  const row = rows[0];
+  return row ? { ...row, enabledModules: row.enabledModules ?? [...COMPANY_MODULE_KEYS] } : null;
 }
 
 export async function deleteSession(sessionId: string): Promise<void> {
