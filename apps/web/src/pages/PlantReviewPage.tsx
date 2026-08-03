@@ -56,6 +56,7 @@ export default function PlantReviewPage() {
   const [newMaterialName, setNewMaterialName] = useState("");
   const [materialEditorPrice, setMaterialEditorPrice] = useState("");
   const [savingMaterial, setSavingMaterial] = useState(false);
+  const [openingManagerKind, setOpeningManagerKind] = useState<"porta" | "janela" | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -115,13 +116,6 @@ export default function PlantReviewPage() {
     const names = new Set(openings.map((opening) => opening.floor ?? UNASSIGNED_FLOOR));
     return Array.from(names).sort((a, b) => floorSortKey(a) - floorSortKey(b));
   }, [openings]);
-
-  const openingsByFloor = useMemo(() => {
-    const groups = new Map<string, ExtractedOpening[]>();
-    for (const floor of openingFloorNames) groups.set(floor, []);
-    for (const opening of openings) groups.get(opening.floor ?? UNASSIGNED_FLOOR)!.push(opening);
-    return groups;
-  }, [openings, openingFloorNames]);
 
   const availableOpeningFloors = useMemo(
     () => Array.from(new Set([...floorNames, ...openingFloorNames])).sort((a, b) => floorSortKey(a) - floorSortKey(b)),
@@ -276,11 +270,11 @@ export default function PlantReviewPage() {
     setOpeningPrices((prices) => ({ ...prices, [openingId]: prices[previous.id] ?? "" }));
   }
 
-  async function addOpening() {
+  async function addOpening(kind: "porta" | "janela") {
     if (!id) return;
     setError(null);
     try {
-      const created = await plantsApi.createOpening(id, { kind: "janela", designation: "Nova janela", widthM: 1.2, heightM: 1.2, quantity: 1, floor: floorNames[0] === UNASSIGNED_FLOOR ? null : floorNames[0] ?? null, location: "exterior", page: 1, confirmed: true, materialId: null, technicalSpecification: null });
+      const created = await plantsApi.createOpening(id, { kind, designation: kind === "porta" ? "Nova porta" : "Nova janela", widthM: kind === "porta" ? 0.9 : 1.2, heightM: kind === "porta" ? 2.1 : 1.2, quantity: 1, floor: floorNames[0] === UNASSIGNED_FLOOR ? null : floorNames[0] ?? null, location: "exterior", page: 1, confirmed: true, materialId: null, technicalSpecification: null });
       setOpenings((items) => [...items, created]);
       setOpeningPrices((prices) => ({ ...prices, [created.id]: "" }));
     } catch (err) {
@@ -304,6 +298,33 @@ export default function PlantReviewPage() {
     }
   }
 
+  function renderOpeningCard(opening: ExtractedOpening, openingIndex: number, floorOpenings: ExtractedOpening[]) {
+    const linkedMaterial = catalogMaterials.find((material) => material.id === opening.materialId);
+    const materialUnit = linkedMaterial?.unit ?? (opening.kind === "porta" ? "un" : "m²");
+    return (
+      <div key={opening.id} className={`rounded-xl border bg-white p-4 ${opening.needsConfirmation ? "border-amber-300" : "border-slate-200"}`}>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2"><strong className="text-sm text-slate-900">{opening.designation || opening.code || (opening.kind === "porta" ? "Porta" : "Janela")}</strong><span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${opening.needsConfirmation ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"}`}>{opening.needsConfirmation ? "Por confirmar" : "Confirmado"}</span></div>
+          <div className="flex flex-wrap items-center gap-2"><button type="button" className="btn btn-secondary btn-sm" disabled={openingIndex === 0} onClick={() => repeatPreviousOpening(opening.id, floorOpenings)}>Preencher como anterior</button><span className="text-xs text-slate-500">Página {opening.page} · confiança {Math.round(Number(opening.confidence) * 100)}%</span></div>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div><label className="label">Código</label><input className="input input-sm" value={opening.code ?? ""} placeholder={opening.kind === "porta" ? "P01" : "J01"} onChange={(event) => setOpenings((items) => items.map((item) => item.id === opening.id ? { ...item, code: event.target.value || null, needsConfirmation: true } : item))} /></div>
+          <div className="sm:col-span-2"><label className="label">Nome / modelo</label><input className="input input-sm" value={opening.designation ?? ""} placeholder={opening.kind === "porta" ? "Ex.: Porta principal" : "Ex.: Janela da sala"} onChange={(event) => setOpenings((items) => items.map((item) => item.id === opening.id ? { ...item, designation: event.target.value || null, needsConfirmation: true } : item))} /></div>
+          <div><label className="label">Piso</label><select className="input input-sm" value={opening.floor ?? UNASSIGNED_FLOOR} onChange={(event) => setOpenings((items) => items.map((item) => item.id === opening.id ? { ...item, floor: event.target.value === UNASSIGNED_FLOOR ? null : event.target.value, needsConfirmation: true } : item))}>{availableOpeningFloors.map((name) => <option key={name} value={name}>{name}</option>)}</select></div>
+          <div><label className="label">Largura (m)</label><input className="input input-sm" type="number" step="0.01" min="0" value={opening.widthM ?? ""} onChange={(event) => setOpenings((items) => items.map((item) => item.id === opening.id ? { ...item, widthM: event.target.value || null, needsConfirmation: true } : item))} /></div>
+          <div><label className="label">Altura (m)</label><input className="input input-sm" type="number" step="0.01" min="0" value={opening.heightM ?? ""} onChange={(event) => setOpenings((items) => items.map((item) => item.id === opening.id ? { ...item, heightM: event.target.value || null, needsConfirmation: true } : item))} /></div>
+          <div><label className="label">Quantidade</label><input className="input input-sm" type="number" step="1" min="1" value={opening.quantity} onChange={(event) => setOpenings((items) => items.map((item) => item.id === opening.id ? { ...item, quantity: Math.max(1, Number(event.target.value)), needsConfirmation: true } : item))} /></div>
+          <div><label className="label">Parede</label><select className="input input-sm" value={opening.location} onChange={(event) => setOpenings((items) => items.map((item) => item.id === opening.id ? { ...item, location: event.target.value as ExtractedOpening["location"], needsConfirmation: true } : item))}><option value="desconhecida">Por definir</option><option value="interior">Interior</option><option value="exterior">Exterior</option></select></div>
+        </div>
+        <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(260px,1fr)_minmax(260px,2fr)]">
+          <div><label className="label">Material</label><button type="button" className="input input-sm flex w-full items-center justify-between gap-2 text-left" onClick={() => openMaterialEditor(opening)}><span className={linkedMaterial ? "truncate font-medium text-slate-900" : "text-slate-500"}>{linkedMaterial?.name ?? "Indicar material"}</span><span className="shrink-0 text-xs font-semibold text-brand-700">{linkedMaterial ? `${Number(openingPrices[opening.id] || linkedMaterial.effectiveUnitCost).toLocaleString("pt-MZ")} ${linkedMaterial.currency}/${materialUnit} · Alterar` : "Escolher ou criar"}</span></button></div>
+          <div><label className="label">Especificação técnica</label><textarea className="input min-h-20 resize-y" value={opening.technicalSpecification ?? ""} placeholder="Perfil, acabamento, vidro, ferragens ou referência" onChange={(event) => setOpenings((items) => items.map((item) => item.id === opening.id ? { ...item, technicalSpecification: event.target.value || null, needsConfirmation: true } : item))} /></div>
+        </div>
+        <div className="mt-3 flex flex-wrap justify-end gap-2"><button type="button" className="btn btn-secondary btn-sm text-red-600" onClick={() => deleteOpening(opening.id)}><IconTrash className="h-4 w-4" /> Eliminar</button><button type="button" className="btn btn-primary btn-sm" disabled={savingOpeningId === opening.id || !opening.widthM || !opening.heightM || opening.location === "desconhecida"} onClick={() => saveOpening(opening)}>{savingOpeningId === opening.id ? "A guardar" : opening.needsConfirmation ? "Confirmar e guardar" : "Guardar alterações"}</button></div>
+      </div>
+    );
+  }
+
   if (!plant) {
     return <div className="min-h-screen flex items-center justify-center text-gray-400">A carregar...</div>;
   }
@@ -314,6 +335,8 @@ export default function PlantReviewPage() {
     rebarSchedules.map((line) => ({ diameterMm: Number(line.diameterMm), weightKg: Number(line.weightKg) })),
   );
   const materialEditorOpening = openings.find((opening) => opening.id === materialEditorOpeningId) ?? null;
+  const managedOpenings = openingManagerKind ? openings.filter((opening) => opening.kind === openingManagerKind) : [];
+  const managedOpeningFloorNames = Array.from(new Set(managedOpenings.map((opening) => opening.floor ?? UNASSIGNED_FLOOR))).sort((a, b) => floorSortKey(a) - floorSortKey(b));
   const filteredOpeningMaterials = catalogMaterials.filter((material) => {
     const query = materialSearch.trim().toLocaleLowerCase("pt");
     return !query || material.name.toLocaleLowerCase("pt").includes(query) || material.category.toLocaleLowerCase("pt").includes(query);
@@ -590,56 +613,20 @@ export default function PlantReviewPage() {
 
         {hasArchitecture && (
           <section className="card card-pad">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-              <div><h2 className="section-title">Portas e janelas ({openings.length})</h2><p className="mt-1 text-xs text-slate-500">Confirme dimensão e parede. Só os vãos confirmados entram no cálculo líquido.</p></div>
-              <button type="button" className="btn btn-secondary btn-sm" onClick={addOpening}>Adicionar vão</button>
+            <div className="mb-4"><h2 className="section-title">Portas e janelas</h2><p className="mt-1 text-xs text-slate-500">Organizadas separadamente por tipo e piso.</p></div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {(["janela", "porta"] as const).map((kind) => {
+                const typedOpenings = openings.filter((opening) => opening.kind === kind);
+                const total = typedOpenings.reduce((sum, opening) => sum + opening.quantity, 0);
+                const pending = typedOpenings.filter((opening) => opening.needsConfirmation || !opening.widthM || !opening.heightM || opening.location === "desconhecida").length;
+                return (
+                  <button key={kind} type="button" className="group flex min-h-28 items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white p-4 text-left transition-colors hover:border-brand-300 hover:bg-brand-50/40" onClick={() => setOpeningManagerKind(kind)}>
+                    <span><strong className="block text-base text-slate-900">{kind === "janela" ? "Janelas" : "Portas"}</strong><span className="mt-1 block text-sm text-slate-500">{total} unidade(s) · {typedOpenings.length} modelo(s)</span>{pending > 0 && <span className="mt-2 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">{pending} por confirmar</span>}</span>
+                    <span className="btn btn-secondary btn-sm group-hover:border-brand-300 group-hover:text-brand-700">Gerir</span>
+                  </button>
+                );
+              })}
             </div>
-            {openings.length === 0 ? <p className="rounded-lg bg-amber-50 px-3 py-3 text-sm text-amber-900">Nenhum vão seguro foi detectado. Adicione portas e janelas manualmente.</p> : (
-              <div className="space-y-4">
-                {openingFloorNames.map((floor) => {
-                  const floorOpenings = openingsByFloor.get(floor) ?? [];
-                  const doors = floorOpenings.reduce((sum, opening) => sum + (opening.kind === "porta" ? opening.quantity : 0), 0);
-                  const windows = floorOpenings.reduce((sum, opening) => sum + (opening.kind === "janela" ? opening.quantity : 0), 0);
-                  return (
-                    <article key={floor} className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50/70">
-                      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-100/80 px-4 py-3">
-                        <h3 className="font-semibold text-slate-900">{floor}</h3>
-                        <span className="text-xs font-medium text-slate-600">{doors} porta(s) · {windows} janela(s)</span>
-                      </header>
-                      <div className="space-y-3 p-3">
-                        {floorOpenings.map((opening, openingIndex) => {
-                          const linkedMaterial = catalogMaterials.find((material) => material.id === opening.materialId);
-                          const materialUnit = linkedMaterial?.unit ?? (opening.kind === "porta" ? "un" : "m²");
-                          return (
-                            <div key={opening.id} className={`rounded-xl border bg-white p-4 ${opening.needsConfirmation ? "border-amber-300" : "border-slate-200"}`}>
-                              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                                <div className="flex items-center gap-2"><strong className="text-sm text-slate-900">{opening.designation || opening.code || (opening.kind === "porta" ? "Porta" : "Janela")}</strong><span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${opening.needsConfirmation ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"}`}>{opening.needsConfirmation ? "Por confirmar" : "Confirmado"}</span></div>
-                                <div className="flex items-center gap-2"><button type="button" className="btn btn-secondary btn-sm" disabled={openingIndex === 0} onClick={() => repeatPreviousOpening(opening.id, floorOpenings)}>Preencher como anterior</button><span className="text-xs text-slate-500">Página {opening.page} · confiança {Math.round(Number(opening.confidence) * 100)}%</span></div>
-                              </div>
-                              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
-                                <div><label className="label">Tipo</label><select className="input input-sm" value={opening.kind} onChange={(event) => setOpenings((items) => items.map((item) => item.id === opening.id ? { ...item, kind: event.target.value as ExtractedOpening["kind"], needsConfirmation: true } : item))}><option value="porta">Porta</option><option value="janela">Janela</option></select></div>
-                                <div><label className="label">Código</label><input className="input input-sm" value={opening.code ?? ""} placeholder="J01" onChange={(event) => setOpenings((items) => items.map((item) => item.id === opening.id ? { ...item, code: event.target.value || null, needsConfirmation: true } : item))} /></div>
-                                <div className="sm:col-span-2"><label className="label">Nome / modelo</label><input className="input input-sm" value={opening.designation ?? ""} placeholder={opening.kind === "porta" ? "Ex.: Porta principal" : "Ex.: Janela da sala"} onChange={(event) => setOpenings((items) => items.map((item) => item.id === opening.id ? { ...item, designation: event.target.value || null, needsConfirmation: true } : item))} /></div>
-                                <div><label className="label">Piso</label><select className="input input-sm" value={opening.floor ?? UNASSIGNED_FLOOR} onChange={(event) => setOpenings((items) => items.map((item) => item.id === opening.id ? { ...item, floor: event.target.value === UNASSIGNED_FLOOR ? null : event.target.value, needsConfirmation: true } : item))}>{availableOpeningFloors.map((name) => <option key={name} value={name}>{name}</option>)}</select></div>
-                                <div><label className="label">Largura (m)</label><input className="input input-sm" type="number" step="0.01" min="0" value={opening.widthM ?? ""} onChange={(event) => setOpenings((items) => items.map((item) => item.id === opening.id ? { ...item, widthM: event.target.value || null, needsConfirmation: true } : item))} /></div>
-                                <div><label className="label">Altura (m)</label><input className="input input-sm" type="number" step="0.01" min="0" value={opening.heightM ?? ""} onChange={(event) => setOpenings((items) => items.map((item) => item.id === opening.id ? { ...item, heightM: event.target.value || null, needsConfirmation: true } : item))} /></div>
-                                <div><label className="label">Quantidade</label><input className="input input-sm" type="number" step="1" min="1" value={opening.quantity} onChange={(event) => setOpenings((items) => items.map((item) => item.id === opening.id ? { ...item, quantity: Math.max(1, Number(event.target.value)), needsConfirmation: true } : item))} /></div>
-                                <div><label className="label">Parede</label><select className="input input-sm" value={opening.location} onChange={(event) => setOpenings((items) => items.map((item) => item.id === opening.id ? { ...item, location: event.target.value as ExtractedOpening["location"], needsConfirmation: true } : item))}><option value="desconhecida">Por definir</option><option value="interior">Interior</option><option value="exterior">Exterior</option></select></div>
-                              </div>
-                              <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(260px,1fr)_minmax(260px,2fr)]">
-                                <div><label className="label">Material</label><button type="button" className="input input-sm flex w-full items-center justify-between text-left" onClick={() => openMaterialEditor(opening)}><span className={linkedMaterial ? "font-medium text-slate-900" : "text-slate-500"}>{linkedMaterial?.name ?? "Indicar material"}</span><span className="text-xs font-semibold text-brand-700">{linkedMaterial ? `${Number(openingPrices[opening.id] || linkedMaterial.effectiveUnitCost).toLocaleString("pt-MZ")} ${linkedMaterial.currency}/${materialUnit} · Alterar` : "Escolher ou criar"}</span></button></div>
-                                <div><label className="label">Especificação técnica</label><textarea className="input min-h-20 resize-y" value={opening.technicalSpecification ?? ""} placeholder="Perfil, acabamento, vidro, ferragens ou referência" onChange={(event) => setOpenings((items) => items.map((item) => item.id === opening.id ? { ...item, technicalSpecification: event.target.value || null, needsConfirmation: true } : item))} /></div>
-                              </div>
-                              <div className="mt-3 flex justify-end gap-2"><button type="button" className="btn btn-secondary btn-sm text-red-600" onClick={() => deleteOpening(opening.id)}><IconTrash className="h-4 w-4" /> Eliminar</button><button type="button" className="btn btn-primary btn-sm" disabled={savingOpeningId === opening.id || !opening.widthM || !opening.heightM || opening.location === "desconhecida"} onClick={() => saveOpening(opening)}>{savingOpeningId === opening.id ? "A guardar" : opening.needsConfirmation ? "Confirmar e guardar" : "Guardar alterações"}</button></div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </article>
-                  );
-                })}
-              </div>
-            )}
           </section>
         )}
 
@@ -692,6 +679,35 @@ export default function PlantReviewPage() {
           </section>
         )}
       </div>
+      {openingManagerKind && (
+        <Modal
+          title={openingManagerKind === "janela" ? "Janelas" : "Portas"}
+          subtitle="Cadastro organizado por piso"
+          onClose={() => setOpeningManagerKind(null)}
+          maxWidth="max-w-6xl"
+        >
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-slate-50 px-4 py-3">
+            <div><strong className="text-sm text-slate-900">{managedOpenings.reduce((sum, opening) => sum + opening.quantity, 0)} unidade(s)</strong><span className="ml-2 text-xs text-slate-500">{managedOpenings.length} modelo(s)</span></div>
+            <button type="button" className="btn btn-primary btn-sm" onClick={() => addOpening(openingManagerKind)}>+ Adicionar {openingManagerKind === "janela" ? "janela" : "porta"}</button>
+          </div>
+
+          {managedOpenings.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-slate-300 px-4 py-10 text-center"><p className="text-sm font-medium text-slate-700">Nenhuma {openingManagerKind === "janela" ? "janela" : "porta"} registada.</p><button type="button" className="btn btn-primary btn-sm mt-3" onClick={() => addOpening(openingManagerKind)}>Adicionar agora</button></div>
+          ) : (
+            <div className="space-y-4">
+              {managedOpeningFloorNames.map((floor) => {
+                const floorOpenings = managedOpenings.filter((opening) => (opening.floor ?? UNASSIGNED_FLOOR) === floor);
+                return (
+                  <article key={floor} className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50/70">
+                    <header className="flex items-center justify-between gap-2 border-b border-slate-200 bg-slate-100/80 px-4 py-3"><h3 className="font-semibold text-slate-900">{floor}</h3><span className="text-xs font-medium text-slate-600">{floorOpenings.reduce((sum, opening) => sum + opening.quantity, 0)} unidade(s)</span></header>
+                    <div className="space-y-3 p-3">{floorOpenings.map((opening, openingIndex) => renderOpeningCard(opening, openingIndex, floorOpenings))}</div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </Modal>
+      )}
       {materialEditorOpening && (
         <Modal
           title="Material da porta ou janela"
