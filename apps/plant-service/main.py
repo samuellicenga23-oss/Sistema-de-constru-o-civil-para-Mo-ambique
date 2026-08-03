@@ -45,6 +45,7 @@ class RoomOut(BaseModel):
     areaM2: float
     page: int
     floor: str | None
+    perimeterM: float | None
 
 
 class RebarLineOut(BaseModel):
@@ -77,7 +78,9 @@ class StaircaseOut(BaseModel):
 
 class SlabOut(BaseModel):
     floor: str | None
-    perimeterM: float | None
+    thicknessCm: float
+    layers: list[str]
+    pages: list[int]
 
 
 class OpeningOut(BaseModel):
@@ -94,9 +97,6 @@ class OpeningOut(BaseModel):
     confidence: float
     source: str
     needsConfirmation: bool
-    thicknessCm: float
-    layers: list[str]
-    pages: list[int]
 
 
 class StructuralSummaryOut(BaseModel):
