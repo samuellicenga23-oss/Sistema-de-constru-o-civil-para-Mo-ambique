@@ -11,6 +11,7 @@ import {
   type StockSummaryLine,
   type ProcurementPlan,
   type ProcurementRequirement,
+  type ProcurementQuote,
 } from "../api/purchasing";
 import { scheduleApi, type ScheduleTask } from "../api/schedule";
 import Layout from "../components/Layout";
@@ -90,6 +91,7 @@ export default function ProjectPurchasingPage() {
   const [scheduleTaskId, setScheduleTaskId] = useState("");
   const [orderNotes, setOrderNotes] = useState("");
   const [lines, setLines] = useState<PurchaseOrderLineInput[]>([]);
+  const [quoteRequirement, setQuoteRequirement] = useState<ProcurementRequirement | null>(null);
 
   const [movMaterialId, setMovMaterialId] = useState("");
   const [showMovementForm, setShowMovementForm] = useState(false);
@@ -100,6 +102,7 @@ export default function ProjectPurchasingPage() {
   const [movDate, setMovDate] = useState(todayStr());
 
   const materialById = useMemo(() => new Map(materials.map((m) => [m.id, m])), [materials]);
+  const commercialSuppliers = useMemo(() => suppliers.filter((supplier) => !supplier.isReference), [suppliers]);
   const orderDraftTotals = useMemo(() => calculateVatTotals(lines.reduce((sum, line) => sum + Number(line.quantity || 0) * Number(line.unitCost || 0), 0), Number(project?.ivaRate ?? 0.16)), [lines, project?.ivaRate]);
   const movementDraftTotals = useMemo(() => calculateVatTotals(Number(movQty || 0) * Number(movUnitCost || 0), Number(project?.ivaRate ?? 0.16)), [movQty, movUnitCost, project?.ivaRate]);
   const normalizedQuery = query.trim().toLocaleLowerCase("pt");
@@ -108,6 +111,7 @@ export default function ProjectPurchasingPage() {
       item.materialName,
       item.supplierName,
       item.quoteSource,
+      ...(item.quotes ?? []).map((quote) => quote.supplierName),
       ...item.phases.map((phase) => phase.label),
     ].some((value) => String(value ?? "").toLocaleLowerCase("pt").includes(normalizedQuery))),
   ), [normalizedQuery, procurementPlan?.requirements]);
@@ -151,7 +155,11 @@ export default function ProjectPurchasingPage() {
     setStockSummary(summary);
     setProcurementPlan(plan);
     setScheduleTasks(schedule?.tasks ?? []);
-    if (!supplierId && sups.length) setSupplierId(sups[0].id);
+    const firstCommercialSupplier = sups.find((supplier) => !supplier.isReference);
+    const selectedSupplier = sups.find((supplier) => supplier.id === supplierId);
+    if (!selectedSupplier || selectedSupplier.isReference) {
+      setSupplierId(firstCommercialSupplier?.id ?? "");
+    }
     if (!movMaterialId && mats.length) setMovMaterialId(mats[0].id);
     if (lines.length === 0 && mats.length) setLines([emptyLine(mats)]);
   }
@@ -192,19 +200,15 @@ export default function ProjectPurchasingPage() {
     updateLine(index, { materialId, unitCost: known ? Number(known.unitCost) : 0 });
   }
 
-  function prepareAutomaticOrder(suggestion: ProcurementRequirement) {
-    const firstPhase = suggestion.phases[0]?.key;
-    const requirements = procurementPlan?.requirements.filter((item) => item.supplierId === suggestion.supplierId && item.suggestedOrderQty > 0 && (
-      suggestion.suggestedScheduleTaskId
-        ? item.suggestedScheduleTaskId === suggestion.suggestedScheduleTaskId
-        : item.phases[0]?.key === firstPhase
-    )) ?? [];
-    if (!requirements.length) return;
-    setSupplierId(suggestion.supplierId!);
+  function prepareOrderFromQuote(suggestion: ProcurementRequirement, quote: ProcurementQuote) {
+    if (!quote.supplierId || quote.isReference) return;
+    setSupplierId(quote.supplierId);
     setScheduleTaskId(suggestion.suggestedScheduleTaskId ?? "");
     setRequiredByDate(suggestion.requiredByDate ?? "");
-    setLines(requirements.map((item) => ({ materialId: item.materialId, quantity: item.suggestedOrderQty, unitCost: item.estimatedUnitCost, currency: project?.currency })));
-    setOrderNotes("Pedido preparado automaticamente a partir das composições e do stock actual");
+    setLines([{ materialId: suggestion.materialId, quantity: suggestion.suggestedOrderQty, unitCost: quote.unitCost, currency: project?.currency }]);
+    setOrderNotes(`Cotação escolhida: ${quote.supplierName}`);
+    setQuoteRequirement(null);
+    setView("pedidos");
     setShowOrderForm(true);
   }
 
@@ -392,7 +396,10 @@ export default function ProjectPurchasingPage() {
                     <strong className="block break-words text-sm text-slate-950">{item.materialName}</strong>
                     <span className="mt-1 block text-xs leading-5 text-slate-500">{item.phases.map((phase) => phase.label).join(" · ")}</span>
                   </div>
-                  <span className={`badge shrink-0 ${item.supplierId ? "badge-green" : "badge-yellow"}`}>{item.supplierId ? "Cotado" : "Sem cotação"}</span>
+                  {(() => {
+                    const commercialQuoteCount = (item.quotes ?? []).filter((quote) => !quote.isReference).length;
+                    return <span className={`badge shrink-0 ${commercialQuoteCount ? "badge-green" : "badge-yellow"}`}>{commercialQuoteCount ? `${commercialQuoteCount} cotação(ões)` : "Só referência"}</span>;
+                  })()}
                 </div>
                 <div className="mt-4 grid grid-cols-3 gap-2 rounded-lg bg-slate-50 p-3 text-xs">
                   <div><span className="block text-slate-500">Necessário</span><strong className="mt-1 block tabular-nums">{item.requiredQty.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {item.unit}</strong></div>
@@ -402,8 +409,8 @@ export default function ProjectPurchasingPage() {
                 {item.purchaseQty && item.purchasePackageLabel && <p className="mt-2 text-xs font-medium text-orange-700">Compra sugerida: {item.purchaseQty} × {item.purchasePackageLabel}</p>}
                 {item.suggestedScheduleTaskName && <p className="mt-2 text-xs text-blue-700">Necessário até {item.requiredByDate} · {item.suggestedScheduleTaskName}</p>}
                 <div className="mt-4 flex items-end justify-between gap-3 border-t border-slate-100 pt-4">
-                  <div><span className="block text-xs text-slate-500">{item.supplierName ?? "Preço do Catálogo"}</span><strong className="mt-0.5 block tabular-nums text-slate-950">{item.estimatedTotalWithVat.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {procurementPlan.currency}</strong><small className="text-slate-400">IVA incluído</small></div>
-                  {item.supplierId ? <button className="btn btn-primary btn-sm shrink-0" onClick={() => prepareAutomaticOrder(item)}>Criar pedido</button> : <Link className="btn btn-secondary btn-sm shrink-0" to="/fornecedores">Pedir cotação</Link>}
+                  <div><span className="block text-xs text-slate-500">{item.supplierId ? "Melhor cotação" : "Referência SIGO"}</span><strong className="mt-0.5 block tabular-nums text-slate-950">{item.estimatedTotalWithVat.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {procurementPlan.currency}</strong><small className="text-slate-400">IVA incluído</small></div>
+                  <button className="btn btn-primary btn-sm shrink-0" onClick={() => setQuoteRequirement(item)}>Comparar preços</button>
                 </div>
               </article>
             ))}
@@ -411,6 +418,49 @@ export default function ProjectPurchasingPage() {
           </div>
           {procurementPlan.missingCompositionItems.length > 0 && <div className="border-t border-amber-200 bg-amber-50 px-5 py-3 text-sm text-amber-900"><strong>{procurementPlan.missingCompositionItems.length} item(ns) ainda não entram no aprovisionamento.</strong> Associe composições no Mapa de Quantidades para o sistema saber que materiais devem ser comprados.</div>}
         </section>}
+
+        {quoteRequirement && procurementPlan && (
+          <Modal
+            title="Comparar fornecedores"
+            subtitle={`${quoteRequirement.materialName} · ${quoteRequirement.suggestedOrderQty.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${quoteRequirement.unit}`}
+            onClose={() => setQuoteRequirement(null)}
+            maxWidth="max-w-4xl"
+          >
+            <div className="space-y-3">
+              {(quoteRequirement.quotes ?? []).map((quote, index) => (
+                <article key={`${quote.supplierName}-${quote.zoneId ?? "geral"}`} className={`rounded-xl border p-4 ${quote.isReference ? "border-slate-200 bg-slate-50" : index === 0 ? "border-emerald-300 bg-emerald-50/50" : "border-slate-200 bg-white"}`}>
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <strong className="text-base text-slate-950">{quote.supplierName}</strong>
+                        {quote.isReference ? <span className="badge badge-gray">Referência de mercado</span> : index === 0 ? <span className="badge badge-green">Menor preço</span> : null}
+                        <span className="badge badge-brand">{quote.quoteSource === "zona" ? "Preço da zona" : quote.quoteSource === "geral" ? "Preço geral" : "Base SIGO"}</span>
+                      </div>
+                      <p className="mt-2 text-sm text-slate-600">{quote.unitCost.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {quote.currency} / {quoteRequirement.unit}</p>
+                    </div>
+                    <div className="flex items-center justify-between gap-5 sm:justify-end">
+                      <div className="text-right">
+                        <span className="block text-xs text-slate-500">Total com IVA {(procurementPlan.ivaRate * 100).toFixed(2)}%</span>
+                        <strong className="mt-1 block text-lg tabular-nums text-slate-950">{quote.estimatedTotalWithVat.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {quote.currency}</strong>
+                        <small className="text-slate-400">Base {quote.estimatedSubtotal.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} + IVA {quote.estimatedVat.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</small>
+                      </div>
+                      {quote.isReference ? (
+                        <span className="text-xs font-medium text-slate-500">Não seleccionável</span>
+                      ) : (
+                        <button type="button" className="btn btn-primary btn-sm" onClick={() => prepareOrderFromQuote(quoteRequirement, quote)}>Escolher</button>
+                      )}
+                    </div>
+                  </div>
+                </article>
+              ))}
+              {(quoteRequirement.quotes ?? []).filter((quote) => !quote.isReference).length === 0 && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                  Ainda não há fornecedor comercial cotado para este material. <Link to="/fornecedores" className="font-semibold underline">Adicionar cotação</Link>
+                </div>
+              )}
+            </div>
+          </Modal>
+        )}
 
         {/* Stock actual */}
         {view === "stock" && <section className="card">
@@ -464,14 +514,14 @@ export default function ProjectPurchasingPage() {
                 <div>
                   <label className="label">Fornecedor</label>
                   <select value={supplierId} onChange={(e) => setSupplierId(e.target.value)} className="input">
-                    {suppliers.length === 0 && <option value="">Sem fornecedores — crie um primeiro</option>}
-                    {suppliers.map((s) => (
+                    {commercialSuppliers.length === 0 && <option value="">Sem fornecedores comerciais</option>}
+                    {commercialSuppliers.map((s) => (
                       <option key={s.id} value={s.id}>
                         {s.name}
                       </option>
                     ))}
                   </select>
-                  {suppliers.length === 0 && (
+                  {commercialSuppliers.length === 0 && (
                     <Link to="/fornecedores" className="mt-1.5 inline-flex text-xs font-semibold text-brand-700 hover:underline">
                       Abrir fornecedores e registar cotações →
                     </Link>

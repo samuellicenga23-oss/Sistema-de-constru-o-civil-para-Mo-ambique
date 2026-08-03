@@ -78,9 +78,23 @@ export type ProcurementRequirement = {
   supplierId: string | null;
   supplierName: string | null;
   quoteSource: "zona" | "geral" | "catalogo";
+  quotes: ProcurementQuote[];
   suggestedScheduleTaskId: string | null;
   suggestedScheduleTaskName: string | null;
   requiredByDate: string | null;
+};
+
+export type ProcurementQuote = {
+  supplierId: string | null;
+  supplierName: string;
+  unitCost: number;
+  estimatedSubtotal: number;
+  estimatedVat: number;
+  estimatedTotalWithVat: number;
+  currency: string;
+  zoneId: string | null;
+  quoteSource: "zona" | "geral" | "catalogo";
+  isReference: boolean;
 };
 
 export type RebarPurchaseLine = {

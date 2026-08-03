@@ -8,6 +8,7 @@ import { assertProjectOwned } from "../services/accessControl.js";
 import { calculateVatTotals, CURRENCIES } from "@sigo/shared";
 import { computeProcurementPlan } from "../services/procurementEngine.js";
 import { recordAuditEvent } from "../services/auditTrail.js";
+import { isSigoPricesSupplier } from "../services/sigoPrices.js";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista"] as const;
 
@@ -117,6 +118,9 @@ export async function purchasingRoutes(app: FastifyInstance) {
       .where(and(eq(suppliers.id, parsed.data.supplierId), eq(suppliers.companyId, companyId)))
       .limit(1);
     if (!supplier) return reply.code(404).send({ error: "Fornecedor não encontrado" });
+    if (isSigoPricesSupplier(supplier)) {
+      return reply.code(409).send({ error: "SIGO Preços é uma referência de mercado. Escolha um fornecedor comercial para criar a ordem." });
+    }
 
     if (parsed.data.scheduleTaskId) {
       const [task] = await db.select().from(scheduleTasks).where(eq(scheduleTasks.id, parsed.data.scheduleTaskId)).limit(1);
