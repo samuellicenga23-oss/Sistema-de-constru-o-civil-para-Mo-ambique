@@ -102,6 +102,7 @@ export type ExtractedOpening = {
   plantId: string;
   kind: "porta" | "janela";
   code: string | null;
+  designation: string | null;
   widthM: string | null;
   heightM: string | null;
   sillHeightM: string | null;
@@ -120,6 +121,7 @@ export type ExtractedOpening = {
 export type OpeningInput = {
   kind: "porta" | "janela";
   code?: string | null;
+  designation?: string | null;
   widthM: number | null;
   heightM: number | null;
   sillHeightM?: number | null;

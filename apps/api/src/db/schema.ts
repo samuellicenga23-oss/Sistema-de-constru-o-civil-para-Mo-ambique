@@ -543,6 +543,7 @@ export const extractedOpenings = pgTable("extracted_openings", {
   plantId: uuid("plant_id").notNull().references(() => plants.id, { onDelete: "cascade" }),
   kind: varchar("kind", { length: 10 }).notNull(),
   code: varchar("code", { length: 40 }),
+  designation: varchar("designation", { length: 160 }),
   widthM: numeric("width_m", { precision: 8, scale: 3 }),
   heightM: numeric("height_m", { precision: 8, scale: 3 }),
   sillHeightM: numeric("sill_height_m", { precision: 8, scale: 3 }),

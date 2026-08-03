@@ -1,0 +1,1 @@
+ALTER TABLE "extracted_openings" ADD COLUMN "designation" varchar(160);

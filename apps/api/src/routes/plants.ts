@@ -432,6 +432,7 @@ export async function plantRoutes(app: FastifyInstance) {
   const openingInputSchema = z.object({
     kind: z.enum(["porta", "janela"]),
     code: z.string().trim().max(40).nullable().optional(),
+    designation: z.string().trim().max(160).nullable().optional(),
     widthM: z.number().positive().max(20).nullable(),
     heightM: z.number().positive().max(10).nullable(),
     sillHeightM: z.number().min(0).max(10).nullable().optional(),
@@ -464,6 +465,7 @@ export async function plantRoutes(app: FastifyInstance) {
       plantId,
       kind: parsed.data.kind,
       code: parsed.data.code || null,
+      designation: parsed.data.designation || null,
       widthM: parsed.data.widthM?.toString() ?? null,
       heightM: parsed.data.heightM?.toString() ?? null,
       sillHeightM: parsed.data.sillHeightM?.toString() ?? null,
@@ -491,6 +493,7 @@ export async function plantRoutes(app: FastifyInstance) {
     const [updated] = await db.update(extractedOpenings).set({
       kind: parsed.data.kind,
       code: parsed.data.code || null,
+      designation: parsed.data.designation || null,
       widthM: parsed.data.widthM?.toString() ?? null,
       heightM: parsed.data.heightM?.toString() ?? null,
       sillHeightM: parsed.data.sillHeightM?.toString() ?? null,

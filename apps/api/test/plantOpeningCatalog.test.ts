@@ -26,10 +26,10 @@ describe("portas e janelas ligadas ao catálogo", () => {
       method: "POST",
       url: `/api/plants/${plant.id}/openings`,
       headers: { cookie },
-      payload: { kind: "janela", code: "J01", widthM: 1.5, heightM: 1.2, quantity: 2, floor: "Piso Térreo", location: "exterior", material: "Janela alumínio série 20", materialId: material.id, technicalSpecification: "Alumínio natural, vidro 6 mm, fecho central", page: 3, confirmed: true },
+      payload: { kind: "janela", code: "J01", designation: "Janela da sala", widthM: 1.5, heightM: 1.2, quantity: 2, floor: "Piso Térreo", location: "exterior", material: "Janela alumínio série 20", materialId: material.id, technicalSpecification: "Alumínio natural, vidro 6 mm, fecho central", page: 3, confirmed: true },
     });
 
     expect(response.statusCode).toBe(201);
-    expect(response.json()).toMatchObject({ materialId: material.id, technicalSpecification: "Alumínio natural, vidro 6 mm, fecho central", floor: "Piso Térreo" });
+    expect(response.json()).toMatchObject({ designation: "Janela da sala", materialId: material.id, technicalSpecification: "Alumínio natural, vidro 6 mm, fecho central", floor: "Piso Térreo" });
   });
 });
