@@ -12,9 +12,10 @@ describe("mapa de compra de armaduras", () => {
     expect(result).toHaveLength(2);
     expect(result[0].diameterMm).toBe(10);
     expect(result[0].scheduledWeightKg).toBeCloseTo(73.98);
-    expect(result[0].barsToBuy).toBe(10);
+    expect(result[0].commercialBarLengthM).toBe(5.75);
+    expect(result[0].barsToBuy).toBe(Math.ceil(result[0].requiredLengthM / 5.75));
     expect(result[1].diameterMm).toBe(12);
-    expect(result[1].barsToBuy).toBe(10);
+    expect(result[1].barsToBuy).toBe(Math.ceil(result[1].requiredLengthM / 5.75));
     expect(result.every((line) => line.purchaseWeightKg >= line.scheduledWeightKg)).toBe(true);
   });
 });

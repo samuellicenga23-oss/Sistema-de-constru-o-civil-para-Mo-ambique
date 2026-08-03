@@ -109,6 +109,8 @@ export type ExtractedOpening = {
   floor: string | null;
   location: "interior" | "exterior" | "desconhecida";
   material: string | null;
+  materialId: string | null;
+  technicalSpecification: string | null;
   page: number;
   confidence: string;
   source: "quadro" | "geometria" | "manual";
@@ -125,6 +127,8 @@ export type OpeningInput = {
   floor?: string | null;
   location: "interior" | "exterior" | "desconhecida";
   material?: string | null;
+  materialId?: string | null;
+  technicalSpecification?: string | null;
   page?: number;
   confirmed?: boolean;
 };

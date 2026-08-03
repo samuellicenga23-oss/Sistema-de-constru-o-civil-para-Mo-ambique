@@ -1,4 +1,5 @@
-export const DEFAULT_REBAR_LENGTH_M = 12;
+// Comprimento comercial usado pelos fornecedores locais em Moçambique.
+export const DEFAULT_REBAR_LENGTH_M = 5.75;
 
 export type RebarWeightLine = { diameterMm: number; weightKg: number };
 

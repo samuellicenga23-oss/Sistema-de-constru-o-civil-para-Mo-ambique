@@ -1,11 +1,11 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { eq, and } from "drizzle-orm";
+import { eq, and, isNull, or } from "drizzle-orm";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, writeFile, unlink, readFile } from "node:fs/promises";
 import path from "node:path";
 import { db } from "../db/index.js";
-import { plants, projects as projectTable, extractedRooms, extractedOpenings, extractedRebarSchedules } from "../db/schema.js";
+import { plants, projects as projectTable, extractedRooms, extractedOpenings, extractedRebarSchedules, materials } from "../db/schema.js";
 import { requireCompanyUser, requireRole } from "../auth/middleware.js";
 import { assertProjectOwned, assertPlantOwned } from "../services/accessControl.js";
 import { env } from "../env.js";
@@ -439,9 +439,19 @@ export async function plantRoutes(app: FastifyInstance) {
     floor: z.string().trim().max(100).nullable().optional(),
     location: z.enum(["interior", "exterior", "desconhecida"]),
     material: z.string().trim().max(120).nullable().optional(),
+    materialId: z.string().uuid().nullable().optional(),
+    technicalSpecification: z.string().trim().max(2000).nullable().optional(),
     page: z.number().int().positive().default(1),
     confirmed: z.boolean().default(true),
   });
+
+  async function openingMaterialIsVisible(materialId: string | null | undefined, companyId: string) {
+    if (!materialId) return true;
+    const [material] = await db.select({ id: materials.id }).from(materials)
+      .where(and(eq(materials.id, materialId), or(isNull(materials.companyId), eq(materials.companyId, companyId))))
+      .limit(1);
+    return Boolean(material);
+  }
 
   app.post("/api/plants/:plantId/openings", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
     const { plantId } = request.params as { plantId: string };
@@ -449,6 +459,7 @@ export async function plantRoutes(app: FastifyInstance) {
     if (!await assertPlantOwned(plantId, companyId)) return reply.code(404).send({ error: "Planta não encontrada" });
     const parsed = openingInputSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    if (!await openingMaterialIsVisible(parsed.data.materialId, companyId)) return reply.code(400).send({ error: "Material não disponível no Catálogo" });
     const [created] = await db.insert(extractedOpenings).values({
       plantId,
       kind: parsed.data.kind,
@@ -460,6 +471,8 @@ export async function plantRoutes(app: FastifyInstance) {
       floor: parsed.data.floor || null,
       location: parsed.data.location,
       material: parsed.data.material || null,
+      materialId: parsed.data.materialId || null,
+      technicalSpecification: parsed.data.technicalSpecification || null,
       page: parsed.data.page,
       confidence: "1",
       source: "manual",
@@ -474,6 +487,7 @@ export async function plantRoutes(app: FastifyInstance) {
     if (!await assertPlantOwned(plantId, companyId)) return reply.code(404).send({ error: "Planta não encontrada" });
     const parsed = openingInputSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    if (!await openingMaterialIsVisible(parsed.data.materialId, companyId)) return reply.code(400).send({ error: "Material não disponível no Catálogo" });
     const [updated] = await db.update(extractedOpenings).set({
       kind: parsed.data.kind,
       code: parsed.data.code || null,
@@ -484,6 +498,8 @@ export async function plantRoutes(app: FastifyInstance) {
       floor: parsed.data.floor || null,
       location: parsed.data.location,
       material: parsed.data.material || null,
+      materialId: parsed.data.materialId || null,
+      technicalSpecification: parsed.data.technicalSpecification || null,
       page: parsed.data.page,
       confidence: parsed.data.confirmed ? "1" : "0.5",
       source: parsed.data.confirmed ? "manual" : "geometria",

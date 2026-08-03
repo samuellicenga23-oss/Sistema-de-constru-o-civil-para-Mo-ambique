@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { plantsApi, type ExtractedOpening, type ExtractedRoom, type ExtractedRebarLine, type OpeningInput, type Plant } from "../api/plants";
 import { boqApi } from "../api/boq";
+import { catalogApi, type Material } from "../api/catalog";
 import Layout from "../components/Layout";
 import { IconBack, IconRefresh, IconRuler, IconTrash } from "../components/icons";
 import { buildRebarPurchasePlan } from "@sigo/shared";
@@ -45,6 +46,8 @@ export default function PlantReviewPage() {
   const [reprocessing, setReprocessing] = useState(false);
   const [preparingMeasurements, setPreparingMeasurements] = useState(false);
   const [savingOpeningId, setSavingOpeningId] = useState<string | null>(null);
+  const [catalogMaterials, setCatalogMaterials] = useState<Material[]>([]);
+  const [openingPrices, setOpeningPrices] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (!id) return;
@@ -55,6 +58,14 @@ export default function PlantReviewPage() {
         setRooms(detail.rooms);
         setOpenings(detail.openings);
         setRebarSchedules(detail.rebarSchedules);
+        const project = await boqApi.getProject(detail.plant.projectId);
+        const availableMaterials = await catalogApi.listMaterials(project.zoneId ?? undefined);
+        setCatalogMaterials(availableMaterials);
+        setOpeningPrices(Object.fromEntries(detail.openings.map((opening) => {
+          const material = availableMaterials.find((item) => item.id === opening.materialId)
+            ?? availableMaterials.find((item) => item.name.toLocaleLowerCase("pt") === opening.material?.toLocaleLowerCase("pt"));
+          return [opening.id, material ? String(material.effectiveUnitCost) : ""];
+        })));
       })
       .catch((err) => setError(err.message));
   }, [id]);
@@ -91,6 +102,23 @@ export default function PlantReviewPage() {
     for (const room of rooms) groups.get(room.floor ?? UNASSIGNED_FLOOR)!.push(room);
     return groups;
   }, [rooms, floorNames]);
+
+  const openingFloorNames = useMemo(() => {
+    const names = new Set(openings.map((opening) => opening.floor ?? UNASSIGNED_FLOOR));
+    return Array.from(names).sort((a, b) => floorSortKey(a) - floorSortKey(b));
+  }, [openings]);
+
+  const openingsByFloor = useMemo(() => {
+    const groups = new Map<string, ExtractedOpening[]>();
+    for (const floor of openingFloorNames) groups.set(floor, []);
+    for (const opening of openings) groups.get(opening.floor ?? UNASSIGNED_FLOOR)!.push(opening);
+    return groups;
+  }, [openings, openingFloorNames]);
+
+  const availableOpeningFloors = useMemo(
+    () => Array.from(new Set([...floorNames, ...openingFloorNames])).sort((a, b) => floorSortKey(a) - floorSortKey(b)),
+    [floorNames, openingFloorNames],
+  );
 
   async function handleFloorChange(roomId: string, value: string) {
     if (!id) return;
@@ -139,6 +167,8 @@ export default function PlantReviewPage() {
       floor: opening.floor,
       location: opening.location,
       material: opening.material,
+      materialId: opening.materialId,
+      technicalSpecification: opening.technicalSpecification,
       page: opening.page,
       confirmed: !opening.needsConfirmation,
     };
@@ -149,7 +179,42 @@ export default function PlantReviewPage() {
     setSavingOpeningId(opening.id);
     setError(null);
     try {
-      const updated = await plantsApi.updateOpening(id, opening.id, { ...openingPayload(opening), confirmed: true });
+      const materialName = opening.material?.trim() ?? "";
+      const enteredPrice = Number(openingPrices[opening.id] || 0);
+      let linkedMaterial = catalogMaterials.find((item) => item.id === opening.materialId)
+        ?? catalogMaterials.find((item) => item.name.toLocaleLowerCase("pt") === materialName.toLocaleLowerCase("pt"));
+
+      if (linkedMaterial && enteredPrice >= 0 && Math.abs(enteredPrice - linkedMaterial.effectiveUnitCost) > 0.0001) {
+        const savedMaterial = await catalogApi.updateMaterial(linkedMaterial.id, {
+          baseUnitCost: enteredPrice,
+          specification: opening.technicalSpecification,
+          priceSourceName: "Revisão da planta",
+          priceDate: new Date().toISOString().slice(0, 10),
+        });
+        linkedMaterial = { ...savedMaterial, effectiveUnitCost: enteredPrice, priceBasis: "base" };
+      } else if (!linkedMaterial && materialName) {
+        const savedMaterial = await catalogApi.createMaterial({
+          name: materialName,
+          category: "Portas e Janelas",
+          specification: opening.technicalSpecification,
+          unit: opening.kind === "porta" ? "un" : "m2",
+          baseUnitCost: enteredPrice,
+          priceSourceName: "Revisão da planta",
+          priceDate: new Date().toISOString().slice(0, 10),
+          includesVat: false,
+        });
+        linkedMaterial = { ...savedMaterial, effectiveUnitCost: enteredPrice, priceBasis: "base" };
+      }
+
+      if (linkedMaterial) {
+        setCatalogMaterials((items) => [...items.filter((item) => item.id !== linkedMaterial!.id && item.name !== linkedMaterial!.name), linkedMaterial!]);
+      }
+      const preparedOpening = {
+        ...opening,
+        material: linkedMaterial?.name ?? (materialName || null),
+        materialId: linkedMaterial?.id ?? null,
+      };
+      const updated = await plantsApi.updateOpening(id, opening.id, { ...openingPayload(preparedOpening), confirmed: true });
       setOpenings((items) => items.map((item) => item.id === updated.id ? updated : item));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Não foi possível guardar o vão");
@@ -158,12 +223,24 @@ export default function PlantReviewPage() {
     }
   }
 
+  function changeOpeningMaterial(openingId: string, materialName: string) {
+    const matched = catalogMaterials.find((item) => item.name.toLocaleLowerCase("pt") === materialName.trim().toLocaleLowerCase("pt"));
+    setOpenings((items) => items.map((item) => item.id === openingId ? {
+      ...item,
+      material: materialName || null,
+      materialId: matched?.id ?? null,
+      needsConfirmation: true,
+    } : item));
+    setOpeningPrices((prices) => ({ ...prices, [openingId]: matched ? String(matched.effectiveUnitCost) : "" }));
+  }
+
   async function addOpening() {
     if (!id) return;
     setError(null);
     try {
-      const created = await plantsApi.createOpening(id, { kind: "janela", widthM: 1.2, heightM: 1.2, quantity: 1, floor: floorNames[0] === UNASSIGNED_FLOOR ? null : floorNames[0] ?? null, location: "exterior", page: 1, confirmed: true });
+      const created = await plantsApi.createOpening(id, { kind: "janela", widthM: 1.2, heightM: 1.2, quantity: 1, floor: floorNames[0] === UNASSIGNED_FLOOR ? null : floorNames[0] ?? null, location: "exterior", page: 1, confirmed: true, materialId: null, technicalSpecification: null });
       setOpenings((items) => [...items, created]);
+      setOpeningPrices((prices) => ({ ...prices, [created.id]: "" }));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Não foi possível adicionar o vão");
     }
@@ -171,8 +248,18 @@ export default function PlantReviewPage() {
 
   async function deleteOpening(openingId: string) {
     if (!id) return;
-    await plantsApi.deleteOpening(id, openingId);
-    setOpenings((items) => items.filter((item) => item.id !== openingId));
+    setError(null);
+    try {
+      await plantsApi.deleteOpening(id, openingId);
+      setOpenings((items) => items.filter((item) => item.id !== openingId));
+      setOpeningPrices((prices) => {
+        const next = { ...prices };
+        delete next[openingId];
+        return next;
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível eliminar o vão");
+    }
   }
 
   if (!plant) {
@@ -461,21 +548,53 @@ export default function PlantReviewPage() {
               <button type="button" className="btn btn-secondary btn-sm" onClick={addOpening}>Adicionar vão</button>
             </div>
             {openings.length === 0 ? <p className="rounded-lg bg-amber-50 px-3 py-3 text-sm text-amber-900">Nenhum vão seguro foi detectado. Adicione portas e janelas manualmente.</p> : (
-              <div className="space-y-2">
-                {openings.map((opening) => (
-                  <div key={opening.id} className={`grid gap-2 rounded-lg border p-3 md:grid-cols-2 xl:grid-cols-[84px_86px_86px_68px_100px_110px_125px_minmax(120px,1fr)_auto] xl:items-end ${opening.needsConfirmation ? "border-amber-200 bg-amber-50/50" : "border-slate-200 bg-white"}`}>
-                    <div><label className="label">Tipo</label><select className="input input-sm" value={opening.kind} onChange={(event) => setOpenings((items) => items.map((item) => item.id === opening.id ? { ...item, kind: event.target.value as ExtractedOpening["kind"], needsConfirmation: true } : item))}><option value="porta">Porta</option><option value="janela">Janela</option></select></div>
-                    <div><label className="label">Largura</label><input className="input input-sm" type="number" step="0.01" min="0" value={opening.widthM ?? ""} onChange={(event) => setOpenings((items) => items.map((item) => item.id === opening.id ? { ...item, widthM: event.target.value || null, needsConfirmation: true } : item))} /></div>
-                    <div><label className="label">Altura</label><input className="input input-sm" type="number" step="0.01" min="0" value={opening.heightM ?? ""} onChange={(event) => setOpenings((items) => items.map((item) => item.id === opening.id ? { ...item, heightM: event.target.value || null, needsConfirmation: true } : item))} /></div>
-                    <div><label className="label">Qtd.</label><input className="input input-sm" type="number" step="1" min="1" value={opening.quantity} onChange={(event) => setOpenings((items) => items.map((item) => item.id === opening.id ? { ...item, quantity: Math.max(1, Number(event.target.value)), needsConfirmation: true } : item))} /></div>
-                    <div><label className="label">Código</label><input className="input input-sm" value={opening.code ?? ""} placeholder="J01" onChange={(event) => setOpenings((items) => items.map((item) => item.id === opening.id ? { ...item, code: event.target.value || null, needsConfirmation: true } : item))} /></div>
-                    <div><label className="label">Piso</label><input className="input input-sm" value={opening.floor ?? ""} placeholder="Piso térreo" onChange={(event) => setOpenings((items) => items.map((item) => item.id === opening.id ? { ...item, floor: event.target.value || null, needsConfirmation: true } : item))} /></div>
-                    <div><label className="label">Parede</label><select className="input input-sm" value={opening.location} onChange={(event) => setOpenings((items) => items.map((item) => item.id === opening.id ? { ...item, location: event.target.value as ExtractedOpening["location"], needsConfirmation: true } : item))}><option value="desconhecida">Por definir</option><option value="interior">Interior</option><option value="exterior">Exterior</option></select></div>
-                    <div><label className="label">Material</label><input className="input input-sm" value={opening.material ?? ""} placeholder="Ex.: alumínio" onChange={(event) => setOpenings((items) => items.map((item) => item.id === opening.id ? { ...item, material: event.target.value || null, needsConfirmation: true } : item))} /></div>
-                    <div className="flex gap-1"><button type="button" className="btn btn-primary btn-sm" disabled={savingOpeningId === opening.id || !opening.widthM || !opening.heightM || opening.location === "desconhecida"} onClick={() => saveOpening(opening)}>{savingOpeningId === opening.id ? "A guardar" : opening.needsConfirmation ? "Confirmar" : "Gravar"}</button><button type="button" className="btn-icon h-9 w-9" aria-label="Eliminar vão" onClick={() => deleteOpening(opening.id)}><IconTrash className="h-4 w-4" /></button></div>
-                    <p className="md:col-span-2 xl:col-span-9 text-[11px] text-slate-500">Página {opening.page} · {opening.source === "quadro" ? "quadro de vãos" : opening.source === "geometria" ? "geometria da planta" : "manual"} · confiança {Math.round(Number(opening.confidence) * 100)}%</p>
-                  </div>
-                ))}
+              <div className="space-y-4">
+                <datalist id="opening-material-catalog">
+                  {catalogMaterials.map((material) => <option key={material.id} value={material.name}>{material.category}</option>)}
+                </datalist>
+                {openingFloorNames.map((floor) => {
+                  const floorOpenings = openingsByFloor.get(floor) ?? [];
+                  const doors = floorOpenings.reduce((sum, opening) => sum + (opening.kind === "porta" ? opening.quantity : 0), 0);
+                  const windows = floorOpenings.reduce((sum, opening) => sum + (opening.kind === "janela" ? opening.quantity : 0), 0);
+                  return (
+                    <article key={floor} className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50/70">
+                      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-100/80 px-4 py-3">
+                        <h3 className="font-semibold text-slate-900">{floor}</h3>
+                        <span className="text-xs font-medium text-slate-600">{doors} porta(s) · {windows} janela(s)</span>
+                      </header>
+                      <div className="space-y-3 p-3">
+                        {floorOpenings.map((opening) => {
+                          const linkedMaterial = catalogMaterials.find((material) => material.id === opening.materialId);
+                          const materialUnit = linkedMaterial?.unit ?? (opening.kind === "porta" ? "un" : "m²");
+                          return (
+                            <div key={opening.id} className={`rounded-xl border bg-white p-4 ${opening.needsConfirmation ? "border-amber-300" : "border-slate-200"}`}>
+                              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                                <div className="flex items-center gap-2"><strong className="text-sm text-slate-900">{opening.code || (opening.kind === "porta" ? "Porta" : "Janela")}</strong><span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${opening.needsConfirmation ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"}`}>{opening.needsConfirmation ? "Por confirmar" : "Confirmado"}</span></div>
+                                <span className="text-xs text-slate-500">Página {opening.page} · confiança {Math.round(Number(opening.confidence) * 100)}%</span>
+                              </div>
+                              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7">
+                                <div><label className="label">Tipo</label><select className="input input-sm" value={opening.kind} onChange={(event) => setOpenings((items) => items.map((item) => item.id === opening.id ? { ...item, kind: event.target.value as ExtractedOpening["kind"], needsConfirmation: true } : item))}><option value="porta">Porta</option><option value="janela">Janela</option></select></div>
+                                <div><label className="label">Código</label><input className="input input-sm" value={opening.code ?? ""} placeholder="J01" onChange={(event) => setOpenings((items) => items.map((item) => item.id === opening.id ? { ...item, code: event.target.value || null, needsConfirmation: true } : item))} /></div>
+                                <div><label className="label">Piso</label><select className="input input-sm" value={opening.floor ?? UNASSIGNED_FLOOR} onChange={(event) => setOpenings((items) => items.map((item) => item.id === opening.id ? { ...item, floor: event.target.value === UNASSIGNED_FLOOR ? null : event.target.value, needsConfirmation: true } : item))}>{availableOpeningFloors.map((name) => <option key={name} value={name}>{name}</option>)}</select></div>
+                                <div><label className="label">Largura (m)</label><input className="input input-sm" type="number" step="0.01" min="0" value={opening.widthM ?? ""} onChange={(event) => setOpenings((items) => items.map((item) => item.id === opening.id ? { ...item, widthM: event.target.value || null, needsConfirmation: true } : item))} /></div>
+                                <div><label className="label">Altura (m)</label><input className="input input-sm" type="number" step="0.01" min="0" value={opening.heightM ?? ""} onChange={(event) => setOpenings((items) => items.map((item) => item.id === opening.id ? { ...item, heightM: event.target.value || null, needsConfirmation: true } : item))} /></div>
+                                <div><label className="label">Quantidade</label><input className="input input-sm" type="number" step="1" min="1" value={opening.quantity} onChange={(event) => setOpenings((items) => items.map((item) => item.id === opening.id ? { ...item, quantity: Math.max(1, Number(event.target.value)), needsConfirmation: true } : item))} /></div>
+                                <div><label className="label">Parede</label><select className="input input-sm" value={opening.location} onChange={(event) => setOpenings((items) => items.map((item) => item.id === opening.id ? { ...item, location: event.target.value as ExtractedOpening["location"], needsConfirmation: true } : item))}><option value="desconhecida">Por definir</option><option value="interior">Interior</option><option value="exterior">Exterior</option></select></div>
+                              </div>
+                              <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(220px,1fr)_170px_minmax(260px,2fr)]">
+                                <div><label className="label">Material do catálogo</label><input list="opening-material-catalog" className="input input-sm" value={opening.material ?? ""} placeholder="Escolha ou escreva um novo material" onChange={(event) => changeOpeningMaterial(opening.id, event.target.value)} /></div>
+                                <div><label className="label">Preço ({linkedMaterial?.currency ?? "MZN"}/{materialUnit})</label><input className="input input-sm" type="number" min="0" step="0.01" value={openingPrices[opening.id] ?? ""} placeholder="0,00" onChange={(event) => setOpeningPrices((prices) => ({ ...prices, [opening.id]: event.target.value }))} /></div>
+                                <div><label className="label">Especificação técnica</label><textarea className="input min-h-20 resize-y" value={opening.technicalSpecification ?? ""} placeholder="Perfil, acabamento, vidro, ferragens, referência ou modelo" onChange={(event) => setOpenings((items) => items.map((item) => item.id === opening.id ? { ...item, technicalSpecification: event.target.value || null, needsConfirmation: true } : item))} /></div>
+                              </div>
+                              {!linkedMaterial && opening.material?.trim() && <p className="mt-2 text-xs font-medium text-brand-700">Novo material: será criado automaticamente no Catálogo ao guardar.</p>}
+                              <div className="mt-3 flex justify-end gap-2"><button type="button" className="btn btn-secondary btn-sm text-red-600" onClick={() => deleteOpening(opening.id)}><IconTrash className="h-4 w-4" /> Eliminar</button><button type="button" className="btn btn-primary btn-sm" disabled={savingOpeningId === opening.id || !opening.widthM || !opening.heightM || opening.location === "desconhecida"} onClick={() => saveOpening(opening)}>{savingOpeningId === opening.id ? "A guardar" : opening.needsConfirmation ? "Confirmar e guardar" : "Guardar alterações"}</button></div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </article>
+                  );
+                })}
               </div>
             )}
           </section>
@@ -487,11 +606,11 @@ export default function PlantReviewPage() {
             <p className="text-sm text-gray-600 mb-3">
               Peso total: <span className="font-semibold text-gray-900">{totalRebarWeight.toFixed(2)} kg</span>. Este
               total já está incluído no resumo estrutural acima. A lista de compra abaixo agrupa o mapa por diâmetro
-              e converte o peso em varões comerciais de 12 m.
+              e converte o peso em varões comerciais de 5,75 m.
             </p>
             <div className="mb-4 overflow-x-auto rounded-lg border border-slate-200">
               <table className="w-full min-w-[660px] text-sm">
-                <thead><tr className="table-head-row"><th className="px-3 py-2 text-left">Diâmetro</th><th className="text-right">Peso do mapa</th><th className="text-right">Comprimento</th><th className="text-right">Varões de 12 m</th><th className="pr-3 text-right">Peso de compra</th></tr></thead>
+                <thead><tr className="table-head-row"><th className="px-3 py-2 text-left">Diâmetro</th><th className="text-right">Peso do mapa</th><th className="text-right">Comprimento</th><th className="text-right">Varões de 5,75 m</th><th className="pr-3 text-right">Peso de compra</th></tr></thead>
                 <tbody>
                   {rebarPurchasePlan.map((line) => (
                     <tr key={line.diameterMm} className="table-row">

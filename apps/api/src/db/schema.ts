@@ -550,6 +550,8 @@ export const extractedOpenings = pgTable("extracted_openings", {
   floor: varchar("floor", { length: 100 }),
   location: varchar("location", { length: 20 }).notNull().default("desconhecida"),
   material: varchar("material", { length: 120 }),
+  materialId: uuid("material_id").references(() => materials.id, { onDelete: "set null" }),
+  technicalSpecification: text("technical_specification"),
   page: integer("page").notNull(),
   confidence: numeric("confidence", { precision: 4, scale: 3 }).notNull().default("0"),
   source: varchar("source", { length: 20 }).notNull(),
