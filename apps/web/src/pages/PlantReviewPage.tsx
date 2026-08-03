@@ -181,9 +181,8 @@ export default function PlantReviewPage() {
 
   const totalRoomsArea = rooms.reduce((s, r) => s + Number(r.areaM2), 0);
   const totalRebarWeight = rebarSchedules.reduce((s, r) => s + Number(r.weightKg), 0);
-  const rebarPurchasePlan = useMemo(
-    () => buildRebarPurchasePlan(rebarSchedules.map((line) => ({ diameterMm: Number(line.diameterMm), weightKg: Number(line.weightKg) }))),
-    [rebarSchedules],
+  const rebarPurchasePlan = buildRebarPurchasePlan(
+    rebarSchedules.map((line) => ({ diameterMm: Number(line.diameterMm), weightKg: Number(line.weightKg) })),
   );
 
   // Lacunas de extracção: o utilizador pediu explicitamente para ser informado do que não foi

@@ -28,7 +28,7 @@
   --color-surface-raised: #ffffff;
 
   --font-sans: "Aptos", "Segoe UI Variable", "Segoe UI", ui-sans-serif, system-ui, -apple-system, sans-serif;
-  --font-display: "Space Grotesk", "Aptos", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-display: "Aptos Display", "Aptos", "Segoe UI", ui-sans-serif, system-ui, -apple-system, sans-serif;
 }
 
 * {
