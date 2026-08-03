@@ -14,13 +14,30 @@ export type StructuralSummary = {
   staircasesCount: number;
   slabsCount: number;
   slabsAvgThicknessCm: number;
-  slabs?: Array<{
+  slabs?: StructuralSlab[];
+  totalSteelWeightKg: number;
+};
+
+export type SlabRebarLayer = {
+  xDiameterMm: number;
+  xSpacingCm: number;
+  yDiameterMm: number;
+  ySpacingCm: number;
+};
+
+export type StructuralSlab = {
+    name?: string;
     floor: string | null;
+    areaM2?: number;
     thicknessCm: number;
     layers: Array<"inferior" | "superior" | "geral">;
     pages: number[];
-  }>;
-  totalSteelWeightKg: number;
+    concreteClass?: string | null;
+    steelGrade?: string | null;
+    coverCm?: number | null;
+    topRebar?: SlabRebarLayer | null;
+    bottomRebar?: SlabRebarLayer | null;
+    notes?: string | null;
 };
 
 export type DocumentDiscipline = "arquitectura" | "estrutura" | "hidrossanitario" | "electricidade" | "outro";
@@ -202,6 +219,9 @@ export const plantsApi = {
 
   updateRoomFloor: (plantId: string, roomId: string, floor: string | null) =>
     request<ExtractedRoom>(`/plants/${plantId}/rooms/${roomId}`, { method: "PATCH", body: JSON.stringify({ floor }) }),
+
+  updateSlabs: (plantId: string, slabs: StructuralSlab[]) =>
+    request<Plant>(`/plants/${plantId}/slabs`, { method: "PUT", body: JSON.stringify({ slabs }) }),
 
   createOpening: (plantId: string, input: OpeningInput) =>
     request<ExtractedOpening>(`/plants/${plantId}/openings`, { method: "POST", body: JSON.stringify(input) }),

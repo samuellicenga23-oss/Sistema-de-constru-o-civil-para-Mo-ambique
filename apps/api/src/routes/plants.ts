@@ -9,7 +9,7 @@ import { plants, projects as projectTable, extractedRooms, extractedOpenings, ex
 import { requireCompanyUser, requireRole } from "../auth/middleware.js";
 import { assertProjectOwned, assertPlantOwned } from "../services/accessControl.js";
 import { env } from "../env.js";
-import { plantParseResultSchema, PLANT_DISCIPLINES } from "@sigo/shared";
+import { extractedSlabSchema, plantParseResultSchema, PLANT_DISCIPLINES } from "@sigo/shared";
 import { loadWorkChapterLibrary } from "../services/boqTemplate.js";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista"] as const;
@@ -426,6 +426,41 @@ export async function plantRoutes(app: FastifyInstance) {
       .where(and(eq(extractedRooms.id, roomId), eq(extractedRooms.plantId, plantId)))
       .returning();
     if (!updated) return reply.code(404).send({ error: "Compartimento não encontrado" });
+    return updated;
+  });
+
+  app.put("/api/plants/:id/slabs", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const companyId = request.currentUser!.companyId!;
+    const plant = await assertPlantOwned(id, companyId);
+    if (!plant) return reply.code(404).send({ error: "Planta não encontrada" });
+    const parsed = z.object({ slabs: z.array(extractedSlabSchema).max(50) }).safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+
+    const slabs = parsed.data.slabs;
+    const current = plant.structuralSummary ?? {
+      footingsCount: 0,
+      footingsAvgWidthCm: 0,
+      footingsAvgLengthCm: 0,
+      footingsAvgDepthCm: 0,
+      columnsCount: 0,
+      beamsCount: 0,
+      beamsTotalLengthM: 0,
+      beamsAvgWidthCm: 0,
+      beamsAvgHeightCm: 0,
+      beamsConcreteVolumeM3: 0,
+      staircasesCount: 0,
+      slabsCount: 0,
+      slabsAvgThicknessCm: 0,
+      totalSteelWeightKg: 0,
+    };
+    const structuralSummary = {
+      ...current,
+      slabs,
+      slabsCount: slabs.length,
+      slabsAvgThicknessCm: slabs.length ? slabs.reduce((sum, slab) => sum + slab.thicknessCm, 0) / slabs.length : 0,
+    };
+    const [updated] = await db.update(plants).set({ structuralSummary }).where(eq(plants.id, id)).returning();
     return updated;
   });
 

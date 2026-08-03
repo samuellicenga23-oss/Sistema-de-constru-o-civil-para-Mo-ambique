@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { plantsApi, type ExtractedOpening, type ExtractedRoom, type ExtractedRebarLine, type OpeningInput, type Plant } from "../api/plants";
+import { plantsApi, type ExtractedOpening, type ExtractedRoom, type ExtractedRebarLine, type OpeningInput, type Plant, type SlabRebarLayer, type StructuralSlab } from "../api/plants";
 import { boqApi } from "../api/boq";
 import { catalogApi, type Material } from "../api/catalog";
 import Layout from "../components/Layout";
@@ -57,6 +57,9 @@ export default function PlantReviewPage() {
   const [materialEditorPrice, setMaterialEditorPrice] = useState("");
   const [savingMaterial, setSavingMaterial] = useState(false);
   const [openingManagerKind, setOpeningManagerKind] = useState<"porta" | "janela" | null>(null);
+  const [slabManagerOpen, setSlabManagerOpen] = useState(false);
+  const [slabDrafts, setSlabDrafts] = useState<StructuralSlab[]>([]);
+  const [savingSlabs, setSavingSlabs] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -325,6 +328,92 @@ export default function PlantReviewPage() {
     );
   }
 
+  function openSlabManager() {
+    const emptyLayer: SlabRebarLayer = { xDiameterMm: 0, xSpacingCm: 0, yDiameterMm: 0, ySpacingCm: 0 };
+    setSlabDrafts((plant?.structuralSummary?.slabs ?? []).map((slab) => ({
+      ...slab,
+      topRebar: slab.topRebar ? { ...slab.topRebar } : { ...emptyLayer },
+      bottomRebar: slab.bottomRebar ? { ...slab.bottomRebar } : { ...emptyLayer },
+    })));
+    setSlabManagerOpen(true);
+  }
+
+  function addSlab() {
+    const index = slabDrafts.length + 1;
+    const defaultLayer: SlabRebarLayer = { xDiameterMm: 0, xSpacingCm: 0, yDiameterMm: 0, ySpacingCm: 0 };
+    setSlabDrafts((items) => [...items, {
+      name: `Laje ${index}`,
+      floor: availableOpeningFloors.find((floor) => floor !== UNASSIGNED_FLOOR) ?? null,
+      areaM2: 1,
+      thicknessCm: 15,
+      layers: ["inferior", "superior"],
+      pages: [1],
+      concreteClass: "B25",
+      steelGrade: "A400",
+      coverCm: 2.5,
+      topRebar: { ...defaultLayer },
+      bottomRebar: { ...defaultLayer },
+      notes: null,
+    }]);
+  }
+
+  function updateSlab(index: number, patch: Partial<StructuralSlab>) {
+    setSlabDrafts((items) => items.map((slab, slabIndex) => slabIndex === index ? { ...slab, ...patch } : slab));
+  }
+
+  function updateSlabLayer(index: number, layerName: "topRebar" | "bottomRebar", patch: Partial<SlabRebarLayer>) {
+    setSlabDrafts((items) => items.map((slab, slabIndex) => {
+      if (slabIndex !== index) return slab;
+      const current = slab[layerName] ?? { xDiameterMm: 10, xSpacingCm: 20, yDiameterMm: 10, ySpacingCm: 20 };
+      return { ...slab, [layerName]: { ...current, ...patch } };
+    }));
+  }
+
+  function slabSteelWeight(slab: StructuralSlab): number {
+    const area = Number(slab.areaM2 ?? 0);
+    const layerWeight = (layer?: SlabRebarLayer | null) => layer && layer.xDiameterMm > 0 && layer.xSpacingCm > 0 && layer.yDiameterMm > 0 && layer.ySpacingCm > 0
+      ? area * (((layer.xDiameterMm ** 2 / 162) / (layer.xSpacingCm / 100)) + ((layer.yDiameterMm ** 2 / 162) / (layer.ySpacingCm / 100)))
+      : 0;
+    return layerWeight(slab.topRebar) + layerWeight(slab.bottomRebar);
+  }
+
+  function slabBarPurchaseSummary(slab: StructuralSlab): string {
+    const area = Number(slab.areaM2 ?? 0);
+    const lengths = new Map<number, number>();
+    for (const layer of [slab.bottomRebar, slab.topRebar]) {
+      if (!layer) continue;
+      if (layer.xDiameterMm > 0 && layer.xSpacingCm > 0) lengths.set(layer.xDiameterMm, (lengths.get(layer.xDiameterMm) ?? 0) + area / (layer.xSpacingCm / 100));
+      if (layer.yDiameterMm > 0 && layer.ySpacingCm > 0) lengths.set(layer.yDiameterMm, (lengths.get(layer.yDiameterMm) ?? 0) + area / (layer.ySpacingCm / 100));
+    }
+    return [...lengths.entries()].sort(([a], [b]) => a - b).map(([diameter, length]) => `Ø${diameter}: ${Math.ceil((length * 1.05) / 5.75)} varões`).join(" · ");
+  }
+
+  async function saveSlabs() {
+    if (!plant) return;
+    const layerIsValid = (layer?: SlabRebarLayer | null) => Boolean(layer && layer.xDiameterMm > 0 && layer.xSpacingCm > 0 && layer.yDiameterMm > 0 && layer.ySpacingCm > 0);
+    if (slabDrafts.some((slab) => !slab.name?.trim() || !slab.areaM2 || slab.areaM2 <= 0 || slab.thicknessCm <= 0 || !layerIsValid(slab.topRebar) || !layerIsValid(slab.bottomRebar))) {
+      setError("Preencha nome, área, espessura e os diâmetros/espaçamentos das armaduras superior e inferior de cada laje.");
+      return;
+    }
+    setSavingSlabs(true);
+    setError(null);
+    try {
+      const updated = await plantsApi.updateSlabs(plant.id, slabDrafts.map((slab) => ({
+        ...slab,
+        name: slab.name?.trim(),
+        floor: slab.floor || null,
+        layers: [...(slab.bottomRebar ? ["inferior" as const] : []), ...(slab.topRebar ? ["superior" as const] : [])],
+        pages: slab.pages.length ? slab.pages : [1],
+      })));
+      setPlant(updated);
+      setSlabManagerOpen(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível guardar as lajes");
+    } finally {
+      setSavingSlabs(false);
+    }
+  }
+
   if (!plant) {
     return <div className="min-h-screen flex items-center justify-center text-gray-400">A carregar...</div>;
   }
@@ -349,6 +438,11 @@ export default function PlantReviewPage() {
   const detectedDisciplines = new Set(plant.documentAnalysis?.sections.map((section) => section.discipline));
   const hasArchitecture = detectedDisciplines.size > 0 ? detectedDisciplines.has("arquitectura") : plant.discipline === "arquitectura";
   const hasStructure = detectedDisciplines.size > 0 ? detectedDisciplines.has("estrutura") : plant.discipline === "estrutura";
+  const structuralSummary = plant.structuralSummary ?? {
+    footingsCount: 0, footingsAvgWidthCm: 0, footingsAvgLengthCm: 0, footingsAvgDepthCm: 0,
+    columnsCount: 0, beamsCount: 0, beamsTotalLengthM: 0, beamsAvgWidthCm: 0, beamsAvgHeightCm: 0,
+    beamsConcreteVolumeM3: 0, staircasesCount: 0, slabsCount: 0, slabsAvgThicknessCm: 0, slabs: [], totalSteelWeightKg: 0,
+  };
   if (plant.processingStatus === "erro") {
     gaps.push(
       plant.errorMessage
@@ -490,7 +584,7 @@ export default function PlantReviewPage() {
           </section>
         )}
 
-        {plant.structuralSummary && (
+        {hasStructure && (
           <section className="card card-pad">
             <div className="flex items-center gap-2 mb-3">
               <IconRuler className="w-4 h-4 text-brand-700" />
@@ -498,44 +592,45 @@ export default function PlantReviewPage() {
             </div>
             <div className="mb-3 grid grid-cols-2 gap-3 text-center sm:grid-cols-3 xl:grid-cols-5">
               <div className="rounded-lg border border-gray-200 p-3">
-                <p className="text-xl font-semibold text-gray-900">{plant.structuralSummary.footingsCount}</p>
+                <p className="text-xl font-semibold text-gray-900">{structuralSummary.footingsCount}</p>
                 <p className="muted">
                   sapatas ·{" "}
-                  {((plant.structuralSummary.footingsAvgWidthCm / 100) * (plant.structuralSummary.footingsAvgLengthCm / 100)).toFixed(2)}{" "}
+                  {((structuralSummary.footingsAvgWidthCm / 100) * (structuralSummary.footingsAvgLengthCm / 100)).toFixed(2)}{" "}
                   m² méd.
                 </p>
               </div>
               <div className="rounded-lg border border-gray-200 p-3">
-                <p className="text-xl font-semibold text-gray-900">{plant.structuralSummary.columnsCount}</p>
+                <p className="text-xl font-semibold text-gray-900">{structuralSummary.columnsCount}</p>
                 <p className="muted">pilares</p>
               </div>
               <div className="rounded-lg border border-gray-200 p-3">
-                <p className="text-xl font-semibold text-gray-900">{plant.structuralSummary.beamsCount}</p>
+                <p className="text-xl font-semibold text-gray-900">{structuralSummary.beamsCount}</p>
                 <p className="muted">
-                  vigas · {plant.structuralSummary.beamsTotalLengthM.toFixed(1)} ml · {plant.structuralSummary.beamsConcreteVolumeM3.toFixed(2)} m³
+                  vigas · {structuralSummary.beamsTotalLengthM.toFixed(1)} ml · {structuralSummary.beamsConcreteVolumeM3.toFixed(2)} m³
                 </p>
               </div>
-              <div className="rounded-lg border border-gray-200 p-3">
-                <p className="text-xl font-semibold text-gray-900">{plant.structuralSummary.slabsCount}</p>
+              <button type="button" className="rounded-lg border border-gray-200 p-3 transition-colors hover:border-brand-300 hover:bg-brand-50" onClick={openSlabManager}>
+                <p className="text-xl font-semibold text-gray-900">{structuralSummary.slabsCount}</p>
                 <p className="muted">laje(s) física(s) por nível</p>
-              </div>
+                <span className="mt-1 block text-xs font-semibold text-brand-700">Indicar ou corrigir</span>
+              </button>
               <div className="rounded-lg border border-gray-200 p-3">
-                <p className="text-xl font-semibold text-gray-900">{plant.structuralSummary.totalSteelWeightKg.toFixed(0)}</p>
+                <p className="text-xl font-semibold text-gray-900">{structuralSummary.totalSteelWeightKg.toFixed(0)}</p>
                 <p className="muted">kg de aço total</p>
               </div>
             </div>
-            {plant.structuralSummary.staircasesCount > 0 && (
+            {structuralSummary.staircasesCount > 0 && (
               <p className="text-sm text-gray-600 mb-3">
-                {plant.structuralSummary.staircasesCount} escada(s) detectada(s) — o aço da(s) escada(s) já está incluído no
+                {structuralSummary.staircasesCount} escada(s) detectada(s) — o aço da(s) escada(s) já está incluído no
                 total acima.
               </p>
             )}
-            {(plant.structuralSummary.slabs?.length ?? 0) > 0 && (
+            {(structuralSummary.slabs?.length ?? 0) > 0 && (
               <div className="mb-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {plant.structuralSummary.slabs!.map((slab, index) => (
+                {structuralSummary.slabs!.map((slab, index) => (
                   <div key={`${slab.floor ?? "laje"}-${slab.thicknessCm}-${index}`} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                    <strong className="block text-sm text-slate-900">{slab.floor ?? `Laje ${index + 1}`}</strong>
-                    <span className="text-xs text-slate-500">Espessura {slab.thicknessCm.toFixed(1)} cm · páginas {slab.pages.join(", ")}</span>
+                    <strong className="block text-sm text-slate-900">{slab.name ?? slab.floor ?? `Laje ${index + 1}`}</strong>
+                    <span className="text-xs text-slate-500">{slab.areaM2 ? `${slab.areaM2.toFixed(2)} m² · ` : ""}espessura {slab.thicknessCm.toFixed(1)} cm{slab.topRebar && slab.bottomRebar ? " · armadura superior e inferior" : ""}</span>
                   </div>
                 ))}
               </div>
@@ -679,6 +774,58 @@ export default function PlantReviewPage() {
           </section>
         )}
       </div>
+      {slabManagerOpen && (
+        <Modal title="Lajes do projecto" subtitle="Área, espessura e armaduras por nível" onClose={() => setSlabManagerOpen(false)} maxWidth="max-w-6xl">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-slate-50 px-4 py-3">
+            <div><strong className="text-sm text-slate-900">{slabDrafts.length} laje(s)</strong><span className="ml-2 text-xs text-slate-500">{slabDrafts.reduce((sum, slab) => sum + Number(slab.areaM2 ?? 0), 0).toLocaleString("pt-MZ")} m²</span></div>
+            <button type="button" className="btn btn-primary btn-sm" onClick={addSlab}>+ Adicionar laje</button>
+          </div>
+          {error && <p className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+          <datalist id="slab-floor-list">{availableOpeningFloors.filter((floor) => floor !== UNASSIGNED_FLOOR).map((floor) => <option key={floor} value={floor} />)}</datalist>
+
+          {slabDrafts.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-slate-300 px-4 py-10 text-center"><p className="text-sm text-slate-600">Registe uma laje para cada piso ou cobertura.</p><button type="button" className="btn btn-primary btn-sm mt-3" onClick={addSlab}>Adicionar primeira laje</button></div>
+          ) : (
+            <div className="space-y-4">
+              {slabDrafts.map((slab, index) => (
+                <article key={index} className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+                  <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3">
+                    <div><strong className="text-sm text-slate-900">{slab.name || `Laje ${index + 1}`}</strong><span className="ml-2 text-xs text-slate-500">{(Number(slab.areaM2 ?? 0) * slab.thicknessCm / 100).toFixed(2)} m³ betão · {slabSteelWeight(slab).toFixed(0)} kg aço estimado</span>{slabBarPurchaseSummary(slab) && <span className="mt-1 block text-xs font-medium text-brand-700">Compra em barras de 5,75 m (+5%): {slabBarPurchaseSummary(slab)}</span>}</div>
+                    <button type="button" className="btn btn-secondary btn-sm text-red-600" onClick={() => setSlabDrafts((items) => items.filter((_, slabIndex) => slabIndex !== index))}><IconTrash className="h-4 w-4" /> Remover</button>
+                  </header>
+                  <div className="space-y-4 p-4">
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                      <div className="sm:col-span-2"><label className="label">Nome da laje</label><input className="input input-sm" value={slab.name ?? ""} placeholder="Ex.: Laje do 1.º piso" onChange={(event) => updateSlab(index, { name: event.target.value })} /></div>
+                      <div><label className="label">Piso / nível</label><input className="input input-sm" list="slab-floor-list" value={slab.floor ?? ""} placeholder="Ex.: Piso Superior" onChange={(event) => updateSlab(index, { floor: event.target.value || null })} /></div>
+                      <div><label className="label">Área (m²)</label><input className="input input-sm" type="number" min="0.01" step="0.01" value={slab.areaM2 ?? ""} onChange={(event) => updateSlab(index, { areaM2: Number(event.target.value) })} /></div>
+                      <div><label className="label">Espessura (cm)</label><input className="input input-sm" type="number" min="1" step="0.5" value={slab.thicknessCm} onChange={(event) => updateSlab(index, { thicknessCm: Number(event.target.value) })} /></div>
+                      <div><label className="label">Classe do betão</label><input className="input input-sm" value={slab.concreteClass ?? ""} placeholder="B25" onChange={(event) => updateSlab(index, { concreteClass: event.target.value || null })} /></div>
+                      <div><label className="label">Classe do aço</label><input className="input input-sm" value={slab.steelGrade ?? ""} placeholder="A400" onChange={(event) => updateSlab(index, { steelGrade: event.target.value || null })} /></div>
+                      <div><label className="label">Recobrimento (cm)</label><input className="input input-sm" type="number" min="0" step="0.5" value={slab.coverCm ?? ""} onChange={(event) => updateSlab(index, { coverCm: event.target.value ? Number(event.target.value) : null })} /></div>
+                    </div>
+                    {(["bottomRebar", "topRebar"] as const).map((layerName) => {
+                      const layer = slab[layerName] ?? { xDiameterMm: 0, xSpacingCm: 0, yDiameterMm: 0, ySpacingCm: 0 };
+                      return (
+                        <div key={layerName} className={`rounded-xl border p-3 ${layerName === "bottomRebar" ? "border-blue-200 bg-blue-50/40" : "border-amber-200 bg-amber-50/40"}`}>
+                          <h4 className="mb-3 text-sm font-semibold text-slate-900">Armadura {layerName === "bottomRebar" ? "inferior" : "superior"}</h4>
+                          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                            <div><label className="label">Diâmetro X (mm)</label><input className="input input-sm" type="number" min="4" step="1" value={layer.xDiameterMm} onChange={(event) => updateSlabLayer(index, layerName, { xDiameterMm: Number(event.target.value) })} /></div>
+                            <div><label className="label">Espaçamento X (cm)</label><input className="input input-sm" type="number" min="5" step="1" value={layer.xSpacingCm} onChange={(event) => updateSlabLayer(index, layerName, { xSpacingCm: Number(event.target.value) })} /></div>
+                            <div><label className="label">Diâmetro Y (mm)</label><input className="input input-sm" type="number" min="4" step="1" value={layer.yDiameterMm} onChange={(event) => updateSlabLayer(index, layerName, { yDiameterMm: Number(event.target.value) })} /></div>
+                            <div><label className="label">Espaçamento Y (cm)</label><input className="input input-sm" type="number" min="5" step="1" value={layer.ySpacingCm} onChange={(event) => updateSlabLayer(index, layerName, { ySpacingCm: Number(event.target.value) })} /></div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    <div><label className="label">Observações</label><textarea className="input min-h-16 resize-y" value={slab.notes ?? ""} placeholder="Reforços locais, negativos, bordos, aberturas ou outras indicações" onChange={(event) => updateSlab(index, { notes: event.target.value || null })} /></div>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+          <div className="mt-5 flex flex-wrap justify-end gap-2"><button type="button" className="btn btn-secondary" onClick={() => setSlabManagerOpen(false)}>Cancelar</button><button type="button" className="btn btn-primary" disabled={savingSlabs || slabDrafts.length === 0} onClick={saveSlabs}>{savingSlabs ? "A guardar" : "Guardar lajes"}</button></div>
+        </Modal>
+      )}
       {openingManagerKind && (
         <Modal
           title={openingManagerKind === "janela" ? "Janelas" : "Portas"}

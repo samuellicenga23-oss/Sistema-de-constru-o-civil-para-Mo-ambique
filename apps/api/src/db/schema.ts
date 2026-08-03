@@ -511,10 +511,18 @@ export const plants = pgTable("plants", {
     slabsCount: number;
     slabsAvgThicknessCm: number;
     slabs?: Array<{
+      name?: string;
       floor: string | null;
+      areaM2?: number;
       thicknessCm: number;
       layers: Array<"inferior" | "superior" | "geral">;
       pages: number[];
+      concreteClass?: string | null;
+      steelGrade?: string | null;
+      coverCm?: number | null;
+      topRebar?: { xDiameterMm: number; xSpacingCm: number; yDiameterMm: number; ySpacingCm: number } | null;
+      bottomRebar?: { xDiameterMm: number; xSpacingCm: number; yDiameterMm: number; ySpacingCm: number } | null;
+      notes?: string | null;
     }>;
     totalSteelWeightKg: number;
   } | null>(),

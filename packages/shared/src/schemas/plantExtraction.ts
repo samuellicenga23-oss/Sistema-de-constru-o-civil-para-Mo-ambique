@@ -36,11 +36,26 @@ export const extractedOpeningSchema = z.object({
 });
 export type ExtractedOpening = z.infer<typeof extractedOpeningSchema>;
 
+export const slabRebarLayerSchema = z.object({
+  xDiameterMm: z.number().positive().max(50),
+  xSpacingCm: z.number().positive().max(100),
+  yDiameterMm: z.number().positive().max(50),
+  ySpacingCm: z.number().positive().max(100),
+});
+
 export const extractedSlabSchema = z.object({
+  name: z.string().trim().max(160).optional(),
   floor: z.string().nullable(),
+  areaM2: z.number().positive().optional(),
   thicknessCm: z.number().positive(),
   layers: z.array(z.enum(["inferior", "superior", "geral"])).min(1),
   pages: z.array(z.number().int().positive()).min(1),
+  concreteClass: z.string().trim().max(80).nullable().optional(),
+  steelGrade: z.string().trim().max(80).nullable().optional(),
+  coverCm: z.number().nonnegative().max(20).nullable().optional(),
+  topRebar: slabRebarLayerSchema.nullable().optional(),
+  bottomRebar: slabRebarLayerSchema.nullable().optional(),
+  notes: z.string().trim().max(1000).nullable().optional(),
 });
 export type ExtractedSlab = z.infer<typeof extractedSlabSchema>;
 

@@ -142,7 +142,7 @@ function initialSlabs(floors: FloorForm[], summary?: StructuralSummary | null): 
       return {
         key: nextKey(),
         label,
-        areaM2: floorFormArea(matchingFloor ?? fallbackFloor).toFixed(2),
+        areaM2: slab.areaM2 ? slab.areaM2.toFixed(2) : floorFormArea(matchingFloor ?? fallbackFloor).toFixed(2),
         thicknessM: (slab.thicknessCm / 100).toFixed(3),
         source: "planta",
       };
