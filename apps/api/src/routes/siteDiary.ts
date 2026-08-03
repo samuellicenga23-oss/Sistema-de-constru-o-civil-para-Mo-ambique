@@ -97,7 +97,7 @@ export async function siteDiaryRoutes(app: FastifyInstance) {
         const requested = consumptions.filter((item) => item.materialId === materialId).reduce((sum, item) => sum + item.quantity, 0);
         if (requested > available + 0.0001) {
           const material = visibleMaterials.find((item) => item.id === materialId);
-          return reply.code(409).send({ error: `Stock insuficiente de ${material?.name ?? "material"}: disponível ${available.toFixed(3)} ${material?.unit ?? ""}` });
+          return reply.code(409).send({ error: `Stock insuficiente de ${material?.name ?? "material"}: disponível ${available.toFixed(2)} ${material?.unit ?? ""}` });
         }
       }
     }

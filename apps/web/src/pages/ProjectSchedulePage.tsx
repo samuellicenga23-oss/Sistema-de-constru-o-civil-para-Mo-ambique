@@ -24,7 +24,7 @@ function today() {
   return new Date().toISOString().slice(0, 10);
 }
 function fmtMoney(value: number, currency: string) {
-  return new Intl.NumberFormat("pt-MZ", { style: "currency", currency, maximumFractionDigits: 0 }).format(value);
+  return new Intl.NumberFormat("pt-MZ", { style: "currency", currency, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
 }
 function fmtDate(value: string | null) {
   return value
@@ -284,7 +284,7 @@ export default function ProjectSchedulePage() {
             <div className="grid grid-cols-2 border-t border-slate-100 lg:grid-cols-4">
               <Stat
                 label="Execução física"
-                value={`${schedule.overallProgress.toFixed(1)}%`}
+                value={`${schedule.overallProgress.toFixed(2)}%`}
                 note={`${doneCount}/${leafTasks.length} concluídas`}
                 bar={schedule.overallProgress}
                 tone={progressTone}
@@ -379,7 +379,7 @@ export default function ProjectSchedulePage() {
                         {task.name}
                       </p>
                       <p className="mt-1 text-[11px] text-slate-500">
-                        {fmtDate(task.startDate)} — {fmtDate(task.endDate)} · {task.durationDays}d · {task.progress.toFixed(0)}%
+                        {fmtDate(task.startDate)} — {fmtDate(task.endDate)} · {task.durationDays}d · {task.progress.toFixed(2)}%
                       </p>
                     </div>
                     {task.isSummary && (
@@ -673,6 +673,7 @@ function TaskEditor({
                   type="number"
                   min="0"
                   max="100"
+                  step="0.01"
                   disabled={task.isSummary}
                   value={form.manualProgress}
                   onChange={(e) => setForm({ ...form, manualProgress: e.target.value })}

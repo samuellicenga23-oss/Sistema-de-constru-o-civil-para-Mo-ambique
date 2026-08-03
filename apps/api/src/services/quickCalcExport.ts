@@ -6,7 +6,7 @@ function escapeHtml(text: string) {
 }
 
 function fmt(n: number) {
-  return n.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 3 });
+  return n.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function buildHtml(result: QuickCalcResult): string {

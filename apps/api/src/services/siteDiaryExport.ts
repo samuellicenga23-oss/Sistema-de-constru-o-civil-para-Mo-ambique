@@ -52,12 +52,12 @@ function buildHtml(entry: SiteDiaryEntry, project: ProjectRow, links?: DiaryLink
 
   <h2>Trabalhos executados</h2>
   ${field("", entry.workDone)}
-  ${links?.progress.length ? `<div class="field"><span class="label">Progresso do cronograma</span>${links.progress.map((item) => `<div class="value">${escapeHtml(item.code)} · ${escapeHtml(item.name)} — <strong>${item.progressPercent.toFixed(1)}%</strong>${item.notes ? ` · ${escapeHtml(item.notes)}` : ""}</div>`).join("")}</div>` : ""}
+  ${links?.progress.length ? `<div class="field"><span class="label">Progresso do cronograma</span>${links.progress.map((item) => `<div class="value">${escapeHtml(item.code)} · ${escapeHtml(item.name)} — <strong>${item.progressPercent.toFixed(2)}%</strong>${item.notes ? ` · ${escapeHtml(item.notes)}` : ""}</div>`).join("")}</div>` : ""}
 
   <h2>Materiais</h2>
   ${field("Recebidos", entry.materialsReceived)}
   ${field("Consumidos", entry.materialsConsumed)}
-  ${links?.consumptions.length ? `<div class="field"><span class="label">Saídas de stock ligadas ao registo</span>${links.consumptions.map((item) => `<div class="value">${escapeHtml(item.name)} — <strong>${item.quantity.toLocaleString("pt-MZ", { maximumFractionDigits: 3 })} ${escapeHtml(item.unit)}</strong></div>`).join("")}</div>` : ""}
+  ${links?.consumptions.length ? `<div class="field"><span class="label">Saídas de stock ligadas ao registo</span>${links.consumptions.map((item) => `<div class="value">${escapeHtml(item.name)} — <strong>${item.quantity.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${escapeHtml(item.unit)}</strong></div>`).join("")}</div>` : ""}
 
   <h2>Ocorrências</h2>
   ${field("Visitas", entry.visitors)}

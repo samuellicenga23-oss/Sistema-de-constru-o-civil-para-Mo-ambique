@@ -234,10 +234,10 @@ async function applyQuantityToItem(itemId: string, row: SheetRow) {
   await db.insert(measurementLines).values({
     lineItemId: itemId,
     description: `Medição importada do Excel (folha "${row.sheet}", linha ${row.rowNumber})`,
-    count: row.quantity.toFixed(4),
+    count: row.quantity.toFixed(2),
     sortOrder: 0,
   });
-  await db.update(lineItems).set({ quantity: row.quantity.toFixed(4), origin: "manual" }).where(eq(lineItems.id, itemId));
+  await db.update(lineItems).set({ quantity: row.quantity.toFixed(2), origin: "manual" }).where(eq(lineItems.id, itemId));
 }
 
 export async function importMeasurementsFromExcel(

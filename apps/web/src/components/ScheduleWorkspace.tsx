@@ -65,11 +65,13 @@ function fmtDate(value: string) {
 function CellInput({
   value,
   type = "text",
+  step,
   onCommit,
   onCancel,
 }: {
   value: string;
   type?: string;
+  step?: string;
   onCommit: (next: string) => void;
   onCancel: () => void;
 }) {
@@ -83,6 +85,7 @@ function CellInput({
     <input
       ref={ref}
       type={type}
+      step={step}
       className="h-7 w-full rounded border border-blue-400 bg-white px-1.5 text-[12px] outline-none ring-2 ring-blue-100"
       value={draft}
       onChange={(e) => setDraft(e.target.value)}
@@ -470,7 +473,7 @@ export default function ScheduleWorkspace({
                       </SheetCell>
                       <SheetCell align="right" onEdit={() => startEdit(task, "duration")}>
                         {cell === "duration" ? (
-                          <CellInput type="number" value={String(task.durationDays)} onCommit={(v) => void commitCell(task, "duration", v)} onCancel={() => setEditing(null)} />
+                          <CellInput type="number" step="1" value={String(task.durationDays)} onCommit={(v) => void commitCell(task, "duration", v)} onCancel={() => setEditing(null)} />
                         ) : (
                           <span className="tabular-nums text-slate-600">{task.durationDays}d</span>
                         )}
@@ -498,9 +501,9 @@ export default function ScheduleWorkspace({
                       </SheetCell>
                       <SheetCell align="right" onEdit={() => startEdit(task, "progress")}>
                         {cell === "progress" ? (
-                          <CellInput type="number" value={String(Math.round(task.progress))} onCommit={(v) => void commitCell(task, "progress", v)} onCancel={() => setEditing(null)} />
+                          <CellInput type="number" step="0.01" value={task.progress.toFixed(2)} onCommit={(v) => void commitCell(task, "progress", v)} onCancel={() => setEditing(null)} />
                         ) : (
-                          <span className="font-semibold tabular-nums text-slate-700">{task.progress.toFixed(0)}%</span>
+                          <span className="font-semibold tabular-nums text-slate-700">{task.progress.toFixed(2)}%</span>
                         )}
                       </SheetCell>
                       <SheetCell onEdit={() => startEdit(task, "status")}>

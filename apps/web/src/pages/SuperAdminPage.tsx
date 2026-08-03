@@ -156,7 +156,7 @@ export default function SuperAdminPage() {
                     "Sob proposta"
                   ) : (
                     <>
-                      {p.monthlyPriceMzn.toLocaleString("pt-MZ")} MT<span className="text-xs font-normal text-gray-400">/mês</span>
+                      {p.monthlyPriceMzn.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MT<span className="text-xs font-normal text-gray-400">/mês</span>
                     </>
                   )}
                 </p>

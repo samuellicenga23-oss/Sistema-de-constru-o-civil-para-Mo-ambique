@@ -64,6 +64,9 @@ function writeNode(ws: ExcelJS.Worksheet, node: LineItemNode, row: number, depth
     r.getCell(4).value = node.quantity ?? 0;
     r.getCell(5).value = node.sellingUnitPrice ?? node.unitPrice ?? 0;
     r.getCell(6).value = { formula: `D${row}*E${row}` } as ExcelJS.CellFormulaValue;
+    r.getCell(4).numFmt = "#,##0.00";
+    r.getCell(5).numFmt = "#,##0.00";
+    r.getCell(6).numFmt = "#,##0.00";
   }
   if (node.kind === "capitulo" || node.kind === "grupo") {
     r.font = { bold: true };
@@ -94,6 +97,7 @@ function writeSectionSheet(workbook: ExcelJS.Workbook, section: SectionNode, doc
       const subtotalRow = ws.getRow(row);
       subtotalRow.getCell(2).value = `SUB-TOTAL ${topNode.code ?? ""}`.trim();
       subtotalRow.getCell(6).value = { formula: `SUM(F${startRow + 1}:F${endRow})` } as ExcelJS.CellFormulaValue;
+      subtotalRow.getCell(6).numFmt = "#,##0.00";
       subtotalRow.font = { bold: true };
       chapterTotalCells.push(`F${row}`);
       row++;
@@ -106,6 +110,7 @@ function writeSectionSheet(workbook: ExcelJS.Workbook, section: SectionNode, doc
   totalRow.getCell(6).value = chapterTotalCells.length
     ? ({ formula: chapterTotalCells.join("+") } as ExcelJS.CellFormulaValue)
     : 0;
+  totalRow.getCell(6).numFmt = "#,##0.00";
   totalRow.font = { bold: true };
   totalRow.eachCell((cell) => (cell.border = { top: { style: "thin" } }));
 
@@ -131,6 +136,8 @@ export async function buildBudgetDocumentExcel(summary: BudgetDocumentSummary): 
     r.getCell(4).value = 1;
     r.getCell(5).value = { formula: `'${sheetName}'!F${totalRow}` } as ExcelJS.CellFormulaValue;
     r.getCell(6).value = { formula: `D${row}*E${row}` } as ExcelJS.CellFormulaValue;
+    r.getCell(5).numFmt = "#,##0.00";
+    r.getCell(6).numFmt = "#,##0.00";
     sectionRefs.push({ row });
     row++;
   }
@@ -140,30 +147,37 @@ export async function buildBudgetDocumentExcel(summary: BudgetDocumentSummary): 
   resumo.getRow(row).getCell(6).value = sectionRefs.length
     ? ({ formula: `SUM(F${sectionRefs[0].row}:F${sectionRefs[sectionRefs.length - 1].row})` } as ExcelJS.CellFormulaValue)
     : 0;
+  resumo.getRow(row).getCell(6).numFmt = "#,##0.00";
   resumo.getRow(row).font = { bold: true };
   row++;
 
   const contingRow = row;
   resumo.getRow(row).getCell(2).value = "Contingências";
   resumo.getRow(row).getCell(4).value = Number(summary.document.contingenciasRate);
+  resumo.getRow(row).getCell(4).numFmt = "0.00%";
   resumo.getRow(row).getCell(6).value = { formula: `D${row}*F${subtotal1Row}` } as ExcelJS.CellFormulaValue;
+  resumo.getRow(row).getCell(6).numFmt = "#,##0.00";
   row++;
 
   const subtotal2Row = row;
   resumo.getRow(row).getCell(2).value = "Base tributável";
   resumo.getRow(row).getCell(6).value = { formula: `F${subtotal1Row}+F${contingRow}` } as ExcelJS.CellFormulaValue;
+  resumo.getRow(row).getCell(6).numFmt = "#,##0.00";
   resumo.getRow(row).font = { bold: true };
   row++;
 
   const ivaRow = row;
   resumo.getRow(row).getCell(2).value = "IVA";
   resumo.getRow(row).getCell(4).value = Number(summary.document.ivaRate);
+  resumo.getRow(row).getCell(4).numFmt = "0.00%";
   resumo.getRow(row).getCell(6).value = { formula: `D${row}*F${subtotal2Row}` } as ExcelJS.CellFormulaValue;
+  resumo.getRow(row).getCell(6).numFmt = "#,##0.00";
   row++;
 
   row++;
   resumo.getRow(row).getCell(2).value = "VALOR TOTAL";
   resumo.getRow(row).getCell(6).value = { formula: `F${subtotal2Row}+F${ivaRow}` } as ExcelJS.CellFormulaValue;
+  resumo.getRow(row).getCell(6).numFmt = "#,##0.00";
   resumo.getRow(row).font = { bold: true };
 
   await writeMeasurementsSheet(workbook, summary);
@@ -193,6 +207,7 @@ export async function buildMeasurementDocumentExcel(summary: BudgetDocumentSumma
     if (node.kind === "item") {
       current.getCell(3).value = node.unit ?? "";
       current.getCell(4).value = node.quantity ?? 0;
+      current.getCell(4).numFmt = "#,##0.00";
     } else if (node.kind === "capitulo" || node.kind === "grupo") {
       current.font = { bold: true };
     }
@@ -264,9 +279,11 @@ async function writeMeasurementsSheet(workbook: ExcelJS.Workbook, summary: Budge
       const r = ws.getRow(row);
       r.getCell(2).value = line.description ? sanitizeExcelText(`   ${line.description}`) : "";
       r.getCell(3).value = Number(line.count);
+      r.getCell(3).numFmt = "#,##0.00";
       if (line.length !== null) r.getCell(4).value = Number(line.length);
       if (line.width !== null) r.getCell(5).value = Number(line.width);
       if (line.height !== null) r.getCell(6).value = Number(line.height);
+      for (const column of [4, 5, 6, 7]) r.getCell(column).numFmt = "#,##0.00";
       // Parcial = Nº × (dimensões preenchidas; vazias contam como 1)
       r.getCell(7).value = {
         formula: `C${row}*IF(D${row}="",1,D${row})*IF(E${row}="",1,E${row})*IF(F${row}="",1,F${row})`,
@@ -277,6 +294,7 @@ async function writeMeasurementsSheet(workbook: ExcelJS.Workbook, summary: Budge
     const totalRow = ws.getRow(row);
     totalRow.getCell(2).value = `   Total (${item.node.unit ?? ""})`;
     totalRow.getCell(7).value = { formula: `SUM(G${firstLineRow}:G${row - 1})` } as ExcelJS.CellFormulaValue;
+    totalRow.getCell(7).numFmt = "#,##0.00";
     totalRow.font = { bold: true };
     totalRow.eachCell((cell) => (cell.border = { top: { style: "thin" } }));
     row += 2;

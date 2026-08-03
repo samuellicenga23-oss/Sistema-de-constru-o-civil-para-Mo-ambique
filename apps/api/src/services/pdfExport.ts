@@ -105,9 +105,9 @@ function buildHtml(summary: BudgetDocumentSummary): string {
         .map((s) => `<tr><td>${escapeHtml(s.name)}</td><td class="num">${money(s.sellingTotal)}</td></tr>`)
         .join("")}
       <tr><td>Trabalhos</td><td class="num">${money(sellingSubtotal)}</td></tr>
-      <tr><td>Contingências (${(Number(document.contingenciasRate) * 100).toFixed(0)}%)</td><td class="num">${money(contingencias)}</td></tr>
+      <tr><td>Contingências (${(Number(document.contingenciasRate) * 100).toFixed(2)}%)</td><td class="num">${money(contingencias)}</td></tr>
       <tr><td>Base tributável</td><td class="num">${money(subtotal2)}</td></tr>
-      <tr><td>IVA (${(Number(document.ivaRate) * 100).toFixed(0)}%)</td><td class="num">${money(iva)}</td></tr>
+      <tr><td>IVA (${(Number(document.ivaRate) * 100).toFixed(2)}%)</td><td class="num">${money(iva)}</td></tr>
       <tr class="grand-total"><td>VALOR TOTAL</td><td class="num">${money(total)} ${document.currency}</td></tr>
     </table>
   </div>

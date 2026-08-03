@@ -13,7 +13,7 @@ import { IconPlus, IconTrash } from "../components/icons";
 import WorkChapterLibrary from "../components/WorkChapterLibrary";
 
 function money(value: string | number) {
-  return Number(value).toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+  return Number(value).toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 type Tab = "composicoes" | "capitulos" | "mao-de-obra" | "materiais" | "zonas";

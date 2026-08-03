@@ -58,7 +58,7 @@ export function validateSchedule(tasks: ScheduleTask[]): ScheduleIssue[] {
         severity: "warning",
         code: "PROGRESSO",
         title: "Estado vs progresso",
-        message: `«${task.name}» está concluída mas o progresso é ${task.progress.toFixed(0)}%.`,
+        message: `«${task.name}» está concluída mas o progresso é ${task.progress.toFixed(2)}%.`,
         taskId: task.id,
         taskCode: task.code,
       });

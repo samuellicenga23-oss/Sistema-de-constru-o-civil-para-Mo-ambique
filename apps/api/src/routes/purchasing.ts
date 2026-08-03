@@ -282,7 +282,7 @@ export async function purchasingRoutes(app: FastifyInstance) {
       if (parsed.data.type === "saida") {
         const movements = await tx.select().from(stockMovements).where(and(eq(stockMovements.projectId, projectId), eq(stockMovements.materialId, parsed.data.materialId)));
         const available = movements.reduce((sum, movement) => sum + (movement.type === "entrada" ? Number(movement.quantity) : -Number(movement.quantity)), 0);
-        if (quantity > available + 0.0001) return { error: `Stock insuficiente de ${material.name}: disponível ${available.toFixed(3)} ${material.unit}` } as const;
+        if (quantity > available + 0.0001) return { error: `Stock insuficiente de ${material.name}: disponível ${available.toFixed(2)} ${material.unit}` } as const;
       }
       const [row] = await tx.insert(stockMovements).values({ ...rest, projectId, quantity: quantity.toString(), unitCost: unitCost !== undefined ? unitCost.toString() : null, createdByUserId: request.currentUser!.id }).returning();
       return { row } as const;

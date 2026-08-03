@@ -201,7 +201,7 @@ export default function SupplierMaterialsModal({ supplier, onClose }: { supplier
                   <td className="py-1.5 px-3">{p.materialName}</td>
                   <td className="text-gray-500">{p.zoneName ?? "Geral"}</td>
                   <td className="text-right tabular-nums">
-                    {Number(p.unitCost).toLocaleString("pt-MZ", { minimumFractionDigits: 2 })} {p.currency}
+                    {Number(p.unitCost).toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {p.currency}
                   </td>
                   <td className="text-right pr-2">
                     <button onClick={() => handleRemove("materiais", p.id)} className="icon-btn-danger" title="Remover">
@@ -216,7 +216,7 @@ export default function SupplierMaterialsModal({ supplier, onClose }: { supplier
                   <td className="py-1.5 px-3">{p.labourName}</td>
                   <td className="text-gray-500">{p.zoneName ?? "Geral"}</td>
                   <td className="text-right tabular-nums">
-                    {Number(p.hourlyCost).toLocaleString("pt-MZ", { minimumFractionDigits: 2 })} {p.currency}/h
+                    {Number(p.hourlyCost).toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {p.currency}/h
                   </td>
                   <td className="text-right pr-2">
                     <button onClick={() => handleRemove("mao-de-obra", p.id)} className="icon-btn-danger" title="Remover">
@@ -231,7 +231,7 @@ export default function SupplierMaterialsModal({ supplier, onClose }: { supplier
                   <td className="py-1.5 px-3">{p.equipmentName}</td>
                   <td className="text-gray-500">{p.zoneName ?? "Geral"}</td>
                   <td className="text-right tabular-nums">
-                    {Number(p.hourlyCost).toLocaleString("pt-MZ", { minimumFractionDigits: 2 })} {p.currency}/h
+                    {Number(p.hourlyCost).toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {p.currency}/h
                   </td>
                   <td className="text-right pr-2">
                     <button onClick={() => handleRemove("maquinas", p.id)} className="icon-btn-danger" title="Remover">

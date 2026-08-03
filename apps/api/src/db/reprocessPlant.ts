@@ -47,7 +47,7 @@ async function main() {
       .map((section) => `${section.label} ${section.startPage}–${section.endPage}`)
       .join("; ");
     console.log(
-      `Planta ${plant.id} reprocessada: ${rooms.length} compartimento(s), ${totalArea.toFixed(3)} m², pisos: ${floors.join(", ") || "não atribuídos"}${sections ? `; secções: ${sections}` : ""}.`,
+      `Planta ${plant.id} reprocessada: ${rooms.length} compartimento(s), ${totalArea.toFixed(2)} m², pisos: ${floors.join(", ") || "não atribuídos"}${sections ? `; secções: ${sections}` : ""}.`,
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erro desconhecido";

@@ -920,19 +920,19 @@ export default function BudgetDocumentPage() {
                   <form onSubmit={handleFinancialSettings} className="mb-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
                     <div className="grid gap-3 sm:grid-cols-2">
                       <label className="text-xs text-slate-600">Estaleiro (%)
-                        <input name="siteCostsRate" type="number" min="0" max="100" step="0.1" defaultValue={Number(document.siteCostsRate) * 100} className="input mt-1" />
+                        <input name="siteCostsRate" type="number" min="0" max="100" step="0.01" defaultValue={Number(document.siteCostsRate) * 100} className="input mt-1" />
                       </label>
                       <label className="text-xs text-slate-600">Indirectos (%)
-                        <input name="indirectCostsRate" type="number" min="0" max="100" step="0.1" defaultValue={Number(document.indirectCostsRate) * 100} className="input mt-1" />
+                        <input name="indirectCostsRate" type="number" min="0" max="100" step="0.01" defaultValue={Number(document.indirectCostsRate) * 100} className="input mt-1" />
                       </label>
                       <label className="text-xs text-slate-600">Margem (%)
-                        <input name="profitMarginRate" type="number" min="0" max="100" step="0.1" defaultValue={Number(document.profitMarginRate) * 100} className="input mt-1" />
+                        <input name="profitMarginRate" type="number" min="0" max="100" step="0.01" defaultValue={Number(document.profitMarginRate) * 100} className="input mt-1" />
                       </label>
                       <label className="text-xs text-slate-600">Contingências (%)
-                        <input name="contingenciasRate" type="number" min="0" max="100" step="0.1" defaultValue={Number(document.contingenciasRate) * 100} className="input mt-1" />
+                        <input name="contingenciasRate" type="number" min="0" max="100" step="0.01" defaultValue={Number(document.contingenciasRate) * 100} className="input mt-1" />
                       </label>
                       <label className="text-xs text-slate-600 sm:col-span-2">IVA (%)
-                        <input name="ivaRate" type="number" min="0" max="100" step="0.1" defaultValue={Number(document.ivaRate) * 100} className="input mt-1" />
+                        <input name="ivaRate" type="number" min="0" max="100" step="0.01" defaultValue={Number(document.ivaRate) * 100} className="input mt-1" />
                       </label>
                     </div>
                     <button type="submit" disabled={savingFinancialSettings} className="btn btn-primary btn-sm mt-3 w-full">
@@ -951,13 +951,13 @@ export default function BudgetDocumentPage() {
                     <dt>{isClientView ? "Trabalhos" : "Custos directos"}</dt>
                     <dd className="tabular-nums">{money(isClientView ? sellingSubtotal : subtotal1, "")}</dd>
                   </div>
-                  {!isClientView && <div className="flex justify-between text-slate-500"><dt>Estaleiro ({(Number(document.siteCostsRate) * 100).toFixed(1)}%)</dt><dd className="tabular-nums">{money(siteCosts, "")}</dd></div>}
-                  {!isClientView && <div className="flex justify-between text-slate-500"><dt>Indirectos ({(Number(document.indirectCostsRate) * 100).toFixed(1)}%)</dt><dd className="tabular-nums">{money(indirectCosts, "")}</dd></div>}
-                  {!isClientView && <div className="flex justify-between text-slate-500"><dt>Margem ({(Number(document.profitMarginRate) * 100).toFixed(1)}%)</dt><dd className="tabular-nums">{money(profitMargin, "")}</dd></div>}
+                  {!isClientView && <div className="flex justify-between text-slate-500"><dt>Estaleiro ({(Number(document.siteCostsRate) * 100).toFixed(2)}%)</dt><dd className="tabular-nums">{money(siteCosts, "")}</dd></div>}
+                  {!isClientView && <div className="flex justify-between text-slate-500"><dt>Indirectos ({(Number(document.indirectCostsRate) * 100).toFixed(2)}%)</dt><dd className="tabular-nums">{money(indirectCosts, "")}</dd></div>}
+                  {!isClientView && <div className="flex justify-between text-slate-500"><dt>Margem ({(Number(document.profitMarginRate) * 100).toFixed(2)}%)</dt><dd className="tabular-nums">{money(profitMargin, "")}</dd></div>}
                   {!isClientView && <div className="flex justify-between font-medium text-slate-700"><dt>Preço de venda</dt><dd className="tabular-nums">{money(sellingSubtotal, "")}</dd></div>}
-                  <div className="flex justify-between text-slate-500"><dt>Contingências ({(Number(document.contingenciasRate) * 100).toFixed(0)}%)</dt><dd className="tabular-nums">{money(contingencias, "")}</dd></div>
+                  <div className="flex justify-between text-slate-500"><dt>Contingências ({(Number(document.contingenciasRate) * 100).toFixed(2)}%)</dt><dd className="tabular-nums">{money(contingencias, "")}</dd></div>
                   <div className="flex justify-between text-slate-700"><dt>Base tributável</dt><dd className="tabular-nums">{money(subtotal2, "")}</dd></div>
-                  <div className="flex justify-between text-slate-500"><dt>IVA ({(Number(document.ivaRate) * 100).toFixed(0)}%)</dt><dd className="tabular-nums">{money(iva, "")}</dd></div>
+                  <div className="flex justify-between text-slate-500"><dt>IVA ({(Number(document.ivaRate) * 100).toFixed(2)}%)</dt><dd className="tabular-nums">{money(iva, "")}</dd></div>
                 </dl>
                 <div className="mt-4 flex flex-col gap-1 border-t border-slate-300 pt-4 sm:flex-row sm:items-baseline sm:justify-between">
                   <span className="text-sm font-semibold text-slate-700">Valor total</span>
@@ -967,10 +967,10 @@ export default function BudgetDocumentPage() {
                   <div className="mt-5 rounded-xl bg-slate-50 p-4">
                     <div className="mb-2 flex justify-between gap-3 text-sm">
                       <span className="text-slate-500">Execução · Auto Nº {dashboard.latestCertificateNumber}</span>
-                      <strong className="tabular-nums text-slate-900">{dashboard.percentExecutado.toFixed(1)}%</strong>
+                      <strong className="tabular-nums text-slate-900">{dashboard.percentExecutado.toFixed(2)}%</strong>
                     </div>
                     <div className="h-2 w-full rounded-full bg-slate-200">
-                      <div className="h-2 rounded-full bg-brand-600" style={{ width: `${Math.min(100, dashboard.percentExecutado).toFixed(1)}%` }} />
+                      <div className="h-2 rounded-full bg-brand-600" style={{ width: `${Math.min(100, dashboard.percentExecutado).toFixed(2)}%` }} />
                     </div>
                   </div>
                 )}

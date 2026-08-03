@@ -9,7 +9,7 @@ import { plants, projects as projectTable, extractedRooms, extractedOpenings, ex
 import { requireCompanyUser, requireRole } from "../auth/middleware.js";
 import { assertProjectOwned, assertPlantOwned } from "../services/accessControl.js";
 import { env } from "../env.js";
-import { extractedSlabSchema, plantParseResultSchema, PLANT_DISCIPLINES } from "@sigo/shared";
+import { extractedSlabSchema, plantParseResultSchema, PLANT_DISCIPLINES, fixedSigo } from "@sigo/shared";
 import { loadWorkChapterLibrary } from "../services/boqTemplate.js";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista"] as const;
@@ -151,10 +151,10 @@ export async function processPlantFile(plantId: string, buffer: Buffer, filename
         plantId,
         name: r.name,
         number: r.number,
-        areaM2: r.areaM2.toString(),
+        areaM2: fixedSigo(r.areaM2),
         page: r.page,
         floor: r.floor,
-        perimeterM: r.perimeterM?.toString() ?? null,
+        perimeterM: r.perimeterM != null ? fixedSigo(r.perimeterM) : null,
       }))
     );
   }
@@ -163,9 +163,9 @@ export async function processPlantFile(plantId: string, buffer: Buffer, filename
       plantId,
       kind: opening.kind,
       code: opening.code,
-      widthM: opening.widthM?.toString() ?? null,
-      heightM: opening.heightM?.toString() ?? null,
-      sillHeightM: opening.sillHeightM?.toString() ?? null,
+      widthM: opening.widthM != null ? fixedSigo(opening.widthM) : null,
+      heightM: opening.heightM != null ? fixedSigo(opening.heightM) : null,
+      sillHeightM: opening.sillHeightM != null ? fixedSigo(opening.sillHeightM) : null,
       quantity: opening.quantity,
       floor: opening.floor,
       location: opening.location,
@@ -182,7 +182,7 @@ export async function processPlantFile(plantId: string, buffer: Buffer, filename
         plantId,
         element: r.element,
         diameterMm: r.diameterMm.toString(),
-        weightKg: r.weightKg.toString(),
+        weightKg: fixedSigo(r.weightKg),
         page: r.page,
       }))
     );
@@ -501,9 +501,9 @@ export async function plantRoutes(app: FastifyInstance) {
       kind: parsed.data.kind,
       code: parsed.data.code || null,
       designation: parsed.data.designation || null,
-      widthM: parsed.data.widthM?.toString() ?? null,
-      heightM: parsed.data.heightM?.toString() ?? null,
-      sillHeightM: parsed.data.sillHeightM?.toString() ?? null,
+      widthM: parsed.data.widthM != null ? fixedSigo(parsed.data.widthM) : null,
+      heightM: parsed.data.heightM != null ? fixedSigo(parsed.data.heightM) : null,
+      sillHeightM: parsed.data.sillHeightM != null ? fixedSigo(parsed.data.sillHeightM) : null,
       quantity: parsed.data.quantity,
       floor: parsed.data.floor || null,
       location: parsed.data.location,
@@ -529,9 +529,9 @@ export async function plantRoutes(app: FastifyInstance) {
       kind: parsed.data.kind,
       code: parsed.data.code || null,
       designation: parsed.data.designation || null,
-      widthM: parsed.data.widthM?.toString() ?? null,
-      heightM: parsed.data.heightM?.toString() ?? null,
-      sillHeightM: parsed.data.sillHeightM?.toString() ?? null,
+      widthM: parsed.data.widthM != null ? fixedSigo(parsed.data.widthM) : null,
+      heightM: parsed.data.heightM != null ? fixedSigo(parsed.data.heightM) : null,
+      sillHeightM: parsed.data.sillHeightM != null ? fixedSigo(parsed.data.sillHeightM) : null,
       quantity: parsed.data.quantity,
       floor: parsed.data.floor || null,
       location: parsed.data.location,

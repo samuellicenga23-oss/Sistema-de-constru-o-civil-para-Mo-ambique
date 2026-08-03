@@ -147,10 +147,10 @@ export async function measurementLineRoutes(app: FastifyInstance) {
       await db.insert(measurementLines).values({
         lineItemId: id,
         description: line.description,
-        count: line.count.toFixed(4),
-        length: line.length !== null ? line.length.toFixed(4) : null,
-        width: line.width !== null ? line.width.toFixed(4) : null,
-        height: line.height !== null ? line.height.toFixed(4) : null,
+        count: line.count.toFixed(2),
+        length: line.length !== null ? line.length.toFixed(2) : null,
+        width: line.width !== null ? line.width.toFixed(2) : null,
+        height: line.height !== null ? line.height.toFixed(2) : null,
         sortOrder: line.sortOrder,
       });
     }

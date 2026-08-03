@@ -320,7 +320,7 @@ export default function PlantReviewPage() {
           <div><label className="label">Parede</label><select className="input input-sm" value={opening.location} onChange={(event) => setOpenings((items) => items.map((item) => item.id === opening.id ? { ...item, location: event.target.value as ExtractedOpening["location"], needsConfirmation: true } : item))}><option value="desconhecida">Por definir</option><option value="interior">Interior</option><option value="exterior">Exterior</option></select></div>
         </div>
         <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(260px,1fr)_minmax(260px,2fr)]">
-          <div><label className="label">Material</label><button type="button" className="input input-sm flex w-full items-center justify-between gap-2 text-left" onClick={() => openMaterialEditor(opening)}><span className={linkedMaterial ? "truncate font-medium text-slate-900" : "text-slate-500"}>{linkedMaterial?.name ?? "Indicar material"}</span><span className="shrink-0 text-xs font-semibold text-brand-700">{linkedMaterial ? `${Number(openingPrices[opening.id] || linkedMaterial.effectiveUnitCost).toLocaleString("pt-MZ")} ${linkedMaterial.currency}/${materialUnit} · Alterar` : "Escolher ou criar"}</span></button></div>
+          <div><label className="label">Material</label><button type="button" className="input input-sm flex w-full items-center justify-between gap-2 text-left" onClick={() => openMaterialEditor(opening)}><span className={linkedMaterial ? "truncate font-medium text-slate-900" : "text-slate-500"}>{linkedMaterial?.name ?? "Indicar material"}</span><span className="shrink-0 text-xs font-semibold text-brand-700">{linkedMaterial ? `${Number(openingPrices[opening.id] || linkedMaterial.effectiveUnitCost).toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${linkedMaterial.currency}/${materialUnit} · Alterar` : "Escolher ou criar"}</span></button></div>
           <div><label className="label">Especificação técnica</label><textarea className="input min-h-20 resize-y" value={opening.technicalSpecification ?? ""} placeholder="Perfil, acabamento, vidro, ferragens ou referência" onChange={(event) => setOpenings((items) => items.map((item) => item.id === opening.id ? { ...item, technicalSpecification: event.target.value || null, needsConfirmation: true } : item))} /></div>
         </div>
         <div className="mt-3 flex flex-wrap justify-end gap-2"><button type="button" className="btn btn-secondary btn-sm text-red-600" onClick={() => deleteOpening(opening.id)}><IconTrash className="h-4 w-4" /> Eliminar</button><button type="button" className="btn btn-primary btn-sm" disabled={savingOpeningId === opening.id || !opening.widthM || !opening.heightM || opening.location === "desconhecida"} onClick={() => saveOpening(opening)}>{savingOpeningId === opening.id ? "A guardar" : opening.needsConfirmation ? "Confirmar e guardar" : "Guardar alterações"}</button></div>
@@ -506,7 +506,7 @@ export default function PlantReviewPage() {
               <p className="text-xs font-semibold uppercase tracking-wide text-brand-700">Análise concluída</p>
               <h2 className="mt-1 text-lg font-bold text-slate-900">Resumo da planta — confirme só se necessário</h2>
               <p className="mt-1 max-w-2xl text-sm text-slate-600">
-                {rooms.length} compartimento(s) · {totalRoomsArea.toFixed(1)} m² · pode medir já ou corrigir pisos abaixo.
+                {rooms.length} compartimento(s) · {totalRoomsArea.toFixed(2)} m² · pode medir já ou corrigir pisos abaixo.
               </p>
             </div>
             <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
@@ -606,7 +606,7 @@ export default function PlantReviewPage() {
               <div className="rounded-lg border border-gray-200 p-3">
                 <p className="text-xl font-semibold text-gray-900">{structuralSummary.beamsCount}</p>
                 <p className="muted">
-                  vigas · {structuralSummary.beamsTotalLengthM.toFixed(1)} ml · {structuralSummary.beamsConcreteVolumeM3.toFixed(2)} m³
+                  vigas · {structuralSummary.beamsTotalLengthM.toFixed(2)} ml · {structuralSummary.beamsConcreteVolumeM3.toFixed(2)} m³
                 </p>
               </div>
               <button type="button" className="rounded-lg border border-gray-200 p-3 transition-colors hover:border-brand-300 hover:bg-brand-50" onClick={openSlabManager}>
@@ -615,7 +615,7 @@ export default function PlantReviewPage() {
                 <span className="mt-1 block text-xs font-semibold text-brand-700">Indicar ou corrigir</span>
               </button>
               <div className="rounded-lg border border-gray-200 p-3">
-                <p className="text-xl font-semibold text-gray-900">{structuralSummary.totalSteelWeightKg.toFixed(0)}</p>
+                <p className="text-xl font-semibold text-gray-900">{structuralSummary.totalSteelWeightKg.toFixed(2)}</p>
                 <p className="muted">kg de aço total</p>
               </div>
             </div>
@@ -630,7 +630,7 @@ export default function PlantReviewPage() {
                 {structuralSummary.slabs!.map((slab, index) => (
                   <div key={`${slab.floor ?? "laje"}-${slab.thicknessCm}-${index}`} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
                     <strong className="block text-sm text-slate-900">{slab.name ?? slab.floor ?? `Laje ${index + 1}`}</strong>
-                    <span className="text-xs text-slate-500">{slab.areaM2 ? `${slab.areaM2.toFixed(2)} m² · ` : ""}espessura {slab.thicknessCm.toFixed(1)} cm{slab.topRebar && slab.bottomRebar ? " · armadura superior e inferior" : ""}</span>
+                    <span className="text-xs text-slate-500">{slab.areaM2 ? `${slab.areaM2.toFixed(2)} m² · ` : ""}espessura {slab.thicknessCm.toFixed(2)} cm{slab.topRebar && slab.bottomRebar ? " · armadura superior e inferior" : ""}</span>
                   </div>
                 ))}
               </div>
@@ -741,7 +741,7 @@ export default function PlantReviewPage() {
                     <tr key={line.diameterMm} className="table-row">
                       <td className="px-3 py-2 font-semibold">Ø{line.diameterMm} mm</td>
                       <td className="text-right tabular-nums">{line.scheduledWeightKg.toFixed(2)} kg</td>
-                      <td className="text-right tabular-nums">{line.requiredLengthM.toFixed(1)} m</td>
+                      <td className="text-right tabular-nums">{line.requiredLengthM.toFixed(2)} m</td>
                       <td className="text-right text-base font-bold tabular-nums text-brand-700">{line.barsToBuy}</td>
                       <td className="pr-3 text-right tabular-nums">{line.purchaseWeightKg.toFixed(2)} kg</td>
                     </tr>
@@ -777,7 +777,7 @@ export default function PlantReviewPage() {
       {slabManagerOpen && (
         <Modal title="Lajes do projecto" subtitle="Área, espessura e armaduras por nível" onClose={() => setSlabManagerOpen(false)} maxWidth="max-w-6xl">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-slate-50 px-4 py-3">
-            <div><strong className="text-sm text-slate-900">{slabDrafts.length} laje(s)</strong><span className="ml-2 text-xs text-slate-500">{slabDrafts.reduce((sum, slab) => sum + Number(slab.areaM2 ?? 0), 0).toLocaleString("pt-MZ")} m²</span></div>
+            <div><strong className="text-sm text-slate-900">{slabDrafts.length} laje(s)</strong><span className="ml-2 text-xs text-slate-500">{slabDrafts.reduce((sum, slab) => sum + Number(slab.areaM2 ?? 0), 0).toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} m²</span></div>
             <button type="button" className="btn btn-primary btn-sm" onClick={addSlab}>+ Adicionar laje</button>
           </div>
           {error && <p className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
@@ -790,7 +790,7 @@ export default function PlantReviewPage() {
               {slabDrafts.map((slab, index) => (
                 <article key={index} className="overflow-hidden rounded-xl border border-slate-200 bg-white">
                   <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3">
-                    <div><strong className="text-sm text-slate-900">{slab.name || `Laje ${index + 1}`}</strong><span className="ml-2 text-xs text-slate-500">{(Number(slab.areaM2 ?? 0) * slab.thicknessCm / 100).toFixed(2)} m³ betão · {slabSteelWeight(slab).toFixed(0)} kg aço estimado</span>{slabBarPurchaseSummary(slab) && <span className="mt-1 block text-xs font-medium text-brand-700">Compra em barras de 5,75 m (+5%): {slabBarPurchaseSummary(slab)}</span>}</div>
+                    <div><strong className="text-sm text-slate-900">{slab.name || `Laje ${index + 1}`}</strong><span className="ml-2 text-xs text-slate-500">{(Number(slab.areaM2 ?? 0) * slab.thicknessCm / 100).toFixed(2)} m³ betão · {slabSteelWeight(slab).toFixed(2)} kg aço estimado</span>{slabBarPurchaseSummary(slab) && <span className="mt-1 block text-xs font-medium text-brand-700">Compra em barras de 5,75 m (+5%): {slabBarPurchaseSummary(slab)}</span>}</div>
                     <button type="button" className="btn btn-secondary btn-sm text-red-600" onClick={() => setSlabDrafts((items) => items.filter((_, slabIndex) => slabIndex !== index))}><IconTrash className="h-4 w-4" /> Remover</button>
                   </header>
                   <div className="space-y-4 p-4">
@@ -798,10 +798,10 @@ export default function PlantReviewPage() {
                       <div className="sm:col-span-2"><label className="label">Nome da laje</label><input className="input input-sm" value={slab.name ?? ""} placeholder="Ex.: Laje do 1.º piso" onChange={(event) => updateSlab(index, { name: event.target.value })} /></div>
                       <div><label className="label">Piso / nível</label><input className="input input-sm" list="slab-floor-list" value={slab.floor ?? ""} placeholder="Ex.: Piso Superior" onChange={(event) => updateSlab(index, { floor: event.target.value || null })} /></div>
                       <div><label className="label">Área (m²)</label><input className="input input-sm" type="number" min="0.01" step="0.01" value={slab.areaM2 ?? ""} onChange={(event) => updateSlab(index, { areaM2: Number(event.target.value) })} /></div>
-                      <div><label className="label">Espessura (cm)</label><input className="input input-sm" type="number" min="1" step="0.5" value={slab.thicknessCm} onChange={(event) => updateSlab(index, { thicknessCm: Number(event.target.value) })} /></div>
+                      <div><label className="label">Espessura (cm)</label><input className="input input-sm" type="number" min="1" step="0.01" value={slab.thicknessCm} onChange={(event) => updateSlab(index, { thicknessCm: Number(event.target.value) })} /></div>
                       <div><label className="label">Classe do betão</label><input className="input input-sm" value={slab.concreteClass ?? ""} placeholder="B25" onChange={(event) => updateSlab(index, { concreteClass: event.target.value || null })} /></div>
                       <div><label className="label">Classe do aço</label><input className="input input-sm" value={slab.steelGrade ?? ""} placeholder="A400" onChange={(event) => updateSlab(index, { steelGrade: event.target.value || null })} /></div>
-                      <div><label className="label">Recobrimento (cm)</label><input className="input input-sm" type="number" min="0" step="0.5" value={slab.coverCm ?? ""} onChange={(event) => updateSlab(index, { coverCm: event.target.value ? Number(event.target.value) : null })} /></div>
+                      <div><label className="label">Recobrimento (cm)</label><input className="input input-sm" type="number" min="0" step="0.01" value={slab.coverCm ?? ""} onChange={(event) => updateSlab(index, { coverCm: event.target.value ? Number(event.target.value) : null })} /></div>
                     </div>
                     {(["bottomRebar", "topRebar"] as const).map((layerName) => {
                       const layer = slab[layerName] ?? { xDiameterMm: 0, xSpacingCm: 0, yDiameterMm: 0, ySpacingCm: 0 };
@@ -809,10 +809,10 @@ export default function PlantReviewPage() {
                         <div key={layerName} className={`rounded-xl border p-3 ${layerName === "bottomRebar" ? "border-blue-200 bg-blue-50/40" : "border-amber-200 bg-amber-50/40"}`}>
                           <h4 className="mb-3 text-sm font-semibold text-slate-900">Armadura {layerName === "bottomRebar" ? "inferior" : "superior"}</h4>
                           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                            <div><label className="label">Diâmetro X (mm)</label><input className="input input-sm" type="number" min="4" step="1" value={layer.xDiameterMm} onChange={(event) => updateSlabLayer(index, layerName, { xDiameterMm: Number(event.target.value) })} /></div>
-                            <div><label className="label">Espaçamento X (cm)</label><input className="input input-sm" type="number" min="5" step="1" value={layer.xSpacingCm} onChange={(event) => updateSlabLayer(index, layerName, { xSpacingCm: Number(event.target.value) })} /></div>
-                            <div><label className="label">Diâmetro Y (mm)</label><input className="input input-sm" type="number" min="4" step="1" value={layer.yDiameterMm} onChange={(event) => updateSlabLayer(index, layerName, { yDiameterMm: Number(event.target.value) })} /></div>
-                            <div><label className="label">Espaçamento Y (cm)</label><input className="input input-sm" type="number" min="5" step="1" value={layer.ySpacingCm} onChange={(event) => updateSlabLayer(index, layerName, { ySpacingCm: Number(event.target.value) })} /></div>
+                            <div><label className="label">Diâmetro X (mm)</label><input className="input input-sm" type="number" min="4" step="0.01" value={layer.xDiameterMm} onChange={(event) => updateSlabLayer(index, layerName, { xDiameterMm: Number(event.target.value) })} /></div>
+                            <div><label className="label">Espaçamento X (cm)</label><input className="input input-sm" type="number" min="5" step="0.01" value={layer.xSpacingCm} onChange={(event) => updateSlabLayer(index, layerName, { xSpacingCm: Number(event.target.value) })} /></div>
+                            <div><label className="label">Diâmetro Y (mm)</label><input className="input input-sm" type="number" min="4" step="0.01" value={layer.yDiameterMm} onChange={(event) => updateSlabLayer(index, layerName, { yDiameterMm: Number(event.target.value) })} /></div>
+                            <div><label className="label">Espaçamento Y (cm)</label><input className="input input-sm" type="number" min="5" step="0.01" value={layer.ySpacingCm} onChange={(event) => updateSlabLayer(index, layerName, { ySpacingCm: Number(event.target.value) })} /></div>
                           </div>
                         </div>
                       );
@@ -874,7 +874,7 @@ export default function PlantReviewPage() {
                 {filteredOpeningMaterials.length === 0 ? <p className="px-3 py-5 text-center text-sm text-slate-500">Nenhum material encontrado.</p> : filteredOpeningMaterials.map((material) => (
                   <button key={material.id} type="button" className={`flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-3 text-left ${selectedMaterialId === material.id ? "border-brand-500 bg-brand-50" : "border-slate-200 hover:border-slate-300"}`} onClick={() => { setSelectedMaterialId(material.id); setMaterialEditorPrice(String(material.effectiveUnitCost)); }}>
                     <span><strong className="block text-sm text-slate-900">{material.name}</strong><span className="text-xs text-slate-500">{material.category} · {material.unit}</span></span>
-                    <span className="shrink-0 text-sm font-semibold text-slate-900">{material.effectiveUnitCost.toLocaleString("pt-MZ")} {material.currency}</span>
+                    <span className="shrink-0 text-sm font-semibold text-slate-900">{material.effectiveUnitCost.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {material.currency}</span>
                   </button>
                 ))}
               </div>

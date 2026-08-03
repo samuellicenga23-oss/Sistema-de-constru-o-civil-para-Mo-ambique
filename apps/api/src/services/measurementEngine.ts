@@ -99,7 +99,7 @@ export function validateMeasuredQuantity(args: {
   const cumulativeQty = args.previousQty + args.periodQty;
   const overrunQty = args.budgetedQty === null ? 0 : Math.max(0, cumulativeQty - args.budgetedQty);
   if (overrunQty > 0.0001 && !args.overrunReason?.trim()) {
-    throw new Error(`A medição excede o contratado em ${overrunQty.toFixed(3)}; indique a justificação do trabalho adicional`);
+    throw new Error(`A medição excede o contratado em ${overrunQty.toFixed(2)}; indique a justificação do trabalho adicional`);
   }
   return { cumulativeQty, overrunQty };
 }

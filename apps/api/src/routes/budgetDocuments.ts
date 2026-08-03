@@ -20,7 +20,7 @@ import { applyProjectSpecificationsToDocument } from "../services/specEnrichment
 import { importMeasurementsFromExcel } from "../services/measurementImport.js";
 import { documentLockedMessage, evaluateDocumentReadiness } from "../services/documentRules.js";
 import { recordAuditEvent } from "../services/auditTrail.js";
-import { CURRENCIES, DEFAULT_IVA_RATE, UNITS, LINE_ITEM_KINDS } from "@sigo/shared";
+import { CURRENCIES, DEFAULT_IVA_RATE, UNITS, LINE_ITEM_KINDS, fixedSigo } from "@sigo/shared";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista"] as const;
 
@@ -339,7 +339,7 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
                 description: item.description,
                 unit: item.unit,
                 quantity: item.quantity,
-                unitPrice: unitPrice !== null ? unitPrice.toString() : null,
+                unitPrice: unitPrice !== null ? fixedSigo(unitPrice) : null,
                 compositionId: item.compositionId,
                 origin: item.compositionId ? "composicao" : item.origin,
                 sortOrder: item.sortOrder,
@@ -446,7 +446,7 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
       for (const item of changed) {
         await tx
           .update(lineItems)
-          .set({ unitPrice: item.nextUnitPrice.toString(), origin: "composicao" })
+          .set({ unitPrice: fixedSigo(item.nextUnitPrice), origin: "composicao" })
           .where(eq(lineItems.id, item.id));
       }
     });
@@ -600,8 +600,8 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
       .values({
         ...data,
         sectionId: id,
-        unitPrice: unitPrice !== null ? unitPrice.toString() : null,
-        quantity: data.quantity !== undefined && data.quantity !== null ? data.quantity.toString() : null,
+        unitPrice: unitPrice !== null ? fixedSigo(unitPrice) : null,
+        quantity: data.quantity !== undefined && data.quantity !== null ? fixedSigo(data.quantity) : null,
         origin,
       })
       .returning();
@@ -644,8 +644,8 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
       .set({
         ...data,
         ...(description !== undefined ? { description } : {}),
-        unitPrice: unitPrice !== undefined ? (unitPrice !== null ? unitPrice.toString() : null) : undefined,
-        quantity: data.quantity !== undefined ? (data.quantity !== null ? data.quantity.toString() : null) : undefined,
+        unitPrice: unitPrice !== undefined ? (unitPrice !== null ? fixedSigo(unitPrice) : null) : undefined,
+        quantity: data.quantity !== undefined ? (data.quantity !== null ? fixedSigo(data.quantity) : null) : undefined,
         origin,
       })
       .where(eq(lineItems.id, id))

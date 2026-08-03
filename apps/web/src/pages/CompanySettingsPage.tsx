@@ -261,7 +261,7 @@ export default function CompanySettingsPage() {
               </div>
               <div>
                 <label className="label">Horas / dia</label>
-                <input type="number" min={1} max={24} step="0.5" value={form.workingHoursPerDay ?? ""} onChange={(e) => setForm((f) => ({ ...f, workingHoursPerDay: e.target.value }))} disabled={!canEdit} className="input" />
+                <input type="number" min={1} max={24} step="0.01" value={form.workingHoursPerDay ?? ""} onChange={(e) => setForm((f) => ({ ...f, workingHoursPerDay: e.target.value }))} disabled={!canEdit} className="input" />
               </div>
               {canEdit && (
                 <div className="sm:col-span-3">

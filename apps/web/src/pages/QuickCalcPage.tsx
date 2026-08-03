@@ -12,7 +12,7 @@ function normalize(text: string) {
 }
 
 function fmt(n: number) {
-  return n.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 3 });
+  return n.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 // Peso por metro linear de um varão, a partir do diâmetro (mm) — fórmula universal
@@ -497,7 +497,7 @@ export default function QuickCalcPage() {
               </div>
               <div>
                 <label className="label">Espessura (cm)</label>
-                <input type="number" step="0.5" min="0" value={thicknessCm} onChange={(e) => setThicknessCm(e.target.value)} className="input" />
+                <input type="number" step="0.01" min="0" value={thicknessCm} onChange={(e) => setThicknessCm(e.target.value)} className="input" />
               </div>
               <div>
                 <label className="label">Classe do betão</label>
@@ -511,15 +511,15 @@ export default function QuickCalcPage() {
               </div>
               <div>
                 <label className="label">Diâmetro do varão (mm)</label>
-                <input type="number" step="1" min="0" value={barDiameterMm} onChange={(e) => setBarDiameterMm(e.target.value)} className="input" />
+                <input type="number" step="0.01" min="0" value={barDiameterMm} onChange={(e) => setBarDiameterMm(e.target.value)} className="input" />
               </div>
               <div>
                 <label className="label">Espaçamento da malha (cm)</label>
-                <input type="number" step="1" min="0" value={spacingCm} onChange={(e) => setSpacingCm(e.target.value)} className="input" />
+                <input type="number" step="0.01" min="0" value={spacingCm} onChange={(e) => setSpacingCm(e.target.value)} className="input" />
               </div>
               <div>
                 <label className="label">Comprimento comercial da barra (m)</label>
-                <input type="number" step="0.1" min="0" value={barLengthM} onChange={(e) => setBarLengthM(e.target.value)} className="input" />
+                <input type="number" step="0.01" min="0" value={barLengthM} onChange={(e) => setBarLengthM(e.target.value)} className="input" />
               </div>
             </div>
 
@@ -805,7 +805,7 @@ export default function QuickCalcPage() {
               </div>
               <div>
                 <label className="label">Capitação diária (L/pessoa/dia)</label>
-                <input type="number" step="1" min="0" value={dailyFlow} onChange={(e) => setDailyFlow(e.target.value)} className="input" />
+                <input type="number" step="0.01" min="0" value={dailyFlow} onChange={(e) => setDailyFlow(e.target.value)} className="input" />
               </div>
               <div className="sm:col-span-2">
                 <label className="label">Tipo de solo (vala de infiltração)</label>

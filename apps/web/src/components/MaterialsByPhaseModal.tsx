@@ -4,7 +4,7 @@ import { IconDownload } from "./icons";
 import ModalPortal from "./ModalPortal";
 
 function fmt(n: number) {
-  return n.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 3 });
+  return n.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function money(n: number, currency: string) {

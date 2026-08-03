@@ -8,7 +8,7 @@ import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { IconTrash, IconPlus, IconBack } from "../components/icons";
 
 function money(value: string | number) {
-  return Number(value).toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+  return Number(value).toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 type SupplierSummary = { count: number; cheapest: { supplierName: string; unitCost: number; currency: string } };
@@ -135,10 +135,10 @@ function LineEditor({
               </div>
               <div className={`mt-3 grid gap-2 ${supportsWaste ? "grid-cols-2" : "grid-cols-1"}`}>
                 <label className="text-xs text-slate-500">{unitLabel}
-                  <input type="number" step="any" value={line.qtyPerUnit} onChange={(event) => updateQty(line.refId, Number(event.target.value))} className="input input-sm mt-1 w-full" />
+                  <input type="number" step="0.01" value={line.qtyPerUnit} onChange={(event) => updateQty(line.refId, Number(event.target.value))} className="input input-sm mt-1 w-full" />
                 </label>
                 {supportsWaste && <label className="text-xs text-slate-500">Perda (%)
-                  <input type="number" min="0" max="100" step="any" value={line.wastePct ?? 0} onChange={(event) => updateWaste(line.refId, Number(event.target.value))} className="input input-sm mt-1 w-full" />
+                  <input type="number" min="0" max="100" step="0.01" value={line.wastePct ?? 0} onChange={(event) => updateWaste(line.refId, Number(event.target.value))} className="input input-sm mt-1 w-full" />
                 </label>}
               </div>
               <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3 text-xs">
@@ -175,13 +175,13 @@ function LineEditor({
                 <td className="px-3 py-2">
                   <input
                     type="number"
-                    step="any"
+                    step="0.01"
                     value={l.qtyPerUnit}
                     onChange={(e) => updateQty(l.refId, Number(e.target.value))}
                     className="input input-sm w-24"
                   />
                 </td>
-                {supportsWaste && <td className="px-3 py-2"><div className="flex items-center gap-1"><input type="number" min="0" max="100" step="any" value={l.wastePct ?? 0} onChange={(e) => updateWaste(l.refId, Number(e.target.value))} className="input input-sm w-16" /><span className="text-xs text-slate-400">%</span></div></td>}
+                {supportsWaste && <td className="px-3 py-2"><div className="flex items-center gap-1"><input type="number" min="0" max="100" step="0.01" value={l.wastePct ?? 0} onChange={(e) => updateWaste(l.refId, Number(e.target.value))} className="input input-sm w-16" /><span className="text-xs text-slate-400">%</span></div></td>}
                 <td className="px-3 py-2.5 text-right tabular-nums text-gray-600">{money(cost)}</td>
                 <td className="px-3 py-2.5 text-right tabular-nums font-medium">{money(effectiveQty * cost)}</td>
                 <td className="px-2 py-2 text-right">
@@ -213,7 +213,7 @@ function LineEditor({
               </option>
             ))}
           </select>
-          <input type="number" step="any" placeholder={unitLabel} value={newQty} onChange={(e) => setNewQty(e.target.value)} className="input input-sm w-full" />
+          <input type="number" step="0.01" placeholder={unitLabel} value={newQty} onChange={(e) => setNewQty(e.target.value)} className="input input-sm w-full" />
           <button onClick={addLine} type="button" className="btn btn-secondary btn-sm w-full sm:w-auto">
             <IconPlus className="w-3.5 h-3.5" />
             Adicionar

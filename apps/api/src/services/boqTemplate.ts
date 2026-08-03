@@ -2,6 +2,7 @@ import { eq, isNull, or, and } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { budgetSections, lineItems, costCompositions, workItemTemplates } from "../db/schema.js";
 import { computeCompositionUnitCost } from "./costEngine.js";
+import { fixedSigo } from "@sigo/shared";
 
 // Estrutura padrão de um Mapa de Quantidades moçambicano (capítulos e trabalhos correntes,
 // derivada dos ficheiros reais analisados: Dr Castro, Centro de Excelência TB, UEM).
@@ -398,7 +399,7 @@ export async function generateStandardBoq(
         description: item.description,
         unit: item.unit as any,
         quantity: "0",
-        unitPrice: unitPrice !== null ? unitPrice.toString() : null,
+        unitPrice: unitPrice !== null ? fixedSigo(unitPrice) : null,
         compositionId,
         origin: compositionId ? "composicao" : "manual",
         sortOrder: itemOrder++,

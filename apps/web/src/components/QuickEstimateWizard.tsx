@@ -143,12 +143,12 @@ function initialSlabs(floors: FloorForm[], summary?: StructuralSummary | null): 
         key: nextKey(),
         label,
         areaM2: slab.areaM2 ? slab.areaM2.toFixed(2) : floorFormArea(matchingFloor ?? fallbackFloor).toFixed(2),
-        thicknessM: (slab.thicknessCm / 100).toFixed(3),
+        thicknessM: (slab.thicknessCm / 100).toFixed(2),
         source: "planta",
       };
     });
   }
-  const fallbackThickness = summary?.slabsAvgThicknessCm ? (summary.slabsAvgThicknessCm / 100).toFixed(3) : "";
+  const fallbackThickness = summary?.slabsAvgThicknessCm ? (summary.slabsAvgThicknessCm / 100).toFixed(2) : "";
   return floors.map((floor, index) => ({
     key: nextKey(),
     label: floor.label ? `Laje — ${floor.label}` : `Laje ${index + 1}`,
@@ -220,7 +220,7 @@ export default function QuickEstimateWizard({
   );
   const [slabThickness, setSlabThickness] = useState("0.35");
   const [beamConcreteVolumeM3, setBeamConcreteVolumeM3] = useState(
-    structuralSummary?.beamsConcreteVolumeM3 ? structuralSummary.beamsConcreteVolumeM3.toFixed(3) : ""
+    structuralSummary?.beamsConcreteVolumeM3 ? structuralSummary.beamsConcreteVolumeM3.toFixed(2) : ""
   );
   const [floorSlabs, setFloorSlabs] = useState<SlabForm[]>(() => initialSlabs(floors, structuralSummary));
   const [openings, setOpenings] = useState<OpeningForm[]>(() => (architectureOpenings ?? []).map((opening) => ({
@@ -603,7 +603,7 @@ export default function QuickEstimateWizard({
                           <label className="label">Pé-direito (m)</label>
                           <input
                             type="number"
-                            step="0.05"
+                            step="0.01"
                             min="0"
                             value={floor.ceilingHeight}
                             onChange={(e) => updateFloor(floor.key, { ceilingHeight: e.target.value })}
@@ -614,7 +614,7 @@ export default function QuickEstimateWizard({
                           <label className="label">Perímetro exterior (m)</label>
                           <input
                             type="number"
-                            step="0.1"
+                            step="0.01"
                             min="0"
                             value={floor.perimeter}
                             onChange={(e) => updateFloor(floor.key, { perimeter: e.target.value })}
@@ -666,7 +666,7 @@ export default function QuickEstimateWizard({
                                     <label className="mb-0.5 block text-[10px] font-medium text-slate-500">Compr. (m)</label>
                                     <input
                                       type="number"
-                                      step="0.1"
+                                      step="0.01"
                                       min="0"
                                       value={room.length}
                                       onChange={(e) => updateRoom(floor.key, room.key, { length: e.target.value })}
@@ -677,7 +677,7 @@ export default function QuickEstimateWizard({
                                     <label className="mb-0.5 block text-[10px] font-medium text-slate-500">Larg. (m)</label>
                                     <input
                                       type="number"
-                                      step="0.1"
+                                      step="0.01"
                                       min="0"
                                       value={room.width}
                                       onChange={(e) => updateRoom(floor.key, room.key, { width: e.target.value })}
@@ -754,7 +754,7 @@ export default function QuickEstimateWizard({
                         <input
                           id="measurement-beam-concrete"
                           type="number"
-                          step="0.001"
+                          step="0.01"
                           min="0"
                           value={beamConcreteVolumeM3}
                           onChange={(event) => setBeamConcreteVolumeM3(event.target.value)}
@@ -799,7 +799,7 @@ export default function QuickEstimateWizard({
                             </div>
                             <div>
                               <label className="label" htmlFor={`slab-thickness-${slab.key}`}>Espessura (m)</label>
-                              <input id={`slab-thickness-${slab.key}`} aria-label={`Espessura da ${slab.label || `laje ${index + 1}`} (m)`} className="input" type="number" min="0" step="0.001" value={slab.thicknessM} onChange={(event) => updateSlab(slab.key, { thicknessM: event.target.value })} />
+                              <input id={`slab-thickness-${slab.key}`} aria-label={`Espessura da ${slab.label || `laje ${index + 1}`} (m)`} className="input" type="number" min="0" step="0.01" value={slab.thicknessM} onChange={(event) => updateSlab(slab.key, { thicknessM: event.target.value })} />
                             </div>
                             <button type="button" onClick={() => removeSlab(slab.key)} className="btn-icon h-10 w-10" aria-label={`Remover ${slab.label || `laje ${index + 1}`}`}><IconTrash className="h-4 w-4" /></button>
                           </div>
@@ -828,7 +828,7 @@ export default function QuickEstimateWizard({
                       <label className="label">Espessura da laje de fundação (m)</label>
                       <input
                         type="number"
-                        step="0.05"
+                        step="0.01"
                         min="0"
                         value={slabThickness}
                         onChange={(e) => { setSlabThickness(e.target.value); setFoundationConfirmed(true); }}
@@ -879,7 +879,7 @@ export default function QuickEstimateWizard({
                         <label className="label">Área média (m²)</label>
                         <input
                           type="number"
-                          step="0.05"
+                          step="0.01"
                           min="0"
                           value={footingAvgArea}
                           onChange={(e) => { setFootingAvgArea(e.target.value); setFoundationConfirmed(true); }}
@@ -890,7 +890,7 @@ export default function QuickEstimateWizard({
                         <label className="label">Profundidade média (m)</label>
                         <input
                           type="number"
-                          step="0.05"
+                          step="0.01"
                           min="0"
                           value={footingAvgDepth}
                           onChange={(e) => { setFootingAvgDepth(e.target.value); setFoundationConfirmed(true); }}
@@ -922,7 +922,7 @@ export default function QuickEstimateWizard({
                     <label className="label">Área de cobertura (m²) — sugerida automaticamente, pode ajustar</label>
                     <input
                       type="number"
-                      step="0.1"
+                      step="0.01"
                       min="0"
                       value={roofArea}
                       onChange={(e) => {
@@ -1111,8 +1111,8 @@ export default function QuickEstimateWizard({
                   <details className="rounded-lg border border-gray-200 p-3">
                     <summary className="cursor-pointer text-sm font-medium text-gray-700">Tubagens — valores reais (opcional)</summary>
                     <div className="mt-3 grid grid-cols-2 gap-3">
-                      <div><label className="label">Esgoto Ø110 (ml)</label><input type="number" step="0.1" min="0" value={sewerPipe110M} onChange={(e) => setSewerPipe110M(e.target.value)} className="input" placeholder="Auto" /></div>
-                      <div><label className="label">Esgoto Ø40 (ml)</label><input type="number" step="0.1" min="0" value={sewerPipe40M} onChange={(e) => setSewerPipe40M(e.target.value)} className="input" placeholder="Auto" /></div>
+                      <div><label className="label">Esgoto Ø110 (ml)</label><input type="number" step="0.01" min="0" value={sewerPipe110M} onChange={(e) => setSewerPipe110M(e.target.value)} className="input" placeholder="Auto" /></div>
+                      <div><label className="label">Esgoto Ø40 (ml)</label><input type="number" step="0.01" min="0" value={sewerPipe40M} onChange={(e) => setSewerPipe40M(e.target.value)} className="input" placeholder="Auto" /></div>
                     </div>
                   </details>
 
@@ -1133,7 +1133,7 @@ export default function QuickEstimateWizard({
               <dl className="grid grid-cols-2 gap-3 text-sm">
                 <div className="card card-pad !p-3"><dt className="muted">Área construída</dt><dd className="font-semibold">{result!.summary.totalBuiltArea.toFixed(2)} m²</dd></div>
                 <div className="card card-pad !p-3"><dt className="muted">Betão estrutural</dt><dd className="font-semibold">{result!.summary.concreteVolume.toFixed(2)} m³</dd></div>
-                <div className="card card-pad !p-3"><dt className="muted">Aço</dt><dd className="font-semibold">{result!.summary.steelWeight.toFixed(0)} kg</dd></div>
+                <div className="card card-pad !p-3"><dt className="muted">Aço</dt><dd className="font-semibold">{result!.summary.steelWeight.toFixed(2)} kg</dd></div>
                 <div className="card card-pad !p-3"><dt className="muted">Aparelhos sanitários</dt><dd className="font-semibold">{result!.summary.totalFixtures}</dd></div>
               </dl>
               <CalculationReportView entries={result!.report} />

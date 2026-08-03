@@ -106,7 +106,7 @@ export async function seedNationalZonePrices() {
       await db.insert(materialZonePrices).values({
         materialId: material.id,
         zoneId: zoneRow.id,
-        unitCost: zoneCost.toFixed(4),
+        unitCost: zoneCost.toFixed(2),
       });
     }
   }

@@ -123,7 +123,7 @@ function AddChildForm({
               </option>
             ))}
           </select>
-          <input type="number" step="any" placeholder="quant." value={quantity} onChange={(e) => setQuantity(e.target.value)} className="input input-sm w-20" />
+          <input type="number" step="0.01" placeholder="quant." value={quantity} onChange={(e) => setQuantity(e.target.value)} className="input input-sm w-20" />
           {!measurementOnly && <select value={compositionId} onChange={(e) => setCompositionId(e.target.value)} className="input input-sm w-auto max-w-[180px]">
             <option value="">preço manual</option>
             {compositions.map((c) => (
@@ -133,7 +133,7 @@ function AddChildForm({
             ))}
           </select>}
           {!measurementOnly && !compositionId && (
-            <input type="number" step="any" placeholder="custo directo" title="Custo directo interno, antes de estaleiro, indirectos e margem" value={unitPrice} onChange={(e) => setUnitPrice(e.target.value)} className="input input-sm w-28" />
+            <input type="number" step="0.01" placeholder="custo directo" title="Custo directo interno, antes de estaleiro, indirectos e margem" value={unitPrice} onChange={(e) => setUnitPrice(e.target.value)} className="input input-sm w-28" />
           )}
         </>
       )}

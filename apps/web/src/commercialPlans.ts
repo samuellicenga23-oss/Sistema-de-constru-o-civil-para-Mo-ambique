@@ -64,7 +64,7 @@ export const COMMERCIAL_TO_INTERNAL_PLAN = {
 
 export function formatMzn(value: number) {
   return `${value.toLocaleString("pt-MZ", {
-    minimumFractionDigits: Number.isInteger(value) ? 0 : 2,
+    minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })} MZN`;
 }

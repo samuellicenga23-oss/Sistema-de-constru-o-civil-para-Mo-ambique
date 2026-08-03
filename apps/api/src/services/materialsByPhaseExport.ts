@@ -2,7 +2,7 @@ import puppeteer from "puppeteer";
 import type { MaterialsByPhaseResult, PhaseReport } from "./materialsByPhase.js";
 
 function fmt(n: number) {
-  return n.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 3 });
+  return n.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function money(n: number, currency: string) {

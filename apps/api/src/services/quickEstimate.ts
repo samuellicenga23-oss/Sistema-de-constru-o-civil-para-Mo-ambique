@@ -567,10 +567,10 @@ export async function applyQuickEstimate(documentId: string, sectionId: string, 
     await db.insert(measurementLines).values({
       lineItemId: item.id,
       description: formula.slice(0, 300),
-      count: quantity.toFixed(4),
+      count: quantity.toFixed(2),
       sortOrder: 0,
     });
-    await db.update(lineItems).set({ quantity: quantity.toFixed(4), origin: "estimativa" }).where(eq(lineItems.id, item.id));
+    await db.update(lineItems).set({ quantity: quantity.toFixed(2), origin: "estimativa" }).where(eq(lineItems.id, item.id));
     itemsUpdated++;
   }
 

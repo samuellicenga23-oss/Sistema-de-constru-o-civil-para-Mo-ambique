@@ -35,6 +35,7 @@ import { invoiceRoutes } from "./routes/invoices.js";
 import { contractRoutes } from "./routes/contracts.js";
 import { workChapterRoutes } from "./routes/workChapters.js";
 import { mutationOriginAllowed, SECURITY_HEADERS } from "./services/httpSecurity.js";
+import { normalizeSigoDecimals } from "@sigo/shared";
 
 // Separado de index.ts (que só chama isto e depois app.listen()) para os testes poderem
 // construir a mesma app real e usar app.inject() — pedidos HTTP simulados em memória, sem abrir
@@ -57,6 +58,15 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
 
   app.addHook("onRequest", async (request, reply) => {
     if (!mutationOriginAllowed({ production: env.isProduction, method: request.method, origin: request.headers.origin, host: request.headers.host, forwardedHost: typeof request.headers["x-forwarded-host"] === "string" ? request.headers["x-forwarded-host"] : undefined, fetchSite: typeof request.headers["sec-fetch-site"] === "string" ? request.headers["sec-fetch-site"] : undefined, allowedOrigins: env.corsOrigin })) return reply.code(403).send({ error: "Origem do pedido não autorizada" });
+  });
+
+  // Uma única regra de precisão desde a entrada: toda carga JSON chega aos
+  // serviços com no máximo duas casas decimais. Contagens inteiras mantêm-se
+  // inteiras; cálculos internos continuam a usar Number sem cortes intermédios.
+  app.addHook("preValidation", async (request) => {
+    if (request.body && typeof request.body === "object" && !Buffer.isBuffer(request.body)) {
+      request.body = normalizeSigoDecimals(request.body);
+    }
   });
 
   app.addHook("onSend", async (request, reply, payload) => {

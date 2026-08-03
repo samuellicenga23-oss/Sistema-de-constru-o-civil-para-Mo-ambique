@@ -1,6 +1,7 @@
 export * from "./enums.js";
 export * from "./workingDays.js";
 export * from "./rebar.js";
+export * from "./precision.js";
 export * from "./schemas/lineItem.js";
 export * from "./schemas/costComposition.js";
 export * from "./schemas/plantExtraction.js";

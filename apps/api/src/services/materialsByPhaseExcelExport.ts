@@ -35,7 +35,7 @@ export async function buildMaterialsByPhaseExcel(documentTitle: string, result: 
         const r = ws.getRow(row);
         r.getCell(1).value = sanitizeExcelText(m.name);
         r.getCell(2).value = m.quantity;
-        r.getCell(2).numFmt = "#,##0.000";
+        r.getCell(2).numFmt = "#,##0.00";
         r.getCell(3).value = m.unit;
         r.getCell(4).value = m.purchasePackageLabel && m.purchaseQty !== null ? `${m.purchaseQty} × ${m.purchasePackageLabel}` : "—";
         r.getCell(5).value = m.value;
@@ -47,7 +47,7 @@ export async function buildMaterialsByPhaseExcel(documentTitle: string, result: 
         const r = ws.getRow(row);
         r.getCell(1).value = sanitizeExcelText(`${item.code ?? ""} ${item.description}`.trim());
         r.getCell(2).value = item.quantity;
-        r.getCell(2).numFmt = "#,##0.000";
+        r.getCell(2).numFmt = "#,##0.00";
         r.getCell(3).value = item.unit ?? "";
         r.getCell(4).value = item.barsInfo
           ? `${item.barsInfo.barsNeeded} varões de ${item.barsInfo.barLengthM}m (Ø${item.barsInfo.diameterMm}mm)`

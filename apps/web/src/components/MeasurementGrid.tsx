@@ -163,7 +163,7 @@ export default function MeasurementGrid({
                   <td>{l.length !== null ? Number(l.length) : "—"}</td>
                   <td>{l.width !== null ? Number(l.width) : "—"}</td>
                   <td>{l.height !== null ? Number(l.height) : "—"}</td>
-                  <td className="text-right font-medium">{l.partial.toFixed(3)}</td>
+                  <td className="text-right font-medium">{l.partial.toFixed(2)}</td>
                   <td className="text-right">
                     <button onClick={() => handleDelete(l.id)} className="icon-btn-danger !h-7 !w-7" title="Eliminar medição">
                       ×
@@ -175,7 +175,7 @@ export default function MeasurementGrid({
                 <td colSpan={5} className="py-0.5 text-right">
                   Quantidade total do item:
                 </td>
-                <td className="text-right">{total.toFixed(3)}</td>
+                <td className="text-right">{total.toFixed(2)}</td>
                 <td></td>
               </tr>
             </tbody>
@@ -193,7 +193,7 @@ export default function MeasurementGrid({
         {mode === "direct" ? (
           <input
             type="number"
-            step="any"
+            step="0.01"
             min="0"
             placeholder="Quant."
             value={directQty}
@@ -202,15 +202,15 @@ export default function MeasurementGrid({
           />
         ) : (
           <>
-            <input type="number" step="any" placeholder="Nº" title="Nº de vezes" value={count} onChange={(e) => setCount(e.target.value)} className="w-14 rounded border border-gray-300 px-1.5 py-0.5" />
+            <input type="number" step="0.01" placeholder="Nº" title="Nº de vezes" value={count} onChange={(e) => setCount(e.target.value)} className="w-14 rounded border border-gray-300 px-1.5 py-0.5" />
             {(mode === "length" || mode === "area" || mode === "volume") && (
-              <input type="number" step="any" placeholder="Comp." title="Comprimento (m)" value={length} onChange={(e) => setLength(e.target.value)} className="w-16 rounded border border-gray-300 px-1.5 py-0.5" />
+              <input type="number" step="0.01" placeholder="Comp." title="Comprimento (m)" value={length} onChange={(e) => setLength(e.target.value)} className="w-16 rounded border border-gray-300 px-1.5 py-0.5" />
             )}
             {(mode === "area" || mode === "volume") && (
-              <input type="number" step="any" placeholder="Larg." title="Largura (m)" value={width} onChange={(e) => setWidth(e.target.value)} className="w-16 rounded border border-gray-300 px-1.5 py-0.5" />
+              <input type="number" step="0.01" placeholder="Larg." title="Largura (m)" value={width} onChange={(e) => setWidth(e.target.value)} className="w-16 rounded border border-gray-300 px-1.5 py-0.5" />
             )}
             {mode === "volume" && (
-              <input type="number" step="any" placeholder="Alt." title="Altura (m)" value={height} onChange={(e) => setHeight(e.target.value)} className="w-16 rounded border border-gray-300 px-1.5 py-0.5" />
+              <input type="number" step="0.01" placeholder="Alt." title="Altura (m)" value={height} onChange={(e) => setHeight(e.target.value)} className="w-16 rounded border border-gray-300 px-1.5 py-0.5" />
             )}
           </>
         )}

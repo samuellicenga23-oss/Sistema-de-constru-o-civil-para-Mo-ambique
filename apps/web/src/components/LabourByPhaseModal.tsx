@@ -3,7 +3,7 @@ import { measurementApi, type LabourByPhaseResponse } from "../api/measurement";
 import Modal from "./Modal";
 
 function quantity(value: number) {
-  return value.toLocaleString("pt-MZ", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  return value.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function money(value: number, currency: string) {

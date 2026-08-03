@@ -34,6 +34,6 @@ export async function recomputeItemQuantity(lineItemId: string): Promise<number 
   const lines = await getMeasurementLines(lineItemId);
   if (lines.length === 0) return null;
   const total = lines.reduce((sum, l) => sum + l.partial, 0);
-  await db.update(lineItems).set({ quantity: total.toFixed(4) }).where(eq(lineItems.id, lineItemId));
+  await db.update(lineItems).set({ quantity: total.toFixed(2) }).where(eq(lineItems.id, lineItemId));
   return total;
 }

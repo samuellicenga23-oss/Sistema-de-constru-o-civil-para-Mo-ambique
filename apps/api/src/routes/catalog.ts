@@ -18,7 +18,7 @@ import {
 import { requireRole } from "../auth/middleware.js";
 import { computeHourlyRate } from "../services/costEngine.js";
 import { cloneLabourCategoryForCompany, cloneMaterialForCompany, cloneEquipmentForCompany } from "../services/catalogClone.js";
-import { CURRENCIES, UNITS } from "@sigo/shared";
+import { CURRENCIES, UNITS, fixedSigo } from "@sigo/shared";
 
 const CATALOG_ROLES = ["super_admin", "admin_empresa", "orcamentista"] as const;
 
@@ -140,7 +140,7 @@ export async function catalogRoutes(app: FastifyInstance) {
         productiveHoursPerMonth: parsed.data.productiveHoursPerMonth?.toString() ?? null,
         socialChargesPct: parsed.data.socialChargesPct.toString(),
         complementaryCostsPct: parsed.data.complementaryCostsPct.toString(),
-        hourlyRate: hourlyRate.toString(),
+        hourlyRate: fixedSigo(hourlyRate),
       })
       .returning();
     return reply.code(201).send(row);
@@ -196,7 +196,7 @@ export async function catalogRoutes(app: FastifyInstance) {
           : parsed.data.productiveHoursPerMonth?.toString() ?? null,
         socialChargesPct: parsed.data.socialChargesPct?.toString(),
         complementaryCostsPct: parsed.data.complementaryCostsPct?.toString(),
-        hourlyRate: hourlyRate.toString(),
+        hourlyRate: fixedSigo(hourlyRate),
         updatedAt: new Date(),
       })
       .where(eq(labourCategories.id, target.id))

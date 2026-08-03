@@ -97,7 +97,7 @@ export async function getProjectControl(projectId: string, currency: string) {
 
   const alerts: ControlAlert[] = [];
   if (!approvedDocument) alerts.push({ code: "budget_missing", level: "critical", title: "Orçamento por aprovar", detail: "A obra ainda não tem referência contratual para controlo físico-financeiro.", href: `/projectos/${projectId}` });
-  if (expectedProgress >= 10 && progressGap <= -10) alerts.push({ code: "schedule_delay", level: "warning", title: "Execução abaixo do planeado", detail: `Previsto ${expectedProgress.toFixed(1)}%; realizado ${actualProgress.toFixed(1)}%.`, href: `/projectos/${projectId}/cronograma` });
+  if (expectedProgress >= 10 && progressGap <= -10) alerts.push({ code: "schedule_delay", level: "warning", title: "Execução abaixo do planeado", detail: `Previsto ${expectedProgress.toFixed(2)}%; realizado ${actualProgress.toFixed(2)}%.`, href: `/projectos/${projectId}/cronograma` });
   if (contractedValue > 0 && financial.paidCost > contractedValue) alerts.push({ code: "cost_over_contract", level: "critical", title: "Custo pago acima do contrato", detail: "Os pagamentos de despesa já ultrapassaram o valor contratado.", href: `/projectos/${projectId}/financeiro` });
   const overdueOrders = orders.filter((order) => order.status === "aprovado" && order.requiredByDate && order.requiredByDate < date);
   if (overdueOrders.length) alerts.push({ code: "purchase_overdue", level: "warning", title: "Compras em atraso", detail: `${overdueOrders.length} ordem(ns) aprovada(s) ultrapassou(aram) a data necessária.`, href: `/projectos/${projectId}/compras` });

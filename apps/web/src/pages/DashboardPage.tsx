@@ -224,7 +224,7 @@ export default function DashboardPage() {
                           <div className="min-w-0 flex-1">
                             <p className="truncate font-medium text-slate-900">{p.name}</p>
                             <div className="mt-1.5 h-1.5 w-full rounded-full bg-slate-100">
-                              <div className="h-1.5 rounded-full bg-brand-600 transition-all" style={{ width: `${((p.total / max) * 100).toFixed(1)}%` }} />
+                              <div className="h-1.5 rounded-full bg-brand-600 transition-all" style={{ width: `${((p.total / max) * 100).toFixed(2)}%` }} />
                             </div>
                           </div>
                           <div className="shrink-0 text-right">
