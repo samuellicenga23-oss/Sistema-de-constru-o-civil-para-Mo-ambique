@@ -20,6 +20,7 @@ import { applyProjectSpecificationsToDocument } from "../services/specEnrichment
 import { getStandardSectionId } from "../services/quickEstimate.js";
 import { getProjectWorkflowStatus } from "../services/projectWorkflow.js";
 import { resolveOrCreateMaterialByName } from "../services/materialResolution.js";
+import { syncProjectPlantMeasurements } from "../services/plantMeasurementSync.js";
 import { CURRENCIES, DEFAULT_IVA_RATE, getPlanDefinition, UNITS } from "@sigo/shared";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista"] as const;
@@ -317,6 +318,7 @@ export async function projectRoutes(app: FastifyInstance) {
     for (const document of drafts) {
       if (await getStandardSectionId(document.id)) {
         await adaptEmptyMeasurementDocument(document.id, id, companyId, project.zoneId);
+        await syncProjectPlantMeasurements(id);
         return { document, created: false };
       }
     }
@@ -338,6 +340,7 @@ export async function projectRoutes(app: FastifyInstance) {
       .returning();
     const selection = await getAdaptivePlantSelection(id, companyId);
     await generateStandardBoq(document.id, companyId, project.zoneId, "Edifício Principal", false, selection);
+    await syncProjectPlantMeasurements(id);
     return reply.code(201).send({ document, created: true });
   });
 

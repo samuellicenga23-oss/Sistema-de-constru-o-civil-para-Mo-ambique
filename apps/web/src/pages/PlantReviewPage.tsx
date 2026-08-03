@@ -707,7 +707,7 @@ export default function PlantReviewPage() {
         )}
 
         {hasArchitecture && (
-          <section className="card card-pad">
+          <section id="portas-janelas" className="card card-pad scroll-mt-24">
             <div className="mb-4"><h2 className="section-title">Portas e janelas</h2><p className="mt-1 text-xs text-slate-500">Organizadas separadamente por tipo e piso.</p></div>
             <div className="grid gap-3 sm:grid-cols-2">
               {(["janela", "porta"] as const).map((kind) => {

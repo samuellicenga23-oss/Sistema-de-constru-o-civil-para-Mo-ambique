@@ -11,6 +11,7 @@ import { assertProjectOwned, assertPlantOwned } from "../services/accessControl.
 import { env } from "../env.js";
 import { extractedSlabSchema, plantParseResultSchema, PLANT_DISCIPLINES, fixedSigo } from "@sigo/shared";
 import { loadWorkChapterLibrary } from "../services/boqTemplate.js";
+import { syncProjectPlantMeasurements } from "../services/plantMeasurementSync.js";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista"] as const;
 const clientPlantIdSchema = z.string().uuid();
@@ -196,13 +197,20 @@ export async function processPlantFile(plantId: string, buffer: Buffer, filename
       ? "estrutura"
       : undefined;
   await db.update(plants).set({
-    processingStatus: "concluido",
-    processingProgress: 100,
-    processingStage: "Análise concluída",
+    processingProgress: 98,
+    processingStage: "A actualizar as medições",
     processingUpdatedAt: new Date(),
     structuralSummary: parsed.structuralSummary ?? null,
     documentAnalysis: parsed.documentAnalysis,
     ...(detectedPrimaryDiscipline ? { discipline: detectedPrimaryDiscipline } : {}),
+  }).where(eq(plants.id, plantId));
+  const [owner] = await db.select({ projectId: plants.projectId }).from(plants).where(eq(plants.id, plantId)).limit(1);
+  if (owner) await syncProjectPlantMeasurements(owner.projectId);
+  await db.update(plants).set({
+    processingStatus: "concluido",
+    processingProgress: 100,
+    processingStage: "Análise concluída",
+    processingUpdatedAt: new Date(),
   }).where(eq(plants.id, plantId));
 }
 
@@ -358,6 +366,7 @@ export async function plantRoutes(app: FastifyInstance) {
         processingStage: "Análise reutilizada — ficheiro já validado",
         processingUpdatedAt: new Date(),
       }).where(eq(plants.id, plant.id)).returning();
+      await syncProjectPlantMeasurements(projectId);
       return reply.code(201).send(reused);
     }
 
@@ -526,7 +535,8 @@ export async function plantRoutes(app: FastifyInstance) {
   app.post("/api/plants/:plantId/openings", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
     const { plantId } = request.params as { plantId: string };
     const companyId = request.currentUser!.companyId!;
-    if (!await assertPlantOwned(plantId, companyId)) return reply.code(404).send({ error: "Planta não encontrada" });
+    const ownedPlant = await assertPlantOwned(plantId, companyId);
+    if (!ownedPlant) return reply.code(404).send({ error: "Planta não encontrada" });
     const parsed = openingInputSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     if (!await openingMaterialIsVisible(parsed.data.materialId, companyId)) return reply.code(400).send({ error: "Material não disponível no Catálogo" });
@@ -549,13 +559,15 @@ export async function plantRoutes(app: FastifyInstance) {
       source: "manual",
       needsConfirmation: !parsed.data.confirmed,
     }).returning();
+    await syncProjectPlantMeasurements(ownedPlant.projectId);
     return reply.code(201).send(created);
   });
 
   app.put("/api/plants/:plantId/openings/:openingId", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
     const { plantId, openingId } = request.params as { plantId: string; openingId: string };
     const companyId = request.currentUser!.companyId!;
-    if (!await assertPlantOwned(plantId, companyId)) return reply.code(404).send({ error: "Planta não encontrada" });
+    const ownedPlant = await assertPlantOwned(plantId, companyId);
+    if (!ownedPlant) return reply.code(404).send({ error: "Planta não encontrada" });
     const parsed = openingInputSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     if (!await openingMaterialIsVisible(parsed.data.materialId, companyId)) return reply.code(400).send({ error: "Material não disponível no Catálogo" });
@@ -578,16 +590,19 @@ export async function plantRoutes(app: FastifyInstance) {
       needsConfirmation: !parsed.data.confirmed,
     }).where(and(eq(extractedOpenings.id, openingId), eq(extractedOpenings.plantId, plantId))).returning();
     if (!updated) return reply.code(404).send({ error: "Vão não encontrado" });
+    await syncProjectPlantMeasurements(ownedPlant.projectId);
     return updated;
   });
 
   app.delete("/api/plants/:plantId/openings/:openingId", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
     const { plantId, openingId } = request.params as { plantId: string; openingId: string };
     const companyId = request.currentUser!.companyId!;
-    if (!await assertPlantOwned(plantId, companyId)) return reply.code(404).send({ error: "Planta não encontrada" });
+    const ownedPlant = await assertPlantOwned(plantId, companyId);
+    if (!ownedPlant) return reply.code(404).send({ error: "Planta não encontrada" });
     const [deleted] = await db.delete(extractedOpenings)
       .where(and(eq(extractedOpenings.id, openingId), eq(extractedOpenings.plantId, plantId))).returning({ id: extractedOpenings.id });
     if (!deleted) return reply.code(404).send({ error: "Vão não encontrado" });
+    await syncProjectPlantMeasurements(ownedPlant.projectId);
     return { ok: true };
   });
 }

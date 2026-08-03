@@ -408,6 +408,9 @@ export default function BudgetDocumentPage() {
   const isReadOnly = isClientView || document.status !== "rascunho";
   const compositionLinkedCount = sections.reduce((count, section) => count + countCompositionItems(section.items), 0);
   const technicalSpecCount = sections.reduce((count, section) => count + countTechnicalSpecs(section.items), 0);
+  const pendingOpenings = architectureOpenings.filter((opening) => opening.needsConfirmation || !opening.widthM || !opening.heightM || opening.location === "desconhecida");
+  const openingsMissingDimensions = pendingOpenings.filter((opening) => !opening.widthM || !opening.heightM).length;
+  const openingsMissingLocation = pendingOpenings.filter((opening) => opening.location === "desconhecida").length;
 
   return (
     <Layout
@@ -559,6 +562,20 @@ export default function BudgetDocumentPage() {
             {sections.some((section) => section.templateKey?.startsWith("sigo_adaptativo")) ? "Adaptado às plantas" : "Sem preços"}
           </span>
         </section>}
+        {isMeasurementDocument && architecturePlant && pendingOpenings.length > 0 && (
+          <section className="card flex flex-col gap-3 border-l-4 border-l-amber-500 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+            <div className="min-w-0">
+              <strong className="text-sm text-slate-950">Portas e janelas aguardam confirmação</strong>
+              <p className="mt-1 text-xs text-slate-600">
+                {pendingOpenings.length} vão(s) lido(s)
+                {openingsMissingDimensions > 0 ? ` · ${openingsMissingDimensions} sem dimensão completa` : ""}
+                {openingsMissingLocation > 0 ? ` · ${openingsMissingLocation} sem classificação interior/exterior` : ""}.
+                As quantidades serão actualizadas automaticamente depois da confirmação.
+              </p>
+            </div>
+            <Link to={`/plantas/${architecturePlant.id}#portas-janelas`} className="btn btn-primary shrink-0">Confirmar vãos</Link>
+          </section>
+        )}
 
         {/* Coluna principal: secções e itens */}
         <div className="min-w-0 space-y-5">

@@ -255,23 +255,26 @@ export async function loadProjectPlantContext(projectId: string): Promise<{ room
     .where(eq(plants.projectId, projectId))
     .orderBy(desc(plants.uploadedAt));
 
+  let selectedRooms: PlantRoom[] = [];
+  let selectedOpenings: PlantOpening[] = [];
   for (const plant of plantRows) {
     if (plant.processingStatus !== "concluido") continue;
     const [rooms, openings] = await Promise.all([
       db.select().from(extractedRooms).where(eq(extractedRooms.plantId, plant.id)),
       db.select().from(extractedOpenings).where(eq(extractedOpenings.plantId, plant.id)),
     ]);
-    if (rooms.length === 0) continue;
-    return {
-      rooms: rooms.map((r) => ({
+    if (selectedRooms.length === 0 && rooms.length > 0) {
+      selectedRooms = rooms.map((r) => ({
         id: r.id,
         name: r.name,
         number: r.number,
         areaM2: Number(r.areaM2),
         perimeterM: r.perimeterM == null ? null : Number(r.perimeterM),
         floor: r.floor,
-      })),
-      openings: openings.map((opening) => ({
+      }));
+    }
+    if (selectedOpenings.length === 0 && openings.length > 0) {
+      selectedOpenings = openings.map((opening) => ({
         id: opening.id,
         kind: opening.kind as PlantOpening["kind"],
         widthM: opening.widthM == null ? null : Number(opening.widthM),
@@ -280,8 +283,9 @@ export async function loadProjectPlantContext(projectId: string): Promise<{ room
         floor: opening.floor,
         location: opening.location as PlantOpening["location"],
         needsConfirmation: opening.needsConfirmation,
-      })),
-    };
+      }));
+    }
+    if (selectedRooms.length > 0 && selectedOpenings.length > 0) break;
   }
-  return { rooms: [], openings: [] };
+  return { rooms: selectedRooms, openings: selectedOpenings };
 }
