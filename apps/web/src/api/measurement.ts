@@ -11,6 +11,9 @@ export type MeasurementCertificate = {
   notes: string | null;
   submittedAt: string | null;
   approvedAt: string | null;
+  submittedByUserId: string | null;
+  approvedByUserId: string | null;
+  approvalNote: string | null;
 };
 
 export type MeasurementLine = {

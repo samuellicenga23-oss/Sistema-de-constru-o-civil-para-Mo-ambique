@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { boqApi, type Project } from "../api/boq";
-import { financialApi, type FinancialEntry, type FinancialSummary } from "../api/financial";
+import { financialApi, type ClientStatement, type FinancialEntry, type FinancialSummary, type ProjectControl, type ProjectContract, type ProjectInvoice } from "../api/financial";
 import Layout from "../components/Layout";
 import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { MetricCard, SectionHeader } from "../components/WorkspaceUI";
@@ -28,6 +28,14 @@ export default function ProjectFinancialPage() {
   const [project, setProject] = useState<Project | null>(null);
   const [entries, setEntries] = useState<FinancialEntry[]>([]);
   const [summary, setSummary] = useState<FinancialSummary | null>(null);
+  const [control, setControl] = useState<ProjectControl | null>(null);
+  const [invoices, setInvoices] = useState<ProjectInvoice[]>([]);
+  const [contract, setContract] = useState<ProjectContract | null>(null);
+  const [statement, setStatement] = useState<ClientStatement | null>(null);
+  const [showContractForm, setShowContractForm] = useState(false);
+  const [contractNumber, setContractNumber] = useState("");
+  const [contractClient, setContractClient] = useState("");
+  const [contractAmount, setContractAmount] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -42,10 +50,15 @@ export default function ProjectFinancialPage() {
 
   async function reload() {
     if (!projectId) return;
-    const [proj, list, sum] = await Promise.all([boqApi.getProject(projectId), financialApi.list(projectId), financialApi.summary(projectId)]);
+    const [proj, list, sum, controlData, invoiceData] = await Promise.all([boqApi.getProject(projectId), financialApi.list(projectId), financialApi.summary(projectId), financialApi.control(projectId), financialApi.listInvoices(projectId)]);
     setProject(proj);
     setEntries(list);
     setSummary(sum);
+    setControl(controlData);
+    setInvoices(invoiceData);
+    const contractData = await financialApi.getContract(projectId).catch(() => null);
+    setContract(contractData);
+    setStatement(contractData ? await financialApi.clientStatement(projectId).catch(() => null) : null);
   }
 
   useEffect(() => {
@@ -92,6 +105,78 @@ export default function ProjectFinancialPage() {
     }
   }
 
+  async function handleIssueInvoice(invoice: ProjectInvoice) {
+    const invoiceNumber = window.prompt("Número da factura", invoice.invoiceNumber ?? "");
+    if (!invoiceNumber?.trim()) return;
+    const retention = window.prompt("Retenção (%)", (Number(invoice.retentionRate) * 100).toString());
+    if (retention === null) return;
+    const retentionRate = Number(retention) / 100;
+    if (Number.isNaN(retentionRate) || retentionRate < 0 || retentionRate > 1) { setError("Indique uma retenção entre 0% e 100%."); return; }
+    setError(null);
+    try {
+      await financialApi.issueInvoice(invoice.id, { invoiceNumber: invoiceNumber.trim(), issueDate: todayStr(), dueDate: todayStr(), retentionRate });
+      await reload();
+    } catch (err) { setError(err instanceof Error ? err.message : "Não foi possível emitir a factura"); }
+  }
+
+  async function handleInvoiceReceipt(invoice: ProjectInvoice) {
+    const value = window.prompt(`Recebimento (saldo ${fmt(invoice.outstandingAmount, invoice.currency)})`, invoice.outstandingAmount.toFixed(2));
+    if (value === null) return;
+    const amount = Number(value);
+    if (!(amount > 0)) { setError("Indique um valor de recebimento válido."); return; }
+    const reference = window.prompt("Referência do pagamento (opcional)") ?? undefined;
+    setError(null);
+    try {
+      await financialApi.addReceipt(invoice.id, { amount, receivedDate: todayStr(), reference });
+      await reload();
+    } catch (err) { setError(err instanceof Error ? err.message : "Não foi possível registar o recebimento"); }
+  }
+
+  async function handleCreditNote(invoice: ProjectInvoice) {
+    const creditNumber = window.prompt("Número da nota de crédito");
+    if (!creditNumber?.trim()) return;
+    const value = window.prompt(`Valor da nota (máximo ${fmt(invoice.outstandingAmount, invoice.currency)})`);
+    if (value === null) return;
+    const creditAmount = Number(value);
+    if (!(creditAmount > 0)) { setError("Indique um valor de crédito válido."); return; }
+    const reason = window.prompt("Motivo da nota de crédito");
+    if (!reason?.trim() || reason.trim().length < 5) { setError("Indique o motivo da nota de crédito."); return; }
+    setError(null);
+    try {
+      await financialApi.createCreditNote(invoice.id, { creditNumber: creditNumber.trim(), issueDate: todayStr(), amount: creditAmount, reason: reason.trim() });
+      await reload();
+    } catch (err) { setError(err instanceof Error ? err.message : "Não foi possível preparar a nota de crédito"); }
+  }
+
+  async function handleIssueCreditNote(noteId: string) {
+    setError(null);
+    try {
+      await financialApi.issueCreditNote(noteId);
+      await reload();
+    } catch (err) { setError(err instanceof Error ? err.message : "Não foi possível emitir a nota de crédito"); }
+  }
+
+  async function handleReceiptProof(receiptId: string, file: File | undefined) {
+    if (!file) return;
+    setError(null);
+    try {
+      await financialApi.uploadReceiptProof(receiptId, file);
+      await reload();
+    } catch (err) { setError(err instanceof Error ? err.message : "Não foi possível anexar o comprovativo"); }
+  }
+
+  async function handleSaveContract(e: FormEvent) {
+    e.preventDefault();
+    if (!projectId || !contractNumber.trim() || !contractClient.trim() || !(Number(contractAmount) > 0)) return;
+    setSaving(true); setError(null);
+    try {
+      await financialApi.saveContract(projectId, { contractNumber: contractNumber.trim(), clientName: contractClient.trim(), originalAmount: Number(contractAmount) });
+      setShowContractForm(false);
+      await reload();
+    } catch (err) { setError(err instanceof Error ? err.message : "Não foi possível guardar o contrato"); }
+    finally { setSaving(false); }
+  }
+
   async function handleDelete(entry: FinancialEntry) {
     const ok = await confirm({
       title: "Eliminar lançamento?",
@@ -134,7 +219,7 @@ export default function ProjectFinancialPage() {
     <>
     <Layout
       title={`Financeiro — ${project.name}`}
-      subtitle="Compromissos de compras, receitas dos autos, pagamentos e fluxo de caixa da obra"
+      subtitle="Caixa da obra: compras, autos e pagamentos"
       actions={
         <Link to={`/projectos/${projectId}`} className="btn btn-ghost btn-sm">
           <IconBack className="w-3.5 h-3.5" />
@@ -145,7 +230,7 @@ export default function ProjectFinancialPage() {
       <div className="mx-auto w-full max-w-7xl space-y-5">
         <ProjectWorkspaceNav projectId={projectId!} />
         {error && <p className="text-sm text-red-600">{error}</p>}
-        <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm leading-6 text-blue-900"><strong>Sincronizado com compras e autos.</strong> Aqui confirma pagamentos e regista excepções.</div>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-blue-100 bg-blue-50/70 px-4 py-2.5 text-xs text-blue-900"><strong>Compras e autos sincronizados.</strong><span>Registe aqui apenas movimentos fora desses fluxos.</span></div>
 
         {/* Indicadores */}
         <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
@@ -156,7 +241,39 @@ export default function ProjectFinancialPage() {
           <MetricCard label="Contas a receber" value={fmt(summary.contasAReceber, currency)} tone="info" />
           <MetricCard label="Contas a pagar" value={fmt(summary.contasAPagar, currency)} tone="warning" />
         </div>
-        <details className="-mt-3 rounded-lg px-1 text-xs text-slate-500"><summary className="font-semibold text-slate-600">Como é calculada a margem?</summary><p className="pt-2 leading-5">Margem realizada = valor recebido − custo pago. Pendências não entram no caixa antes da liquidação.</p></details>
+        <details className="-mt-3 px-1 text-xs text-slate-500"><summary className="cursor-pointer font-semibold text-slate-600">Critério da margem</summary><p className="pt-1 leading-5">Valor recebido menos custo pago; pendências só entram após liquidação.</p></details>
+
+        {control && <section className="card overflow-hidden">
+          <SectionHeader title="Controlo da obra" description={`Previsto vs. realizado · referência em ${control.basis.referenceDate}`} />
+          <div className="grid gap-px bg-slate-100 sm:grid-cols-3">
+            <div className="bg-white px-5 py-4"><span className="text-xs text-slate-500">Execução física</span><strong className="mt-1 block text-xl tabular-nums text-slate-950">{control.schedule.actualProgress.toFixed(1)}%</strong><p className={`mt-1 text-xs ${control.schedule.progressGap < -10 ? "text-amber-700" : "text-slate-500"}`}>Previsto {control.schedule.expectedProgress.toFixed(1)}% · {control.schedule.progressGap >= 0 ? "+" : ""}{control.schedule.progressGap.toFixed(1)} p.p.</p></div>
+            <div className="bg-white px-5 py-4"><span className="text-xs text-slate-500">Autos certificados</span><strong className="mt-1 block text-xl tabular-nums text-slate-950">{fmt(control.commercial.certifiedValue, currency)}</strong><p className="mt-1 text-xs text-slate-500">Recebido {fmt(control.commercial.receivedValue, currency)}</p></div>
+            <div className="bg-white px-5 py-4"><span className="text-xs text-slate-500">Consumo de stock</span><strong className="mt-1 block text-xl tabular-nums text-slate-950">{fmt(control.cost.consumedStockValue, currency)}</strong><p className="mt-1 text-xs text-slate-500">{control.basis.stockConsumptionEstimated ? "Inclui custo médio de entrada" : "Valorizado por custo de movimento"}</p></div>
+          </div>
+          {control.alerts.length > 0 && <div className="divide-y divide-slate-100 border-t border-slate-100">{control.alerts.map((alert) => <Link key={alert.code} to={alert.href} className="flex items-center justify-between gap-4 px-5 py-3 hover:bg-slate-50"><div><strong className={`text-sm ${alert.level === "critical" ? "text-red-700" : alert.level === "warning" ? "text-amber-800" : "text-blue-700"}`}>{alert.title}</strong><p className="mt-0.5 text-xs text-slate-500">{alert.detail}</p></div><span className="text-xs font-semibold text-blue-700">Ver →</span></Link>)}</div>}
+        </section>}
+
+        <section className="card overflow-hidden">
+          <SectionHeader title="Contrato e conta-corrente" description={contract ? `${contract.contractNumber} · ${contract.clientName}` : "Defina a referência comercial antes de emitir facturas."} actions={<button type="button" className="btn btn-secondary btn-sm" onClick={() => { setContractNumber(contract?.contractNumber ?? ""); setContractClient(contract?.clientName ?? project.client ?? ""); setContractAmount(contract?.originalAmount ?? ""); setShowContractForm(true); }}>{contract ? "Ver contrato" : "Criar contrato"}</button>} />
+          {statement ? <div className="grid gap-px bg-slate-100 sm:grid-cols-2 lg:grid-cols-5"><div className="bg-white px-5 py-3 text-sm"><span className="text-xs text-slate-500">Valor revisto</span><strong className="mt-1 block">{fmt(statement.contract.revisedAmount, statement.currency)}</strong></div><div className="bg-white px-5 py-3 text-sm"><span className="text-xs text-slate-500">Facturado</span><strong className="mt-1 block">{fmt(statement.totals.invoiced, statement.currency)}</strong></div><div className="bg-white px-5 py-3 text-sm"><span className="text-xs text-slate-500">Notas de crédito</span><strong className="mt-1 block text-red-600">−{fmt(statement.totals.credited, statement.currency)}</strong></div><div className="bg-white px-5 py-3 text-sm"><span className="text-xs text-slate-500">Recebido</span><strong className="mt-1 block text-green-700">{fmt(statement.totals.received, statement.currency)}</strong></div><div className="bg-white px-5 py-3 text-sm"><span className="text-xs text-slate-500">Por receber</span><strong className="mt-1 block text-amber-700">{fmt(statement.totals.outstanding, statement.currency)}</strong></div></div> : <p className="px-5 py-4 text-sm text-slate-500">Sem contrato configurado.</p>}
+        </section>
+        {showContractForm && <Modal title="Contrato da obra" subtitle="O valor original fica protegido depois da activação; alterações seguem como adendas." onClose={() => !saving && setShowContractForm(false)} maxWidth="max-w-2xl"><form onSubmit={handleSaveContract} className="space-y-4"><div className="grid gap-3 sm:grid-cols-2"><div><label className="label">Número do contrato</label><input required className="input" value={contractNumber} onChange={(e) => setContractNumber(e.target.value)} /></div><div><label className="label">Cliente</label><input required className="input" value={contractClient} onChange={(e) => setContractClient(e.target.value)} /></div><div><label className="label">Valor original ({project.currency})</label><input required min="0" step="0.01" type="number" className="input" value={contractAmount} onChange={(e) => setContractAmount(e.target.value)} /></div></div><div className="flex justify-end gap-2"><button type="button" className="btn btn-secondary" onClick={() => setShowContractForm(false)}>Cancelar</button><button disabled={saving} className="btn btn-primary">Guardar contrato</button></div></form></Modal>}
+
+        <section className="card overflow-hidden">
+          <SectionHeader title="Facturas e recebimentos" description="Autos aprovados geram facturas em rascunho; emita e registe recebimentos totais ou parciais." />
+          {!invoices.length ? <p className="px-5 py-5 text-sm text-slate-500">Ainda não existem facturas. Aprove um Auto de Medição para preparar a primeira.</p> : <div className="divide-y divide-slate-100">{invoices.map((invoice) => (
+            <article key={invoice.id} className="px-5 py-4">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div><div className="flex flex-wrap items-center gap-2"><strong className="text-sm text-slate-900">{invoice.invoiceNumber ?? "Factura por emitir"}</strong><span className={`badge ${invoice.status === "paga" ? "badge-green" : invoice.status === "rascunho" ? "badge-yellow" : "badge-blue"}`}>{invoice.status === "rascunho" ? "Rascunho" : invoice.status === "emitida" ? "Emitida" : invoice.status === "parcial" ? "Parcial" : invoice.status === "paga" ? "Paga" : "Cancelada"}</span></div><p className="mt-1 text-xs text-slate-500">{invoice.clientName ?? "Cliente por definir"} · IVA {(Number(invoice.ivaRate) * 100).toFixed(0)}% · Retenção {(Number(invoice.retentionRate) * 100).toFixed(0)}%</p></div>
+                <div className="flex flex-wrap items-center gap-2"><div className="mr-2 text-right text-xs"><strong className="block text-sm tabular-nums text-slate-900">{fmt(Number(invoice.netAmount), invoice.currency)}</strong>{invoice.creditAmount > 0 && <span className="block text-red-600">Crédito −{fmt(invoice.creditAmount, invoice.currency)}</span>}<span className="text-slate-500">Saldo {fmt(invoice.outstandingAmount, invoice.currency)}</span></div>{invoice.status === "rascunho" && <button type="button" className="btn btn-primary btn-sm" onClick={() => handleIssueInvoice(invoice)}>Emitir</button>}{(invoice.status === "emitida" || invoice.status === "parcial") && <button type="button" className="btn btn-secondary btn-sm text-green-700" onClick={() => handleInvoiceReceipt(invoice)}>Recebimento</button>}{invoice.status !== "rascunho" && invoice.status !== "cancelada" && <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleCreditNote(invoice)}>Nota de crédito</button>}{invoice.status !== "rascunho" && invoice.status !== "cancelada" && <a className="btn btn-ghost btn-sm" href={financialApi.invoicePdfUrl(invoice.id)} target="_blank" rel="noreferrer">PDF</a>}</div>
+              </div>
+              {(invoice.receipts.length > 0 || invoice.creditNotes.length > 0) && <details className="mt-3 border-t border-slate-100 pt-3"><summary className="cursor-pointer text-xs font-semibold text-blue-700">Documentos e movimentos ({invoice.receipts.length + invoice.creditNotes.length})</summary><div className="mt-3 grid gap-3 lg:grid-cols-2">
+                {invoice.receipts.length > 0 && <div className="rounded-lg border border-slate-200"><strong className="block border-b border-slate-100 px-3 py-2 text-xs">Recebimentos</strong>{invoice.receipts.map((receipt) => <div key={receipt.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-xs"><span>{receipt.receivedDate} · {fmt(Number(receipt.amount), invoice.currency)}</span>{receipt.proofUrl ? <a className="font-semibold text-blue-700" href={receipt.proofUrl} target="_blank" rel="noreferrer">Ver comprovativo</a> : <label className="btn btn-secondary btn-sm cursor-pointer">Anexar comprovativo<input className="sr-only" type="file" accept="application/pdf,image/png,image/jpeg,image/webp,image/gif" onChange={(event) => handleReceiptProof(receipt.id, event.target.files?.[0])} /></label>}</div>)}</div>}
+                {invoice.creditNotes.length > 0 && <div className="rounded-lg border border-slate-200"><strong className="block border-b border-slate-100 px-3 py-2 text-xs">Notas de crédito</strong>{invoice.creditNotes.map((note) => <div key={note.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-xs"><span>{note.creditNumber} · {fmt(Number(note.amount), invoice.currency)} · {note.status}</span>{note.status === "rascunho" && <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleIssueCreditNote(note.id)}>Emitir</button>}</div>)}</div>}
+              </div></details>}
+            </article>
+          ))}</div>}
+        </section>
 
         {/* Fluxo de caixa mensal */}
         {summary.fluxoCaixaMensal.length > 0 && (
@@ -191,7 +308,7 @@ export default function ProjectFinancialPage() {
         )}
 
         {/* Novo lançamento */}
-        <section className="card overflow-hidden"><SectionHeader title="Movimentos excepcionais" description="Use apenas para valores que não vêm de compras ou autos" actions={<button type="button" onClick={() => setShowForm(true)} className="btn btn-primary btn-sm"><IconPlus className="h-3.5 w-3.5" /> Novo lançamento</button>} /></section>
+        <section className="card overflow-hidden"><SectionHeader title="Movimentos manuais" description="Valores que não vêm de compras nem autos" actions={<button type="button" onClick={() => setShowForm(true)} className="btn btn-primary btn-sm"><IconPlus className="h-3.5 w-3.5" /> Novo lançamento</button>} /></section>
         {showForm && <Modal title="Novo lançamento financeiro" subtitle={`Receita ou despesa · ${project.name}`} onClose={() => !saving && setShowForm(false)} maxWidth="max-w-3xl"><form onSubmit={handleCreate} className="grid gap-4 sm:grid-cols-2">
             <div>
               <label className="label">Tipo</label>

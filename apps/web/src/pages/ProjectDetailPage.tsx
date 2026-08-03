@@ -80,8 +80,10 @@ export default function ProjectDetailPage() {
     setPlants(plantList);
     setMaterialSpecifications(projectMaterials);
     boqApi.getProjectWorkflow(projectId).then(setWorkflowStatus).catch(() => setWorkflowStatus(null));
-    const firstBudget = docs.find((document) => document.documentType === "orcamento");
-    if (!selectedDocId && firstBudget) setSelectedDocId(firstBudget.id);
+    const firstBudget = docs.find((document) => document.documentType === "orcamento" && document.status === "aprovado");
+    if (!selectedDocId || !docs.some((document) => document.id === selectedDocId && document.status === "aprovado")) {
+      setSelectedDocId(firstBudget?.id ?? "");
+    }
     const [catalogMaterials, supplierList, compositionList] = await Promise.all([
       catalogApi.listMaterials(proj.zoneId ?? undefined),
       suppliersApi.list(),
@@ -288,6 +290,7 @@ export default function ProjectDetailPage() {
   const failedPlants = plants.filter((plant) => plant.processingStatus === "erro");
   const measurementDocuments = documents.filter((document) => document.documentType === "medicao");
   const budgetDocuments = documents.filter((document) => document.documentType === "orcamento");
+  const approvedBudgetDocuments = budgetDocuments.filter((document) => document.status === "aprovado");
   const hasMeasuredBudget = measurementDocuments.some((document) => document.lastEstimateReport?.entries?.length);
   const latestCompletedPlant = completedPlants[completedPlants.length - 1];
   const usesPlants = project.measurementMode === "plantas";
@@ -608,17 +611,14 @@ export default function ProjectDetailPage() {
         <section id="certificados-obra" className="card order-8 xl:col-span-2 scroll-mt-24">
           <SectionHeader
             title="Certificados de obra"
-            description="Avanço físico por período, contra o orçamento aprovado — alimenta cronograma e financeiro (não confundir com medições de projecto)"
+            description="Execução por período ligada ao orçamento aprovado"
             actions={<IconClipboard className="w-4 h-4 text-blue-700" />}
           />
-          {budgetDocuments.length === 0 ? (
+          {approvedBudgetDocuments.length === 0 ? (
             <div className="border-t border-gray-100 px-5 py-4 text-sm text-slate-600">
-              <p>Disponível depois de ter um <strong>orçamento</strong> (com preços). Fluxo: medições → «Enviar para orçamento» → aprovar → certificar execução.</p>
-              {measurementDocuments.length > 0 && (
-                <Link to={`/documentos/${measurementDocuments[0].id}`} className="action-link mt-2 inline-block">
-                  Ir à medição e enviar para orçamento →
-                </Link>
-              )}
+              <p>Aprove um orçamento para abrir o primeiro Auto de Medição.</p>
+              {budgetDocuments[0] && <Link to={`/documentos/${budgetDocuments[0].id}`} className="action-link mt-2 inline-block">Rever orçamento →</Link>}
+              {!budgetDocuments[0] && measurementDocuments[0] && <Link to={`/documentos/${measurementDocuments[0].id}`} className="action-link mt-2 inline-block">Enviar medição para orçamento →</Link>}
             </div>
           ) : (
           <div className="grid md:grid-cols-2">
@@ -648,7 +648,7 @@ export default function ProjectDetailPage() {
               <div className="flex-1 min-w-[160px]">
                 <label className="label">Orçamento base (contrato)</label>
                 <select value={selectedDocId} onChange={(e) => setSelectedDocId(e.target.value)} className="input">
-                  {budgetDocuments.map((d) => (
+                  {approvedBudgetDocuments.map((d) => (
                     <option key={d.id} value={d.id}>
                       {d.title} {d.status !== "aprovado" ? "(ainda não aprovado)" : ""}
                     </option>

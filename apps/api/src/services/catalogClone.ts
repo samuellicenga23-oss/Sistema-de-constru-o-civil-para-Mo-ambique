@@ -16,7 +16,7 @@ import {
 // O item global original nunca é alterado (continua igual para as outras empresas).
 
 export async function cloneLabourCategoryForCompany(sourceId: string, companyId: string) {
-  const [source] = await db.select().from(labourCategories).where(eq(labourCategories.id, sourceId)).limit(1);
+  const [source] = await db.select().from(labourCategories).where(and(eq(labourCategories.id, sourceId), isNull(labourCategories.companyId))).limit(1);
   if (!source) return null;
   const [copy] = await db
     .insert(labourCategories)
@@ -40,7 +40,7 @@ export async function cloneLabourCategoryForCompany(sourceId: string, companyId:
 }
 
 export async function cloneMaterialForCompany(sourceId: string, companyId: string) {
-  const [source] = await db.select().from(materials).where(eq(materials.id, sourceId)).limit(1);
+  const [source] = await db.select().from(materials).where(and(eq(materials.id, sourceId), isNull(materials.companyId))).limit(1);
   if (!source) return null;
   const [copy] = await db
     .insert(materials)
@@ -68,7 +68,7 @@ export async function cloneMaterialForCompany(sourceId: string, companyId: strin
 }
 
 export async function cloneEquipmentForCompany(sourceId: string, companyId: string) {
-  const [source] = await db.select().from(equipment).where(eq(equipment.id, sourceId)).limit(1);
+  const [source] = await db.select().from(equipment).where(and(eq(equipment.id, sourceId), isNull(equipment.companyId))).limit(1);
   if (!source) return null;
   const [copy] = await db
     .insert(equipment)
@@ -95,7 +95,7 @@ export async function setMaterialPriceByName(companyId: string, name: string, ba
 }
 
 export async function cloneCompositionForCompany(sourceId: string, companyId: string) {
-  const [source] = await db.select().from(costCompositions).where(eq(costCompositions.id, sourceId)).limit(1);
+  const [source] = await db.select().from(costCompositions).where(and(eq(costCompositions.id, sourceId), isNull(costCompositions.companyId))).limit(1);
   if (!source) return null;
 
   const [copy] = await db

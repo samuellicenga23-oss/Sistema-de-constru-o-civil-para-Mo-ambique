@@ -21,6 +21,7 @@ import { SectionHeader } from "../components/WorkspaceUI";
 import { IconBack, IconChart, IconClipboard, IconDoc, IconDownload, IconPencil, IconPlus, IconRefresh, IconRuler, IconTrash } from "../components/icons";
 import { useAuth } from "../auth/AuthContext";
 import { collectUnpricedItems, filterTreeToUnpricedOnly } from "../utils/boqHelpers";
+import { ApiError } from "../api/http";
 
 function money(value: number, currency: string) {
   return `${value.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`;
@@ -348,6 +349,25 @@ export default function BudgetDocumentPage() {
       const { document } = await boqApi.createBudgetFromMeasurement(documentId);
       navigate(`/documentos/${document.id}`);
     } catch (err) {
+      if (err instanceof ApiError && err.code === "MEASUREMENT_CHANGED") {
+        const createRevision = await confirm({
+          title: "A medição foi alterada",
+          message: "Existem capítulos, itens ou quantidades diferentes do último orçamento.",
+          confirmLabel: "Criar nova revisão",
+          details: ["O orçamento anterior permanece intacto", "Os preços serão recalculados pelas cotações actuais"],
+        });
+        if (createRevision) {
+          try {
+            const { document } = await boqApi.createBudgetFromMeasurement(documentId, true);
+            navigate(`/documentos/${document.id}`);
+            return;
+          } catch (revisionError) {
+            setError(revisionError instanceof Error ? revisionError.message : "Não foi possível criar a revisão");
+            return;
+          }
+        }
+        return;
+      }
       setError(err instanceof Error ? err.message : "Não foi possível enviar a medição para orçamento");
     } finally {
       setSubmittingToBudget(false);
@@ -382,6 +402,7 @@ export default function BudgetDocumentPage() {
   const currency = document.currency;
   const isClientView = user?.role === "visualizador";
   const isMeasurementDocument = document.documentType === "medicao";
+  const isReadOnly = isClientView || document.status !== "rascunho";
   const compositionLinkedCount = sections.reduce((count, section) => count + countCompositionItems(section.items), 0);
   const technicalSpecCount = sections.reduce((count, section) => count + countTechnicalSpecs(section.items), 0);
 
@@ -406,7 +427,7 @@ export default function BudgetDocumentPage() {
               </button>
             </>
           )}
-          {!isClientView && (
+          {!isReadOnly && (
             <button
               onClick={() => compositionLinkedCount > 0 ? setShowWizard(true) : handlePrepareAutomaticDocument()}
               disabled={preparingAutomaticDocument}
@@ -460,7 +481,7 @@ export default function BudgetDocumentPage() {
                 icon: <IconTrash className="w-3.5 h-3.5" />,
                 onClick: handleDeleteDocument,
                 danger: true,
-                hidden: isClientView,
+                hidden: isReadOnly,
               },
             ]}
           />
@@ -469,6 +490,14 @@ export default function BudgetDocumentPage() {
     >
       <div className="space-y-5">
         <ProjectWorkspaceNav projectId={document.projectId} measurementOnly={isMeasurementDocument && project?.projectType === "medicao"} />
+        {!isClientView && document.status !== "rascunho" && (
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm">
+            <span className="font-medium text-slate-700">
+              {document.status === "aprovado" ? "Documento aprovado e protegido" : "Em aprovação — edição bloqueada"}
+            </span>
+            <span className={`badge ${document.status === "aprovado" ? "badge-green" : "badge-brand"}`}>{document.status}</span>
+          </div>
+        )}
         {!isMeasurementDocument && document.status === "rascunho" && !isClientView && (
           <section className="card overflow-hidden">
             <SectionHeader
@@ -515,15 +544,24 @@ export default function BudgetDocumentPage() {
           </button>
         </section>}
         {isMeasurementDocument && <section className="card flex flex-col gap-3 border-l-4 border-l-blue-600 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-          <div><strong className="text-sm text-slate-950">Documento técnico de medição</strong><p className="mt-1 text-xs text-slate-500">Aqui trabalham-se apenas quantidades e memória de cálculo. Os preços são aplicados depois, no orçamento.</p></div>
-          <span className="badge badge-brand shrink-0">Sem preços</span>
+          <div>
+            <strong className="text-sm text-slate-950">Documento técnico de medição</strong>
+            <p className="mt-1 text-xs text-slate-500">
+              {sections.some((section) => section.templateKey?.startsWith("sigo_adaptativo"))
+                ? "Capítulos seleccionados pelas disciplinas detectadas. Pode acrescentar ou remover trabalhos antes de medir."
+                : "Aqui trabalham-se quantidades e memória de cálculo. Os preços entram depois, no orçamento."}
+            </p>
+          </div>
+          <span className="badge badge-brand shrink-0">
+            {sections.some((section) => section.templateKey?.startsWith("sigo_adaptativo")) ? "Adaptado às plantas" : "Sem preços"}
+          </span>
         </section>}
 
         {/* Coluna principal: secções e itens */}
         <div className="min-w-0 space-y-5">
           {error && <AlertBanner tone="error" onDismiss={() => setError(null)}>{error}</AlertBanner>}
 
-          {isMeasurementDocument && !isClientView && (
+          {isMeasurementDocument && !isReadOnly && (
             <section className="card overflow-hidden border-l-4 border-l-emerald-500">
               <SectionHeader
                 title="Importar medições do Excel"
@@ -711,7 +749,7 @@ export default function BudgetDocumentPage() {
                       {!isMeasurementDocument && !isClientView && (
                         <span className="text-sm font-bold text-slate-900 tabular-nums">{money(section.sellingTotal, currency)}</span>
                       )}
-                      {!isClientView && (
+                      {!isReadOnly && (
                         <>
                           <button
                             type="button"
@@ -737,7 +775,7 @@ export default function BudgetDocumentPage() {
                 ) : (
                   <table className="w-full min-w-[500px] border-collapse sm:min-w-[720px]">
                     <BoqHeaderRow measurementOnly={isMeasurementDocument} />
-                    <BoqTableHead readOnly={isClientView} measurementOnly={isMeasurementDocument} />
+                    <BoqTableHead readOnly={isReadOnly} measurementOnly={isMeasurementDocument} />
                     <tbody>
                       {section.items.map((item) => (
                         <LineItemRow
@@ -747,7 +785,7 @@ export default function BudgetDocumentPage() {
                           sectionId={section.id}
                           compositions={compositions}
                           onChange={reload}
-                          readOnly={isClientView}
+                          readOnly={isReadOnly}
                           measurementOnly={isMeasurementDocument}
                           hasPlantRooms={architectureRooms.length > 0}
                         />
@@ -757,7 +795,7 @@ export default function BudgetDocumentPage() {
                 )}
               </div>
 
-              {!isClientView && <div className="px-3 pb-3">
+              {!isReadOnly && <div className="px-3 pb-3">
                 {addingIn === section.id ? (
                   <AddChildForm
                     sectionId={section.id}
@@ -786,7 +824,7 @@ export default function BudgetDocumentPage() {
             </div>
           )}
 
-          {!isClientView && <details className="card overflow-hidden">
+          {!isReadOnly && <details className="card overflow-hidden">
             <summary className="cursor-pointer px-5 py-4 hover:bg-slate-50">
               <span className="text-sm font-semibold text-slate-900">Opções manuais e importações</span>
               <span className="ml-2 text-xs font-normal text-slate-500">Adicionar secções ou usar medições já preparadas em Excel</span>
@@ -870,7 +908,7 @@ export default function BudgetDocumentPage() {
                 <button type="button" onClick={() => setShowFinancialSummary(false)} className="btn btn-ghost btn-sm">Fechar</button>
               </header>
               <div className="max-h-[78vh] overflow-y-auto p-5">
-                {!isClientView && (
+                {!isReadOnly && (
                   <button type="button" onClick={() => setShowFinancialSettings((value) => !value)} className="btn btn-secondary btn-sm mb-4 w-full">
                     {showFinancialSettings ? "Ocultar formação do preço" : "Editar formação do preço"}
                   </button>
@@ -939,7 +977,7 @@ export default function BudgetDocumentPage() {
         </ModalPortal>
       )}
 
-      {!isClientView && showWizard && documentId && (
+      {!isReadOnly && showWizard && documentId && (
         <QuickEstimateWizard
           documentId={documentId}
           structuralSummary={structuralPlant?.structuralSummary}

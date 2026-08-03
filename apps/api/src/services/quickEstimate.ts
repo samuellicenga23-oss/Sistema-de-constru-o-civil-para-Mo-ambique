@@ -536,6 +536,9 @@ export async function getStandardSectionId(documentId: string): Promise<string |
   const sections = await db.select().from(budgetSections).where(eq(budgetSections.documentId, documentId));
   if (sections.length === 0) return null;
 
+  const generatedSection = sections.find((section) => section.templateKey?.startsWith("sigo_"));
+  if (generatedSection) return generatedSection.id;
+
   // Um documento importado pode ter códigos como 1.1/2.1/3.1, mas com trabalhos completamente
   // diferentes do modelo SIGO. Verifica também a descrição de itens sentinela para nunca aplicar
   // quantidades automáticas no trabalho errado só porque o código coincide.

@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { eq, and, desc, count, or, isNull } from "drizzle-orm";
+import { eq, and, desc, count, or, isNull, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import {
   projects,
@@ -8,10 +8,14 @@ import {
   subscriptions,
   materials,
   projectMaterialSpecifications,
+  plants,
+  extractedRooms,
+  budgetSections,
+  lineItems,
 } from "../db/schema.js";
 import { requireCompanyUser, requireRole } from "../auth/middleware.js";
 import { assertProjectOwned } from "../services/accessControl.js";
-import { generateStandardBoq } from "../services/boqTemplate.js";
+import { generateStandardBoq, getAdaptiveBoqSelection, STANDARD_CHAPTERS } from "../services/boqTemplate.js";
 import { applyProjectSpecificationsToDocument } from "../services/specEnrichment.js";
 import { getStandardSectionId } from "../services/quickEstimate.js";
 import { getProjectWorkflowStatus } from "../services/projectWorkflow.js";
@@ -73,6 +77,77 @@ async function linkMaterialSpecification(
       .where(eq(materials.id, resolved.material.id));
   }
   return { link, material: resolved.material, createdMaterial: resolved.created };
+}
+
+async function getAdaptivePlantSelection(projectId: string, companyId: string) {
+  const completedPlants = await db
+    .select({ id: plants.id, discipline: plants.discipline, documentAnalysis: plants.documentAnalysis, structuralSummary: plants.structuralSummary })
+    .from(plants)
+    .where(and(eq(plants.projectId, projectId), eq(plants.processingStatus, "concluido")));
+  if (!completedPlants.length) return getAdaptiveBoqSelection(companyId, null);
+
+  const plantIds = completedPlants.map((plant) => plant.id);
+  const [{ value: roomCount }] = await db
+    .select({ value: count() })
+    .from(extractedRooms)
+    .where(inArray(extractedRooms.plantId, plantIds));
+  const disciplines = new Set<string>();
+  const detectedTerms = new Set<string>();
+  for (const plant of completedPlants) {
+    const sections = plant.documentAnalysis?.sections ?? [];
+    if (sections.length) sections.forEach((section) => disciplines.add(section.discipline));
+    else disciplines.add(plant.discipline);
+    for (const tag of plant.documentAnalysis?.matchedTags ?? []) detectedTerms.add(tag);
+    for (const section of sections) {
+      for (const evidence of section.evidence ?? []) detectedTerms.add(evidence);
+    }
+  }
+  return getAdaptiveBoqSelection(companyId, {
+    disciplines: [...disciplines],
+    detectedTerms: [...detectedTerms],
+    hasRooms: roomCount > 0,
+    hasStructuralElements: completedPlants.some((plant) => {
+      const summary = plant.structuralSummary;
+      return !!summary && (
+        summary.footingsCount > 0 || summary.columnsCount > 0 || summary.beamsCount > 0 ||
+        summary.slabsCount > 0 || summary.staircasesCount > 0 || summary.totalSteelWeightKg > 0
+      );
+    }),
+  });
+}
+
+async function adaptEmptyMeasurementDocument(
+  documentId: string,
+  projectId: string,
+  companyId: string,
+  zoneId: string | null,
+) {
+  const selection = await getAdaptivePlantSelection(projectId, companyId);
+  if (selection.mode !== "adaptativo") return;
+
+  const sections = await db.select().from(budgetSections).where(eq(budgetSections.documentId, documentId));
+  const generatedByKey = sections.find((section) => section.templateKey?.startsWith("sigo_"));
+  const legacyGeneratedId = generatedByKey ? null : await getStandardSectionId(documentId);
+  const generated = generatedByKey ?? sections.find((section) => section.id === legacyGeneratedId);
+  if (!generated) return;
+
+  const items = await db.select({ code: lineItems.code, description: lineItems.description, kind: lineItems.kind, quantity: lineItems.quantity })
+    .from(lineItems).where(eq(lineItems.sectionId, generated.id));
+  if (items.some((item) => Number(item.quantity ?? 0) !== 0)) return;
+
+  // Se o utilizador já personalizou a estrutura, ela deixa de ser reconstruída automaticamente.
+  const expectedChapters = [...STANDARD_CHAPTERS, ...selection.chapters];
+  const expected = new Map(expectedChapters.flatMap((chapter) => [
+    [chapter.code, chapter.name] as const,
+    ...chapter.items.map((item) => [item.code, item.description] as const),
+  ]));
+  if (items.some((item) => !item.code || expected.get(item.code) !== item.description)) return;
+  const currentChapterCodes = items.filter((item) => item.kind === "capitulo").map((item) => item.code).sort().join(",");
+  const selectedChapterCodes = selection.chapters.map((chapter) => chapter.code).sort().join(",");
+  if (generated.templateKey?.startsWith("sigo_adaptativo") && currentChapterCodes === selectedChapterCodes) return;
+
+  await db.delete(budgetSections).where(eq(budgetSections.id, generated.id));
+  await generateStandardBoq(documentId, companyId, zoneId, "Edifício Principal", false, selection);
 }
 
 export async function projectRoutes(app: FastifyInstance) {
@@ -240,7 +315,10 @@ export async function projectRoutes(app: FastifyInstance) {
       .orderBy(desc(budgetDocuments.createdAt));
 
     for (const document of drafts) {
-      if (await getStandardSectionId(document.id)) return { document, created: false };
+      if (await getStandardSectionId(document.id)) {
+        await adaptEmptyMeasurementDocument(document.id, id, companyId, project.zoneId);
+        return { document, created: false };
+      }
     }
 
     const [document] = await db
@@ -258,7 +336,8 @@ export async function projectRoutes(app: FastifyInstance) {
         profitMarginRate: project.profitMarginRate,
       })
       .returning();
-    await generateStandardBoq(document.id, companyId, project.zoneId, "Edifício Principal", false);
+    const selection = await getAdaptivePlantSelection(id, companyId);
+    await generateStandardBoq(document.id, companyId, project.zoneId, "Edifício Principal", false, selection);
     return reply.code(201).send({ document, created: true });
   });
 

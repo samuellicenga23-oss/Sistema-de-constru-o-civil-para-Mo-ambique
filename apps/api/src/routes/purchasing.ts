@@ -1,12 +1,13 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { eq, and, or, isNull, desc } from "drizzle-orm";
+import { eq, and, or, isNull, desc, sql as drizzleSql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { purchaseOrders, purchaseOrderLines, stockMovements, suppliers, materials, budgetDocuments, financialEntries, scheduleTasks } from "../db/schema.js";
 import { requireCompanyUser, requireRole } from "../auth/middleware.js";
 import { assertProjectOwned } from "../services/accessControl.js";
 import { calculateVatTotals, CURRENCIES } from "@sigo/shared";
 import { computeProcurementPlan } from "../services/procurementEngine.js";
+import { recordAuditEvent } from "../services/auditTrail.js";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista"] as const;
 
@@ -106,6 +107,9 @@ export async function purchasingRoutes(app: FastifyInstance) {
     if (parsed.data.lines.some((line) => line.currency !== project.currency)) {
       return reply.code(400).send({ error: `Todas as linhas devem usar a moeda da obra (${project.currency})` });
     }
+    if (new Set(parsed.data.lines.map((line) => line.materialId)).size !== parsed.data.lines.length) {
+      return reply.code(400).send({ error: "Agrupe quantidades repetidas do mesmo material numa única linha" });
+    }
 
     const [supplier] = await db
       .select()
@@ -124,31 +128,36 @@ export async function purchasingRoutes(app: FastifyInstance) {
       if (!material) return reply.code(404).send({ error: "Material não encontrado no Catálogo" });
     }
 
-    const [order] = await db
-      .insert(purchaseOrders)
-      .values({
-        projectId,
-        supplierId: parsed.data.supplierId,
-        orderDate: parsed.data.orderDate,
-        requiredByDate: parsed.data.requiredByDate,
-        scheduleTaskId: parsed.data.scheduleTaskId,
-        notes: parsed.data.notes,
-        ivaRate: project.ivaRate,
-        createdByUserId: request.currentUser!.id,
-      })
-      .returning();
-
-    await db.insert(purchaseOrderLines).values(
-      parsed.data.lines.map((l) => ({
-        purchaseOrderId: order.id,
-        materialId: l.materialId,
-        quantity: l.quantity.toString(),
-        unitCost: l.unitCost.toString(),
-        currency: l.currency,
-      }))
-    );
+    const order = await db.transaction(async (tx) => {
+      const [created] = await tx
+        .insert(purchaseOrders)
+        .values({
+          projectId,
+          supplierId: parsed.data.supplierId,
+          orderDate: parsed.data.orderDate,
+          requiredByDate: parsed.data.requiredByDate,
+          scheduleTaskId: parsed.data.scheduleTaskId,
+          notes: parsed.data.notes,
+          ivaRate: project.ivaRate,
+          createdByUserId: request.currentUser!.id,
+        })
+        .returning();
+      await tx.insert(purchaseOrderLines).values(parsed.data.lines.map((line) => ({
+        purchaseOrderId: created.id,
+        materialId: line.materialId,
+        quantity: line.quantity.toString(),
+        unitCost: line.unitCost.toString(),
+        currency: line.currency,
+      })));
+      return created;
+    });
 
     const lines = (await getOrderWithLines(order.id)).map((l) => ({ ...l.line, materialName: l.materialName, unit: l.materialUnit }));
+    await recordAuditEvent({
+      companyId, projectId, actorUserId: request.currentUser!.id,
+      entityType: "purchase_order", entityId: order.id, action: "created",
+      after: { status: order.status, supplierId: order.supplierId, orderDate: order.orderDate, lineCount: lines.length },
+    });
     return reply.code(201).send({ ...order, supplierName: supplier.name, lines });
   });
 
@@ -162,6 +171,14 @@ export async function purchasingRoutes(app: FastifyInstance) {
 
     const parsed = z.object({ status: z.enum(["rascunho", "aprovado", "recebido", "cancelado"]), effectiveDate: z.string().optional() }).safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    if (parsed.data.status === "aprovado") {
+      if (request.currentUser!.role !== "admin_empresa") {
+        return reply.code(403).send({ error: "A aprovação da ordem exige um administrador da empresa" });
+      }
+      if (order.createdByUserId === request.currentUser!.id) {
+        return reply.code(409).send({ error: "Quem criou a ordem não pode aprová-la" });
+      }
+    }
 
     const transitions: Record<typeof order.status, typeof order.status[]> = {
       rascunho: ["aprovado", "cancelado"],
@@ -173,66 +190,41 @@ export async function purchasingRoutes(app: FastifyInstance) {
       return reply.code(409).send({ error: `A ordem ${order.status} não pode passar para ${parsed.data.status}` });
     }
 
-    const [row] = await db.update(purchaseOrders).set({ status: parsed.data.status }).where(eq(purchaseOrders.id, id)).returning();
+    const change = await db.transaction(async (tx) => {
+      await tx.execute(drizzleSql`select id from purchase_orders where id = ${id} for update`);
+      const [lockedOrder] = await tx.select().from(purchaseOrders).where(eq(purchaseOrders.id, id)).limit(1);
+      if (!lockedOrder) return { error: "Ordem de compra não encontrada" } as const;
+      if (lockedOrder.status === parsed.data.status) return { row: lockedOrder, changed: false } as const;
+      if (!transitions[lockedOrder.status].includes(parsed.data.status)) return { error: `A ordem ${lockedOrder.status} não pode passar para ${parsed.data.status}` } as const;
+      const [row] = await tx.update(purchaseOrders).set({ status: parsed.data.status }).where(eq(purchaseOrders.id, id)).returning();
 
-    if (parsed.data.status === "aprovado") {
-      const lines = await db.select().from(purchaseOrderLines).where(eq(purchaseOrderLines.purchaseOrderId, id));
-      const [supplier] = await db.select().from(suppliers).where(eq(suppliers.id, order.supplierId)).limit(1);
-      const subtotal = lines.reduce((sum, line) => sum + Number(line.quantity) * Number(line.unitCost), 0);
-      const amount = calculateVatTotals(subtotal, Number(order.ivaRate)).total;
-      const [existing] = await db
-        .select()
-        .from(financialEntries)
-        .where(and(eq(financialEntries.projectId, order.projectId), eq(financialEntries.sourceType, "purchase_order"), eq(financialEntries.sourceId, id)))
-        .limit(1);
-      if (!existing && amount > 0) {
-        await db.insert(financialEntries).values({
-          projectId: order.projectId,
-          type: "despesa",
-          category: "Compras e materiais",
-          description: `Compromisso automático da ordem de compra · ${supplier?.name ?? "Fornecedor"}`,
-          amount: amount.toFixed(2),
-          currency: lines[0]?.currency ?? "MZN",
-          dueDate: order.requiredByDate ?? order.orderDate,
-          status: "pendente",
-          sourceType: "purchase_order",
-          sourceId: id,
-          createdByUserId: request.currentUser!.id,
-        });
+      if (parsed.data.status === "aprovado") {
+        const lines = await tx.select().from(purchaseOrderLines).where(eq(purchaseOrderLines.purchaseOrderId, id));
+        const [supplier] = await tx.select().from(suppliers).where(eq(suppliers.id, lockedOrder.supplierId)).limit(1);
+        const subtotal = lines.reduce((sum, line) => sum + Number(line.quantity) * Number(line.unitCost), 0);
+        const amount = calculateVatTotals(subtotal, Number(lockedOrder.ivaRate)).total;
+        if (amount > 0) await tx.insert(financialEntries).values({ projectId: lockedOrder.projectId, type: "despesa", category: "Compras e materiais", description: `Compromisso automático da ordem de compra · ${supplier?.name ?? "Fornecedor"}`, amount: amount.toFixed(2), currency: lines[0]?.currency ?? "MZN", dueDate: lockedOrder.requiredByDate ?? lockedOrder.orderDate, status: "pendente", sourceType: "purchase_order", sourceId: id, createdByUserId: request.currentUser!.id }).onConflictDoNothing();
       }
-    }
 
-    if (parsed.data.status === "cancelado") {
-      await db.delete(financialEntries).where(and(
-        eq(financialEntries.projectId, order.projectId),
-        eq(financialEntries.sourceType, "purchase_order"),
-        eq(financialEntries.sourceId, id),
-        eq(financialEntries.status, "pendente")
-      ));
-    }
-
-    if (parsed.data.status === "recebido") {
-      const [existingMovement] = await db.select().from(stockMovements).where(eq(stockMovements.purchaseOrderId, id)).limit(1);
-      if (!existingMovement) {
-        const lines = await db.select().from(purchaseOrderLines).where(eq(purchaseOrderLines.purchaseOrderId, id));
-        if (lines.length) {
-          await db.insert(stockMovements).values(
-            lines.map((l) => ({
-              projectId: order.projectId,
-              materialId: l.materialId,
-              type: "entrada" as const,
-              quantity: l.quantity,
-              unitCost: l.unitCost,
-              currency: l.currency,
-              notes: "Entrada automática — recepção da ordem de compra",
-              purchaseOrderId: id,
-              createdByUserId: request.currentUser!.id,
-              date: parsed.data.effectiveDate ?? new Date().toISOString().slice(0, 10),
-            }))
-          );
-        }
+      if (parsed.data.status === "cancelado") {
+        await tx.delete(financialEntries).where(and(eq(financialEntries.projectId, lockedOrder.projectId), eq(financialEntries.sourceType, "purchase_order"), eq(financialEntries.sourceId, id), eq(financialEntries.status, "pendente")));
       }
-    }
+
+      if (parsed.data.status === "recebido") {
+        const lines = await tx.select().from(purchaseOrderLines).where(eq(purchaseOrderLines.purchaseOrderId, id));
+        if (lines.length) await tx.insert(stockMovements).values(lines.map((line) => ({ projectId: lockedOrder.projectId, materialId: line.materialId, type: "entrada" as const, quantity: line.quantity, unitCost: line.unitCost, currency: line.currency, notes: "Entrada automática — recepção da ordem de compra", purchaseOrderId: id, createdByUserId: request.currentUser!.id, date: parsed.data.effectiveDate ?? new Date().toISOString().slice(0, 10) }))).onConflictDoNothing();
+      }
+      return { row, changed: true } as const;
+    });
+    if ("error" in change) return reply.code(409).send({ error: change.error });
+    const row = change.row;
+    if (change.changed) await recordAuditEvent({
+      companyId: companyIdOf(request), projectId: order.projectId, actorUserId: request.currentUser!.id,
+      entityType: "purchase_order", entityId: id, action: `status.${parsed.data.status}`,
+      before: { status: order.status, supplierId: order.supplierId, orderDate: order.orderDate },
+      after: { status: row.status, supplierId: row.supplierId, orderDate: row.orderDate },
+      metadata: parsed.data.effectiveDate ? { effectiveDate: parsed.data.effectiveDate } : null,
+    });
     return row;
   });
 
@@ -283,16 +275,25 @@ export async function purchasingRoutes(app: FastifyInstance) {
     if (!material) return reply.code(404).send({ error: "Material não encontrado no Catálogo" });
 
     const { quantity, unitCost, ...rest } = parsed.data;
-    const [row] = await db
-      .insert(stockMovements)
-      .values({
-        ...rest,
-        projectId,
-        quantity: quantity.toString(),
-        unitCost: unitCost !== undefined ? unitCost.toString() : null,
-        createdByUserId: request.currentUser!.id,
-      })
-      .returning();
+    const result = await db.transaction(async (tx) => {
+      // Serializa movimentos do mesmo material/obra. Sem este bloqueio, duas saídas simultâneas
+      // podiam ambas ler o saldo antigo e produzir stock negativo.
+      await tx.execute(drizzleSql`select pg_advisory_xact_lock(hashtext(${`${projectId}:${parsed.data.materialId}`}))`);
+      if (parsed.data.type === "saida") {
+        const movements = await tx.select().from(stockMovements).where(and(eq(stockMovements.projectId, projectId), eq(stockMovements.materialId, parsed.data.materialId)));
+        const available = movements.reduce((sum, movement) => sum + (movement.type === "entrada" ? Number(movement.quantity) : -Number(movement.quantity)), 0);
+        if (quantity > available + 0.0001) return { error: `Stock insuficiente de ${material.name}: disponível ${available.toFixed(3)} ${material.unit}` } as const;
+      }
+      const [row] = await tx.insert(stockMovements).values({ ...rest, projectId, quantity: quantity.toString(), unitCost: unitCost !== undefined ? unitCost.toString() : null, createdByUserId: request.currentUser!.id }).returning();
+      return { row } as const;
+    });
+    if ("error" in result) return reply.code(409).send({ error: result.error });
+    const row = result.row;
+    await recordAuditEvent({
+      companyId, projectId, actorUserId: request.currentUser!.id,
+      entityType: "stock_movement", entityId: row.id, action: "created",
+      after: { materialId: row.materialId, type: row.type, quantity: row.quantity, unitCost: row.unitCost, date: row.date },
+    });
     return reply.code(201).send({ ...row, materialName: material.name, unit: material.unit });
   });
 
@@ -306,6 +307,11 @@ export async function purchasingRoutes(app: FastifyInstance) {
       return reply.code(409).send({ error: "Este movimento foi gerado por outro módulo e deve ser corrigido na sua origem" });
     }
     await db.delete(stockMovements).where(eq(stockMovements.id, id));
+    await recordAuditEvent({
+      companyId: companyIdOf(request), projectId: movement.projectId, actorUserId: request.currentUser!.id,
+      entityType: "stock_movement", entityId: id, action: "deleted",
+      before: { materialId: movement.materialId, type: movement.type, quantity: movement.quantity, unitCost: movement.unitCost, date: movement.date },
+    });
     return { ok: true };
   });
 

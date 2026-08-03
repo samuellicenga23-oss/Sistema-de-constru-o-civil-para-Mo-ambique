@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { Link, Navigate, useParams } from "react-router-dom";
+import { Link, Navigate, useParams, useSearchParams } from "react-router-dom";
 import { calculateVatTotals } from "@sigo/shared";
 import { SIGO_CONTACT_EMAIL, SIGO_WHATSAPP_NUMBER, findCommercialPlan, formatMzn } from "../commercialPlans";
 import { LogoFull } from "../components/Logo";
@@ -19,22 +19,33 @@ const EMPTY_FORM: CheckoutForm = { name: "", company: "", email: "", phone: "", 
 
 export default function CheckoutPage() {
   const { planSlug } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const plan = findCommercialPlan(planSlug);
+  const [billingCycle, setBillingCycle] = useState<"mensal" | "anual">(searchParams.get("periodo") === "anual" ? "anual" : "mensal");
   const [form, setForm] = useState(EMPTY_FORM);
   const [reviewing, setReviewing] = useState(false);
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "auto" });
-    document.title = "Subscrição anual — SIGO";
+    document.title = "Subscrição SIGO";
     return () => { document.title = "SIGO — Sistema Integrado de Gestão de Obras"; };
   }, []);
   const [accepted, setAccepted] = useState(false);
-  const totals = useMemo(() => calculateVatTotals(plan?.annualPrice ?? 0), [plan?.annualPrice]);
+  const totals = useMemo(
+    () => calculateVatTotals(billingCycle === "anual" ? plan?.annualPrice ?? 0 : plan?.monthlyPrice ?? 0),
+    [billingCycle, plan?.annualPrice, plan?.monthlyPrice],
+  );
 
   if (!plan) return <Navigate to="/#planos" replace />;
 
   function update(field: keyof CheckoutForm, value: string) {
     setForm((current) => ({ ...current, [field]: value }));
+    setReviewing(false);
+  }
+
+  function changeBillingCycle(value: "mensal" | "anual") {
+    setBillingCycle(value);
+    setSearchParams({ periodo: value }, { replace: true });
     setReviewing(false);
   }
 
@@ -44,8 +55,8 @@ export default function CheckoutPage() {
   }
 
   const requestText = [
-    `Olá Samuel. Quero avançar com a subscrição anual do SIGO — plano ${plan.name}.`,
-    `Total anual com IVA: ${formatMzn(totals.total)}.`,
+    `Olá Samuel. Quero avançar com a subscrição ${billingCycle} do SIGO — plano ${plan.name}.`,
+    `Total ${billingCycle} com IVA: ${formatMzn(totals.total)}.`,
     `Empresa: ${form.company}`,
     `Responsável: ${form.name}`,
     `Email: ${form.email}`,
@@ -56,7 +67,7 @@ export default function CheckoutPage() {
     form.notes ? `Observações: ${form.notes}` : "",
   ].filter(Boolean).join("\n");
   const whatsappUrl = `https://wa.me/${SIGO_WHATSAPP_NUMBER}?text=${encodeURIComponent(requestText)}`;
-  const emailUrl = `mailto:${SIGO_CONTACT_EMAIL}?subject=${encodeURIComponent(`Subscrição anual SIGO — ${plan.name}`)}&body=${encodeURIComponent(requestText)}`;
+  const emailUrl = `mailto:${SIGO_CONTACT_EMAIL}?subject=${encodeURIComponent(`Subscrição ${billingCycle} SIGO — ${plan.name}`)}&body=${encodeURIComponent(requestText)}`;
 
   return (
     <div className="min-h-screen bg-surface text-ink">
@@ -69,7 +80,7 @@ export default function CheckoutPage() {
         </div>
       </header>
 
-      <main className="mx-auto grid max-w-6xl gap-6 px-4 py-8 sm:px-6 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start lg:py-12 page-enter">
+      <main className="mx-auto grid max-w-6xl gap-6 px-4 py-8 sm:px-6 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start lg:py-12">
         <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_10px_30px_-18px_rgba(20,32,51,0.28)]">
           <div className="border-b border-slate-200 px-5 py-5 sm:px-7">
             <p className="eyebrow text-accent">Pedido de subscrição</p>
@@ -121,17 +132,21 @@ export default function CheckoutPage() {
         <aside className="space-y-4 lg:sticky lg:top-6">
           <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_10px_30px_-18px_rgba(20,32,51,0.28)]">
             <div className="bg-ink px-5 py-5 text-white">
-              <p className="text-[10px] font-display font-black uppercase tracking-[.14em] text-orange-300">Plano anual</p>
+              <p className="text-[10px] font-display font-black uppercase tracking-[.14em] text-orange-300">Plano escolhido</p>
               <h2 className="mt-2 font-display text-2xl font-black">{plan.name}</h2>
               <p className="mt-2 text-sm text-slate-300">{plan.limits}</p>
             </div>
             <div className="p-5">
+              <div className="mb-5 grid grid-cols-2 rounded-xl bg-slate-100 p-1" role="group" aria-label="Periodicidade da subscrição">
+                <button type="button" onClick={() => changeBillingCycle("mensal")} className={`rounded-lg px-3 py-2.5 text-xs font-display font-black ${billingCycle === "mensal" ? "bg-white text-slate-950 shadow-sm" : "text-slate-500"}`}>Mensal</button>
+                <button type="button" onClick={() => changeBillingCycle("anual")} className={`rounded-lg px-3 py-2.5 text-xs font-display font-black ${billingCycle === "anual" ? "bg-white text-slate-950 shadow-sm" : "text-slate-500"}`}>Anual · −15%</button>
+              </div>
               <dl className="space-y-3 text-sm">
-                <div className="flex justify-between gap-4"><dt className="text-slate-500">Subscrição anual</dt><dd className="font-semibold tabular-nums">{formatMzn(totals.subtotal)}</dd></div>
+                <div className="flex justify-between gap-4"><dt className="text-slate-500">Subscrição {billingCycle}</dt><dd className="font-semibold tabular-nums">{formatMzn(totals.subtotal)}</dd></div>
                 <div className="flex justify-between gap-4"><dt className="text-slate-500">IVA 16%</dt><dd className="font-semibold tabular-nums">{formatMzn(totals.iva)}</dd></div>
-                <div className="flex justify-between gap-4 border-t border-slate-200 pt-3"><dt className="font-bold">Total anual</dt><dd className="font-display text-lg font-black tabular-nums">{formatMzn(totals.total)}</dd></div>
+                <div className="flex justify-between gap-4 border-t border-slate-200 pt-3"><dt className="font-bold">Total {billingCycle}</dt><dd className="font-display text-lg font-black tabular-nums">{formatMzn(totals.total)}</dd></div>
               </dl>
-              <p className="mt-4 rounded-lg bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800">15% de desconto anual já incluído no valor base.</p>
+              <p className={`mt-4 rounded-lg px-3 py-2 text-xs font-semibold ${billingCycle === "anual" ? "bg-emerald-50 text-emerald-800" : "bg-slate-50 text-slate-600"}`}>{billingCycle === "anual" ? "15% de desconto anual já incluído." : "Cobrança mensal, sem compromisso anual."}</p>
             </div>
           </section>
           {reviewing && (

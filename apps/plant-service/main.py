@@ -1,8 +1,11 @@
 import asyncio
+import hashlib
 import json
 import os
+from collections import OrderedDict
+from threading import Lock
 
-from fastapi import FastAPI, File, Header, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from pydantic import BaseModel
 from fastapi.responses import StreamingResponse
 
@@ -17,6 +20,12 @@ app = FastAPI(title="SIGO Plant Service")
 # em produção, permissivo em dev sem configuração" (achado da auditoria).
 PLANT_SERVICE_TOKEN = os.environ.get("PLANT_SERVICE_TOKEN")
 IS_PRODUCTION = os.environ.get("ENVIRONMENT") == "production"
+PARSER_VERSION = "2026.08-adaptive-1"
+PARSER_CONCURRENCY = max(1, min(2, int(os.environ.get("PLANT_PARSER_CONCURRENCY", "1"))))
+PARSER_CACHE_SIZE = max(1, min(20, int(os.environ.get("PLANT_PARSER_CACHE_SIZE", "6"))))
+parser_slots = asyncio.Semaphore(PARSER_CONCURRENCY)
+parse_cache: OrderedDict[str, dict] = OrderedDict()
+parse_cache_lock = Lock()
 
 # Falhar já no arranque, não silenciosamente pedido a pedido — sem isto, um deploy em produção
 # que se esquecesse de definir o token ficava a aceitar qualquer pedido sem autenticação
@@ -97,6 +106,7 @@ class DocumentAnalysisOut(BaseModel):
     pageCount: int
     isMultiDiscipline: bool
     sections: list[DocumentSectionOut]
+    matchedTags: list[str]
 
 
 class ParseResponse(BaseModel):
@@ -143,6 +153,7 @@ def build_parse_response(result) -> ParseResponse:
         documentAnalysis=DocumentAnalysisOut(
             pageCount=document_analysis.page_count,
             isMultiDiscipline=document_analysis.is_multi_discipline,
+            matchedTags=document_analysis.matched_tags,
             sections=[
                 DocumentSectionOut(
                     discipline=section.discipline,
@@ -159,9 +170,32 @@ def build_parse_response(result) -> ParseResponse:
     )
 
 
+def _payload(response: ParseResponse) -> dict:
+    return response.model_dump() if hasattr(response, "model_dump") else response.dict()
+
+
+def _cached_payload(file_bytes: bytes, detection_tags: list[str] | None = None) -> tuple[str, dict | None]:
+    tags_hash = hashlib.sha256(json.dumps(sorted(detection_tags or []), ensure_ascii=False).encode()).hexdigest()[:12]
+    cache_key = f"{PARSER_VERSION}:{tags_hash}:{hashlib.sha256(file_bytes).hexdigest()}"
+    with parse_cache_lock:
+        cached = parse_cache.get(cache_key)
+        if cached is not None:
+            parse_cache.move_to_end(cache_key)
+    return cache_key, cached
+
+
+def _store_payload(cache_key: str, payload: dict) -> None:
+    with parse_cache_lock:
+        parse_cache[cache_key] = payload
+        parse_cache.move_to_end(cache_key)
+        while len(parse_cache) > PARSER_CACHE_SIZE:
+            parse_cache.popitem(last=False)
+
+
 @app.post("/parse", response_model=ParseResponse)
 async def parse(
     file: UploadFile = File(...),
+    detection_tags_json: str | None = Form(default=None, alias="detectionTags"),
     x_internal_token: str | None = Header(default=None, alias="X-Internal-Token"),
 ):
     if PLANT_SERVICE_TOKEN and x_internal_token != PLANT_SERVICE_TOKEN:
@@ -170,14 +204,24 @@ async def parse(
         raise HTTPException(400, "Só é suportado PDF vectorial (DWG fica para quando houver um ficheiro de exemplo)")
 
     file_bytes = await file.read()
-    result = parse_pdf(file_bytes)
-
-    return build_parse_response(result)
+    detection_tags = json.loads(detection_tags_json) if detection_tags_json else []
+    cache_key, cached = _cached_payload(file_bytes, detection_tags)
+    if cached is not None:
+        return ParseResponse(**cached)
+    async with parser_slots:
+        cache_key, cached = _cached_payload(file_bytes, detection_tags)
+        if cached is not None:
+            return ParseResponse(**cached)
+        result = await asyncio.to_thread(parse_pdf, file_bytes, None, detection_tags)
+        response = build_parse_response(result)
+        _store_payload(cache_key, _payload(response))
+        return response
 
 
 @app.post("/parse-stream")
 async def parse_stream(
     file: UploadFile = File(...),
+    detection_tags_json: str | None = Form(default=None, alias="detectionTags"),
     x_internal_token: str | None = Header(default=None, alias="X-Internal-Token"),
 ):
     if PLANT_SERVICE_TOKEN and x_internal_token != PLANT_SERVICE_TOKEN:
@@ -186,10 +230,27 @@ async def parse_stream(
         raise HTTPException(400, "Só é suportado PDF vectorial")
 
     file_bytes = await file.read()
+    detection_tags = json.loads(detection_tags_json) if detection_tags_json else []
 
     async def stream_events():
         queue: asyncio.Queue = asyncio.Queue()
         loop = asyncio.get_running_loop()
+        cache_key, cached = _cached_payload(file_bytes, detection_tags)
+        if cached is not None:
+            yield json.dumps({"type": "stage", "progress": 92, "message": "A reutilizar análise validada deste ficheiro"}, ensure_ascii=False) + "\n"
+            yield json.dumps({"type": "result", "data": cached}, ensure_ascii=False) + "\n"
+            return
+
+        if parser_slots.locked():
+            yield json.dumps({"type": "stage", "progress": 28, "message": "Análise em fila; o leitor está a concluir outro projecto"}, ensure_ascii=False) + "\n"
+
+        await parser_slots.acquire()
+        cache_key, cached = _cached_payload(file_bytes, detection_tags)
+        if cached is not None:
+            parser_slots.release()
+            yield json.dumps({"type": "stage", "progress": 92, "message": "A reutilizar análise validada deste ficheiro"}, ensure_ascii=False) + "\n"
+            yield json.dumps({"type": "result", "data": cached}, ensure_ascii=False) + "\n"
+            return
 
         def report_progress(current_page: int, total_pages: int):
             loop.call_soon_threadsafe(
@@ -199,9 +260,10 @@ async def parse_stream(
 
         def run_parser():
             try:
-                result = parse_pdf(file_bytes, report_progress)
+                result = parse_pdf(file_bytes, report_progress, detection_tags)
                 response = build_parse_response(result)
-                payload = response.model_dump() if hasattr(response, "model_dump") else response.dict()
+                payload = _payload(response)
+                _store_payload(cache_key, payload)
                 loop.call_soon_threadsafe(queue.put_nowait, {"type": "result", "data": payload})
             except Exception as exc:
                 loop.call_soon_threadsafe(queue.put_nowait, {"type": "error", "message": str(exc)})
@@ -215,5 +277,6 @@ async def parse_stream(
                     break
         finally:
             await parser_task
+            parser_slots.release()
 
     return StreamingResponse(stream_events(), media_type="application/x-ndjson")

@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/app.js";
-import { sql } from "../src/db/index.js";
+import { db, sql } from "../src/db/index.js";
+import { plants } from "../src/db/schema.js";
 import { createCompany, createUser, loginCookie, truncateAll } from "./helpers.js";
 
 let app: FastifyInstance;
@@ -34,6 +35,63 @@ async function projectContext(currency: "MZN" | "USD" = "MZN", projectType: "med
 }
 
 describe("Percurso planta → diagnóstico → mapa automático", () => {
+  it("cria capítulos de medição conforme as disciplinas detectadas nas plantas", async () => {
+    const { cookie, project } = await projectContext("MZN", "medicao");
+    const customChapterResponse = await app.inject({
+      method: "POST",
+      url: "/api/catalog/work-chapters",
+      headers: { cookie },
+      payload: {
+        code: "14",
+        name: "SEGURANÇA ELECTRÓNICA",
+        discipline: "electricidade",
+        detectionTags: ["cctv", "alarme"],
+        items: [{ code: "14.1", description: "Sistema CCTV completo", unit: "vg" }],
+      },
+    });
+    expect(customChapterResponse.statusCode).toBe(201);
+    await db.insert(plants).values({
+      projectId: project.id,
+      discipline: "arquitectura",
+      filePath: "teste/adaptativo.pdf",
+      processingStatus: "concluido",
+      processingProgress: 100,
+      documentAnalysis: {
+        pageCount: 3,
+        isMultiDiscipline: true,
+        matchedTags: ["cctv"],
+        sections: [
+          { discipline: "arquitectura", label: "Arquitectura", startPage: 1, endPage: 1, pageCount: 1, confidence: 0.9, evidence: [] },
+          { discipline: "hidrossanitario", label: "Hidrossanitário", startPage: 2, endPage: 2, pageCount: 1, confidence: 0.9, evidence: [] },
+          { discipline: "electricidade", label: "Electricidade", startPage: 3, endPage: 3, pageCount: 1, confidence: 0.9, evidence: [] },
+        ],
+      },
+    });
+
+    const workspaceResponse = await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/measurement-workspace`,
+      headers: { cookie },
+    });
+    expect(workspaceResponse.statusCode).toBe(200);
+
+    const documentResponse = await app.inject({
+      method: "GET",
+      url: `/api/budget-documents/${project.defaultDocumentId}`,
+      headers: { cookie },
+    });
+    const chapters = documentResponse.json().sections.flatMap(
+      (section: { items: Array<{ kind: string; description: string }> }) => section.items,
+    ).filter((item: { kind: string }) => item.kind === "capitulo")
+      .map((item: { description: string }) => item.description);
+
+    expect(chapters).toContain("ALVENARIAS");
+    expect(chapters).toContain("INSTALAÇÃO HIDRÁULICA");
+    expect(chapters).toContain("INSTALAÇÕES ELÉCTRICAS");
+    expect(chapters).toContain("SEGURANÇA ELECTRÓNICA");
+    expect(chapters).not.toContain("BETÕES, AÇOS E COFRAGENS");
+  });
+
   it("mantém mapas automáticos em MZN mesmo quando a moeda de gestão do projecto é USD", async () => {
     const { cookie, project } = await projectContext("USD");
 
@@ -73,6 +131,31 @@ describe("Percurso planta → diagnóstico → mapa automático", () => {
       created: false,
     });
 
+    const emptyBudgetResponse = await app.inject({
+      method: "POST",
+      url: `/api/budget-documents/${project.defaultDocumentId}/create-budget`,
+      headers: { cookie },
+    });
+    expect(emptyBudgetResponse.statusCode).toBe(409);
+
+    const summaryResponse = await app.inject({
+      method: "GET",
+      url: `/api/budget-documents/${project.defaultDocumentId}`,
+      headers: { cookie },
+    });
+    const firstMeasuredItem = summaryResponse.json().sections
+      .flatMap((section: { items: Array<{ children?: Array<{ id: string; kind: string }> }> }) => section.items)
+      .flatMap((item: { children?: Array<{ id: string; kind: string }> }) => item.children ?? [])
+      .find((item: { kind: string }) => item.kind === "item");
+    expect(firstMeasuredItem).toBeTruthy();
+    const quantityResponse = await app.inject({
+      method: "PUT",
+      url: `/api/line-items/${firstMeasuredItem.id}`,
+      headers: { cookie },
+      payload: { quantity: 1 },
+    });
+    expect(quantityResponse.statusCode).toBe(200);
+
     const budgetResponse = await app.inject({
       method: "POST",
       url: `/api/budget-documents/${project.defaultDocumentId}/create-budget`,
@@ -85,6 +168,37 @@ describe("Percurso planta → diagnóstico → mapa automático", () => {
         sourceMeasurementDocumentId: project.defaultDocumentId,
       }),
       created: true,
+      revisionCreated: false,
+    });
+
+    const changedQuantityResponse = await app.inject({
+      method: "PUT",
+      url: `/api/line-items/${firstMeasuredItem.id}`,
+      headers: { cookie },
+      payload: { quantity: 2 },
+    });
+    expect(changedQuantityResponse.statusCode).toBe(200);
+
+    const changedBudgetResponse = await app.inject({
+      method: "POST",
+      url: `/api/budget-documents/${project.defaultDocumentId}/create-budget`,
+      headers: { cookie },
+      payload: {},
+    });
+    expect(changedBudgetResponse.statusCode).toBe(409);
+    expect(changedBudgetResponse.json()).toEqual(expect.objectContaining({ code: "MEASUREMENT_CHANGED" }));
+
+    const revisionResponse = await app.inject({
+      method: "POST",
+      url: `/api/budget-documents/${project.defaultDocumentId}/create-budget`,
+      headers: { cookie },
+      payload: { createRevision: true },
+    });
+    expect(revisionResponse.statusCode).toBe(201);
+    expect(revisionResponse.json()).toEqual({
+      document: expect.objectContaining({ revision: "1", sourceMeasurementDocumentId: project.defaultDocumentId }),
+      created: true,
+      revisionCreated: true,
     });
 
     const documentsResponse = await app.inject({

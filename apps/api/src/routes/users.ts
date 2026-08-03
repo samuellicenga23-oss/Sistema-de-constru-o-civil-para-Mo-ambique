@@ -6,6 +6,7 @@ import { users, subscriptions, sessions } from "../db/schema.js";
 import { requireRole } from "../auth/middleware.js";
 import { hashPassword } from "../auth/password.js";
 import { getPlanDefinition } from "@sigo/shared";
+import { recordAuditEvent } from "../services/auditTrail.js";
 
 const createUserSchema = z.object({
   name: z.string().trim().min(2),
@@ -88,6 +89,7 @@ export async function userRoutes(app: FastifyInstance) {
       .insert(users)
       .values({ companyId, name, email, passwordHash, role, mustChangePassword: true })
       .returning();
+    await recordAuditEvent({ companyId, actorUserId: request.currentUser!.id, entityType: "user", entityId: user.id, action: "created", after: { role: user.role, isActive: user.isActive, mustChangePassword: user.mustChangePassword } });
 
     return reply.code(201).send(publicUser(user));
   });
@@ -112,6 +114,7 @@ export async function userRoutes(app: FastifyInstance) {
 
     const [updated] = await db.update(users).set(parsed.data).where(eq(users.id, target.id)).returning();
     if (parsed.data.isActive === false) await db.delete(sessions).where(eq(sessions.userId, target.id));
+    await recordAuditEvent({ companyId, actorUserId: request.currentUser!.id, entityType: "user", entityId: target.id, action: "updated", before: { name: target.name, role: target.role, isActive: target.isActive }, after: { name: updated.name, role: updated.role, isActive: updated.isActive } });
     return publicUser(updated);
   });
 
@@ -129,6 +132,7 @@ export async function userRoutes(app: FastifyInstance) {
     const passwordHash = await hashPassword(parsed.data.password);
     const [updated] = await db.update(users).set({ passwordHash, mustChangePassword: true }).where(eq(users.id, target.id)).returning();
     await db.delete(sessions).where(eq(sessions.userId, target.id));
+    await recordAuditEvent({ companyId, actorUserId: request.currentUser!.id, entityType: "user", entityId: target.id, action: "password_reset", after: { mustChangePassword: true, sessionsRevoked: true } });
     return publicUser(updated);
   });
 
@@ -147,6 +151,7 @@ export async function userRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: "A empresa deve manter pelo menos um administrador activo" });
     }
     await db.delete(users).where(eq(users.id, target.id));
+    await recordAuditEvent({ companyId, actorUserId: request.currentUser!.id, entityType: "user", entityId: target.id, action: "deleted", before: { role: target.role, isActive: target.isActive, neverLoggedIn: true } });
     return { ok: true };
   });
 }

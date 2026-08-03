@@ -189,6 +189,17 @@ S = 12,35 m2
         self.assertEqual(len(rooms), 3)
         self.assertTrue(all(room.floor == "Piso Térreo" for room in rooms))
 
+    def test_reports_configured_terms_found_in_complete_project(self):
+        doc = fitz.open()
+        page = doc.new_page()
+        page.insert_text((50, 70), "Projecto de seguranca: rede CCTV e central de incendio")
+        payload = doc.tobytes()
+        doc.close()
+
+        result = parse_pdf(payload, detection_tags=["cctv", "elevador", "incendio"])
+
+        self.assertEqual(result.document_analysis.matched_tags, ["cctv", "incendio"])
+
 
 if __name__ == "__main__":
     unittest.main()

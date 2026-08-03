@@ -60,6 +60,9 @@ export type BudgetDocument = {
   siteCostsRate: string;
   indirectCostsRate: string;
   profitMarginRate: string;
+  submittedByUserId: string | null;
+  approvedByUserId: string | null;
+  approvalNote: string | null;
   lastEstimateReport: CalculationReport | null;
 };
 
@@ -89,6 +92,7 @@ export type SectionNode = {
   id: string;
   name: string;
   sortOrder: number;
+  templateKey: string | null;
   items: LineItemNode[];
   total: number;
   sellingTotal: number;
@@ -167,8 +171,11 @@ export const boqApi = {
     profitMarginRate: number;
   }>) => request<BudgetDocument>(`/budget-documents/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteBudgetDocument: (id: string) => request<{ ok: true }>(`/budget-documents/${id}`, { method: "DELETE" }),
-  createBudgetFromMeasurement: (id: string) =>
-    request<{ document: BudgetDocument; created: boolean }>(`/budget-documents/${id}/create-budget`, { method: "POST" }),
+  createBudgetFromMeasurement: (id: string, createRevision = false) =>
+    request<{ document: BudgetDocument; created: boolean; revisionCreated?: boolean }>(`/budget-documents/${id}/create-budget`, {
+      method: "POST",
+      body: JSON.stringify({ createRevision }),
+    }),
   applySpecifications: (id: string) =>
     request<{ updated: number }>(`/budget-documents/${id}/apply-specifications`, { method: "POST" }),
   measurementExcelUrl: (id: string) => `/api/budget-documents/${id}/export-measurements.xlsx`,
@@ -177,8 +184,8 @@ export const boqApi = {
   getBudgetDocumentSummary: (id: string) => request<BudgetDocumentSummary>(`/budget-documents/${id}`),
   repriceBudgetDocument: (id: string) =>
     request<BudgetRepriceResult>(`/budget-documents/${id}/reprice`, { method: "POST" }),
-  updateBudgetDocumentStatus: (id: string, status: "rascunho" | "submetido" | "aprovado") =>
-    request<BudgetDocument>(`/budget-documents/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) }),
+  updateBudgetDocumentStatus: (id: string, status: "rascunho" | "submetido" | "aprovado", decisionNote?: string) =>
+    request<BudgetDocument>(`/budget-documents/${id}/status`, { method: "PATCH", body: JSON.stringify({ status, decisionNote }) }),
 
   createSection: (documentId: string, data: { name: string; sortOrder?: number }) =>
     request<SectionNode>(`/budget-documents/${documentId}/sections`, { method: "POST", body: JSON.stringify(data) }),

@@ -16,8 +16,10 @@ export async function truncateAll() {
     work_item_templates,
     projects, budget_documents, budget_sections, line_items, measurement_lines,
     measurement_certificates, measurement_certificate_lines,
+    invoice_credit_notes, invoice_receipts, project_invoices,
+    contract_variations, project_contracts,
     plants, extracted_rooms, extracted_rebar_schedules,
-    financial_entries, site_diary_entries,
+    financial_entries, audit_events, site_diary_entries,
     suppliers, supplier_material_prices, supplier_labour_prices, supplier_equipment_prices,
     purchase_orders, purchase_order_lines, stock_movements
   CASCADE`;
@@ -38,7 +40,10 @@ export async function createUser(companyId: string | null, role: UserRole, email
 // Faz login via a própria API (não escreve a sessão directamente na BD) — testa o fluxo real
 // de autenticação ao mesmo tempo que prepara o cookie para os pedidos seguintes.
 export async function loginCookie(app: FastifyInstance, email: string, password = "password123"): Promise<string> {
-  const res = await app.inject({ method: "POST", url: "/api/auth/login", payload: { email, password } });
+  // Cada actor de teste recebe um IP de origem próprio. Assim, o rate limit real de login
+  // continua a ser exercitado sem uma empresa de teste bloquear acidentalmente as outras.
+  const testIp = `198.18.0.${Array.from(email).reduce((sum, char) => sum + char.charCodeAt(0), 0) % 200 + 1}`;
+  const res = await app.inject({ method: "POST", url: "/api/auth/login", headers: { "x-forwarded-for": testIp }, payload: { email, password } });
   if (res.statusCode !== 200) {
     throw new Error(`Login de teste falhou para ${email}: ${res.statusCode} ${res.body}`);
   }

@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db } from "./index.js";
 import {
   labourCategories,
@@ -16,11 +16,15 @@ import { computeHourlyRate } from "../services/costEngine.js";
 // catálogo global partilhado (companyId nulo), editável por cada empresa depois.
 const WORKING_DAYS_PER_MONTH = 22;
 const WORKING_HOURS_PER_DAY = 9;
+const PRICE_DATE = "2026-08-03";
+const INE_CONSTRUCTION_SOURCE = "INE Moçambique — preços de insumos + revisão SIGO 2026";
+const INE_CONSTRUCTION_REFERENCE = "https://ine.gov.mz/documents/20119/235090/05.Pre%C3%A7os%20M%C3%A9dios%20de%20Insumos%20de%20Constru%C3%A7%C3%A3o%20Civil-MAIO%202023.pdf/4c0f6e7e-0c31-c448-5a49-757bc1da9a91?download=true";
+const LABOUR_SOURCE = "Diploma Ministerial n.º 39/2026 — Construção";
+const LABOUR_REFERENCE = "https://inm.gov.mz/pt-br/content/sum%C3%A1rio-br-n%C2%BA-94-de-200526-boletim-da-rep%C3%BAblica-i-serie-p%C3%A1g-489";
 
-// Salários revistos com base no salário mínimo do sector da construção civil em
-// Moçambique a partir de 1 de Abril de 2026 (8.652 MT/mês) e nas bandas salariais por
-// função (fonte: wageindicator.org/meusalario.org) — nenhuma categoria pode ficar abaixo
-// do mínimo legal; acima disso, escalona-se por qualificação.
+// Salários revistos com base no Diploma Ministerial n.º 39/2026: mínimo do sector da
+// construção de 8.652 MT/mês. Nenhuma categoria fica abaixo do mínimo; funções qualificadas
+// usam bandas superiores coerentes com os preços de insumos publicados pelo INE.
 const LABOUR_CATEGORIES = [
   { name: "Servente", monthlySalary: 9000 },
   { name: "Carpinteiro B", monthlySalary: 10500 },
@@ -30,19 +34,19 @@ const LABOUR_CATEGORIES = [
   { name: "Topógrafo", monthlySalary: 14000 },
 ];
 
-// Cimento confirmado por pesquisa (Dez/2025-2026: saco 50kg entre 650-700 MT, preço
-// disparou ~50% por escassez de matéria-prima) — mantido em 650 MT. Aço e blocos ajustados
-// com uma inflação moderada equivalente, sem fonte de preço exacta encontrada online.
+// Valores-base sem IVA. A referência nacional parte da tabela de insumos do INE e foi
+// confrontada com preços públicos de fornecedores de Maputo em Agosto de 2026. Cotações da
+// empresa e preços por zona continuam a substituir estes valores sempre que existirem.
 // `purchasePackage` (opcional): unidade de compra de mercado, quando difere da unidade de
 // medida usada nas composições (ex: areia medida em m3, vendida por camião) — editável depois
 // no Catálogo, por material; a dimensão real do camião/saco varia por fornecedor.
 const MATERIALS = [
-  { name: "Cimento (saco 50kg)", unit: "un" as const, baseUnitCost: 650, importFactor: 1, purchasePackage: { label: "Saco 50kg", qty: 1 } },
-  { name: "Areia grossa", unit: "m3" as const, baseUnitCost: 900, importFactor: 1, purchasePackage: { label: "Camião 10m³", qty: 10 } },
-  { name: "Areia fina", unit: "m3" as const, baseUnitCost: 900, importFactor: 1, purchasePackage: { label: "Camião 10m³", qty: 10 } },
-  { name: "Brita 3/4", unit: "m3" as const, baseUnitCost: 1200, importFactor: 1, purchasePackage: { label: "Camião 10m³", qty: 10 } },
-  { name: "Saibro", unit: "m3" as const, baseUnitCost: 765, importFactor: 1, purchasePackage: { label: "Camião 10m³", qty: 10 } },
-  { name: "Aço A400", unit: "kg" as const, baseUnitCost: 92, importFactor: 1.05 },
+  { name: "Cimento (saco 50kg)", unit: "un" as const, baseUnitCost: 430, importFactor: 1, purchasePackage: { label: "Saco 50kg", qty: 1 } },
+  { name: "Areia grossa", unit: "m3" as const, baseUnitCost: 1055, importFactor: 1, purchasePackage: { label: "Camião 22m³", qty: 22 } },
+  { name: "Areia fina", unit: "m3" as const, baseUnitCost: 625, importFactor: 1, purchasePackage: { label: "Camião 22m³", qty: 22 } },
+  { name: "Brita 3/4", unit: "m3" as const, baseUnitCost: 920, importFactor: 1, purchasePackage: { label: "Camião 22m³", qty: 22 } },
+  { name: "Saibro", unit: "m3" as const, baseUnitCost: 500, importFactor: 1, purchasePackage: { label: "Camião 22m³", qty: 22 } },
+  { name: "Aço A400", unit: "kg" as const, baseUnitCost: 87, importFactor: 1.05 },
   { name: "Bloco de cimento 20x20x40", unit: "un" as const, baseUnitCost: 40, importFactor: 1, purchasePackage: { label: "Palete (100 un)", qty: 100 } },
   { name: "Bloco de cimento 15x20x40", unit: "un" as const, baseUnitCost: 34, importFactor: 1, purchasePackage: { label: "Palete (100 un)", qty: 100 } },
 ];
@@ -86,43 +90,39 @@ const WORK_ITEM_TEMPLATES: Array<{ chapterCode: string; chapterName: string; des
 ];
 
 async function seedLabourCategories() {
-  const [existing] = await db.select().from(labourCategories).limit(1);
-  if (existing) {
-    console.log("catálogo de mão-de-obra já existe, a saltar");
-    return;
-  }
   for (const cat of LABOUR_CATEGORIES) {
     const hourlyRate = computeHourlyRate(cat.monthlySalary, WORKING_DAYS_PER_MONTH, WORKING_HOURS_PER_DAY);
-    await db.insert(labourCategories).values({
-      companyId: null,
-      name: cat.name,
-      monthlySalary: cat.monthlySalary.toString(),
-      hourlyRate: hourlyRate.toString(),
-      currency: "MZN",
-    });
+    const [existing] = await db.select().from(labourCategories).where(and(eq(labourCategories.name, cat.name), isNull(labourCategories.companyId))).limit(1);
+    const values = {
+      monthlySalary: cat.monthlySalary.toString(), hourlyRate: hourlyRate.toString(), currency: "MZN" as const,
+      sourceName: LABOUR_SOURCE, sourceReference: LABOUR_REFERENCE, effectiveDate: "2026-06-06", updatedAt: new Date(),
+    };
+    if (existing) await db.update(labourCategories).set(values).where(eq(labourCategories.id, existing.id));
+    else await db.insert(labourCategories).values({ companyId: null, name: cat.name, ...values });
   }
-  console.log(`catálogo de mão-de-obra semeado (${LABOUR_CATEGORIES.length} categorias)`);
+  console.log(`catálogo de mão-de-obra revisto (${LABOUR_CATEGORIES.length} categorias)`);
 }
 
 async function seedMaterials() {
-  const [existing] = await db.select().from(materials).limit(1);
-  if (existing) {
-    console.log("catálogo de materiais já existe, a saltar");
-    return;
-  }
   for (const m of MATERIALS) {
-    await db.insert(materials).values({
-      companyId: null,
-      name: m.name,
+    const [existing] = await db.select().from(materials).where(and(eq(materials.name, m.name), isNull(materials.companyId))).limit(1);
+    const values = {
       unit: m.unit,
       baseUnitCost: m.baseUnitCost.toString(),
       importFactor: m.importFactor.toString(),
-      currency: "MZN",
+      currency: "MZN" as const,
+      priceSourceName: INE_CONSTRUCTION_SOURCE,
+      sourceReference: INE_CONSTRUCTION_REFERENCE,
+      priceDate: PRICE_DATE,
+      includesVat: false,
       purchasePackageLabel: m.purchasePackage?.label ?? null,
       purchasePackageQty: m.purchasePackage ? m.purchasePackage.qty.toString() : null,
-    });
+      updatedAt: new Date(),
+    };
+    if (existing) await db.update(materials).set(values).where(eq(materials.id, existing.id));
+    else await db.insert(materials).values({ companyId: null, name: m.name, ...values });
   }
-  console.log(`catálogo de materiais semeado (${MATERIALS.length} materiais)`);
+  console.log(`catálogo de materiais revisto (${MATERIALS.length} materiais)`);
 }
 
 async function seedEquipment() {

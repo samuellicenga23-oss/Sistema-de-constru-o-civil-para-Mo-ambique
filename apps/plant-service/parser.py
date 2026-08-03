@@ -124,6 +124,7 @@ class DocumentAnalysis:
     page_count: int
     is_multi_discipline: bool
     sections: list[DocumentSection] = field(default_factory=list)
+    matched_tags: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -599,9 +600,9 @@ def extract_rooms(text: str, page_number: int) -> list[Room]:
     return rooms
 
 
-def _positioned_text_lines(page) -> list[tuple[float, float, float, float, str]]:
+def _positioned_text_lines(page, page_dict=None) -> list[tuple[float, float, float, float, str]]:
     lines: list[tuple[float, float, float, float, str]] = []
-    page_dict = page.get_text("dict")
+    page_dict = page_dict if page_dict is not None else page.get_text("dict")
     for block in page_dict.get("blocks", []):
         if block.get("type") != 0:
             continue
@@ -679,14 +680,18 @@ def _prefer_dimensioned_view(
     return selected
 
 
-def extract_rooms_spatial(page, page_number: int) -> list[Room]:
+def extract_rooms_spatial(page, page_number: int, text: str | None = None, page_dict=None) -> list[Room]:
     """Associa área e ambiente pela sua posição, independentemente da ordem interna do PDF."""
-    floor_label, _ = detect_floor_label(page.get_text())
-    lines = _positioned_text_lines(page)
+    floor_label, _ = detect_floor_label(text if text is not None else page.get_text())
+    lines = _positioned_text_lines(page, page_dict)
     area_lines = [line for line in lines if AREA_ONLY_PATTERN.match(line[4])]
     if not area_lines:
         return []
-    render_scale = 2.0
+    # Uma prancha A1/A0 a 2× produz dezenas de milhões de pixels e era o principal custo do
+    # leitor online. A visibilidade das etiquetas precisa de contraste, não de resolução de
+    # impressão: limita-se o maior lado a ~2400 px, preservando detalhe nas folhas pequenas.
+    longest_side = max(float(page.rect.width), float(page.rect.height), 1.0)
+    render_scale = min(1.25, max(0.75, 2400.0 / longest_side))
     rendered_page = page.get_pixmap(
         matrix=fitz.Matrix(render_scale, render_scale),
         colorspace=fitz.csGRAY,
@@ -1203,7 +1208,7 @@ def build_structural_summary(
     )
 
 
-def parse_pdf(file_bytes: bytes, progress_callback=None) -> ParseResult:
+def parse_pdf(file_bytes: bytes, progress_callback=None, detection_tags: list[str] | None = None) -> ParseResult:
     doc = fitz.open(stream=file_bytes, filetype="pdf")
     metadata = PlantMetadata()
     rooms: list[Room] = []
@@ -1219,7 +1224,10 @@ def parse_pdf(file_bytes: bytes, progress_callback=None) -> ParseResult:
 
     for page_index in range(doc.page_count):
         page = doc[page_index]
-        text = page.get_text()
+        # Reutiliza o mesmo TextPage para texto corrido e geometria. Sem isto, PyMuPDF voltava a
+        # interpretar fontes e objectos da página duas ou três vezes nas plantas cotadas.
+        text_page = page.get_textpage()
+        text = page.get_text("text", textpage=text_page)
         page_number = page_index + 1
         document_text_parts.append(text)
 
@@ -1235,10 +1243,11 @@ def parse_pdf(file_bytes: bytes, progress_callback=None) -> ParseResult:
         if is_room_area_page(text):
             plan_type = detect_plan_type(text)
             room_page_priorities[page_number] = ROOM_PAGE_PRIORITY.get(plan_type, 1)
+            page_dict = page.get_text("dict", textpage=text_page)
             rooms.extend(
                 merge_page_room_sources(
                     extract_rooms(text, page_number),
-                    extract_rooms_spatial(page, page_number),
+                    extract_rooms_spatial(page, page_number, text, page_dict),
                     extract_room_schedule(text, page_number),
                 )
             )
@@ -1268,6 +1277,12 @@ def parse_pdf(file_bytes: bytes, progress_callback=None) -> ParseResult:
 
     classifications = classify_document_pages(document_text_parts, page_hints)
     document_analysis = build_document_analysis(classifications)
+    normalised_document = _normalise_key("\n".join(document_text_parts))
+    document_analysis.matched_tags = sorted({
+        tag.strip().lower()
+        for tag in (detection_tags or [])
+        if tag.strip() and _normalise_key(tag) in normalised_document
+    })
     architecture_pages = {page.page for page in classifications if page.discipline == "arquitectura"}
     structure_pages = {page.page for page in classifications if page.discipline == "estrutura"}
 

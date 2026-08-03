@@ -77,23 +77,23 @@ export default function SuppliersPage() {
   return (
     <Layout
       title="Fornecedores"
-      subtitle="Directório de empresas, contactos e cotações usadas nas compras"
+      subtitle="Empresas, contactos e cotações para compras"
       actions={<button onClick={() => setShowForm(true)} className="btn btn-primary btn-sm"><IconPlus className="h-3.5 w-3.5" /> Novo fornecedor</button>}
     >
       <div className="mx-auto w-full max-w-7xl space-y-5">
         {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
 
-        <section className="grid gap-3 sm:grid-cols-3">
-          <div className="card card-pad"><span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Fornecedores</span><strong className="mt-1 block text-2xl text-slate-950">{suppliers.length}</strong></div>
-          <div className="card card-pad"><span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Com contacto</span><strong className="mt-1 block text-2xl text-slate-950">{suppliers.filter((supplier) => supplier.contact).length}</strong></div>
-          <div className="card card-pad"><span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Com NUIT</span><strong className="mt-1 block text-2xl text-slate-950">{suppliers.filter((supplier) => supplier.nuit).length}</strong></div>
+        <section className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm">
+          <strong className="text-slate-950">{suppliers.length} fornecedor(es)</strong>
+          <span className="text-slate-500">{suppliers.filter((supplier) => supplier.contact).length} com contacto</span>
+          <span className="text-slate-500">{suppliers.filter((supplier) => supplier.nuit).length} com NUIT</span>
         </section>
 
         <section className="card overflow-hidden">
           <div className="border-b border-slate-200 p-4 sm:p-5">
             <div className="mb-4 flex items-center gap-2">
               <IconUsers className="h-4 w-4 text-brand-700" />
-              <div><h2 className="section-title text-base">Directório de fornecedores</h2><p className="mt-0.5 text-xs text-slate-500">Seleccione um fornecedor para gerir os recursos e preços que pode fornecer.</p></div>
+              <div><h2 className="section-title text-base">Fornecedores</h2><p className="mt-0.5 text-xs text-slate-500">Pesquise ou abra um fornecedor para gerir as suas cotações.</p></div>
             </div>
             <PageSearch
               value={query}
@@ -142,13 +142,13 @@ export default function SuppliersPage() {
                     <p className="mt-1 text-xs text-slate-500">{supplier.location || "Localização por definir"}</p>
                   </div>
                 </div>
-                <dl className="mt-4 space-y-2 border-t border-slate-100 pt-4 text-xs">
-                  <div className="flex justify-between gap-3"><dt className="text-slate-500">Contacto</dt><dd className="break-all text-right font-medium text-slate-700">{supplier.contact || "Por definir"}</dd></div>
-                  <div className="flex justify-between gap-3"><dt className="text-slate-500">NUIT</dt><dd className="text-right font-medium text-slate-700">{supplier.nuit || "Por definir"}</dd></div>
-                </dl>
+                {(supplier.contact || supplier.nuit) && <dl className="mt-4 space-y-2 border-t border-slate-100 pt-4 text-xs">
+                  {supplier.contact && <div className="flex justify-between gap-3"><dt className="text-slate-500">Contacto</dt><dd className="break-all text-right font-medium text-slate-700">{supplier.contact}</dd></div>}
+                  {supplier.nuit && <div className="flex justify-between gap-3"><dt className="text-slate-500">NUIT</dt><dd className="text-right font-medium text-slate-700">{supplier.nuit}</dd></div>}
+                </dl>}
                 <div className="mt-auto flex items-center gap-2 pt-5">
                   <button onClick={() => setMaterialsModalSupplier(supplier)} className="btn btn-secondary btn-sm flex-1">
-                    Ver recursos e preços
+                    Cotações e recursos
                   </button>
                   <button onClick={() => setPendingDelete(supplier)} className="icon-btn-danger" title="Eliminar fornecedor">
                     <IconTrash className="h-3.5 w-3.5" />

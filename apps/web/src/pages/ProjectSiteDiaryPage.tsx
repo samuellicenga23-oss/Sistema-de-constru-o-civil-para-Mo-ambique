@@ -170,7 +170,7 @@ export default function ProjectSiteDiaryPage() {
     <>
     <Layout
       title={`Diário de Obra — ${project.name}`}
-      subtitle="Registo diário de trabalhos, materiais, presenças e ocorrências — com exportação em PDF"
+      subtitle="Trabalhos, equipa, materiais e ocorrências por dia"
       actions={
         <Link to={`/projectos/${projectId}`} className="btn btn-ghost btn-sm">
           <IconBack className="w-3.5 h-3.5" />
@@ -182,7 +182,7 @@ export default function ProjectSiteDiaryPage() {
         <ProjectWorkspaceNav projectId={projectId!} />
         {error && <p className="text-sm text-red-600">{error}</p>}
 
-        <section className="card"><SectionHeader title="Registos do diário" description="Trabalhos, equipa, ocorrências e evidências por dia" actions={<button type="button" onClick={() => setShowForm(true)} className="btn btn-primary btn-sm"><IconPlus className="h-3.5 w-3.5" /> Registar dia</button>} /></section>
+        <section className="card"><SectionHeader title="Registos" description={`${entries.length} dia(s) registado(s)`} actions={<button type="button" onClick={() => setShowForm(true)} className="btn btn-primary btn-sm"><IconPlus className="h-3.5 w-3.5" /> Registar dia</button>} /></section>
         <PageSearch value={query} onChange={setQuery} placeholder="Pesquisar por data, trabalho, material ou ocorrência…" resultLabel={`${filteredEntries.length} registo(s)`} />
         {showForm && <Modal title="Novo registo do Diário" subtitle={`${date} · ${project.name}`} onClose={() => !saving && setShowForm(false)} maxWidth={formMode === "full" ? "max-w-6xl" : "max-w-lg"}>
           <form onSubmit={handleCreate} className="space-y-3">

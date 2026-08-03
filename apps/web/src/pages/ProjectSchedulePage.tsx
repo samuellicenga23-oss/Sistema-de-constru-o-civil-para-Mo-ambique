@@ -201,7 +201,7 @@ export default function ProjectSchedulePage() {
   return (
     <Layout
       title={`Cronograma — ${project.name}`}
-      subtitle="WBS · Gantt · linha de base · progresso ligado a diário e autos"
+      subtitle="Planeamento, dependências e progresso da obra"
       actions={
         <>
           <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-1">
@@ -259,9 +259,7 @@ export default function ProjectSchedulePage() {
               <div className="min-w-0">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-blue-700">Plano de execução</p>
                 <h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-950">Cronograma da obra</h2>
-                <p className="mt-1 max-w-2xl text-sm text-slate-500">
-                  Folha editável + Gantt sincronizados — como no MS Project, feito para obra em Moçambique.
-                </p>
+                <p className="mt-1 max-w-2xl text-sm text-slate-500">Gantt e folha de actividades sincronizados.</p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <button type="button" className="btn btn-secondary btn-sm" onClick={() => setSetupOpen((v) => !v)}>
@@ -325,9 +323,7 @@ export default function ProjectSchedulePage() {
                 {schedule.tasks.length ? "Recriar WBS" : "Gerar cronograma"}
               </button>
             </div>
-            <p className="text-xs text-slate-500">
-              A duração calcula-se pelas horas de mão-de-obra das composições — só indique um prazo se quiser forçar.
-            </p>
+            <p className="text-xs text-slate-500">A duração é calculada pelas composições; use prazo próprio apenas quando necessário.</p>
             {!manualDuration ? (
               <button type="button" className="text-xs font-semibold text-blue-700 hover:underline" onClick={() => setManualDuration(true)}>
                 Substituir por prazo próprio

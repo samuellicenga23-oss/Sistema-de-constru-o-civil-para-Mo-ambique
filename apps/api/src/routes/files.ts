@@ -26,7 +26,8 @@ export async function fileRoutes(app: FastifyInstance) {
 
     const buffer = await readFile(plant.filePath);
     reply.header("Content-Type", "application/pdf");
-    reply.header("Content-Disposition", `inline; filename="${plant.originalFileName ?? "planta.pdf"}"`);
+    const downloadName = path.basename(plant.originalFileName ?? "planta.pdf").replace(/["\r\n]/g, "_");
+    reply.header("Content-Disposition", `inline; filename="${downloadName}"`);
     return reply.send(buffer);
   });
 

@@ -131,6 +131,35 @@ export type PriceZone = {
   updatedAt: string;
 };
 
+export type WorkChapterItem = {
+  code: string;
+  description: string;
+  unit: string;
+  composition?: string;
+  compositionId?: string | null;
+};
+
+export type WorkChapter = {
+  code: string;
+  name: string;
+  discipline: "all" | "arquitectura" | "estrutura" | "hidrossanitario" | "electricidade" | "outro";
+  detectionTags: string[];
+  requiresTagMatch: boolean;
+  version: number;
+  companyId: string | null;
+  items: WorkChapterItem[];
+};
+
+export type WorkChapterInput = {
+  code: string;
+  name: string;
+  discipline: WorkChapter["discipline"];
+  detectionTags: string[];
+  requiresTagMatch: boolean;
+  chapterSortOrder?: number;
+  items: Array<{ code: string; description: string; unit: string; compositionId?: string | null }>;
+};
+
 export type MaterialZonePrice = {
   id: string;
   materialId: string;
@@ -248,6 +277,14 @@ export const catalogApi = {
     request<MaterialZonePrice>(`/catalog/materials/${materialId}/zone-prices/${zoneId}`, { method: "PUT", body: JSON.stringify(typeof data === "number" ? { unitCost: data } : data) }),
   deleteMaterialZonePrice: (materialId: string, zoneId: string) =>
     request<{ ok: true }>(`/catalog/materials/${materialId}/zone-prices/${zoneId}`, { method: "DELETE" }),
+
+  listWorkChapters: () => request<WorkChapter[]>("/catalog/work-chapters"),
+  createWorkChapter: (data: WorkChapterInput) =>
+    request<WorkChapter>("/catalog/work-chapters", { method: "POST", body: JSON.stringify(data) }),
+  updateWorkChapter: (code: string, data: WorkChapterInput) =>
+    request<WorkChapter>(`/catalog/work-chapters/${encodeURIComponent(code)}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteWorkChapter: (code: string) =>
+    request<{ ok: true }>(`/catalog/work-chapters/${encodeURIComponent(code)}`, { method: "DELETE" }),
 
   listMaterialSuppliers: (materialId: string) =>
     request<Array<{ id: string; supplierId: string; supplierName: string; zoneId: string | null; zoneName: string | null; unitCost: string; currency: string }>>(

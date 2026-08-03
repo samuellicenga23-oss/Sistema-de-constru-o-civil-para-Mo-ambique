@@ -18,6 +18,10 @@ After=network.target
 Type=simple
 User=sigo
 WorkingDirectory=/home/sigo/htdocs/sud30s.org/apps/plant-service
+# Uma análise pesada por processo evita que dois PDFs grandes disputem CPU e tornem ambos lentos.
+# O cache em memória complementa o cache persistente por hash mantido pela API.
+Environment=PLANT_PARSER_CONCURRENCY=1
+Environment=PLANT_PARSER_CACHE_SIZE=6
 ExecStart=/home/sigo/htdocs/sud30s.org/apps/plant-service/.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8001
 Restart=on-failure
 RestartSec=3

@@ -72,7 +72,7 @@ function Brand({ variant = "dark" }: { variant?: "dark" | "light" }) {
 }
 
 function HeroProduct() {
-  return <div className="relative mx-auto w-full max-w-[650px] anim-float lg:ml-auto">
+  return <div className="relative mx-auto w-full max-w-[650px] lg:ml-auto">
     <div className="absolute -left-4 top-16 hidden w-44 rounded-xl border border-[#d7e6e7] bg-white/95 p-4 shadow-[0_16px_36px_rgba(20,32,51,.12)] backdrop-blur-sm sm:block">
       <p className="text-[9px] font-bold uppercase tracking-[.14em] text-slate-400">Compra recomendada</p>
       <p className="mt-2 text-sm font-display font-black text-[#142033]">Aço A500 · 3,8 t</p>
@@ -138,7 +138,7 @@ export default function PublicLandingPage() {
       <div className="mx-auto flex h-[76px] max-w-[1280px] items-center justify-between px-5 lg:px-8">
         <a href="#inicio" aria-label="SIGO — início"><Brand /></a>
         <nav className="hidden items-center gap-7 text-sm font-semibold text-slate-600 md:flex"><a className="hover:text-slate-950" href="#plataforma">Plataforma</a><a className="hover:text-slate-950" href="#solucoes">Soluções</a><a className="hover:text-slate-950" href="#planos">Planos</a><a className="hover:text-slate-950" href="#perguntas">Perguntas</a></nav>
-        <div className="hidden items-center gap-2 md:flex"><Link className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-white" to={platformHref}>{user ? "Abrir plataforma" : "Entrar"}</Link><a className="rounded-xl bg-[#142033] px-4 py-2.5 text-sm font-bold text-white hover:bg-[#24324a]" href={whatsappHref()} target="_blank" rel="noreferrer">Pedir demonstração</a></div>
+        <div className="hidden items-center gap-2 md:flex"><Link className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-white" to={platformHref}>{user ? "Abrir plataforma" : "Entrar"}</Link><a className="rounded-xl bg-[#ed6c22] px-4 py-2.5 text-sm font-bold text-white hover:bg-[#d85f18]" href={whatsappHref()} target="_blank" rel="noreferrer">Marcar demonstração</a></div>
         <button type="button" className="grid h-10 w-10 place-items-center rounded-xl border border-slate-300 bg-white text-xl md:hidden" onClick={() => setMenuOpen((value) => !value)} aria-expanded={menuOpen} aria-label={menuOpen ? "Fechar menu" : "Abrir menu"}>{menuOpen ? "×" : "≡"}</button>
       </div>
       {menuOpen && <nav className="border-t border-slate-200 bg-[#f6f8f8] px-5 py-4 md:hidden"><div className="mx-auto grid max-w-[1280px] gap-1 text-sm font-semibold">{[["#plataforma","Plataforma"],["#solucoes","Soluções"],["#planos","Planos"],["#perguntas","Perguntas"]].map(([href,label]) => <a key={href} className="rounded-xl px-3 py-3 hover:bg-white" href={href} onClick={closeMenu}>{label}</a>)}<Link className="mt-2 rounded-xl bg-[#142033] px-3 py-3 text-center text-white" to={platformHref}>{user ? "Abrir plataforma" : "Entrar no SIGO"}</Link></div></nav>}
@@ -152,21 +152,26 @@ export default function PublicLandingPage() {
           <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-[#f6f8f8] to-transparent" />
           <div className="absolute inset-0 opacity-[0.35]" style={{ backgroundImage: "linear-gradient(rgba(20,32,51,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(20,32,51,0.03) 1px, transparent 1px)", backgroundSize: "48px 48px" }} />
         </div>
-        <div className="relative mx-auto grid max-w-[1280px] items-center gap-16 px-5 py-16 sm:py-20 lg:grid-cols-[.86fr_1.14fr] lg:px-8 lg:py-24">
-          <div className="relative z-10 page-enter">
-            <p className="mb-4 font-display text-[42px] font-black tracking-[-0.06em] text-[#142033] sm:text-5xl lg:text-[56px]">SIGO</p>
-            <p className="mb-5 inline-flex items-center gap-2 border-l-2 border-[#ed6c22] pl-3 text-[11px] font-display font-black uppercase tracking-[0.14em] text-[#8f4d25] sm:mb-6 sm:text-xs">Da estimativa à obra, tudo ligado</p>
-            <h1 className="max-w-[650px] text-[34px] font-display font-black leading-[1.05] tracking-[-0.045em] text-[#101a2c] sm:text-5xl lg:text-[56px]">Controle a obra como ela realmente acontece.</h1>
-            <p className="mt-6 max-w-xl text-base leading-7 text-slate-600 sm:mt-7 sm:text-lg sm:leading-8">O SIGO liga orçamento, planeamento, compras, campo e medição. A sua equipa trabalha no mesmo fluxo e sabe o que mudou, o que falta e qual é a próxima decisão.</p>
+        <div className="relative mx-auto grid max-w-[1280px] items-center gap-14 px-5 py-16 sm:py-20 lg:grid-cols-[.86fr_1.14fr] lg:px-8 lg:py-24">
+          <div className="relative z-10">
+            <p className="mb-5 inline-flex items-center gap-2 rounded-full border border-[#0f8a90]/20 bg-white/70 px-3 py-1.5 text-[10px] font-display font-black uppercase tracking-[0.13em] text-[#0f7479] sm:text-[11px]">Gestão de obras para empresas moçambicanas</p>
+            <h1 className="max-w-[650px] text-[38px] font-display font-black leading-[1.02] tracking-[-0.05em] text-[#101a2c] sm:text-5xl lg:text-[60px]">Do orçamento ao último auto, a obra sob controlo.</h1>
+            <p className="mt-6 max-w-xl text-base leading-7 text-slate-600 sm:text-lg sm:leading-8">Custos, cronograma, compras, Diário de Obra e medições trabalham no mesmo fluxo. A equipa deixa de procurar versões e passa a decidir com dados da obra.</p>
             <div className="mt-8 flex flex-col gap-3 sm:mt-9 sm:flex-row">
-              <a className="rounded-xl bg-[#ed6c22] px-6 py-3.5 text-center text-sm font-display font-black text-white shadow-[0_10px_26px_rgba(237,108,34,.22)] transition hover:bg-[#d85f18] hover:shadow-[0_14px_30px_rgba(237,108,34,.28)]" href={whatsappHref()} target="_blank" rel="noreferrer">Ver o SIGO em funcionamento</a>
-              <a className="rounded-xl border border-slate-300 bg-white/90 px-6 py-3.5 text-center text-sm font-bold text-slate-800 backdrop-blur-sm hover:border-slate-400" href="#plataforma">Explorar a plataforma ↓</a>
+              <a className="rounded-xl bg-[#ed6c22] px-6 py-3.5 text-center text-sm font-display font-black text-white shadow-[0_10px_26px_rgba(237,108,34,.22)] hover:bg-[#d85f18]" href={whatsappHref()} target="_blank" rel="noreferrer">Agendar demonstração</a>
+              <a className="rounded-xl border border-slate-300 bg-white/90 px-6 py-3.5 text-center text-sm font-bold text-slate-800 hover:border-slate-400" href="#plataforma">Ver como funciona</a>
             </div>
-            <div className="mt-8 grid max-w-xl grid-cols-2 gap-x-6 gap-y-3 border-t border-[#142033]/10 pt-5 text-xs font-semibold text-slate-600 sm:mt-10 sm:grid-cols-3 sm:pt-6 sm:text-sm"><span>✓ MZN e USD</span><span>✓ Computador e telemóvel</span><span>✓ Implementação acompanhada</span></div>
+            <p className="mt-5 text-xs font-semibold text-slate-500">Demonstração com o seu fluxo de trabalho · sem compromisso</p>
           </div>
           <HeroProduct />
         </div>
-        <div className="relative mx-auto max-w-[1280px] border-t border-[#142033]/10 px-5 lg:px-8"><div className="grid py-5 text-center text-[10px] font-display font-black uppercase tracking-[.13em] text-slate-500 sm:grid-cols-5"><span className="py-2">Orçamentar</span><span className="py-2 sm:border-l sm:border-slate-300">Planear</span><span className="py-2 sm:border-l sm:border-slate-300">Comprar</span><span className="py-2 sm:border-l sm:border-slate-300">Executar</span><span className="py-2 sm:border-l sm:border-slate-300">Medir</span></div></div>
+        <div className="relative mx-auto max-w-[1280px] border-t border-[#142033]/10 px-5 lg:px-8"><div className="grid py-5 text-center text-[10px] font-display font-black uppercase tracking-[.13em] text-slate-500 sm:grid-cols-5"><span className="py-2">Orçamentar</span><span className="py-2 sm:border-l sm:border-slate-300">Planear</span><span className="py-2 sm:border-l sm:border-slate-300">Comprar</span><span className="py-2 sm:border-l sm:border-slate-300">Executar</span><span className="py-2 sm:border-l sm:border-slate-300">Medir e facturar</span></div></div>
+      </section>
+
+      <section aria-label="Contexto da plataforma" className="border-b border-[#142033]/10 bg-white">
+        <div className="mx-auto grid max-w-[1280px] grid-cols-2 gap-px bg-slate-200 px-px sm:grid-cols-4 lg:px-8">
+          {[["16%", "IVA configurado"], ["MZN · USD", "Moedas por projecto"], ["PDF · Excel", "Mapas e relatórios"], ["Suporte local", "Implementação acompanhada"]].map(([value, label]) => <div key={label} className="bg-white px-4 py-6 text-center"><strong className="block text-lg font-display font-black text-[#142033]">{value}</strong><span className="mt-1 block text-[11px] font-semibold text-slate-500">{label}</span></div>)}
+        </div>
       </section>
 
       <section className="border-b border-[#142033]/10 bg-[#f4f6f8] py-20 lg:py-28">
@@ -174,8 +179,8 @@ export default function PublicLandingPage() {
           <div className="max-w-2xl"><p className="text-xs font-display font-black uppercase tracking-[0.16em] text-[#0f8a90]">Uma obra, uma só fonte de verdade</p><h2 className="mt-4 text-3xl font-display font-black leading-tight tracking-[-0.03em] sm:text-4xl">Ganhe rapidez de operação e máximo controlo na execução.</h2></div>
           <div className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {FEATURE_GRID.map(({ Icon, label, copy }, index) => (
-              <div key={label} className="group rounded-2xl border border-slate-200 bg-white p-6 shadow-[0_10px_30px_rgba(20,32,51,.04)] transition hover:-translate-y-0.5 hover:border-[#1AADB4]/40 hover:shadow-[0_20px_40px_rgba(20,32,51,.09)]">
-                <div className="flex items-center justify-between"><span className="grid h-11 w-11 place-items-center rounded-xl bg-[#142033] text-white transition group-hover:bg-[#1AADB4]"><Icon className="h-5 w-5" /></span><span className="text-xs font-display font-black text-slate-300">0{index + 1}</span></div>
+              <div key={label} className="rounded-2xl border border-slate-200 bg-white p-6 shadow-[0_10px_30px_rgba(20,32,51,.04)] hover:border-[#1AADB4]/40">
+                <div className="flex items-center justify-between"><span className="grid h-11 w-11 place-items-center rounded-xl bg-[#142033] text-white"><Icon className="h-5 w-5" /></span><span className="text-xs font-display font-black text-slate-300">0{index + 1}</span></div>
                 <h3 className="mt-5 text-base font-display font-black text-[#142033]">{label}</h3>
                 <p className="mt-2 text-sm leading-6 text-slate-500">{copy}</p>
               </div>
@@ -224,39 +229,37 @@ export default function PublicLandingPage() {
       </section>
 
       <section id="planos" className="scroll-mt-24 bg-[#f6f8f8] py-20 lg:py-28"><div className="mx-auto max-w-[1280px] px-5 lg:px-8">
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between"><div><p className="text-xs font-display font-black uppercase tracking-[0.16em] text-[#d85f18]">Planos</p><h2 className="mt-4 max-w-2xl text-4xl font-display font-black tracking-[-0.04em] sm:text-5xl">Escolha a capacidade certa para a sua operação.</h2></div>
-          <div className="inline-flex self-start rounded-full border border-slate-200 bg-white p-1 lg:self-auto">
-            <button type="button" onClick={() => setBillingView("mensal")} className={`rounded-full px-4 py-2 text-sm font-display font-black transition ${billingView === "mensal" ? "bg-[#142033] text-white" : "text-slate-500"}`}>Por mês</button>
-            <button type="button" onClick={() => setBillingView("anual")} className={`rounded-full px-4 py-2 text-sm font-display font-black transition ${billingView === "anual" ? "bg-[#142033] text-white" : "text-slate-500"}`}>Por ano</button>
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between"><div><p className="text-xs font-display font-black uppercase tracking-[0.16em] text-[#d85f18]">Planos mensais e anuais</p><h2 className="mt-4 max-w-2xl text-4xl font-display font-black tracking-[-0.04em] sm:text-5xl">Um plano para cada fase da empresa.</h2><p className="mt-4 max-w-2xl text-base leading-7 text-slate-600">Pague mensalmente para manter flexibilidade ou escolha o anual e beneficie do desconto.</p></div>
+          <div className="inline-flex self-start rounded-full border border-slate-200 bg-white p-1 lg:self-auto" role="group" aria-label="Periodicidade da subscrição">
+            <button type="button" onClick={() => setBillingView("mensal")} className={`rounded-full px-4 py-2 text-sm font-display font-black ${billingView === "mensal" ? "bg-[#142033] text-white" : "text-slate-500"}`}>Mensal</button>
+            <button type="button" onClick={() => setBillingView("anual")} className={`rounded-full px-4 py-2 text-sm font-display font-black ${billingView === "anual" ? "bg-[#142033] text-white" : "text-slate-500"}`}>Anual · poupe 15%</button>
           </div>
         </div>
         <div className="mt-14 grid items-stretch gap-5 lg:grid-cols-3">{COMMERCIAL_PLANS.map((plan) => {
           const totals = calculateVatTotals(plan.annualPrice);
           const regularTotals = calculateVatTotals(plan.regularAnnualPrice);
-          const monthlyEquivalent = Math.round(totals.total / 12);
+          const monthlyTotals = calculateVatTotals(plan.monthlyPrice);
+          const annualMonthlyEquivalent = totals.total / 12;
           const savingsPct = Math.round((1 - plan.annualPrice / plan.regularAnnualPrice) * 100);
           return <article key={plan.slug} className={`relative flex min-w-0 flex-col rounded-2xl border p-6 sm:p-7 ${plan.featured ? "border-[#1AADB4] bg-white shadow-[0_24px_60px_rgba(20,32,51,.12)] lg:-translate-y-3" : "border-slate-200 bg-white/75"}`}>
             {plan.featured && <span className="absolute right-5 top-0 -translate-y-1/2 rounded-full bg-[#1AADB4] px-3 py-1 text-[10px] font-display font-black uppercase tracking-wider text-white">Recomendado</span>}
             <p className="text-sm font-display font-black uppercase tracking-[0.1em] text-slate-500">{plan.name}</p>
             <p className="mt-2 text-xs font-semibold text-[#a84a16]">{plan.audience}</p>
-            {billingView === "mensal" ? (
-              <div className="mt-5">
-                <div className="flex items-baseline gap-1"><strong className="block break-words text-4xl font-display font-black tracking-[-0.04em]">{formatMzn(monthlyEquivalent)}</strong><span className="text-sm font-semibold text-slate-500">/mês</span></div>
-                <p className="mt-2 text-xs text-slate-500">Facturado {formatMzn(totals.total)}/ano (IVA incluído) · poupa {savingsPct}% face ao preço de tabela</p>
-              </div>
-            ) : (
-              <div className="mt-5">
-                <div className="flex items-baseline gap-1"><strong className="block break-words text-4xl font-display font-black tracking-[-0.04em]">{formatMzn(totals.total)}</strong><span className="text-sm font-semibold text-slate-500">/ano</span></div>
-                <p className="mt-2 text-xs text-slate-500">Equivale a {formatMzn(monthlyEquivalent)}/mês · poupa {formatMzn(regularTotals.total - totals.total)} face ao preço de tabela</p>
-              </div>
-            )}
+            {billingView === "mensal" ? <div className="mt-5">
+              <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1"><strong className="block break-words text-4xl font-display font-black tracking-[-0.04em]">{formatMzn(monthlyTotals.total)}</strong><span className="text-sm font-semibold text-slate-500">/mês</span></div>
+              <p className="mt-2 text-xs text-slate-500">IVA incluído · cobrança mensal</p>
+            </div> : <div className="mt-5">
+              <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1"><strong className="block break-words text-4xl font-display font-black tracking-[-0.04em]">{formatMzn(annualMonthlyEquivalent)}</strong><span className="text-sm font-semibold text-slate-500">/mês</span></div>
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs"><span className="text-slate-500">{formatMzn(totals.total)} cobrados por ano</span><span className="rounded-full bg-emerald-50 px-2 py-1 font-bold text-emerald-700">Poupa {savingsPct}%</span></div>
+              <p className="mt-1 text-[11px] text-slate-400">Preço anual de tabela: {formatMzn(regularTotals.total)}</p>
+            </div>}
             <p className="mt-5 text-sm leading-6 text-slate-600">{plan.description}</p>
             <p className="mt-4 border-y border-slate-100 py-3 text-xs font-bold">{plan.limits}</p>
             <ul className="my-6 flex-1 space-y-3">{plan.features.map((feature) => <li key={feature} className="flex gap-3 text-sm text-slate-700"><span className="font-display font-black text-[#1AADB4]">✓</span><span>{feature}</span></li>)}</ul>
-            <Link className={`rounded-lg px-4 py-3 text-center text-sm font-display font-black ${plan.featured ? "bg-[#ed6c22] text-white hover:bg-[#d85f18]" : "bg-[#142033] text-white hover:bg-[#24324a]"}`} to={`/checkout/${plan.slug}`}>Escolher {plan.name} →</Link>
+            <Link className={`rounded-lg px-4 py-3 text-center text-sm font-display font-black ${plan.featured ? "bg-[#ed6c22] text-white hover:bg-[#d85f18]" : "bg-[#142033] text-white hover:bg-[#24324a]"}`} to={`/checkout/${plan.slug}?periodo=${billingView}`}>Escolher {plan.name} {billingView === "mensal" ? "mensal" : "anual"} →</Link>
             <a className="mt-2 rounded-lg px-4 py-2.5 text-center text-xs font-bold text-slate-500 hover:bg-slate-50 hover:text-slate-900" href={emailHref(plan.name)}>Tirar uma dúvida</a>
           </article>; })}</div>
-        <p className="mt-7 text-center text-xs leading-5 text-slate-500">A subscrição é facturada anualmente, num só pagamento; o valor mensal mostrado é o equivalente para comparação. O checkout confirma o pedido — a activação é acompanhada pela equipa SIGO.</p>
+        <p className="mt-7 text-center text-xs leading-5 text-slate-500">Os valores incluem IVA. No checkout pode comparar e alterar a periodicidade antes de enviar o pedido.</p>
       </div></section>
 
       <section id="perguntas" className="scroll-mt-24 bg-white py-20 lg:py-28"><div className="mx-auto grid max-w-[1080px] gap-10 px-5 lg:grid-cols-[.7fr_1.3fr] lg:px-8"><div><p className="text-xs font-display font-black uppercase tracking-[0.16em] text-[#0f8a90]">Antes de decidir</p><h2 className="mt-4 text-4xl font-display font-black tracking-[-0.04em]">Perguntas honestas, respostas directas.</h2></div><div className="divide-y divide-slate-200 border-y border-slate-200">{[
@@ -270,5 +273,6 @@ export default function PublicLandingPage() {
     </main>
 
     <footer className="border-t border-slate-800 bg-[#101827] py-10 text-white"><div className="mx-auto flex max-w-[1280px] flex-col gap-8 px-5 sm:flex-row sm:items-end sm:justify-between lg:px-8"><div><Brand variant="light" /><p className="mt-5 max-w-sm text-sm leading-6 text-slate-400">Custos, prazo e execução no mesmo sistema de gestão de obras.</p></div><div className="text-sm text-slate-400 sm:text-right"><p>Moçambique · MZN e USD</p><p className="mt-2">© 2026 SIGO. Todos os direitos reservados.</p></div></div></footer>
+    <a href={whatsappHref()} target="_blank" rel="noreferrer" className="fixed bottom-4 right-4 z-40 rounded-full bg-[#ed6c22] px-5 py-3 text-center text-sm font-display font-black text-white shadow-[0_14px_34px_rgba(20,32,51,.25)] sm:hidden">WhatsApp</a>
   </div>;
 }

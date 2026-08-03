@@ -239,13 +239,15 @@ export async function catalogRoutes(app: FastifyInstance) {
     const deduped = dedupeByName(rows).sort((a, b) => a.name.localeCompare(b.name));
 
     const materialIds = deduped.map((m) => m.id);
-    const zonePrices = zoneId && materialIds.length
-      ? await db.select().from(materialZonePrices).where(and(eq(materialZonePrices.zoneId, zoneId), inArray(materialZonePrices.materialId, materialIds)))
-      : [];
-    const zonePriceByMaterialId = new Map(zonePrices.map((p) => [p.materialId, p]));
     const [selectedZone] = zoneId
       ? await db.select().from(priceZones).where(and(eq(priceZones.id, zoneId), scopeFilter(priceZones.companyId, request))).limit(1)
       : [undefined];
+    // Não consultar preços de uma zona antes de confirmar que a zona é visível à empresa.
+    // Um UUID de zona privada não pode alterar nem revelar a resposta do catálogo alheio.
+    const zonePrices = selectedZone && materialIds.length
+      ? await db.select().from(materialZonePrices).where(and(eq(materialZonePrices.zoneId, selectedZone.id), inArray(materialZonePrices.materialId, materialIds)))
+      : [];
+    const zonePriceByMaterialId = new Map(zonePrices.map((p) => [p.materialId, p]));
     const zoneFallbackFactor = selectedZone
       ? (1 + Number(selectedZone.materialAdjustmentPct) / 100) * (1 + Number(selectedZone.defaultTransportPct) / 100)
       : 1;

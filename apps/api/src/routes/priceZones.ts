@@ -98,7 +98,9 @@ export async function priceZoneRoutes(app: FastifyInstance) {
       .limit(1);
 
     if (!target && companyId) {
-      const [source] = await db.select().from(priceZones).where(eq(priceZones.id, id)).limit(1);
+      // Só zonas partilhadas podem ser clonadas; uma zona privada de outra empresa nunca pode
+      // ser copiada por conhecer o seu UUID.
+      const [source] = await db.select().from(priceZones).where(and(eq(priceZones.id, id), isNull(priceZones.companyId))).limit(1);
       if (!source) return reply.code(404).send({ error: "Zona não encontrada" });
       const [copy] = await db.insert(priceZones).values({
         companyId,
@@ -143,7 +145,14 @@ export async function priceZoneRoutes(app: FastifyInstance) {
     const { id } = request.params as { id: string };
     const [material] = await db.select().from(materials).where(and(eq(materials.id, id), scopeFilter(materials.companyId, request))).limit(1);
     if (!material) return reply.code(404).send({ error: "Material não encontrado" });
-    return db.select().from(materialZonePrices).where(eq(materialZonePrices.materialId, id));
+    // O material pode ser global, mas a zona é sempre uma fronteira de empresa. Não revelar
+    // preços/cotações de zonas privadas que pertencem a outra empresa.
+    return db
+      .select({ price: materialZonePrices })
+      .from(materialZonePrices)
+      .innerJoin(priceZones, eq(materialZonePrices.zoneId, priceZones.id))
+      .where(and(eq(materialZonePrices.materialId, id), scopeFilter(priceZones.companyId, request)))
+      .then((rows) => rows.map(({ price }) => price));
   });
 
   app.put("/api/catalog/materials/:id/zone-prices/:zoneId", auth, async (request, reply) => {

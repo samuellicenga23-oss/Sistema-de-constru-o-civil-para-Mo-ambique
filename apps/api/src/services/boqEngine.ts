@@ -164,7 +164,7 @@ export async function getBudgetDocumentSummary(documentId: string): Promise<Budg
   const sectionNodes: SectionNode[] = sections.map((section) => {
     const items = buildTree(allItems.filter((i) => i.sectionId === section.id), techSpecs);
     const total = items.reduce((sum, i) => sum + i.totalPrice, 0);
-    return { id: section.id, name: section.name, sortOrder: section.sortOrder, items, total, sellingTotal: 0 };
+    return { id: section.id, name: section.name, sortOrder: section.sortOrder, templateKey: section.templateKey, items, total, sellingTotal: 0 };
   });
 
   const subtotal1 = sectionNodes.reduce((sum, s) => sum + s.total, 0);

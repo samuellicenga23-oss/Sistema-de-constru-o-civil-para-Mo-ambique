@@ -7,6 +7,7 @@ import { requireCompanyUser, requireRole } from "../auth/middleware.js";
 import { assertLineItemOwned } from "../services/accessControl.js";
 import { getMeasurementLines, recomputeItemQuantity, computePartial } from "../services/dimensionEngine.js";
 import { buildMeasurementLinesFromPlant, loadProjectPlantRooms } from "../services/plantMeasurementLink.js";
+import { documentLockedMessage } from "../services/documentRules.js";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista"] as const;
 
@@ -26,6 +27,17 @@ async function assertMeasurementLineOwned(measurementLineId: string, companyId: 
   return item ? line : null;
 }
 
+async function getItemDocument(lineItemId: string) {
+  const [row] = await db
+    .select({ document: budgetDocuments })
+    .from(lineItems)
+    .innerJoin(budgetSections, eq(lineItems.sectionId, budgetSections.id))
+    .innerJoin(budgetDocuments, eq(budgetSections.documentId, budgetDocuments.id))
+    .where(eq(lineItems.id, lineItemId))
+    .limit(1);
+  return row?.document ?? null;
+}
+
 export async function measurementLineRoutes(app: FastifyInstance) {
   app.get("/api/line-items/:id/measurements", { preHandler: requireCompanyUser }, async (request, reply) => {
     const { id } = request.params as { id: string };
@@ -41,6 +53,8 @@ export async function measurementLineRoutes(app: FastifyInstance) {
     const item = await assertLineItemOwned(id, companyId);
     if (!item) return reply.code(404).send({ error: "Item não encontrado" });
     if (item.kind !== "item") return reply.code(400).send({ error: "Só itens (não capítulos/grupos/notas) têm medições" });
+    const document = await getItemDocument(id);
+    if (!document || document.status !== "rascunho") return reply.code(409).send({ error: documentLockedMessage(document?.status ?? "submetido") });
 
     const parsed = lineSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
@@ -68,6 +82,8 @@ export async function measurementLineRoutes(app: FastifyInstance) {
     const companyId = request.currentUser!.companyId!;
     const existing = await assertMeasurementLineOwned(id, companyId);
     if (!existing) return reply.code(404).send({ error: "Linha de medição não encontrada" });
+    const document = await getItemDocument(existing.lineItemId);
+    if (!document || document.status !== "rascunho") return reply.code(409).send({ error: documentLockedMessage(document?.status ?? "submetido") });
 
     const parsed = lineSchema.partial().safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
@@ -95,6 +111,8 @@ export async function measurementLineRoutes(app: FastifyInstance) {
     const companyId = request.currentUser!.companyId!;
     const existing = await assertMeasurementLineOwned(id, companyId);
     if (!existing) return reply.code(404).send({ error: "Linha de medição não encontrada" });
+    const document = await getItemDocument(existing.lineItemId);
+    if (!document || document.status !== "rascunho") return reply.code(409).send({ error: documentLockedMessage(document?.status ?? "submetido") });
 
     await db.delete(measurementLines).where(eq(measurementLines.id, id));
     const newQuantity = await recomputeItemQuantity(existing.lineItemId);
@@ -109,6 +127,8 @@ export async function measurementLineRoutes(app: FastifyInstance) {
     if (!item) return reply.code(404).send({ error: "Item não encontrado" });
     if (item.kind !== "item") return reply.code(400).send({ error: "Só itens têm medições" });
     if (!item.code) return reply.code(400).send({ error: "Este item não tem código — não é possível ligar à planta." });
+    const document = await getItemDocument(id);
+    if (!document || document.status !== "rascunho") return reply.code(409).send({ error: documentLockedMessage(document?.status ?? "submetido") });
 
     const [projectRow] = await db
       .select({ projectId: budgetDocuments.projectId })

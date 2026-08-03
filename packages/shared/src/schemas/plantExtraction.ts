@@ -85,6 +85,7 @@ export const documentAnalysisSchema = z.object({
   pageCount: z.number().int().nonnegative(),
   isMultiDiscipline: z.boolean(),
   sections: z.array(documentSectionSchema),
+  matchedTags: z.array(z.string()).default([]),
 });
 export type DocumentAnalysis = z.infer<typeof documentAnalysisSchema>;
 

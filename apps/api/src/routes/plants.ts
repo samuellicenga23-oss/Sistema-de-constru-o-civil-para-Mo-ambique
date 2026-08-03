@@ -1,18 +1,28 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { eq, and } from "drizzle-orm";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir, writeFile, unlink, readFile } from "node:fs/promises";
 import path from "node:path";
 import { db } from "../db/index.js";
-import { plants, extractedRooms, extractedRebarSchedules } from "../db/schema.js";
+import { plants, projects as projectTable, extractedRooms, extractedRebarSchedules } from "../db/schema.js";
 import { requireCompanyUser, requireRole } from "../auth/middleware.js";
 import { assertProjectOwned, assertPlantOwned } from "../services/accessControl.js";
 import { env } from "../env.js";
 import { plantParseResultSchema, PLANT_DISCIPLINES } from "@sigo/shared";
+import { loadWorkChapterLibrary } from "../services/boqTemplate.js";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista"] as const;
 const clientPlantIdSchema = z.string().uuid();
+const PLANT_PARSER_VERSION = "2026.08-adaptive-1";
+type PlantDetectionContext = { tags: string[]; parserVersion: string };
+
+async function getPlantDetectionContext(companyId: string): Promise<PlantDetectionContext> {
+  const chapters = await loadWorkChapterLibrary(companyId);
+  const tags = [...new Set(chapters.flatMap((chapter) => chapter.detectionTags ?? []).map((tag) => tag.trim().toLocaleLowerCase("pt")).filter(Boolean))].sort();
+  const rulesHash = createHash("sha256").update(JSON.stringify(tags)).digest("hex").slice(0, 10);
+  return { tags, parserVersion: `${PLANT_PARSER_VERSION}-${rulesHash}` };
+}
 
 async function setPlantProgress(
   plantId: string,
@@ -50,10 +60,22 @@ async function fetchPlantService(form: FormData): Promise<Response> {
   }
 }
 
-export async function processPlantFile(plantId: string, buffer: Buffer, filename: string): Promise<void> {
+export async function processPlantFile(plantId: string, buffer: Buffer, filename: string, suppliedContext?: PlantDetectionContext): Promise<void> {
+  let detectionContext = suppliedContext;
+  if (!detectionContext) {
+    const [owner] = await db.select({ companyId: projectTable.companyId }).from(plants)
+      .innerJoin(projectTable, eq(projectTable.id, plants.projectId)).where(eq(plants.id, plantId)).limit(1);
+    if (!owner) throw new Error("Projecto da planta não encontrado");
+    detectionContext = await getPlantDetectionContext(owner.companyId);
+  }
+  await db.update(plants).set({
+    fileHash: createHash("sha256").update(buffer).digest("hex"),
+    parserVersion: detectionContext.parserVersion,
+  }).where(eq(plants.id, plantId));
   await setPlantProgress(plantId, 20, "A preparar o PDF para leitura");
   const form = new FormData();
   form.append("file", new Blob([new Uint8Array(buffer)], { type: "application/pdf" }), filename);
+  form.append("detectionTags", JSON.stringify(detectionContext.tags));
   const response = await fetchPlantService(form);
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
@@ -76,6 +98,7 @@ export async function processPlantFile(plantId: string, buffer: Buffer, filename
     if (!line.trim()) return;
     const event = JSON.parse(line) as
       | { type: "progress"; currentPage: number; totalPages: number }
+      | { type: "stage"; progress: number; message: string }
       | { type: "result"; data: unknown }
       | { type: "error"; message: string };
     if (event.type === "progress") {
@@ -86,6 +109,8 @@ export async function processPlantFile(plantId: string, buffer: Buffer, filename
         `A ler página ${event.currentPage} de ${event.totalPages}`,
         { currentPage: event.currentPage, totalPages: event.totalPages },
       );
+    } else if (event.type === "stage") {
+      await setPlantProgress(plantId, event.progress, event.message);
     } else if (event.type === "result") {
       parseResult = event.data;
     } else {
@@ -192,6 +217,27 @@ export async function plantRoutes(app: FastifyInstance) {
     if (!buffer.subarray(0, 5).equals(Buffer.from("%PDF-", "ascii"))) {
       return reply.code(400).send({ error: "Ficheiro inválido — só são aceites PDFs" });
     }
+    const fileHash = createHash("sha256").update(buffer).digest("hex");
+    const detectionContext = await getPlantDetectionContext(companyId);
+    // O mesmo conjunto de plantas é frequentemente reenviado ao corrigir a disciplina ou ao
+    // repetir uma criação. Dentro da própria empresa, reutilizar uma análise concluída evita
+    // novamente minutos de CPU sem partilhar dados entre clientes.
+    const [cachedPlant] = await db
+      .select({
+        id: plants.id,
+        discipline: plants.discipline,
+        structuralSummary: plants.structuralSummary,
+        documentAnalysis: plants.documentAnalysis,
+      })
+      .from(plants)
+      .innerJoin(projectTable, eq(projectTable.id, plants.projectId))
+      .where(and(
+        eq(projectTable.companyId, companyId),
+        eq(plants.fileHash, fileHash),
+        eq(plants.parserVersion, detectionContext.parserVersion),
+        eq(plants.processingStatus, "concluido"),
+      ))
+      .limit(1);
     const uploadsDir = path.join(env.uploadsDir, "plants");
     await mkdir(uploadsDir, { recursive: true });
     const fileName = `${randomUUID()}.pdf`;
@@ -208,6 +254,8 @@ export async function plantRoutes(app: FastifyInstance) {
         discipline: discipline === "auto" ? "arquitectura" : discipline as (typeof PLANT_DISCIPLINES)[number],
         filePath,
         originalFileName: data.filename,
+        fileHash,
+        parserVersion: detectionContext.parserVersion,
         processingStatus: "processando",
         processingProgress: 12,
         processingStage: "Ficheiro recebido e validado",
@@ -216,12 +264,35 @@ export async function plantRoutes(app: FastifyInstance) {
       })
       .returning();
 
+    if (cachedPlant) {
+      const [cachedRooms, cachedRebar] = await Promise.all([
+        db.select().from(extractedRooms).where(eq(extractedRooms.plantId, cachedPlant.id)),
+        db.select().from(extractedRebarSchedules).where(eq(extractedRebarSchedules.plantId, cachedPlant.id)),
+      ]);
+      if (cachedRooms.length) {
+        await db.insert(extractedRooms).values(cachedRooms.map(({ id: _id, plantId: _plantId, ...room }) => ({ ...room, plantId: plant.id })));
+      }
+      if (cachedRebar.length) {
+        await db.insert(extractedRebarSchedules).values(cachedRebar.map(({ id: _id, plantId: _plantId, ...line }) => ({ ...line, plantId: plant.id })));
+      }
+      const [reused] = await db.update(plants).set({
+        discipline: cachedPlant.discipline,
+        structuralSummary: cachedPlant.structuralSummary,
+        documentAnalysis: cachedPlant.documentAnalysis,
+        processingStatus: "concluido",
+        processingProgress: 100,
+        processingStage: "Análise reutilizada — ficheiro já validado",
+        processingUpdatedAt: new Date(),
+      }).where(eq(plants.id, plant.id)).returning();
+      return reply.code(201).send(reused);
+    }
+
     // O upload responde assim que o ficheiro fica gravado — a leitura do PDF corre em segundo
     // plano e o progresso é consultado via GET /api/plants/:id/status (já usado pelo frontend
     // para a barra de progresso). Antes disto, o pedido HTTP ficava aberto durante toda a
     // análise (por vezes minutos), o que em produção esbarra em timeouts do proxy/CloudPanel —
     // nunca esperar aqui pela leitura inteira antes de responder.
-    processPlantFile(plant.id, buffer, data.filename).catch(async (err) => {
+    processPlantFile(plant.id, buffer, data.filename, detectionContext).catch(async (err) => {
       const message = err instanceof Error ? err.message : "Erro desconhecido a processar a planta";
       await db.update(plants).set({ processingStatus: "erro", processingStage: "Análise interrompida", processingUpdatedAt: new Date(), errorMessage: message }).where(eq(plants.id, plant.id));
     });

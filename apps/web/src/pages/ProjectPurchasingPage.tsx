@@ -310,7 +310,7 @@ export default function ProjectPurchasingPage() {
     <>
     <Layout
       title={`Compras e Armazém — ${project.name}`}
-      subtitle="Ordens de compra a fornecedores e stock de materiais desta obra — ligado ao Catálogo de Preços"
+      subtitle="Necessidades, pedidos e stock da obra"
       actions={
         <Link to={`/projectos/${projectId}`} className="btn btn-ghost btn-sm">
           <IconBack className="w-3.5 h-3.5" />
@@ -322,9 +322,9 @@ export default function ProjectPurchasingPage() {
         <ProjectWorkspaceNav projectId={projectId!} />
         {error && <p className="text-sm text-red-600">{error}</p>}
         {!project.zoneId && (
-          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-            <span className="font-semibold">Zona de preços em falta.</span> Enquanto a obra não tiver zona, as ordens só podem sugerir
-            cotações gerais do fornecedor. Defina a zona na página principal do projecto para usar cotações locais.
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <span><strong>Zona de preços em falta.</strong> Serão usadas apenas cotações gerais.</span>
+            <Link className="font-semibold text-amber-900 underline underline-offset-2" to={`/projectos/${projectId}`}>Definir zona</Link>
           </div>
         )}
 
@@ -359,8 +359,8 @@ export default function ProjectPurchasingPage() {
         </section>
 
         {procurementPlan && view === "necessidades" && <section className="card overflow-hidden">
-          <SectionHeader title="Necessidades automáticas" description="Composições do orçamento − stock disponível − pedidos em curso" />
-          <div className="border-b border-slate-100 bg-blue-50/60 px-5 py-3 text-sm text-blue-900"><strong>O sistema já fez a conferência.</strong> Só propõe a quantidade ainda em falta e escolhe a melhor cotação aplicável à zona da obra. Confirme antes de criar o pedido.</div>
+          <SectionHeader title="Necessidades" description="Orçamento menos stock e pedidos em curso" />
+          <div className="border-b border-slate-100 bg-blue-50/60 px-5 py-2.5 text-xs text-blue-900"><strong>Quantidade em falta já calculada.</strong> Confirme antes de preparar o pedido.</div>
           <div className="grid gap-px bg-slate-200 sm:grid-cols-2">
             {filteredRequirements.map((item) => (
               <article key={item.materialId} className="flex min-w-0 flex-col bg-white p-5">

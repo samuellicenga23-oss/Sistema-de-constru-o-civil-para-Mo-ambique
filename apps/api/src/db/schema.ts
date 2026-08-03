@@ -11,6 +11,7 @@ import {
   date,
   jsonb,
   unique,
+  index,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
@@ -266,12 +267,21 @@ export const compositionEquipmentLines = pgTable("composition_equipment_lines", 
 export const workItemTemplates = pgTable("work_item_templates", {
   id: uuid("id").primaryKey().defaultRandom(),
   companyId: uuid("company_id").references(() => companies.id, { onDelete: "cascade" }),
+  templateKey: varchar("template_key", { length: 180 }).unique(),
   chapterName: varchar("chapter_name", { length: 200 }).notNull(),
   chapterCode: varchar("chapter_code", { length: 10 }),
+  itemCode: varchar("item_code", { length: 30 }),
   description: text("description").notNull(),
   unit: unitEnum("unit").notNull(),
   compositionId: uuid("composition_id").references(() => costCompositions.id),
+  compositionName: varchar("composition_name", { length: 250 }),
+  discipline: varchar("discipline", { length: 40 }).notNull().default("outro"),
+  detectionTags: jsonb("detection_tags").$type<string[]>().notNull().default([]),
+  requiresTagMatch: boolean("requires_tag_match").notNull().default(false),
+  chapterSortOrder: integer("chapter_sort_order").notNull().default(0),
   sortOrder: integer("sort_order").notNull().default(0),
+  version: integer("version").notNull().default(1),
+  isActive: boolean("is_active").notNull().default(true),
 });
 
 // ---------- Projecto e Mapa de Quantidades ----------
@@ -325,6 +335,7 @@ export const budgetDocuments = pgTable("budget_documents", {
   documentType: varchar("document_type", { length: 20 }).notNull().default("orcamento"),
   sourceMeasurementDocumentId: uuid("source_measurement_document_id")
     .references((): AnyPgColumn => budgetDocuments.id, { onDelete: "set null" }),
+  sourceMeasurementFingerprint: varchar("source_measurement_fingerprint", { length: 64 }),
   revision: varchar("revision", { length: 20 }),
   fileNumber: varchar("file_number", { length: 50 }),
   currency: currencyEnum("currency").notNull().default("MZN"),
@@ -335,6 +346,9 @@ export const budgetDocuments = pgTable("budget_documents", {
   indirectCostsRate: numeric("indirect_costs_rate", { precision: 5, scale: 4 }).notNull().default("0"),
   profitMarginRate: numeric("profit_margin_rate", { precision: 5, scale: 4 }).notNull().default("0"),
   status: documentStatusEnum("status").notNull().default("rascunho"),
+  submittedByUserId: uuid("submitted_by_user_id").references(() => users.id),
+  approvedByUserId: uuid("approved_by_user_id").references(() => users.id),
+  approvalNote: text("approval_note"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   // Relatório da última estimativa aplicada pelo Assistente de Medições — uma linha por item
   // gerado, com a fórmula usada e se veio de dado real (planta), do que o utilizador indicou no
@@ -361,12 +375,16 @@ export const budgetSections = pgTable("budget_sections", {
   documentId: uuid("document_id").notNull().references(() => budgetDocuments.id, { onDelete: "cascade" }),
   name: varchar("name", { length: 200 }).notNull(),
   sortOrder: integer("sort_order").notNull().default(0),
+  // Identifica estruturas geradas pelo SIGO sem confundir mapas importados que usem códigos
+  // semelhantes. Também permite evoluir o modelo adaptativo sem alterar documentos existentes.
+  templateKey: varchar("template_key", { length: 50 }),
 });
 
 export const lineItems = pgTable("line_items", {
   id: uuid("id").primaryKey().defaultRandom(),
   sectionId: uuid("section_id").notNull().references(() => budgetSections.id, { onDelete: "cascade" }),
   parentId: uuid("parent_id").references((): AnyPgColumn => lineItems.id, { onDelete: "cascade" }),
+  sourceMeasurementItemId: uuid("source_measurement_item_id").references((): AnyPgColumn => lineItems.id, { onDelete: "set null" }),
   kind: lineItemKindEnum("kind").notNull(),
   code: varchar("code", { length: 30 }),
   description: text("description").notNull(),
@@ -406,6 +424,9 @@ export const measurementCertificates = pgTable("measurement_certificates", {
   notes: text("notes"),
   submittedAt: timestamp("submitted_at"),
   approvedAt: timestamp("approved_at"),
+  submittedByUserId: uuid("submitted_by_user_id").references(() => users.id),
+  approvedByUserId: uuid("approved_by_user_id").references(() => users.id),
+  approvalNote: text("approval_note"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -463,6 +484,8 @@ export const plants = pgTable("plants", {
   discipline: plantDisciplineEnum("discipline").notNull(),
   filePath: text("file_path").notNull(),
   originalFileName: varchar("original_file_name", { length: 300 }),
+  fileHash: varchar("file_hash", { length: 64 }),
+  parserVersion: varchar("parser_version", { length: 40 }),
   processingStatus: plantStatusEnum("processing_status").notNull().default("pendente"),
   processingProgress: integer("processing_progress").notNull().default(0),
   processingStage: varchar("processing_stage", { length: 200 }),
@@ -493,7 +516,7 @@ export const plants = pgTable("plants", {
   // de páginas reconhecidos como arquitectura, estrutura, hidrossanitário, electricidade, etc.
   documentAnalysis: jsonb("document_analysis").$type<DocumentAnalysis | null>(),
   uploadedAt: timestamp("uploaded_at").notNull().defaultNow(),
-});
+}, (table) => [index("plants_file_hash_idx").on(table.fileHash, table.parserVersion)]);
 
 export const extractedRooms = pgTable("extracted_rooms", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -521,6 +544,10 @@ export const extractedRebarSchedules = pgTable("extracted_rebar_schedules", {
 
 export const financialEntryTypeEnum = pgEnum("financial_entry_type", ["receita", "despesa"]);
 export const financialEntryStatusEnum = pgEnum("financial_entry_status", ["pendente", "pago"]);
+export const invoiceStatusEnum = pgEnum("invoice_status", ["rascunho", "emitida", "parcial", "paga", "cancelada"]);
+export const contractStatusEnum = pgEnum("contract_status", ["rascunho", "activo", "concluido", "cancelado"]);
+export const contractVariationStatusEnum = pgEnum("contract_variation_status", ["rascunho", "submetida", "aprovada", "rejeitada"]);
+export const creditNoteStatusEnum = pgEnum("credit_note_status", ["rascunho", "emitida", "cancelada"]);
 
 // Lançamento financeiro (receita ou despesa) ligado a um projecto — "contas a pagar"/"a receber"
 // são apenas lançamentos com status "pendente" e dueDate preenchida; "pago" com paidDate é o que
@@ -546,6 +573,114 @@ export const financialEntries = pgTable("financial_entries", {
   createdByUserId: uuid("created_by_user_id").references(() => users.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (table) => [unique("financial_entry_source_unique").on(table.projectId, table.sourceType, table.sourceId)]);
+
+// Factura comercial emitida a partir de um Auto aprovado. O valor do Auto fica imutável na
+// factura; recebimentos parciais vivem numa tabela própria em vez de deformar um lançamento
+// financeiro binário (pendente/pago).
+export const projectInvoices = pgTable("project_invoices", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  measurementCertificateId: uuid("measurement_certificate_id").notNull().references(() => measurementCertificates.id),
+  invoiceNumber: varchar("invoice_number", { length: 80 }),
+  clientName: varchar("client_name", { length: 200 }),
+  issueDate: date("issue_date"),
+  dueDate: date("due_date"),
+  status: invoiceStatusEnum("status").notNull().default("rascunho"),
+  grossAmount: numeric("gross_amount", { precision: 14, scale: 2 }).notNull(),
+  ivaRate: numeric("iva_rate", { precision: 5, scale: 4 }).notNull(),
+  retentionRate: numeric("retention_rate", { precision: 5, scale: 4 }).notNull().default("0"),
+  retentionAmount: numeric("retention_amount", { precision: 14, scale: 2 }).notNull().default("0"),
+  netAmount: numeric("net_amount", { precision: 14, scale: 2 }).notNull(),
+  currency: currencyEnum("currency").notNull().default("MZN"),
+  notes: text("notes"),
+  createdByUserId: uuid("created_by_user_id").references(() => users.id),
+  issuedByUserId: uuid("issued_by_user_id").references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [
+  unique("project_invoice_certificate_unique").on(table.measurementCertificateId),
+  unique("project_invoice_number_unique").on(table.projectId, table.invoiceNumber),
+]);
+
+export const invoiceReceipts = pgTable("invoice_receipts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  invoiceId: uuid("invoice_id").notNull().references(() => projectInvoices.id, { onDelete: "cascade" }),
+  amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
+  receivedDate: date("received_date").notNull(),
+  reference: varchar("reference", { length: 150 }),
+  notes: text("notes"),
+  proofFilePath: text("proof_file_path"),
+  proofOriginalName: varchar("proof_original_name", { length: 300 }),
+  idempotencyKey: varchar("idempotency_key", { length: 100 }),
+  createdByUserId: uuid("created_by_user_id").references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [unique("invoice_receipt_idempotency_unique").on(table.invoiceId, table.idempotencyKey)]);
+
+export const invoiceCreditNotes = pgTable("invoice_credit_notes", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  invoiceId: uuid("invoice_id").notNull().references(() => projectInvoices.id, { onDelete: "cascade" }),
+  creditNumber: varchar("credit_number", { length: 80 }).notNull(),
+  issueDate: date("issue_date").notNull(),
+  amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
+  reason: text("reason").notNull(),
+  status: creditNoteStatusEnum("status").notNull().default("rascunho"),
+  createdByUserId: uuid("created_by_user_id").references(() => users.id),
+  issuedByUserId: uuid("issued_by_user_id").references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [unique("invoice_credit_note_number_unique").on(table.invoiceId, table.creditNumber)]);
+
+// O contrato é a referência comercial da obra. Adendas nunca reescrevem o valor original:
+// cada uma guarda a sua decisão e só as aprovadas entram no valor contratual revisto.
+export const projectContracts = pgTable("project_contracts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }).unique(),
+  contractNumber: varchar("contract_number", { length: 100 }).notNull(),
+  clientName: varchar("client_name", { length: 200 }).notNull(),
+  awardDate: date("award_date"),
+  startDate: date("start_date"),
+  endDate: date("end_date"),
+  originalAmount: numeric("original_amount", { precision: 14, scale: 2 }).notNull(),
+  advanceAmount: numeric("advance_amount", { precision: 14, scale: 2 }).notNull().default("0"),
+  retentionRate: numeric("retention_rate", { precision: 5, scale: 4 }).notNull().default("0"),
+  currency: currencyEnum("currency").notNull().default("MZN"),
+  status: contractStatusEnum("status").notNull().default("rascunho"),
+  notes: text("notes"),
+  createdByUserId: uuid("created_by_user_id").references(() => users.id),
+  approvedByUserId: uuid("approved_by_user_id").references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const contractVariations = pgTable("contract_variations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  contractId: uuid("contract_id").notNull().references(() => projectContracts.id, { onDelete: "cascade" }),
+  title: varchar("title", { length: 200 }).notNull(),
+  reason: text("reason").notNull(),
+  amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
+  status: contractVariationStatusEnum("status").notNull().default("rascunho"),
+  submittedByUserId: uuid("submitted_by_user_id").references(() => users.id),
+  approvedByUserId: uuid("approved_by_user_id").references(() => users.id),
+  decisionNote: text("decision_note"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// ---------- Auditoria ----------
+//
+// Diário de eventos exclusivamente acrescentável. Não tem FKs deliberadamente: um registo de
+// auditoria precisa de sobreviver à eliminação administrativa de um documento ou utilizador e
+// nunca deve ser alterado para "corrigir" o passado. As rotas da aplicação só inserem/lêem estes
+// eventos; não existe operação de update/delete.
+export const auditEvents = pgTable("audit_events", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id").notNull(),
+  projectId: uuid("project_id"),
+  actorUserId: uuid("actor_user_id"),
+  entityType: varchar("entity_type", { length: 80 }).notNull(),
+  entityId: uuid("entity_id"),
+  action: varchar("action", { length: 80 }).notNull(),
+  beforeData: jsonb("before_data"),
+  afterData: jsonb("after_data"),
+  metadata: jsonb("metadata"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
 
 // ---------- Diário de Obra ----------
 
@@ -627,7 +762,7 @@ export const purchaseOrderLines = pgTable("purchase_order_lines", {
   quantity: numeric("quantity", { precision: 14, scale: 3 }).notNull(),
   unitCost: numeric("unit_cost", { precision: 14, scale: 4 }).notNull(),
   currency: currencyEnum("currency").notNull().default("MZN"),
-});
+}, (table) => [unique("purchase_order_material_unique").on(table.purchaseOrderId, table.materialId)]);
 
 // Movimento de stock por projecto (um "armazém" simples por obra, não multi-armazém ainda) —
 // "entrada" acontece automaticamente quando uma ordem de compra passa a "recebido" (ver
@@ -649,7 +784,7 @@ export const stockMovements = pgTable("stock_movements", {
   createdByUserId: uuid("created_by_user_id").references(() => users.id),
   date: date("date").notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+}, (table) => [unique("stock_purchase_material_unique").on(table.purchaseOrderId, table.materialId)]);
 
 // Preço de um material específico por fornecedor, opcionalmente por zona (transporte varia por
 // zona tal como material_zone_prices) — é isto que faz aparecer "materiais" dentro de um

@@ -1,0 +1,1 @@
+ALTER TABLE "work_item_templates" ADD COLUMN "requires_tag_match" boolean DEFAULT false NOT NULL;

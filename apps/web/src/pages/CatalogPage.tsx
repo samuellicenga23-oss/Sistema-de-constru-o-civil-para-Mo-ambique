@@ -10,15 +10,17 @@ import AlertBanner from "../components/AlertBanner";
 import LoadingState from "../components/LoadingState";
 import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { IconPlus, IconTrash } from "../components/icons";
+import WorkChapterLibrary from "../components/WorkChapterLibrary";
 
 function money(value: string | number) {
   return Number(value).toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 4 });
 }
 
-type Tab = "composicoes" | "mao-de-obra" | "materiais" | "zonas";
+type Tab = "composicoes" | "capitulos" | "mao-de-obra" | "materiais" | "zonas";
 
 const TABS: Array<{ id: Tab; label: string }> = [
   { id: "composicoes", label: "Composições de custo" },
+  { id: "capitulos", label: "Capítulos de trabalho" },
   { id: "mao-de-obra", label: "Mão-de-obra" },
   { id: "materiais", label: "Materiais" },
   { id: "zonas", label: "Zonas de Preço" },
@@ -37,6 +39,7 @@ export default function CatalogPage() {
   const [materials, setMaterials] = useState<Material[]>([]);
   const [compositions, setCompositions] = useState<CostComposition[]>([]);
   const [zones, setZones] = useState<PriceZone[]>([]);
+  const [chapterCount, setChapterCount] = useState(0);
   const [compositionQuery, setCompositionQuery] = useState("");
   const [labourQuery, setLabourQuery] = useState("");
   const [materialQuery, setMaterialQuery] = useState("");
@@ -250,6 +253,8 @@ export default function CatalogPage() {
                 (
                 {t.id === "composicoes"
                   ? compositions.length
+                  : t.id === "capitulos"
+                    ? chapterCount
                   : t.id === "mao-de-obra"
                     ? labourCategories.length
                     : t.id === "materiais"
@@ -332,6 +337,15 @@ export default function CatalogPage() {
 
             <div className="grid divide-y divide-slate-100 sm:grid-cols-2 sm:divide-x 2xl:grid-cols-3">{filteredCompositions.map((c) => <button key={`mobile-${c.id}`} type="button" onClick={() => navigate(`/catalogo/composicoes/${c.id}`)} className="group block w-full px-4 py-4 text-left hover:bg-blue-50/60"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><span className="font-mono text-[10px] font-semibold text-slate-400">{c.code || "SEM CÓD."}</span><strong className="mt-1 block text-sm text-slate-900 group-hover:text-brand-700">{c.name}</strong><p className="mt-1 text-xs text-slate-500">{c.category} · {c.outputUnit} · revisão {c.version}</p></div><span className={`badge shrink-0 ${c.isReady ? "badge-green" : "badge-yellow"}`}>{c.qualityScore}%</span></div><div className="mt-3 flex items-end justify-between gap-3 border-t border-slate-100 pt-3"><span className="click-hint">Abrir composição →</span><span className="text-right"><strong className="block text-sm tabular-nums">{money(c.unitCost)} {c.currency}</strong><small className="text-[10px] text-slate-500">por {c.outputUnit}</small></span></div></button>)}</div>
           </section>
+        )}
+
+        {tab === "capitulos" && (
+          <WorkChapterLibrary
+            compositions={compositions}
+            onCount={setChapterCount}
+            onError={setError}
+            onSaved={flash}
+          />
         )}
 
         {tab === "mao-de-obra" && (

@@ -13,6 +13,8 @@ import {
 } from "../services/measurementEngine.js";
 import { computeLabourByPhase } from "../services/labourByPhase.js";
 import { calculateBudgetTotals } from "../services/budgetTotals.js";
+import { createDraftInvoiceForCertificate } from "../services/invoicing.js";
+import { recordAuditEvent } from "../services/auditTrail.js";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista", "engenheiro_fiscal"] as const;
 const createSchema = z.object({
@@ -40,8 +42,22 @@ export async function measurementCertificateRoutes(app: FastifyInstance) {
     const document = await assertDocumentOwned(parsed.data.budgetDocumentId, companyId);
     if (!document) return reply.code(404).send({ error: "Mapa de Quantidades não encontrado" });
     if (document.projectId !== projectId) return reply.code(409).send({ error: "O Mapa de Quantidades não pertence a este projecto" });
+    if (document.documentType !== "orcamento") return reply.code(409).send({ error: "Seleccione um orçamento, não uma medição técnica" });
+    if (document.status !== "aprovado") {
+      return reply.code(409).send({ error: "Aprove o orçamento antes de abrir o primeiro Auto de Medição" });
+    }
     try {
-      return reply.code(201).send(await createMeasurementCertificate({ projectId, ...parsed.data }));
+      const certificate = await createMeasurementCertificate({ projectId, ...parsed.data });
+      await recordAuditEvent({
+        companyId,
+        projectId,
+        actorUserId: request.currentUser!.id,
+        entityType: "measurement_certificate",
+        entityId: certificate.id,
+        action: "created",
+        after: { number: certificate.number, status: certificate.status, budgetDocumentId: certificate.budgetDocumentId, periodDate: certificate.periodDate },
+      });
+      return reply.code(201).send(certificate);
     } catch (error) {
       return reply.code(409).send({ error: error instanceof Error ? error.message : "Não foi possível abrir o auto" });
     }
@@ -99,7 +115,7 @@ export async function measurementCertificateRoutes(app: FastifyInstance) {
     const { id } = request.params as { id: string };
     const certificate = await assertCertificateOwned(id, request.currentUser!.companyId!);
     if (!certificate) return reply.code(404).send({ error: "Auto de medição não encontrado" });
-    const parsed = z.object({ status: z.enum(["rascunho", "submetido", "aprovado"]), decisionNote: z.string().optional() }).safeParse(request.body);
+    const parsed = z.object({ status: z.enum(["rascunho", "submetido", "aprovado"]), decisionNote: z.string().trim().max(1000).optional() }).safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
 
     const transitions: Record<typeof certificate.status, typeof certificate.status[]> = {
@@ -107,6 +123,14 @@ export async function measurementCertificateRoutes(app: FastifyInstance) {
       submetido: ["rascunho", "aprovado"],
       aprovado: [],
     };
+    if (parsed.data.status === "aprovado") {
+      if (request.currentUser!.role !== "admin_empresa") {
+        return reply.code(403).send({ error: "A aprovação do Auto exige um administrador da empresa" });
+      }
+      if (certificate.submittedByUserId === request.currentUser!.id) {
+        return reply.code(409).send({ error: "Quem submeteu o Auto não pode aprová-lo" });
+      }
+    }
     if (parsed.data.status !== certificate.status && !transitions[certificate.status].includes(parsed.data.status)) {
       return reply.code(409).send({ error: `O auto ${certificate.status} não pode passar para ${parsed.data.status}` });
     }
@@ -124,9 +148,16 @@ export async function measurementCertificateRoutes(app: FastifyInstance) {
       : parsed.data.status === "aprovado"
         ? { approvedAt: now }
         : { submittedAt: null, notes: parsed.data.decisionNote ? `${certificate.notes ?? ""}\nDevolvido: ${parsed.data.decisionNote}`.trim() : certificate.notes };
-    const [updated] = await db.update(measurementCertificates).set({ status: parsed.data.status, ...timestamps }).where(eq(measurementCertificates.id, id)).returning();
+    const [updated] = await db.update(measurementCertificates).set({
+      status: parsed.data.status,
+      ...timestamps,
+      submittedByUserId: parsed.data.status === "submetido" ? request.currentUser!.id : certificate.submittedByUserId,
+      approvedByUserId: parsed.data.status === "aprovado" ? request.currentUser!.id : certificate.approvedByUserId,
+      approvalNote: parsed.data.decisionNote ?? certificate.approvalNote,
+    }).where(eq(measurementCertificates.id, id)).returning();
 
-    if (parsed.data.status === "aprovado") {
+    // Receitas antigas permanecem consultáveis; Autos novos passam a factura primeiro e não criam receita directa.
+    if (parsed.success && parsed.data.status === "aprovado" && false) {
       const [document] = await db.select().from(budgetDocuments).where(eq(budgetDocuments.id, certificate.budgetDocumentId)).limit(1);
       const periodSubtotal = detail!.lines.reduce((sum, line) => sum + line.periodValue, 0);
       const grossAmount = calculateBudgetTotals(periodSubtotal, {
@@ -157,6 +188,18 @@ export async function measurementCertificateRoutes(app: FastifyInstance) {
         });
       }
     }
+    if (parsed.data.status === "aprovado") await createDraftInvoiceForCertificate(id, request.currentUser!.id);
+    await recordAuditEvent({
+      companyId: request.currentUser!.companyId!,
+      projectId: certificate.projectId,
+      actorUserId: request.currentUser!.id,
+      entityType: "measurement_certificate",
+      entityId: id,
+      action: `status.${parsed.data.status}`,
+      before: { number: certificate.number, status: certificate.status, periodDate: certificate.periodDate },
+      after: { number: updated.number, status: updated.status, periodDate: updated.periodDate },
+      metadata: parsed.data.decisionNote ? { decisionNote: parsed.data.decisionNote } : null,
+    });
     return updated;
   });
 
@@ -166,6 +209,15 @@ export async function measurementCertificateRoutes(app: FastifyInstance) {
     if (!certificate) return reply.code(404).send({ error: "Auto de medição não encontrado" });
     if (certificate.status !== "rascunho") return reply.code(409).send({ error: "Só é possível eliminar autos em rascunho" });
     await db.delete(measurementCertificates).where(eq(measurementCertificates.id, id));
+    await recordAuditEvent({
+      companyId: request.currentUser!.companyId!,
+      projectId: certificate.projectId,
+      actorUserId: request.currentUser!.id,
+      entityType: "measurement_certificate",
+      entityId: id,
+      action: "deleted",
+      before: { number: certificate.number, status: certificate.status, periodDate: certificate.periodDate },
+    });
     return { ok: true };
   });
 

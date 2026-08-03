@@ -19,6 +19,13 @@ import { computeHourlyRate } from "../services/costEngine.js";
 
 const WORKING_DAYS = 22;
 const WORKING_HOURS = 9;
+const PRICE_DATE = "2026-08-03";
+const MARKET_PRICE_SOURCE = "Referência SIGO Moçambique 2026 — INE e mercado local";
+const MARKET_PRICE_REFERENCE = "https://ine.gov.mz/documents/20119/235090/05.Pre%C3%A7os%20M%C3%A9dios%20de%20Insumos%20de%20Constru%C3%A7%C3%A3o%20Civil-MAIO%202023.pdf/4c0f6e7e-0c31-c448-5a49-757bc1da9a91?download=true | valores estimados sem IVA; substituir por cotação válida da empresa";
+const CONSTRUIR_SOURCE = "Construir, Lda. — Maputo";
+const CONSTRUIR_REFERENCE = "https://construir.co.mz/";
+const LABOUR_SOURCE = "Diploma Ministerial n.º 39/2026 — Construção";
+const LABOUR_REFERENCE = "https://inm.gov.mz/pt-br/content/sum%C3%A1rio-br-n%C2%BA-94-de-200526-boletim-da-rep%C3%BAblica-i-serie-p%C3%A1g-489";
 
 // Ver nota de salários em seedCatalog.ts — mesmo critério (mínimo legal 2026 + escalão por
 // qualificação/escassez de mão-de-obra especializada).
@@ -42,6 +49,8 @@ const EXTRA_MATERIALS: Array<{
   importFactor?: number;
   category?: string;
   specification?: string;
+  priceSourceName?: string;
+  sourceReference?: string;
   // Unidade de compra de mercado, quando difere da unidade de medida (ver nota em seedCatalog.ts).
   purchasePackage?: { label: string; qty: number };
 }> = [
@@ -69,8 +78,8 @@ const EXTRA_MATERIALS: Array<{
     specification: "Mosaico cerâmico esmaltado ou grès porcelânico, dimensões e cor conforme memória descritiva do projecto, incluindo rodapés quando aplicável; assentamento com cola adequada, juntas de 2–3 mm e tratamento anti-humidade em zonas húmidas; ou equivalente aprovado." },
   { name: "Cimento cola", unit: "kg", baseUnitCost: 60, purchasePackage: { label: "Saco 20kg", qty: 20 } },
   { name: "Cruzetas para juntas", unit: "un", baseUnitCost: 1, purchasePackage: { label: "Pacote 200un", qty: 200 } },
-  { name: "Tubo uPVC Ø110mm", unit: "ml", baseUnitCost: 350, purchasePackage: { label: "Vara 6m", qty: 6 } },
-  { name: "Tubo uPVC Ø40mm", unit: "ml", baseUnitCost: 120, purchasePackage: { label: "Vara 6m", qty: 6 } },
+  { name: "Tubo uPVC Ø110mm", unit: "ml", baseUnitCost: 330, purchasePackage: { label: "Vara 6m", qty: 6 }, priceSourceName: CONSTRUIR_SOURCE, sourceReference: "https://construir.co.mz/" },
+  { name: "Tubo uPVC Ø40mm", unit: "ml", baseUnitCost: 100, purchasePackage: { label: "Vara 6m", qty: 6 }, priceSourceName: CONSTRUIR_SOURCE, sourceReference: CONSTRUIR_REFERENCE },
   { name: "Tubo PVC Ø80mm (queda)", unit: "ml", baseUnitCost: 250, purchasePackage: { label: "Vara 6m", qty: 6 } },
   { name: "Acessórios uPVC (colarinhos, curvas, sifões)", unit: "vg", baseUnitCost: 100 },
   { name: "Membrana polietileno 275 micron", unit: "m2", baseUnitCost: 90, purchasePackage: { label: "Rolo 100m²", qty: 100 } },
@@ -92,7 +101,7 @@ const EXTRA_MATERIALS: Array<{
   { name: "Vigamento de madeira para cobertura", unit: "ml", baseUnitCost: 650 },
   { name: "Cumeeira metálica", unit: "ml", baseUnitCost: 550 },
   { name: "Caixa de visita pré-fabricada", unit: "un", baseUnitCost: 4500 },
-  { name: "Tubo PPR 20mm (água)", unit: "ml", baseUnitCost: 95, purchasePackage: { label: "Vara 4m", qty: 4 } },
+  { name: "Tubo PPR 20mm (água)", unit: "ml", baseUnitCost: 65, purchasePackage: { label: "Vara 4m", qty: 4 }, priceSourceName: CONSTRUIR_SOURCE, sourceReference: "https://construir.co.mz/produto/tubo-ppr-pn20-32-c4m" },
   { name: "Acessórios de canalização (água)", unit: "vg", baseUnitCost: 250 },
   { name: "Torneira/registo", unit: "un", baseUnitCost: 850 },
   { name: "Cabo eléctrico 2.5mm²", unit: "ml", baseUnitCost: 65, purchasePackage: { label: "Rolo 100m", qty: 100 } },
@@ -103,41 +112,41 @@ const EXTRA_MATERIALS: Array<{
   {
     name: "Sanita completa com autoclismo (kit)",
     unit: "un",
-    baseUnitCost: 4500,
+    baseUnitCost: 8500,
     category: "Aparelhos sanitários",
     specification: "Sanita de louça vitrificada branca, autoclismo de dupla descarga 3/6 L, assento, mecanismo, válvula, flexível, fixações e vedantes. Saída horizontal ou vertical conforme a rede do projecto; conjunto completo instalado, ensaiado e estanque; ou equivalente aprovado.",
   },
   {
     name: "Lavatório com torneira (kit)",
     unit: "un",
-    baseUnitCost: 2800,
+    baseUnitCost: 6500,
     category: "Aparelhos sanitários",
     specification: "Lavatório de louça vitrificada branca com 50–60 cm, pedestal ou suportes conforme projecto, torneira monocomando cromada, válvula, sifão, flexíveis e fixações; conjunto completo instalado e ensaiado; ou equivalente aprovado.",
   },
   {
     name: "Chuveiro com misturadora (kit)",
     unit: "un",
-    baseUnitCost: 2200,
+    baseUnitCost: 4500,
     category: "Aparelhos sanitários",
     specification: "Misturadora de duche cromada para água quente e fria, ligações 1/2 polegada, chuveiro, flexível, suportes, excêntricos e vedantes; pressão de serviço compatível com a rede, instalação e ensaio incluídos; ou equivalente aprovado.",
   },
   {
     name: "Pia de cozinha inox com torneira (kit)",
     unit: "un",
-    baseUnitCost: 3200,
+    baseUnitCost: 7500,
     category: "Aparelhos sanitários",
     specification: "Lava-louça em aço inoxidável AISI 304, uma cuba, espessura mínima 0,8 mm, válvula e sifão, torneira monocomando cromada, flexíveis, fixações e vedação; dimensões conforme bancada do projecto; ou equivalente aprovado.",
   },
   {
     name: "Tanque de lavandaria com torneira (kit)",
     unit: "un",
-    baseUnitCost: 1800,
+    baseUnitCost: 4500,
     category: "Aparelhos sanitários",
     specification: "Tanque de lavandaria resistente, capacidade e dimensões conforme projecto, torneira de serviço cromada, válvula, sifão, ligações, suportes e vedação; conjunto instalado e ensaiado; ou equivalente aprovado.",
   },
   { name: "Reservatório de água 500L com suportes (kit)", unit: "un", baseUnitCost: 18000 },
   // ---- Materiais adicionais (expansão biblioteca MZ 2026) ----
-  { name: "Primário acrílico", unit: "un", baseUnitCost: 2800, category: "Tintas e revestimentos",
+  { name: "Primário acrílico", unit: "un", baseUnitCost: 3100, category: "Tintas e revestimentos", priceSourceName: CONSTRUIR_SOURCE, sourceReference: CONSTRUIR_REFERENCE,
     specification: "Primário acrílico para interior/exterior, compatível com tintas aquosas subsequentes; uma demão conforme ficha técnica; ou equivalente aprovado." },
   { name: "Massa corrida", unit: "kg", baseUnitCost: 85, purchasePackage: { label: "Saco 25kg", qty: 25 }, category: "Tintas e revestimentos" },
   { name: "Rejunte cerâmico", unit: "kg", baseUnitCost: 120, purchasePackage: { label: "Saco 5kg", qty: 5 }, category: "Revestimentos" },
@@ -146,7 +155,7 @@ const EXTRA_MATERIALS: Array<{
   { name: "Aditivo hidrófugo", unit: "un", baseUnitCost: 850 },
   { name: "Tela de fibra de vidro para reboco", unit: "m2", baseUnitCost: 180, purchasePackage: { label: "Rolo 50m²", qty: 50 } },
   { name: "Geotextil não tecido", unit: "m2", baseUnitCost: 120, purchasePackage: { label: "Rolo 100m²", qty: 100 } },
-  { name: "Brita 0/19", unit: "m3", baseUnitCost: 1150, purchasePackage: { label: "Camião 10m³", qty: 10 } },
+  { name: "Brita 0/19", unit: "m3", baseUnitCost: 920, purchasePackage: { label: "Camião 22m³", qty: 22 }, priceSourceName: CONSTRUIR_SOURCE, sourceReference: "https://construir.co.mz/produto/pedra-34-18m3-o-preco-do-produto-pode-variar-conforme-o-bairro-entre-em-contacto" },
   { name: "Lona/plástico de protecção", unit: "m2", baseUnitCost: 35, purchasePackage: { label: "Rolo 100m²", qty: 100 } },
   { name: "Tela metálica galvanizada (vedação)", unit: "m2", baseUnitCost: 420, purchasePackage: { label: "Rolo 10m", qty: 10 } },
   { name: "Poste metálico para vedação", unit: "un", baseUnitCost: 850 },
@@ -170,7 +179,19 @@ const EXTRA_MATERIALS: Array<{
   { name: "Cabo eléctrico 6mm²", unit: "ml", baseUnitCost: 140, purchasePackage: { label: "Rolo 100m", qty: 100 } },
   { name: "Eletroduto PVC Ø20mm", unit: "ml", baseUnitCost: 35, purchasePackage: { label: "Vara 3m", qty: 3 } },
   { name: "Caixa de derivação", unit: "un", baseUnitCost: 180 },
-  { name: "Quadro eléctrico principal (kit)", unit: "un", baseUnitCost: 8500,
+  { name: "Caixa de aparelhagem embutida", unit: "un", baseUnitCost: 80,
+    specification: "Caixa de aparelhagem para montagem embutida, com parafusos de fixação e espaço adequado ao mecanismo indicado no projecto." },
+  { name: "Interruptor de iluminação 10A", unit: "un", baseUnitCost: 300,
+    specification: "Interruptor de iluminação 10 A, 250 V, mecanismo, tecla e espelho completos; número de teclas, montagem e grau IP conforme o local de aplicação." },
+  { name: "Tomada 2P+T 16A", unit: "un", baseUnitCost: 350,
+    specification: "Tomada de corrente 2P+T, 16 A, 250 V, com contacto de protecção, mecanismo, espelho e acessórios; grau IP conforme o local de aplicação." },
+  { name: "Cabo de cobre nu 35mm²", unit: "ml", baseUnitCost: 700, purchasePackage: { label: "Rolo 50m", qty: 50 },
+    specification: "Condutor de cobre nu de 35 mm² para rede principal de terra, secção final conforme cálculo e projecto eléctrico." },
+  { name: "Barramento equipotencial e acessórios", unit: "vg", baseUnitCost: 1200,
+    specification: "Barramento principal de equipotencialização, ligadores, terminais, abraçadeiras e identificação para ligação das massas e elementos metálicos." },
+  { name: "Caixa de inspecção de terra", unit: "un", baseUnitCost: 750,
+    specification: "Caixa de visita/inspecção para eléctrodo de terra, com tampa removível e borne de ensaio acessível." },
+  { name: "Quadro eléctrico principal (kit)", unit: "un", baseUnitCost: 18000,
     specification: "Quadro eléctrico principal em chapa metálica, disjuntor geral, barramento, bornes, disjuntores modulares conforme projecto e acessórios; montado, identificado e ensaiado; ou equivalente aprovado." },
   { name: "Ar condicionado split 12000 BTU (kit)", unit: "un", baseUnitCost: 42000,
     specification: "Unidade split inverter 12000 BTU, classe energética A ou superior, unidade interior e exterior, tubagem frigorígena, drenagem, fixações, isolamento e ensaio; ou equivalente aprovado." },
@@ -202,9 +223,9 @@ const EXTRA_MATERIALS: Array<{
   { name: "Chapa metálica perfilada (cobertura)", unit: "m2", baseUnitCost: 1100 },
   { name: "Perfil metálico IPN (estrutura)", unit: "kg", baseUnitCost: 95 },
   { name: "Bloco de enchimento para laje aligeirada", unit: "un", baseUnitCost: 18, purchasePackage: { label: "Palete (50 un)", qty: 50 } },
-  { name: "Electrodo de aterramento", unit: "un", baseUnitCost: 850 },
+  { name: "Electrodo de aterramento", unit: "un", baseUnitCost: 1500 },
   { name: "Sensor de movimento (PIR)", unit: "un", baseUnitCost: 650 },
-  { name: "Interruptor diferencial", unit: "un", baseUnitCost: 1200 },
+  { name: "Interruptor diferencial", unit: "un", baseUnitCost: 2200 },
 ];
 
 const EXTRA_EQUIPMENT: Array<{ name: string; unit: "h"; hourlyCost: number }> = [
@@ -214,12 +235,18 @@ const EXTRA_EQUIPMENT: Array<{ name: string; unit: "h"; hourlyCost: number }> = 
   { name: "Cortadora de cerâmica", unit: "h", hourlyCost: 55 },
   { name: "Andaime (aluguer)", unit: "h", hourlyCost: 35 },
   { name: "Bomba de betão", unit: "h", hourlyCost: 1800 },
+  { name: "Megómetro e medidor de terra", unit: "h", hourlyCost: 250 },
 ];
 
 type CompositionSpec = {
   name: string;
   category: string;
   outputUnit: "m" | "m2" | "m3" | "ml" | "kg" | "un" | "vg" | "h";
+  description?: string;
+  measurementCriteria?: string;
+  executionNotes?: string;
+  sourceName?: string;
+  sourceReference?: string;
   labour: Array<[string, number]>;
   mats: Array<[string, number]>;
   equip: Array<[string, number]>;
@@ -366,6 +393,11 @@ const COMPOSITIONS: CompositionSpec[] = [
     name: "Fossa séptica pré-fabricada instalada (por m³ útil)",
     category: "Redes de Águas e Esgotos",
     outputUnit: "m3",
+    description: "Fornecimento, assentamento, ligação e ensaio de fossa séptica pré-fabricada estanque em PEAD ou solução equivalente aprovada. O rendimento do reservatório corresponde a uma unidade típica de 2,5 m³ e deve ser ajustado à capacidade comercial seleccionada.",
+    measurementCriteria: "Medir pelo volume útil dimensionado, em m³. A capacidade final, o número de utilizadores e os diâmetros de entrada e saída devem coincidir com o projecto sanitário e com a ficha do fabricante.",
+    executionNotes: "Confirmar implantação, acessibilidade para limpeza, nível freático e capacidade resistente do terreno. Executar base nivelada, instalar sem deformações, ligar a tubagem, encher conforme instruções do fabricante e ensaiar a estanquidade antes do aterro final.",
+    sourceName: "CYPE USS010/IUE030; OMS — Guide to the Development of On-Site Sanitation",
+    sourceReference: "https://generadordeprecios.info/espacios_urbanos/Instalaciones/Urbanas/Tratamiento_de_aguas_residuales/IUE030_Fosa_septica_de_polietileno_de_alta_0_3.html | https://iris.who.int/bitstream/handle/10665/39313/9241544430_eng.pdf",
     labour: [["Canalizador", 2.4], ["Servente", 3.2], ["Pedreiro A", 1.6]],
     mats: [
       ["Fossa séptica pré-fabricada", 0.4], // ~2,5 m³ por unidade típica PEAD/fibrocimento
@@ -380,6 +412,11 @@ const COMPOSITIONS: CompositionSpec[] = [
     name: "Vala/poço de infiltração com brita e geotêxtil",
     category: "Redes de Águas e Esgotos",
     outputUnit: "m2",
+    description: "Campo de infiltração ou poço absorvente com escavação, brita filtrante, geotêxtil separador e tubagem perfurada de distribuição. A área é definida pela contribuição diária e pela capacidade de infiltração efectiva do solo.",
+    measurementCriteria: "Medir pela área efectiva de infiltração dimensionada, em m². Não adoptar a quantidade sem confirmar ensaio de percolação, nível freático, afastamentos sanitários e geometria indicada no projecto.",
+    executionNotes: "Usar brita limpa de granulometria drenante, envolver a camada filtrante com geotêxtil e manter a tubagem com pendente regular. O fundo deve permanecer acima do nível freático, rocha ou camada impermeável; não executar em solo saturado sem solução técnica alternativa.",
+    sourceName: "CYPE AUP030; OMS — Guide to the Development of On-Site Sanitation",
+    sourceReference: "https://generadordeprecios.info/obra_nueva/Acondicionamiento_del_terreno/Drenajes/Pozos/Pozo_de_infiltracion__con_geotextil.html | https://iris.who.int/bitstream/handle/10665/39313/9241544430_eng.pdf",
     labour: [["Canalizador", 1.0], ["Servente", 1.8], ["Pedreiro B", 0.4]],
     mats: [
       ["Brita 0/19", 0.9],
@@ -394,6 +431,58 @@ const COMPOSITIONS: CompositionSpec[] = [
   { name: "Acessórios WC montados (espelho, toalheiro)", category: "Aparelhos Sanitários", outputUnit: "un", labour: [["Canalizador", 0.8]], mats: [["Espelho para lavatório", 1], ["Acessórios WC (toalheiro, porta-papel)", 1], ["Barra de apoio WC", 0.5]], equip: [] },
 
   // ---- Eléctricas (expansão) ----
+  {
+    name: "Quadro eléctrico completo, montado e ensaiado",
+    category: "Instalações Eléctricas",
+    outputUnit: "un",
+    description: "Quadro geral ou parcial completo, com caixa, barramentos, protecção geral, protecções diferenciais e magnetotérmicas, bornes, identificação, ligações e ensaios conforme projecto.",
+    measurementCriteria: "Medir por unidade de quadro completamente montada, identificada, ligada e ensaiada. A quantidade e calibre das protecções devem ser confirmados pelo diagrama unifilar.",
+    executionNotes: "Confirmar poder de corte, selectividade, equilíbrio de fases, reserva modular e grau de protecção. Executar aperto, continuidade, isolamento, funcionamento dos diferenciais e registo dos ensaios antes da energização.",
+    sourceName: "CYPE IEI010 — rede interior e quadro geral",
+    sourceReference: "https://www.generadordeprecios.info/obra_nueva/Instalaciones/Electricas/Instalaciones_interiores/IEI010_Red_de_distribucion_interior_en_viv.html",
+    labour: [["Electricista", 8.0], ["Servente", 2.0]],
+    mats: [["Quadro eléctrico principal (kit)", 1], ["Interruptor diferencial", 2], ["Cabo eléctrico 6mm²", 5]],
+    equip: [["Megómetro e medidor de terra", 1.5]],
+  },
+  {
+    name: "Ponto de iluminação completo em tubagem embutida (sem luminária)",
+    category: "Instalações Eléctricas",
+    outputUnit: "un",
+    description: "Ponto de iluminação completo desde a caixa de derivação, incluindo tubagem embutida, condutores de fase, neutro e protecção, caixas, interruptor e acessórios. Não inclui a luminária.",
+    measurementCriteria: "Medir por ponto concluído e funcional. O rendimento considera um percurso médio de 6 m; diferenças relevantes devem ser medidas pelo comprimento real da tubagem e dos condutores.",
+    executionNotes: "Usar condutores de 1,5 mm² no circuito de iluminação salvo indicação diferente no projecto. Confirmar separação de instalações, continuidade do condutor de protecção, polaridade e funcionamento do comando.",
+    sourceName: "CYPE IEI014 — circuito interior de iluminação",
+    sourceReference: "https://generadordeprecios.info/obra_nueva/Instalaciones/Electricas/Instalaciones_interiores/IEI014_Red_de_distribucion_interior_en_est.html",
+    labour: [["Electricista", 1.5], ["Servente", 0.5]],
+    mats: [["Eletroduto PVC Ø20mm", 6.3], ["Cabo eléctrico 1.5mm²", 18.9], ["Caixa de derivação", 0.2], ["Caixa de aparelhagem embutida", 1], ["Interruptor de iluminação 10A", 1]],
+    equip: [],
+  },
+  {
+    name: "Ponto de tomada 2P+T completo em tubagem embutida",
+    category: "Instalações Eléctricas",
+    outputUnit: "un",
+    description: "Ponto de tomada de uso geral 2P+T completo desde a caixa de derivação, incluindo tubagem embutida, condutores de fase, neutro e protecção, caixas, mecanismo, espelho e acessórios.",
+    measurementCriteria: "Medir por tomada concluída e funcional. O rendimento considera um percurso médio de 8 m; circuitos especiais e percursos diferentes devem ser ajustados ao projecto.",
+    executionNotes: "Usar condutores de 2,5 mm² para tomada geral salvo cálculo diferente. Cozinhas, equipamentos dedicados, exteriores e zonas húmidas exigem circuito, calibre e grau IP próprios. Ensaiar continuidade de terra, polaridade e funcionamento.",
+    sourceName: "CYPE IEI009/IEM060 — circuito de tomada e mecanismo 2P+T",
+    sourceReference: "https://generadordeprecios.info/rehabilitacion/Instalaciones/Electricas/Instalaciones_interiores/IEI009_Red_de_distribucion_interior_en_est.html | https://generadordeprecios.info/rehabilitacion/Instalaciones/Electricas/Mecanismos/Base_de_toma_de_corriente_empotrada.html",
+    labour: [["Electricista", 1.8], ["Servente", 0.6]],
+    mats: [["Eletroduto PVC Ø20mm", 8.4], ["Cabo eléctrico 2.5mm²", 25.2], ["Caixa de derivação", 0.2], ["Caixa de aparelhagem embutida", 1], ["Tomada 2P+T 16A", 1]],
+    equip: [],
+  },
+  {
+    name: "Rede de terra e equipotencial completa, ensaiada",
+    category: "Instalações Eléctricas",
+    outputUnit: "vg",
+    description: "Rede principal de terra da edificação, com eléctrodos, caixas de inspecção, condutor de cobre, barramento equipotencial, ligadores, identificação e ensaio da resistência de terra.",
+    measurementCriteria: "Medir como conjunto completo por edifício. A quantidade de eléctrodos e o comprimento do condutor são provisórios até confirmação pelo projecto e pelo valor de resistência obtido em obra.",
+    executionNotes: "A composição base considera 2 eléctrodos e 25 m de cobre nu. Interligar massas e elementos metálicos ao barramento principal, manter pontos de ensaio acessíveis e acrescentar eléctrodos quando a resistência medida exceder o limite definido no projecto.",
+    sourceName: "CYPE — instalações de terra; IEC 60364 (princípios de protecção)",
+    sourceReference: "https://www.generadordeprecios.info/obra_nueva/Instalaciones/Electricas/Instalaciones_interiores/IEI010_Red_de_distribucion_interior_en_viv.html",
+    labour: [["Electricista", 12.0], ["Servente", 8.0]],
+    mats: [["Electrodo de aterramento", 2], ["Caixa de inspecção de terra", 2], ["Cabo de cobre nu 35mm²", 25], ["Barramento equipotencial e acessórios", 1], ["Cabo eléctrico 6mm²", 12]],
+    equip: [["Megómetro e medidor de terra", 2.0]],
+  },
   { name: "Rede eléctrica embutida (tubagem + cabo)", category: "Instalações Eléctricas", outputUnit: "ml", labour: [["Electricista", 0.4], ["Servente", 0.3]], mats: [["Eletroduto PVC Ø20mm", 1.05], ["Cabo eléctrico 2.5mm²", 1.05], ["Caixa de derivação", 0.1]], equip: [] },
   { name: "Quadro eléctrico principal montado", category: "Instalações Eléctricas", outputUnit: "un", labour: [["Electricista", 8.0]], mats: [["Quadro eléctrico principal (kit)", 1], ["Disjuntores e acessórios eléctricos", 2], ["Interruptor diferencial", 1]], equip: [] },
   { name: "Instalação ar condicionado split", category: "Instalações Eléctricas", outputUnit: "un", labour: [["Técnico HVAC", 4.0], ["Electricista", 1.0]], mats: [["Ar condicionado split 12000 BTU (kit)", 1], ["Cabo eléctrico 4mm²", 5]], equip: [] },
@@ -410,14 +499,9 @@ async function ensureExtraEquipment() {
       .from(equipment)
       .where(and(eq(equipment.name, e.name), isNull(equipment.companyId)))
       .limit(1);
-    if (existing) continue;
-    await db.insert(equipment).values({
-      companyId: null,
-      name: e.name,
-      unit: e.unit,
-      hourlyCost: e.hourlyCost.toString(),
-      currency: "MZN",
-    });
+    const values = { unit: e.unit, hourlyCost: e.hourlyCost.toString(), currency: "MZN" as const };
+    if (existing) await db.update(equipment).set(values).where(eq(equipment.id, existing.id));
+    else await db.insert(equipment).values({ companyId: null, name: e.name, ...values });
   }
 }
 
@@ -428,15 +512,18 @@ async function ensureExtraLabour() {
       .from(labourCategories)
       .where(and(eq(labourCategories.name, cat.name), isNull(labourCategories.companyId)))
       .limit(1);
-    if (existing) continue;
     const hourlyRate = computeHourlyRate(cat.monthlySalary, WORKING_DAYS, WORKING_HOURS);
-    await db.insert(labourCategories).values({
-      companyId: null,
-      name: cat.name,
+    const values = {
       monthlySalary: cat.monthlySalary.toString(),
       hourlyRate: hourlyRate.toString(),
-      currency: "MZN",
-    });
+      currency: "MZN" as const,
+      sourceName: LABOUR_SOURCE,
+      sourceReference: LABOUR_REFERENCE,
+      effectiveDate: "2026-06-06",
+      updatedAt: new Date(),
+    };
+    if (existing) await db.update(labourCategories).set(values).where(eq(labourCategories.id, existing.id));
+    else await db.insert(labourCategories).values({ companyId: null, name: cat.name, ...values });
   }
 }
 
@@ -447,33 +534,23 @@ async function ensureExtraMaterials() {
       .from(materials)
       .where(and(eq(materials.name, m.name), isNull(materials.companyId)))
       .limit(1);
-    if (existing) {
-      if (
-        (m.category && existing.category !== m.category) ||
-        (m.specification && existing.specification !== m.specification)
-      ) {
-        await db
-          .update(materials)
-          .set({
-            category: m.category ?? existing.category,
-            specification: m.specification ?? existing.specification,
-          })
-          .where(eq(materials.id, existing.id));
-      }
-      continue;
-    }
-    await db.insert(materials).values({
-      companyId: null,
-      name: m.name,
-      category: m.category ?? "Outros",
-      specification: m.specification ?? null,
+    const values = {
+      category: m.category ?? existing?.category ?? "Outros",
+      specification: m.specification ?? existing?.specification ?? null,
       unit: m.unit,
       baseUnitCost: m.baseUnitCost.toString(),
       importFactor: (m.importFactor ?? 1).toString(),
-      currency: "MZN",
+      currency: "MZN" as const,
+      priceSourceName: m.priceSourceName ?? MARKET_PRICE_SOURCE,
+      sourceReference: m.sourceReference ?? MARKET_PRICE_REFERENCE,
+      priceDate: PRICE_DATE,
+      includesVat: false,
       purchasePackageLabel: m.purchasePackage?.label ?? null,
       purchasePackageQty: m.purchasePackage ? m.purchasePackage.qty.toString() : null,
-    });
+      updatedAt: new Date(),
+    };
+    if (existing) await db.update(materials).set(values).where(eq(materials.id, existing.id));
+    else await db.insert(materials).values({ companyId: null, name: m.name, ...values });
   }
 }
 
@@ -506,9 +583,24 @@ export async function seedCompositions() {
       .limit(1);
 
     if (existing) {
-      // Já existia de uma ronda de seed anterior (sem categoria) — actualiza a categoria.
-      if (existing.category !== spec.category) {
-        await db.update(costCompositions).set({ category: spec.category }).where(eq(costCompositions.id, existing.id));
+      // Mantém também a ficha técnica das composições globais alinhada com a biblioteca.
+      if (
+        existing.category !== spec.category ||
+        (spec.description !== undefined && existing.description !== spec.description) ||
+        (spec.measurementCriteria !== undefined && existing.measurementCriteria !== spec.measurementCriteria) ||
+        (spec.executionNotes !== undefined && existing.executionNotes !== spec.executionNotes) ||
+        (spec.sourceName !== undefined && existing.sourceName !== spec.sourceName) ||
+        (spec.sourceReference !== undefined && existing.sourceReference !== spec.sourceReference)
+      ) {
+        await db.update(costCompositions).set({
+          category: spec.category,
+          ...(spec.description !== undefined ? { description: spec.description } : {}),
+          ...(spec.measurementCriteria !== undefined ? { measurementCriteria: spec.measurementCriteria } : {}),
+          ...(spec.executionNotes !== undefined ? { executionNotes: spec.executionNotes } : {}),
+          ...(spec.sourceName !== undefined ? { sourceName: spec.sourceName } : {}),
+          ...(spec.sourceReference !== undefined ? { sourceReference: spec.sourceReference } : {}),
+          updatedAt: new Date(),
+        }).where(eq(costCompositions.id, existing.id));
         updated++;
       }
       continue;
@@ -516,7 +608,18 @@ export async function seedCompositions() {
 
     const [composition] = await db
       .insert(costCompositions)
-      .values({ companyId: null, name: spec.name, category: spec.category, outputUnit: spec.outputUnit, currency: "MZN" })
+      .values({
+        companyId: null,
+        name: spec.name,
+        category: spec.category,
+        outputUnit: spec.outputUnit,
+        currency: "MZN",
+        description: spec.description ?? null,
+        measurementCriteria: spec.measurementCriteria ?? null,
+        executionNotes: spec.executionNotes ?? null,
+        sourceName: spec.sourceName ?? null,
+        sourceReference: spec.sourceReference ?? null,
+      })
       .returning();
 
     for (const [name, qty] of spec.labour) {

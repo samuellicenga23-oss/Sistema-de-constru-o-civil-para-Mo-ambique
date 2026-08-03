@@ -5,6 +5,36 @@ import type { LineItemNode } from "../src/services/boqEngine.js";
 import { resolveSchedulePrintOptions } from "../src/services/schedulePdf.js";
 import { calculateProcurementQuantity } from "../src/services/procurementEngine.js";
 import { calculateVatTotals, DEFAULT_IVA_RATE, priceExcludingVat } from "@sigo/shared";
+import { documentLockedMessage, evaluateDocumentReadiness } from "../src/services/documentRules.js";
+
+describe("Regras de aprovação de documentos", () => {
+  it("não permite submeter uma medição vazia", () => {
+    const result = evaluateDocumentReadiness("medicao", [
+      { kind: "item", description: "Escavação", unit: "m3", quantity: 0, unitPrice: null },
+    ]);
+    expect(result.ready).toBe(false);
+    expect(result.blockers.join(" ")).toMatch(/quantidade/i);
+  });
+
+  it("exige unidade e preço apenas nos itens realmente medidos do orçamento", () => {
+    const result = evaluateDocumentReadiness("orcamento", [
+      { kind: "item", description: "Aplicável", unit: null, quantity: 10, unitPrice: 0 },
+      { kind: "item", description: "Não aplicável", unit: null, quantity: 0, unitPrice: null },
+    ]);
+    expect(result).toMatchObject({ ready: false, measuredItems: 1, missingUnit: 1, missingPrice: 1 });
+  });
+
+  it("aceita um orçamento medido, com unidade e preço positivo", () => {
+    expect(evaluateDocumentReadiness("orcamento", [
+      { kind: "item", description: "Betão B25", unit: "m3", quantity: 12.5, unitPrice: 9_850 },
+    ]).ready).toBe(true);
+  });
+
+  it("explica por que documentos fora do rascunho estão protegidos", () => {
+    expect(documentLockedMessage("aprovado")).toMatch(/nova revisão/i);
+    expect(documentLockedMessage("submetido")).toMatch(/rascunho/i);
+  });
+});
 
 describe("Regras dos Autos de Medição", () => {
   it("calcula o acumulado a partir do período actual", () => {

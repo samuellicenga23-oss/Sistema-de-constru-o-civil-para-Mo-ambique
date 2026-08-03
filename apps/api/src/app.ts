@@ -29,6 +29,12 @@ import { supplierRoutes } from "./routes/suppliers.js";
 import { purchasingRoutes } from "./routes/purchasing.js";
 import { fileRoutes } from "./routes/files.js";
 import { scheduleRoutes } from "./routes/schedule.js";
+import { auditRoutes } from "./routes/audit.js";
+import { projectControlRoutes } from "./routes/projectControl.js";
+import { invoiceRoutes } from "./routes/invoices.js";
+import { contractRoutes } from "./routes/contracts.js";
+import { workChapterRoutes } from "./routes/workChapters.js";
+import { mutationOriginAllowed, SECURITY_HEADERS } from "./services/httpSecurity.js";
 
 // Separado de index.ts (que só chama isto e depois app.listen()) para os testes poderem
 // construir a mesma app real e usar app.inject() — pedidos HTTP simulados em memória, sem abrir
@@ -40,7 +46,36 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   // sítio) e torna os logs inúteis para investigar abuso.
   // `opts.logger`: só usado pelos testes, para silenciar o pino durante a suite — sem isto
   // fica `true` tal como sempre esteve (dev e produção).
-  const app = Fastify({ logger: opts.logger ?? true, trustProxy: true });
+  const app = Fastify({
+    logger: opts.logger ?? true,
+    // Em produção existe exactamente um proxy CloudPanel/Nginx à frente da API. Limitar a um
+    // salto impede um cliente directo de forjar cadeias X-Forwarded-For arbitrárias.
+    trustProxy: env.isProduction ? 1 : true,
+    bodyLimit: 5 * 1024 * 1024,
+    requestIdHeader: "x-request-id",
+  });
+
+  app.addHook("onRequest", async (request, reply) => {
+    if (!mutationOriginAllowed({ production: env.isProduction, method: request.method, origin: request.headers.origin, host: request.headers.host, forwardedHost: typeof request.headers["x-forwarded-host"] === "string" ? request.headers["x-forwarded-host"] : undefined, fetchSite: typeof request.headers["sec-fetch-site"] === "string" ? request.headers["sec-fetch-site"] : undefined, allowedOrigins: env.corsOrigin })) return reply.code(403).send({ error: "Origem do pedido não autorizada" });
+  });
+
+  app.addHook("onSend", async (request, reply, payload) => {
+    for (const [name, value] of Object.entries(SECURITY_HEADERS)) reply.header(name, value);
+    const requestUrl = request.raw.url ?? "";
+    if (requestUrl.startsWith("/api/") && !requestUrl.startsWith("/api/health")) {
+      reply.header("Cache-Control", "no-store");
+    }
+    return payload;
+  });
+
+  app.setErrorHandler((error, request, reply) => {
+    request.log.error({ err: error, requestId: request.id }, "Unhandled request error");
+    const statusCode = typeof error === "object" && error !== null && "statusCode" in error && typeof error.statusCode === "number" ? error.statusCode : null;
+    if (statusCode && statusCode < 500) {
+      return reply.code(statusCode).send({ error: error instanceof Error ? error.message : "Pedido inválido", requestId: request.id });
+    }
+    return reply.code(500).send({ error: "Erro interno. Tente novamente.", requestId: request.id });
+  });
 
   // Em produção, só as origens listadas em CORS_ORIGIN podem fazer pedidos com credenciais
   // (cookies) — "origin: true" (reflectir qualquer origem) combinado com credentials:true era
@@ -52,7 +87,7 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
     credentials: true,
   });
   await app.register(cookie, { secret: env.sessionCookieSecret });
-  await app.register(multipart, { limits: { fileSize: 50 * 1024 * 1024 } });
+  await app.register(multipart, { limits: { fileSize: 50 * 1024 * 1024, files: 5, fields: 20, parts: 25 } });
   // Só o logótipo da empresa e o avatar de perfil são públicos de propósito (mostrados em
   // contextos sem sessão própria — ex: branding no login, ou o avatar de outro utilizador da
   // mesma equipa). Plantas e fotografias do diário de obra são dados privados de cada empresa —
@@ -87,6 +122,11 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   await app.register(supplierRoutes);
   await app.register(purchasingRoutes);
   await app.register(scheduleRoutes);
+  await app.register(auditRoutes);
+  await app.register(projectControlRoutes);
+  await app.register(invoiceRoutes);
+  await app.register(contractRoutes);
+  await app.register(workChapterRoutes);
 
   // Em produção corremos um único processo Node (padrão CloudPanel: um domínio → um appPort) —
   // a API também serve o build do frontend, em vez de depender de um Nginx separado a servir

@@ -218,6 +218,69 @@
       "when": 1785342345293,
       "tag": "0030_majestic_christian_walker",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1785676686392,
+      "tag": "0031_concerned_mandrill",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1785678978123,
+      "tag": "0032_long_maggott",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1785708531472,
+      "tag": "0033_fat_war_machine",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1785709036208,
+      "tag": "0034_giant_scalphunter",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1785710106482,
+      "tag": "0035_blue_storm",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1785711163264,
+      "tag": "0036_sloppy_cerise",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1785734385231,
+      "tag": "0037_lively_moondragon",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1785736823426,
+      "tag": "0038_mature_runaways",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1785737240047,
+      "tag": "0039_rare_avengers",
+      "breakpoints": true
     }
   ]
 }

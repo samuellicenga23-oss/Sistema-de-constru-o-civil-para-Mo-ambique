@@ -30,6 +30,7 @@ export type DocumentSection = {
 export type DocumentAnalysis = {
   pageCount: number;
   isMultiDiscipline: boolean;
+  matchedTags: string[];
   sections: DocumentSection[];
 };
 export type PlantUploadDiscipline = "auto" | "arquitectura" | "estrutura";

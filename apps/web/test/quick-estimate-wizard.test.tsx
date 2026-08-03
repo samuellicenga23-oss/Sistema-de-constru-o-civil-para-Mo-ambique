@@ -27,14 +27,15 @@ const structuralSummary = {
   totalSteelWeightKg: 8450,
 };
 
-describe("QuickEstimateWizard — dados manuais", () => {
-  it("abre o passo correcto a partir de uma pendência e permite indicar a espessura", () => {
-    render(<QuickEstimateWizard documentId="doc-1" onClose={() => {}} onApplied={() => {}} />);
+const architectureRooms = [
+  { id: "room-1", name: "Sala", number: null, areaM2: "24.50", page: 1, floor: "Piso Térreo" },
+];
 
-    const readinessItem = screen.getByText("Lajes e espessuras").closest("div.flex");
-    const manualButton = readinessItem?.querySelector("button");
-    expect(manualButton).toHaveTextContent("Indicar dados");
-    fireEvent.click(manualButton!);
+describe("QuickEstimateWizard — dados manuais", () => {
+  it("permite completar manualmente a espessura estrutural", () => {
+    render(<QuickEstimateWizard documentId="doc-1" onClose={() => {}} onApplied={() => {}} architectureRooms={architectureRooms} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Seguinte" }));
 
     const slabInput = screen.getByLabelText("Espessura média da laje (m)");
     expect(slabInput).toHaveValue(null);
@@ -48,15 +49,13 @@ describe("QuickEstimateWizard — dados manuais", () => {
         documentId="doc-2"
         onClose={() => {}}
         onApplied={() => {}}
+        architectureRooms={architectureRooms}
         structuralSummary={structuralSummary}
         structuralPlantName="Estrutura.pdf"
       />
     );
 
-    const readinessItem = screen.getByText("Lajes e espessuras").closest("div.flex");
-    const editButton = readinessItem?.querySelector("button");
-    expect(editButton).toHaveTextContent("Alterar");
-    fireEvent.click(editButton!);
+    fireEvent.click(screen.getByRole("button", { name: "Seguinte" }));
 
     const slabInput = screen.getByLabelText("Espessura média da laje (m)");
     const beamInput = screen.getByLabelText("Betão em vigas (m³)");

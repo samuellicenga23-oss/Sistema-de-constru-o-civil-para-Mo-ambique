@@ -4,6 +4,7 @@ export const SIGO_CONTACT_EMAIL = "licsenga.samuel@mechanical.co.mz";
 export type CommercialPlan = {
   slug: "fundamento" | "profissional" | "empresa";
   name: string;
+  monthlyPrice: number;
   annualPrice: number;
   regularAnnualPrice: number;
   description: string;
@@ -17,6 +18,7 @@ export const COMMERCIAL_PLANS: CommercialPlan[] = [
   {
     slug: "fundamento",
     name: "Fundamento",
+    monthlyPrice: 4_900,
     annualPrice: 49_980,
     regularAnnualPrice: 58_800,
     description: "Organize custos, documentos e os primeiros projectos num único lugar.",
@@ -27,6 +29,7 @@ export const COMMERCIAL_PLANS: CommercialPlan[] = [
   {
     slug: "profissional",
     name: "Profissional",
+    monthlyPrice: 12_900,
     annualPrice: 131_580,
     regularAnnualPrice: 154_800,
     description: "Ligue planeamento, compras, estaleiro, medição e controlo financeiro.",
@@ -38,6 +41,7 @@ export const COMMERCIAL_PLANS: CommercialPlan[] = [
   {
     slug: "empresa",
     name: "Empresa",
+    monthlyPrice: 29_900,
     annualPrice: 304_980,
     regularAnnualPrice: 358_800,
     description: "Governação, capacidade e acompanhamento para operações com várias equipas.",
@@ -59,5 +63,8 @@ export const COMMERCIAL_TO_INTERNAL_PLAN = {
 } as const;
 
 export function formatMzn(value: number) {
-  return `${value.toLocaleString("pt-MZ")} MZN`;
+  return `${value.toLocaleString("pt-MZ", {
+    minimumFractionDigits: Number.isInteger(value) ? 0 : 2,
+    maximumFractionDigits: 2,
+  })} MZN`;
 }

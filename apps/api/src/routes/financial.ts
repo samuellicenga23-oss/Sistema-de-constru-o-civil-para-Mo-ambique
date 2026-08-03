@@ -1,12 +1,13 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { financialEntries, budgetDocuments } from "../db/schema.js";
+import { financialEntries, budgetDocuments, invoiceCreditNotes, invoiceReceipts, projectInvoices } from "../db/schema.js";
 import { requireCompanyUser, requireRole } from "../auth/middleware.js";
 import { assertProjectOwned } from "../services/accessControl.js";
 import { getBudgetDocumentSummary } from "../services/boqEngine.js";
 import { CURRENCIES } from "@sigo/shared";
+import { recordAuditEvent } from "../services/auditTrail.js";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista"] as const;
 
@@ -57,6 +58,11 @@ export async function financialRoutes(app: FastifyInstance) {
       .insert(financialEntries)
       .values({ ...rest, projectId, amount: amount.toString(), createdByUserId: request.currentUser!.id })
       .returning();
+    await recordAuditEvent({
+      companyId: companyIdOf(request), projectId, actorUserId: request.currentUser!.id,
+      entityType: "financial_entry", entityId: row.id, action: "created",
+      after: { type: row.type, category: row.category, amount: row.amount, currency: row.currency, status: row.status, sourceType: row.sourceType },
+    });
     return reply.code(201).send(row);
   });
 
@@ -67,6 +73,14 @@ export async function financialRoutes(app: FastifyInstance) {
 
     const parsed = entryUpdateSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    if (parsed.data.status === "pago" && entry.status !== "pago") {
+      if (request.currentUser!.role !== "admin_empresa") {
+        return reply.code(403).send({ error: "A baixa de um pagamento exige um administrador da empresa" });
+      }
+      if (!entry.sourceType && entry.createdByUserId === request.currentUser!.id) {
+        return reply.code(409).send({ error: "Quem criou este lançamento não pode confirmar o seu próprio pagamento" });
+      }
+    }
     if (entry.sourceType && (parsed.data.type || parsed.data.category || parsed.data.description !== undefined || parsed.data.amount !== undefined || parsed.data.currency)) {
       return reply.code(409).send({ error: "O valor deste lançamento é sincronizado com o documento de origem; altere apenas o pagamento" });
     }
@@ -76,6 +90,12 @@ export async function financialRoutes(app: FastifyInstance) {
       .set({ ...rest, amount: amount !== undefined ? amount.toString() : undefined })
       .where(eq(financialEntries.id, id))
       .returning();
+    await recordAuditEvent({
+      companyId: companyIdOf(request), projectId: entry.projectId, actorUserId: request.currentUser!.id,
+      entityType: "financial_entry", entityId: id, action: "updated",
+      before: { type: entry.type, category: entry.category, amount: entry.amount, currency: entry.currency, status: entry.status, dueDate: entry.dueDate, paidDate: entry.paidDate },
+      after: { type: row.type, category: row.category, amount: row.amount, currency: row.currency, status: row.status, dueDate: row.dueDate, paidDate: row.paidDate },
+    });
     return row;
   });
 
@@ -85,6 +105,11 @@ export async function financialRoutes(app: FastifyInstance) {
     if (!entry) return { ok: true };
     if (entry.sourceType) return reply.code(409).send({ error: "Lançamentos automáticos devem ser corrigidos no documento de origem" });
     await db.delete(financialEntries).where(eq(financialEntries.id, id));
+    await recordAuditEvent({
+      companyId: companyIdOf(request), projectId: entry.projectId, actorUserId: request.currentUser!.id,
+      entityType: "financial_entry", entityId: id, action: "deleted",
+      before: { type: entry.type, category: entry.category, amount: entry.amount, currency: entry.currency, status: entry.status },
+    });
     return { ok: true };
   });
 
@@ -109,7 +134,17 @@ export async function financialRoutes(app: FastifyInstance) {
     const summary = latestDocument ? await getBudgetDocumentSummary(latestDocument.id) : null;
     const valorContratado = summary?.total ?? 0;
 
-    const entries = await db.select().from(financialEntries).where(eq(financialEntries.projectId, projectId));
+    const [entries, invoices] = await Promise.all([
+      db.select().from(financialEntries).where(eq(financialEntries.projectId, projectId)),
+      db.select().from(projectInvoices).where(eq(projectInvoices.projectId, projectId)),
+    ]);
+    const invoiceIds = invoices.map((invoice) => invoice.id);
+    const [receipts, creditNotes] = invoiceIds.length
+      ? await Promise.all([
+          db.select().from(invoiceReceipts).where(inArray(invoiceReceipts.invoiceId, invoiceIds)),
+          db.select().from(invoiceCreditNotes).where(inArray(invoiceCreditNotes.invoiceId, invoiceIds)),
+        ])
+      : [[], []];
 
     let valorRecebido = 0;
     let custoRealizado = 0;
@@ -120,6 +155,10 @@ export async function financialRoutes(app: FastifyInstance) {
     for (const e of entries) {
       const amount = Number(e.amount);
       if (e.type === "receita") {
+        // A factura conserva um lançamento de origem para rastreabilidade, mas o valor financeiro
+        // real vem dos seus recebimentos. Sem este desvio, pagamentos parciais seriam contados
+        // como se toda a factura tivesse sido recebida ou estivesse em aberto.
+        if (e.sourceType === "invoice") continue;
         if (e.status === "pago") {
           valorRecebido += amount;
           const month = (e.paidDate ?? e.createdAt.toISOString().slice(0, 10)).slice(0, 7);
@@ -140,6 +179,28 @@ export async function financialRoutes(app: FastifyInstance) {
           contasAPagar += amount;
         }
       }
+    }
+    const invoiceById = new Map(invoices.map((invoice) => [invoice.id, invoice]));
+    const receiptsByInvoice = new Map<string, number>();
+    const creditsByInvoice = new Map<string, number>();
+    for (const receipt of receipts) {
+      const invoice = invoiceById.get(receipt.invoiceId);
+      if (!invoice || invoice.status === "cancelada" || invoice.currency !== project.currency) continue;
+      const amount = Number(receipt.amount);
+      receiptsByInvoice.set(receipt.invoiceId, (receiptsByInvoice.get(receipt.invoiceId) ?? 0) + amount);
+      valorRecebido += amount;
+      const month = receipt.receivedDate.slice(0, 7);
+      const bucket = cashFlowByMonth.get(month) ?? { receitas: 0, despesas: 0 };
+      bucket.receitas += amount;
+      cashFlowByMonth.set(month, bucket);
+    }
+    for (const note of creditNotes) {
+      if (note.status !== "emitida") continue;
+      creditsByInvoice.set(note.invoiceId, (creditsByInvoice.get(note.invoiceId) ?? 0) + Number(note.amount));
+    }
+    for (const invoice of invoices) {
+      if (invoice.status === "rascunho" || invoice.status === "cancelada" || invoice.currency !== project.currency) continue;
+      contasAReceber += Math.max(0, Number(invoice.netAmount) - (creditsByInvoice.get(invoice.id) ?? 0) - (receiptsByInvoice.get(invoice.id) ?? 0));
     }
 
     const fluxoCaixaMensal = Array.from(cashFlowByMonth.entries())

@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
+import { createHash } from "node:crypto";
 import { db } from "../db/index.js";
 import { budgetDocuments, budgetSections, lineItems, measurementCertificates, projects } from "../db/schema.js";
 import { requireCompanyUser, requireRole } from "../auth/middleware.js";
@@ -17,12 +18,64 @@ import {
 import { generateStandardBoq } from "../services/boqTemplate.js";
 import { applyProjectSpecificationsToDocument } from "../services/specEnrichment.js";
 import { importMeasurementsFromExcel } from "../services/measurementImport.js";
+import { documentLockedMessage, evaluateDocumentReadiness } from "../services/documentRules.js";
+import { recordAuditEvent } from "../services/auditTrail.js";
 import { CURRENCIES, DEFAULT_IVA_RATE, UNITS, LINE_ITEM_KINDS } from "@sigo/shared";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista"] as const;
 
 function companyIdOf(request: FastifyRequest): string {
   return request.currentUser!.companyId!;
+}
+
+async function getDocumentItems(documentId: string) {
+  return db
+    .select({
+      kind: lineItems.kind,
+      description: lineItems.description,
+      unit: lineItems.unit,
+      quantity: lineItems.quantity,
+      unitPrice: lineItems.unitPrice,
+    })
+    .from(lineItems)
+    .innerJoin(budgetSections, eq(lineItems.sectionId, budgetSections.id))
+    .where(eq(budgetSections.documentId, documentId));
+}
+
+function measurementFingerprint(
+  sections: Array<{ id: string; name: string; sortOrder: number }>,
+  items: Array<{ id: string; sectionId: string; parentId: string | null; kind: string; code: string | null; description: string; unit: string | null; quantity: string | null; compositionId: string | null; sortOrder: number }>,
+) {
+  const payload = {
+    sections: sections.map((section) => ({ id: section.id, name: section.name, sortOrder: section.sortOrder })),
+    items: [...items]
+      .sort((a, b) => a.sectionId.localeCompare(b.sectionId) || a.sortOrder - b.sortOrder || a.id.localeCompare(b.id))
+      .map((item) => ({
+        id: item.id,
+        sectionId: item.sectionId,
+        parentId: item.parentId,
+        kind: item.kind,
+        code: item.code,
+        description: item.description,
+        unit: item.unit,
+        quantity: item.quantity,
+        compositionId: item.compositionId,
+        sortOrder: item.sortOrder,
+      })),
+  };
+  return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
+
+async function getDocumentForSection(sectionId: string, companyId: string) {
+  const section = await assertSectionOwned(sectionId, companyId);
+  return section ? assertDocumentOwned(section.documentId, companyId) : null;
+}
+
+async function getDocumentForItem(itemId: string, companyId: string) {
+  const item = await assertLineItemOwned(itemId, companyId);
+  if (!item) return null;
+  const [section] = await db.select().from(budgetSections).where(eq(budgetSections.id, item.sectionId)).limit(1);
+  return section ? assertDocumentOwned(section.documentId, companyId) : null;
 }
 
 const documentSchema = z.object({
@@ -137,7 +190,7 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
     const document = await assertDocumentOwned(id, companyId);
     if (!document) return reply.code(404).send({ error: "Documento não encontrado" });
 
-    const parsed = z.object({ status: z.enum(["rascunho", "submetido", "aprovado"]) }).safeParse(request.body);
+    const parsed = z.object({ status: z.enum(["rascunho", "submetido", "aprovado"]), decisionNote: z.string().trim().max(1000).optional() }).safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
 
     const transitions: Record<typeof document.status, (typeof document.status)[]> = {
@@ -145,11 +198,45 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
       submetido: ["rascunho", "aprovado"],
       aprovado: [],
     };
+    if (parsed.data.status === "aprovado") {
+      if (request.currentUser!.role !== "admin_empresa") {
+        return reply.code(403).send({ error: "A aprovação do documento exige um administrador da empresa" });
+      }
+      if (document.submittedByUserId === request.currentUser!.id) {
+        return reply.code(409).send({ error: "Quem submeteu o documento não pode aprová-lo" });
+      }
+    }
     if (parsed.data.status !== document.status && !transitions[document.status].includes(parsed.data.status)) {
       return reply.code(409).send({ error: `O documento em ${document.status} não pode passar para ${parsed.data.status}` });
     }
 
-    const [updated] = await db.update(budgetDocuments).set({ status: parsed.data.status }).where(eq(budgetDocuments.id, id)).returning();
+    if (parsed.data.status === "submetido" || parsed.data.status === "aprovado") {
+      const readiness = evaluateDocumentReadiness(document.documentType === "medicao" ? "medicao" : "orcamento", await getDocumentItems(id));
+      if (!readiness.ready) {
+        return reply.code(409).send({
+          error: `Documento incompleto: ${readiness.blockers.join("; ")}.`,
+          readiness,
+        });
+      }
+    }
+
+    const [updated] = await db.update(budgetDocuments).set({
+      status: parsed.data.status,
+      submittedByUserId: parsed.data.status === "submetido" ? request.currentUser!.id : document.submittedByUserId,
+      approvedByUserId: parsed.data.status === "aprovado" ? request.currentUser!.id : document.approvedByUserId,
+      approvalNote: parsed.data.decisionNote ?? document.approvalNote,
+    }).where(eq(budgetDocuments.id, id)).returning();
+    await recordAuditEvent({
+      companyId,
+      projectId: document.projectId,
+      actorUserId: request.currentUser!.id,
+      entityType: "budget_document",
+      entityId: id,
+      action: `status.${parsed.data.status}`,
+      before: { status: document.status, title: document.title, documentType: document.documentType, submittedByUserId: document.submittedByUserId },
+      after: { status: updated.status, title: updated.title, documentType: updated.documentType, submittedByUserId: updated.submittedByUserId, approvedByUserId: updated.approvedByUserId },
+      metadata: parsed.data.decisionNote ? { decisionNote: parsed.data.decisionNote } : null,
+    });
     return updated;
   });
 
@@ -164,13 +251,19 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
     if (source.documentType !== "medicao") {
       return reply.code(409).send({ error: "Só documentos de medição podem ser enviados para orçamento." });
     }
+    const options = z.object({ createRevision: z.boolean().default(false) }).safeParse(request.body ?? {});
+    if (!options.success) return reply.code(400).send({ error: options.error.flatten() });
 
-    const [existing] = await db
+    const readiness = evaluateDocumentReadiness("medicao", await getDocumentItems(id));
+    if (!readiness.ready) {
+      return reply.code(409).send({ error: `Medição incompleta: ${readiness.blockers.join("; ")}.`, readiness });
+    }
+
+    const existingBudgets = await db
       .select()
       .from(budgetDocuments)
       .where(and(eq(budgetDocuments.projectId, source.projectId), eq(budgetDocuments.sourceMeasurementDocumentId, id)))
-      .limit(1);
-    if (existing) return { document: existing, created: false };
+      .orderBy(desc(budgetDocuments.createdAt));
 
     const project = await assertProjectOwned(source.projectId, companyId);
     if (!project) return reply.code(404).send({ error: "Projecto não encontrado" });
@@ -178,6 +271,19 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
     const sourceItems = sourceSections.length
       ? await db.select().from(lineItems).where(inArray(lineItems.sectionId, sourceSections.map((section) => section.id))).orderBy(lineItems.sortOrder)
       : [];
+    const fingerprint = measurementFingerprint(sourceSections, sourceItems);
+    const latestBudget = existingBudgets[0];
+    if (latestBudget?.sourceMeasurementFingerprint === fingerprint || (latestBudget && !latestBudget.sourceMeasurementFingerprint)) {
+      return { document: latestBudget, created: false, revisionCreated: false };
+    }
+    if (latestBudget && !options.data.createRevision) {
+      return reply.code(409).send({
+        code: "MEASUREMENT_CHANGED",
+        error: "A medição mudou depois do último orçamento. Crie uma nova revisão para incorporar os novos capítulos e quantidades.",
+        existingDocumentId: latestBudget.id,
+        existingRevision: latestBudget.revision,
+      });
+    }
 
     const computedPrices = new Map<string, number | null>();
     for (const item of sourceItems) {
@@ -201,7 +307,8 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
           title: `Orçamento — ${project.name}`,
           documentType: "orcamento",
           sourceMeasurementDocumentId: source.id,
-          revision: "0",
+          sourceMeasurementFingerprint: fingerprint,
+          revision: String(existingBudgets.length),
           currency: "MZN",
           ivaRate: project.ivaRate,
           contingenciasRate: project.contingenciasRate,
@@ -214,7 +321,7 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
       for (const sourceSection of sourceSections) {
         const [targetSection] = await tx
           .insert(budgetSections)
-          .values({ documentId: created.id, name: sourceSection.name, sortOrder: sourceSection.sortOrder })
+          .values({ documentId: created.id, name: sourceSection.name, sortOrder: sourceSection.sortOrder, templateKey: "sigo_orcamento_snapshot_v1" })
           .returning();
 
         const copyLevel = async (sourceParentId: string | null, targetParentId: string | null): Promise<void> => {
@@ -226,6 +333,7 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
               .values({
                 sectionId: targetSection.id,
                 parentId: targetParentId,
+                sourceMeasurementItemId: item.id,
                 kind: item.kind,
                 code: item.code,
                 description: item.description,
@@ -249,7 +357,7 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
 
     await applyProjectSpecificationsToDocument(target.id, project.id);
 
-    return reply.code(201).send({ document: target, created: true });
+    return reply.code(201).send({ document: target, created: true, revisionCreated: existingBudgets.length > 0 });
   });
 
   app.post("/api/budget-documents/:id/apply-specifications", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
@@ -359,6 +467,7 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
     const companyId = companyIdOf(request);
     const document = await assertDocumentOwned(id, companyId);
     if (!document) return reply.code(404).send({ error: "Documento não encontrado" });
+    if (document.status !== "rascunho") return reply.code(409).send({ error: documentLockedMessage(document.status) });
 
     const parsed = documentSchema.partial().safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
@@ -384,6 +493,7 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
     const companyId = companyIdOf(request);
     const document = await assertDocumentOwned(id, companyId);
     if (!document) return reply.code(404).send({ error: "Documento não encontrado" });
+    if (document.status !== "rascunho") return reply.code(409).send({ error: "Só é possível eliminar documentos em rascunho." });
 
     // Os autos de medição referenciam o documento sem cascade (fazem sentido só enquanto o
     // documento base existir) — apagam-se primeiro para não violar a chave estrangeira; as
@@ -401,6 +511,7 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
     const companyId = companyIdOf(request);
     const document = await assertDocumentOwned(id, companyId);
     if (!document) return reply.code(404).send({ error: "Documento não encontrado" });
+    if (document.status !== "rascunho") return reply.code(409).send({ error: documentLockedMessage(document.status) });
 
     const data = await request.file();
     if (!data) return reply.code(400).send({ error: "Ficheiro em falta" });
@@ -421,6 +532,7 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
     const companyId = companyIdOf(request);
     const document = await assertDocumentOwned(id, companyId);
     if (!document) return reply.code(404).send({ error: "Documento não encontrado" });
+    if (document.status !== "rascunho") return reply.code(409).send({ error: documentLockedMessage(document.status) });
 
     const parsed = sectionSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
@@ -434,6 +546,8 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
     const companyId = companyIdOf(request);
     const section = await assertSectionOwned(id, companyId);
     if (!section) return reply.code(404).send({ error: "Secção não encontrada" });
+    const document = await getDocumentForSection(id, companyId);
+    if (!document || document.status !== "rascunho") return reply.code(409).send({ error: documentLockedMessage(document?.status ?? "submetido") });
     await db.delete(budgetSections).where(eq(budgetSections.id, id));
     return { ok: true };
   });
@@ -443,6 +557,8 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
     const companyId = companyIdOf(request);
     const section = await assertSectionOwned(id, companyId);
     if (!section) return reply.code(404).send({ error: "Secção não encontrada" });
+    const document = await getDocumentForSection(id, companyId);
+    if (!document || document.status !== "rascunho") return reply.code(409).send({ error: documentLockedMessage(document?.status ?? "submetido") });
 
     const parsed = z.object({ name: z.string().min(1) }).safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
@@ -457,6 +573,8 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
     const companyId = companyIdOf(request);
     const section = await assertSectionOwned(id, companyId);
     if (!section) return reply.code(404).send({ error: "Secção não encontrada" });
+    const document = await getDocumentForSection(id, companyId);
+    if (!document || document.status !== "rascunho") return reply.code(409).send({ error: documentLockedMessage(document?.status ?? "submetido") });
 
     const parsed = lineItemSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
@@ -495,6 +613,8 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
     const companyId = companyIdOf(request);
     const existing = await assertLineItemOwned(id, companyId);
     if (!existing) return reply.code(404).send({ error: "Item não encontrado" });
+    const document = await getDocumentForItem(id, companyId);
+    if (!document || document.status !== "rascunho") return reply.code(409).send({ error: documentLockedMessage(document?.status ?? "submetido") });
 
     const parsed = lineItemUpdateSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
@@ -538,6 +658,8 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
     const companyId = companyIdOf(request);
     const existing = await assertLineItemOwned(id, companyId);
     if (!existing) return reply.code(404).send({ error: "Item não encontrado" });
+    const document = await getDocumentForItem(id, companyId);
+    if (!document || document.status !== "rascunho") return reply.code(409).send({ error: documentLockedMessage(document?.status ?? "submetido") });
     await db.delete(lineItems).where(eq(lineItems.id, id));
     return { ok: true };
   });
@@ -561,6 +683,10 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
     for (const entry of parsed.data.items) {
       const existing = await assertLineItemOwned(entry.id, companyId);
       if (!existing || existing.kind !== "item") continue;
+      const document = await getDocumentForItem(entry.id, companyId);
+      if (!document || document.status !== "rascunho") {
+        return reply.code(409).send({ error: documentLockedMessage(document?.status ?? "submetido") });
+      }
       const description = mergeDescriptionWithSpec(stripEmbeddedSpec(existing.description), entry.technicalSpecification);
       await db.update(lineItems).set({ description }).where(eq(lineItems.id, entry.id));
       updated++;
