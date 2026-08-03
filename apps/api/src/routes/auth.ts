@@ -19,6 +19,7 @@ import {
 import { requireAuth } from "../auth/middleware.js";
 import { detectImageExtension } from "../services/imageValidation.js";
 import { env } from "../env.js";
+import { isCompanyUserRole, resolveRoleTemplate } from "@sigo/shared";
 
 // Extrai os dados da sessão que ajudam o utilizador a reconhecer o dispositivo mais tarde (ecrã
 // de Perfil → "Sessões") — nenhum dos dois é uma identidade forte, só um auxiliar visual.
@@ -99,13 +100,24 @@ export async function authRoutes(app: FastifyInstance) {
       }
 
       const [company] = user.companyId
-        ? await db.select({ enabledModules: companies.enabledModules }).from(companies).where(eq(companies.id, user.companyId)).limit(1)
+        ? await db
+            .select({ enabledModules: companies.enabledModules, rolePermissions: companies.rolePermissions })
+            .from(companies)
+            .where(eq(companies.id, user.companyId))
+            .limit(1)
         : [];
 
       const session = await createSession(user.id, sessionMetaOf(request));
       const lastLoginAt = new Date();
       await db.update(users).set({ lastLoginAt }).where(eq(users.id, user.id));
       reply.setCookie("sid", session.id, { ...COOKIE_OPTS, expires: session.expiresAt });
+
+      const permissions =
+        user.permissions?.length > 0
+          ? user.permissions
+          : isCompanyUserRole(user.role)
+            ? resolveRoleTemplate(user.role, company?.rolePermissions)
+            : ["plataforma.configuracoes"];
 
       return {
         id: user.id,
@@ -119,6 +131,7 @@ export async function authRoutes(app: FastifyInstance) {
         mustChangePassword: user.mustChangePassword,
         preferredLanguage: user.preferredLanguage,
         enabledModules: company?.enabledModules ?? [],
+        permissions,
         createdAt: user.createdAt,
       };
     }
@@ -269,6 +282,7 @@ export async function authRoutes(app: FastifyInstance) {
       mustChangePassword: updated.mustChangePassword,
       preferredLanguage: updated.preferredLanguage,
       enabledModules: request.currentUser!.enabledModules,
+      permissions: request.currentUser!.permissions,
       createdAt: updated.createdAt,
     };
   });

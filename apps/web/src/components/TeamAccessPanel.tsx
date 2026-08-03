@@ -1,20 +1,34 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { usersApi, type CompanyUser, type CompanyUserRole } from "../api/users";
+import { roleLabel, type CompanyUserRole, type PermissionDef } from "@sigo/shared";
+import { usersApi, type CompanyUser, type PermissionCatalogResponse } from "../api/users";
 import { useAuth } from "../auth/AuthContext";
 import Modal from "./Modal";
 import { IconKey, IconPlus, IconRefresh, IconUsers } from "./icons";
 import { InlineNotice, SectionHeader } from "./WorkspaceUI";
 
-const ROLE_INFO: Record<CompanyUserRole, { label: string; summary: string; badgeClass: string }> = {
-  admin_empresa: { label: "Administrador", summary: "Empresa, subscrição, equipa e todos os módulos operacionais.", badgeClass: "bg-[#142033] text-white" },
-  orcamentista: { label: "Orçamentista", summary: "Catálogo, composições, orçamentos, cotações e preparação de compras.", badgeClass: "bg-blue-100 text-blue-800" },
-  engenheiro_fiscal: { label: "Engenheiro / Fiscal", summary: "Cronograma, Diário de Obra, Autos, compras e validação da execução.", badgeClass: "bg-teal-100 text-teal-800" },
-  visualizador: { label: "Visualizador", summary: "Consulta de informação e relatórios, sem alterações operacionais.", badgeClass: "bg-slate-200 text-slate-700" },
+const ROLE_INFO: Record<CompanyUserRole, { summary: string; badgeClass: string }> = {
+  admin_empresa: {
+    summary: "Empresa, subscrição, equipa e todos os módulos operacionais.",
+    badgeClass: "bg-ink text-white",
+  },
+  orcamentista: {
+    summary: "Catálogo, composições, orçamentos, cotações e preparação de compras.",
+    badgeClass: "bg-brand-50 text-brand-800",
+  },
+  engenheiro_fiscal: {
+    summary: "Cronograma, Diário de Obra, Autos, compras e validação da execução.",
+    badgeClass: "bg-teal-50 text-teal-700",
+  },
+  visualizador: {
+    summary: "Consulta de informação e relatórios, sem alterações operacionais.",
+    badgeClass: "bg-slate-200 text-slate-700",
+  },
 };
 
-type Dialog =
+type Drawer =
   | { type: "create" }
   | { type: "edit"; user: CompanyUser }
+  | { type: "permissions"; user: CompanyUser }
   | { type: "password"; user: CompanyUser }
   | null;
 
@@ -29,16 +43,89 @@ function generatePassword() {
   return Array.from(bytes, (value) => chars[value % chars.length]).join("");
 }
 
-export default function TeamAccessPanel({ maxUsers, onCountChange }: { maxUsers: number | null; onCountChange?: (count: number) => void }) {
+function initials(name: string) {
+  const parts = name.trim().split(/\s+/);
+  return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase();
+}
+
+function PermissionGrid({
+  catalog,
+  groups,
+  selected,
+  onChange,
+  columnsClass,
+}: {
+  catalog: PermissionDef[];
+  groups: string[];
+  selected: Set<string>;
+  onChange: (next: Set<string>) => void;
+  columnsClass: string;
+}) {
+  return (
+    <div className="space-y-5">
+      {groups.map((group) => {
+        const items = catalog.filter((p) => p.group === group);
+        if (items.length === 0) return null;
+        return (
+          <div key={group}>
+            <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.12em] text-slate-400">{group}</p>
+            <div className={`grid gap-2 ${columnsClass}`}>
+              {items.map((perm) => {
+                const on = selected.has(perm.id);
+                return (
+                  <label
+                    key={perm.id}
+                    className={`flex cursor-pointer items-start gap-2.5 rounded-xl border px-3 py-2.5 transition ${
+                      on ? "border-brand-200 bg-brand-50/70" : "border-slate-200 bg-white hover:border-slate-300"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      className="mt-0.5 h-4 w-4 accent-[#ed6c22]"
+                      checked={on}
+                      onChange={() => {
+                        const next = new Set(selected);
+                        if (on) next.delete(perm.id);
+                        else next.add(perm.id);
+                        onChange(next);
+                      }}
+                    />
+                    <span className="min-w-0">
+                      <span className="block text-[13px] font-semibold text-slate-900">{perm.label}</span>
+                      <span className="mt-0.5 block font-mono text-[10px] text-slate-400">{perm.id}</span>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+export default function TeamAccessPanel({
+  maxUsers,
+  onCountChange,
+}: {
+  maxUsers: number | null;
+  onCountChange?: (count: number) => void;
+}) {
   const { user: currentUser } = useAuth();
   const [users, setUsers] = useState<CompanyUser[]>([]);
+  const [catalog, setCatalog] = useState<PermissionCatalogResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState<CompanyUserRole | "todos">("todos");
   const [statusFilter, setStatusFilter] = useState<"todos" | "activos" | "inactivos">("todos");
-  const [dialog, setDialog] = useState<Dialog>(null);
+  const [drawer, setDrawer] = useState<Drawer>(null);
+  const [deleteTarget, setDeleteTarget] = useState<CompanyUser | null>(null);
   const [saving, setSaving] = useState(false);
+  const [templateRole, setTemplateRole] = useState<CompanyUserRole>("orcamentista");
+  const [templateSelected, setTemplateSelected] = useState<Set<string>>(new Set());
+  const [userPermSelected, setUserPermSelected] = useState<Set<string>>(new Set());
 
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -50,9 +137,11 @@ export default function TeamAccessPanel({ maxUsers, onCountChange }: { maxUsers:
     setLoading(true);
     setError(null);
     try {
-      const data = await usersApi.list();
+      const [data, cat] = await Promise.all([usersApi.list(), usersApi.permissionCatalog()]);
       data.sort((a, b) => Number(b.isActive) - Number(a.isActive) || a.name.localeCompare(b.name, "pt"));
       setUsers(data);
+      setCatalog(cat);
+      setTemplateSelected(new Set(cat.roleTemplates[templateRole] ?? []));
       onCountChange?.(data.length);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Não foi possível carregar a equipa");
@@ -61,136 +150,493 @@ export default function TeamAccessPanel({ maxUsers, onCountChange }: { maxUsers:
     }
   }
 
-  useEffect(() => { reload(); }, []);
+  useEffect(() => {
+    reload();
+  }, []);
 
-  const filtered = useMemo(() => users.filter((member) => {
-    const text = `${member.name} ${member.email}`.toLocaleLowerCase("pt");
-    return text.includes(query.toLocaleLowerCase("pt"))
-      && (roleFilter === "todos" || member.role === roleFilter)
-      && (statusFilter === "todos" || (statusFilter === "activos" ? member.isActive : !member.isActive));
-  }), [users, query, roleFilter, statusFilter]);
+  useEffect(() => {
+    if (!catalog) return;
+    setTemplateSelected(new Set(catalog.roleTemplates[templateRole] ?? []));
+  }, [templateRole, catalog]);
 
-  const activeUsers = users.filter((member) => member.isActive).length;
-  const admins = users.filter((member) => member.isActive && member.role === "admin_empresa").length;
-  const pending = users.filter((member) => !member.lastLoginAt || member.mustChangePassword).length;
-  const usage = maxUsers ? Math.min(100, Math.round(users.length / maxUsers * 100)) : null;
+  const filtered = useMemo(
+    () =>
+      users.filter((member) => {
+        const text = `${member.name} ${member.email}`.toLocaleLowerCase("pt");
+        return (
+          text.includes(query.toLocaleLowerCase("pt")) &&
+          (roleFilter === "todos" || member.role === roleFilter) &&
+          (statusFilter === "todos" || (statusFilter === "activos" ? member.isActive : !member.isActive))
+        );
+      }),
+    [users, query, roleFilter, statusFilter],
+  );
+
+  const activeUsers = users.filter((m) => m.isActive).length;
+  const atCapacity = Boolean(maxUsers && users.length >= maxUsers);
 
   function openCreate() {
-    setName(""); setEmail(""); setPassword(generatePassword()); setRole("orcamentista"); setIsActive(true); setDialog({ type: "create" });
+    setName("");
+    setEmail("");
+    setPassword(generatePassword());
+    setRole("orcamentista");
+    setIsActive(true);
+    setDrawer({ type: "create" });
   }
 
   function openEdit(member: CompanyUser) {
-    setName(member.name); setRole(member.role); setIsActive(member.isActive); setDialog({ type: "edit", user: member });
+    setName(member.name);
+    setRole(member.role);
+    setIsActive(member.isActive);
+    setDrawer({ type: "edit", user: member });
   }
 
-  function openPassword(member: CompanyUser) {
-    setPassword(generatePassword()); setDialog({ type: "password", user: member });
+  function openPermissions(member: CompanyUser) {
+    setUserPermSelected(new Set(member.permissions ?? []));
+    setDrawer({ type: "permissions", user: member });
   }
 
   async function saveCreate(e: FormEvent) {
-    e.preventDefault(); setSaving(true); setError(null);
+    e.preventDefault();
+    setSaving(true);
+    setError(null);
     try {
       await usersApi.create({ name, email, password, role });
-      setDialog(null); await reload();
-    } catch (err) { setError(err instanceof Error ? err.message : "Não foi possível criar o acesso"); }
-    finally { setSaving(false); }
+      setDrawer(null);
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível criar o acesso");
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function saveEdit(e: FormEvent) {
     e.preventDefault();
-    if (!dialog || dialog.type !== "edit") return;
-    setSaving(true); setError(null);
+    if (!drawer || drawer.type !== "edit") return;
+    setSaving(true);
+    setError(null);
     try {
-      await usersApi.update(dialog.user.id, { name, role, isActive });
-      setDialog(null); await reload();
-    } catch (err) { setError(err instanceof Error ? err.message : "Não foi possível actualizar o acesso"); }
-    finally { setSaving(false); }
+      await usersApi.update(drawer.user.id, { name, role, isActive });
+      setDrawer(null);
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível actualizar o acesso");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function toggleActive(member: CompanyUser) {
+    if (member.id === currentUser?.id) return;
+    setError(null);
+    try {
+      await usersApi.update(member.id, { isActive: !member.isActive });
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível alterar o estado");
+    }
+  }
+
+  async function saveUserPermissions() {
+    if (!drawer || drawer.type !== "permissions") return;
+    setSaving(true);
+    setError(null);
+    try {
+      await usersApi.update(drawer.user.id, { permissions: [...userPermSelected] });
+      setDrawer(null);
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível guardar permissões");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function restoreUserPermissions() {
+    if (!drawer || drawer.type !== "permissions") return;
+    setSaving(true);
+    setError(null);
+    try {
+      const updated = await usersApi.restorePermissions(drawer.user.id);
+      setUserPermSelected(new Set(updated.permissions));
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível restaurar o padrão");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveRoleTemplate() {
+    if (!catalog) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const rolePermissions = { ...catalog.roleTemplates, [templateRole]: [...templateSelected] };
+      const res = await usersApi.saveRolePermissions(rolePermissions);
+      setCatalog({ ...catalog, roleTemplates: res.roleTemplates });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível guardar o template");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await usersApi.delete(deleteTarget.id);
+      setDeleteTarget(null);
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível remover a conta");
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function savePassword(e: FormEvent) {
     e.preventDefault();
-    if (!dialog || dialog.type !== "password") return;
-    setSaving(true); setError(null);
+    if (!drawer || drawer.type !== "password") return;
+    setSaving(true);
+    setError(null);
     try {
-      await usersApi.resetPassword(dialog.user.id, password);
-      setDialog(null); await reload();
-    } catch (err) { setError(err instanceof Error ? err.message : "Não foi possível redefinir a palavra-passe"); }
-    finally { setSaving(false); }
+      await usersApi.resetPassword(drawer.user.id, password);
+      setDrawer(null);
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível redefinir a palavra-passe");
+    } finally {
+      setSaving(false);
+    }
   }
 
-  const atCapacity = Boolean(maxUsers && users.length >= maxUsers);
+  return (
+    <div className="space-y-5">
+      {error && <InlineNotice tone="danger">{error}</InlineNotice>}
 
-  return <div className="space-y-5">
-    {error && <InlineNotice tone="danger">{error}</InlineNotice>}
+      <section className="card overflow-hidden">
+        <SectionHeader
+          title="Utilizadores"
+          description="Listagem leve — criar e editar abrem no painel lateral. Permissões padrão por função e ajuste fino por conta."
+          actions={
+            atCapacity ? (
+              <span className="rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+                Plano cheio ({users.length}/{maxUsers})
+              </span>
+            ) : (
+              <button onClick={openCreate} className="btn btn-primary btn-sm">
+                <IconPlus className="h-4 w-4" /> Novo utilizador
+              </button>
+            )
+          }
+        />
 
-    <section className="card overflow-hidden">
-      <SectionHeader
-        title="Equipa e acessos"
-        description="Crie credenciais, atribua responsabilidades e suspenda acessos sem apagar o histórico da obra."
-        actions={atCapacity
-          ? <span className="rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">Plano cheio ({users.length}/{maxUsers}) — liberte um acesso ou actualize o plano na aba Subscrição.</span>
-          : <button onClick={openCreate} className="btn btn-primary btn-sm"><IconPlus className="h-4 w-4" /> Novo utilizador</button>}
-      />
-
-      <div className="flex flex-wrap items-center gap-x-8 gap-y-3 border-b border-slate-200 bg-slate-50/70 px-5 py-4 text-sm">
-        <span><strong className="text-slate-900">{maxUsers ? `${users.length}/${maxUsers}` : users.length}</strong> <span className="text-slate-500">na equipa</span></span>
-        <span><strong className="text-emerald-700">{activeUsers}</strong> <span className="text-slate-500">com acesso activo</span></span>
-        <span><strong className="text-slate-900">{admins}</strong> <span className="text-slate-500">administradores</span></span>
-        {pending > 0 && <span><strong className="text-amber-700">{pending}</strong> <span className="text-slate-500">por concluir primeiro acesso</span></span>}
-        {maxUsers && (
-          <span className="ml-auto flex items-center gap-2">
-            <span className="h-1.5 w-28 overflow-hidden rounded-full bg-slate-200"><span className={`block h-full rounded-full ${usage && usage >= 90 ? "bg-amber-500" : "bg-blue-600"}`} style={{ width: `${usage}%` }} /></span>
-            <span className="text-xs text-slate-400">{usage}% do plano</span>
+        <div className="flex flex-wrap items-center gap-x-8 gap-y-3 border-b border-slate-200 bg-slate-50/70 px-5 py-4 text-sm">
+          <span>
+            <strong className="text-slate-900">{maxUsers ? `${users.length}/${maxUsers}` : users.length}</strong>{" "}
+            <span className="text-slate-500">na equipa</span>
           </span>
-        )}
-      </div>
-
-      <div className="grid gap-3 border-b border-slate-200 p-4 md:grid-cols-[1fr_190px_150px_auto]">
-        <input className="input" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Procurar por nome ou email" aria-label="Procurar utilizador" />
-        <select className="input" value={roleFilter} onChange={(e) => setRoleFilter(e.target.value as CompanyUserRole | "todos")} aria-label="Filtrar por perfil"><option value="todos">Todos os perfis</option>{Object.entries(ROLE_INFO).map(([key, info]) => <option key={key} value={key}>{info.label}</option>)}</select>
-        <select className="input" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)} aria-label="Filtrar por estado"><option value="todos">Todos os estados</option><option value="activos">Activos</option><option value="inactivos">Desactivados</option></select>
-        <button onClick={reload} className="btn btn-secondary" title="Actualizar lista"><IconRefresh className="h-4 w-4" /> Actualizar</button>
-      </div>
-
-      <div className="hidden grid-cols-[minmax(230px,1.5fr)_170px_160px_170px] gap-4 border-b border-slate-200 px-5 py-2.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 lg:grid"><span>Utilizador</span><span>Perfil e estado</span><span>Último acesso</span><span className="text-right">Acções</span></div>
-      <div className="divide-y divide-slate-100">
-        {loading && <div className="p-8 text-center text-sm text-slate-500">A carregar a equipa…</div>}
-        {!loading && filtered.map((member) => <div key={member.id} className={`grid gap-4 px-5 py-4 lg:grid-cols-[minmax(230px,1.5fr)_170px_160px_170px] lg:items-center ${!member.isActive ? "bg-slate-50/70" : ""}`}>
-          <div className="flex min-w-0 items-center gap-3">
-            <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-full text-sm font-bold ${member.isActive ? "bg-blue-100 text-blue-800" : "bg-slate-200 text-slate-500"}`}>{member.name.trim().charAt(0).toUpperCase()}</span>
-            <div className="min-w-0">
-              <p className="flex items-center gap-1.5 truncate text-sm font-semibold text-slate-900">
-                {member.name}
-                {member.id === currentUser?.id && <span className="badge badge-brand shrink-0">Você</span>}
-                {member.mustChangePassword && <span className="badge badge-yellow shrink-0">1º acesso pendente</span>}
-              </p>
-              <p className="truncate text-xs text-slate-500">{member.email}</p>
-            </div>
-          </div>
-          <div>
-            <span className={`badge ${ROLE_INFO[member.role].badgeClass}`}>{ROLE_INFO[member.role].label}</span>
-            <p className={`mt-1.5 text-[11px] font-semibold ${member.isActive ? "text-emerald-700" : "text-slate-400"}`}>{member.isActive ? "● Acesso activo" : "○ Acesso suspenso"}</p>
-          </div>
-          <div><p className="text-xs font-medium text-slate-700">{fmtAccess(member.lastLoginAt)}</p><p className="mt-1 text-[10px] text-slate-400">{member.hasGoogleLogin ? "Google associado" : "Email e palavra-passe"}</p></div>
-          <div className="flex justify-start gap-2 lg:justify-end"><button onClick={() => openEdit(member)} className="btn btn-secondary btn-sm">Editar</button>{member.id !== currentUser?.id && <button onClick={() => openPassword(member)} className="btn btn-ghost btn-sm" title="Redefinir palavra-passe"><IconKey className="h-4 w-4" /></button>}</div>
-        </div>)}
-        {!loading && filtered.length === 0 && <div className="p-10 text-center"><IconUsers className="mx-auto h-9 w-9 text-slate-300" /><p className="mt-3 text-sm font-semibold">Nenhum utilizador corresponde aos filtros.</p><button onClick={() => { setQuery(""); setRoleFilter("todos"); setStatusFilter("todos"); }} className="mt-2 text-xs font-semibold text-blue-700">Limpar filtros</button></div>}
-      </div>
-
-      <details className="group border-t border-slate-200 px-5 py-3 text-sm open:pb-5">
-        <summary className="cursor-pointer list-none font-semibold text-slate-600 marker:content-none">
-          <span className="inline-flex items-center gap-1.5">O que cada perfil pode fazer <span className="text-slate-400 transition group-open:rotate-180">▾</span></span>
-        </summary>
-        <div className="mt-3 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {Object.entries(ROLE_INFO).map(([key, info]) => <div key={key}><span className={`badge ${info.badgeClass}`}>{info.label}</span><p className="mt-2 text-xs leading-5 text-slate-500">{info.summary}</p></div>)}
+          <span>
+            <strong className="text-emerald-700">{activeUsers}</strong> <span className="text-slate-500">activos</span>
+          </span>
         </div>
-      </details>
-    </section>
 
-    {dialog?.type === "create" && <Modal title="Criar acesso da equipa" subtitle="A credencial é temporária e deverá ser alterada no primeiro acesso." onClose={() => setDialog(null)} maxWidth="max-w-xl"><form onSubmit={saveCreate} className="space-y-4"><div className="grid gap-4 sm:grid-cols-2"><div><label className="label">Nome completo</label><input className="input" required minLength={2} value={name} onChange={(e) => setName(e.target.value)} /></div><div><label className="label">Email de acesso</label><input className="input" required type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></div></div><div><label className="label">Perfil</label><select className="input" value={role} onChange={(e) => setRole(e.target.value as CompanyUserRole)}>{Object.entries(ROLE_INFO).map(([key, info]) => <option key={key} value={key}>{info.label}</option>)}</select><p className="mt-1 text-xs text-slate-500">{ROLE_INFO[role].summary}</p></div><div><div className="flex items-center justify-between"><label className="label">Palavra-passe temporária</label><button type="button" onClick={() => setPassword(generatePassword())} className="text-xs font-semibold text-blue-700">Gerar outra</button></div><input className="input font-mono" required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} /><p className="mt-1 text-xs text-amber-700">Copie e entregue esta credencial de forma segura. Ela não voltará a ser mostrada.</p></div><div className="flex justify-end gap-2 pt-2"><button type="button" onClick={() => setDialog(null)} className="btn btn-secondary">Cancelar</button><button disabled={saving} className="btn btn-primary">{saving ? "A criar…" : "Criar acesso"}</button></div></form></Modal>}
+        <div className="grid gap-3 border-b border-slate-200 p-4 md:grid-cols-[1fr_190px_150px_auto]">
+          <input className="input" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Procurar por nome ou email" />
+          <select className="input" value={roleFilter} onChange={(e) => setRoleFilter(e.target.value as CompanyUserRole | "todos")}>
+            <option value="todos">Todos os perfis</option>
+            {(Object.keys(ROLE_INFO) as CompanyUserRole[]).map((key) => (
+              <option key={key} value={key}>
+                {roleLabel(key)}
+              </option>
+            ))}
+          </select>
+          <select className="input" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}>
+            <option value="todos">Todos os estados</option>
+            <option value="activos">Activos</option>
+            <option value="inactivos">Desactivados</option>
+          </select>
+          <button onClick={reload} className="btn btn-secondary" type="button">
+            <IconRefresh className="h-4 w-4" /> Actualizar
+          </button>
+        </div>
 
-    {dialog?.type === "edit" && <Modal title="Editar utilizador" subtitle={dialog.user.email} onClose={() => setDialog(null)}><form onSubmit={saveEdit} className="space-y-4"><div><label className="label">Nome</label><input className="input" required minLength={2} value={name} onChange={(e) => setName(e.target.value)} /></div><div><label className="label">Perfil</label><select className="input" disabled={dialog.user.id === currentUser?.id} value={role} onChange={(e) => setRole(e.target.value as CompanyUserRole)}>{Object.entries(ROLE_INFO).map(([key, info]) => <option key={key} value={key}>{info.label}</option>)}</select><p className="mt-1 text-xs text-slate-500">{dialog.user.id === currentUser?.id ? "Outro administrador deve alterar o seu perfil de acesso." : ROLE_INFO[role].summary}</p></div><label className={`flex items-start gap-3 rounded-lg border p-3 ${dialog.user.id === currentUser?.id ? "cursor-not-allowed bg-slate-50 opacity-60" : "cursor-pointer"}`}><input type="checkbox" className="mt-1" disabled={dialog.user.id === currentUser?.id} checked={isActive} onChange={(e) => setIsActive(e.target.checked)} /><span><strong className="block text-sm">Acesso activo</strong><small className="text-xs text-slate-500">Ao desactivar, todas as sessões terminam; os registos e aprovações permanecem.</small></span></label><div className="flex justify-end gap-2"><button type="button" onClick={() => setDialog(null)} className="btn btn-secondary">Cancelar</button><button disabled={saving} className="btn btn-primary">{saving ? "A guardar…" : "Guardar alterações"}</button></div></form></Modal>}
+        <div className="divide-y divide-slate-100">
+          {loading && <div className="p-8 text-center text-sm text-slate-500">A carregar a equipa…</div>}
+          {!loading &&
+            filtered.map((member) => (
+              <div
+                key={member.id}
+                className={`flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between ${!member.isActive ? "bg-slate-50/70" : ""}`}
+              >
+                <div className="flex min-w-0 items-center gap-3">
+                  <span
+                    className={`grid h-10 w-10 shrink-0 place-items-center rounded-full text-xs font-bold ${
+                      member.isActive ? "bg-brand-100 text-brand-800" : "bg-slate-200 text-slate-500"
+                    }`}
+                  >
+                    {initials(member.name)}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="flex flex-wrap items-center gap-1.5 text-sm font-semibold text-slate-900">
+                      <span className="truncate">{member.name}</span>
+                      {member.id === currentUser?.id && <span className="badge badge-brand">Você</span>}
+                      <span className={`badge ${ROLE_INFO[member.role].badgeClass}`}>{roleLabel(member.role)}</span>
+                      <span className={`badge ${member.isActive ? "badge-green" : "badge-gray"}`}>
+                        {member.isActive ? "Activo" : "Inactivo"}
+                      </span>
+                      <span className="badge badge-gray">{member.permissionCount ?? member.permissions?.length ?? 0} perm.</span>
+                    </p>
+                    <p className="truncate text-xs text-slate-500">{member.email}</p>
+                    <p className="mt-0.5 text-[11px] text-slate-400">{fmtAccess(member.lastLoginAt)}</p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                  <label className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-600">
+                    <input
+                      type="checkbox"
+                      className="accent-[#ed6c22]"
+                      checked={member.isActive}
+                      disabled={member.id === currentUser?.id}
+                      onChange={() => toggleActive(member)}
+                    />
+                    Activo
+                  </label>
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => openPermissions(member)}>
+                    Permissões
+                  </button>
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => openEdit(member)}>
+                    Editar
+                  </button>
+                  {member.id !== currentUser?.id && (
+                    <>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        title="Redefinir palavra-passe"
+                        onClick={() => {
+                          setPassword(generatePassword());
+                          setDrawer({ type: "password", user: member });
+                        }}
+                      >
+                        <IconKey className="h-4 w-4" />
+                      </button>
+                      <button type="button" className="btn btn-danger btn-sm" onClick={() => setDeleteTarget(member)}>
+                        Remover
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            ))}
+          {!loading && filtered.length === 0 && (
+            <div className="p-10 text-center">
+              <IconUsers className="mx-auto h-9 w-9 text-slate-300" />
+              <p className="mt-3 text-sm font-semibold">Nenhum utilizador corresponde aos filtros.</p>
+            </div>
+          )}
+        </div>
+      </section>
 
-    {dialog?.type === "password" && <Modal title="Redefinir palavra-passe" subtitle={`O acesso de ${dialog.user.name} será terminado em todos os dispositivos.`} onClose={() => setDialog(null)}><form onSubmit={savePassword} className="space-y-4"><InlineNotice>Depois de entrar com esta credencial temporária, o utilizador terá de escolher uma nova palavra-passe.</InlineNotice><div><div className="flex items-center justify-between"><label className="label">Nova palavra-passe temporária</label><button type="button" onClick={() => setPassword(generatePassword())} className="text-xs font-semibold text-blue-700"><IconRefresh className="mr-1 inline h-3 w-3" />Gerar outra</button></div><input className="input font-mono" required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} /></div><div className="flex justify-end gap-2"><button type="button" onClick={() => setDialog(null)} className="btn btn-secondary">Cancelar</button><button disabled={saving} className="btn btn-primary">{saving ? "A redefinir…" : "Redefinir acesso"}</button></div></form></Modal>}
-  </div>;
+      {catalog && (
+        <section className="card overflow-hidden">
+          <SectionHeader
+            title="Permissões por função"
+            description="Altera o template da função. Novos utilizadores herdam este pacote; contas com ajuste fino mantêm o seu até restaurar."
+            actions={
+              <button type="button" className="btn btn-primary btn-sm" disabled={saving} onClick={saveRoleTemplate}>
+                {saving ? "A guardar…" : "Guardar template"}
+              </button>
+            }
+          />
+          <div className="border-b border-slate-200 px-5 py-4">
+            <label className="label">Função</label>
+            <select className="input max-w-sm" value={templateRole} onChange={(e) => setTemplateRole(e.target.value as CompanyUserRole)}>
+              {(Object.keys(ROLE_INFO) as CompanyUserRole[]).map((key) => (
+                <option key={key} value={key}>
+                  {roleLabel(key)}
+                </option>
+              ))}
+            </select>
+            <p className="mt-2 text-xs text-slate-500">{ROLE_INFO[templateRole].summary}</p>
+          </div>
+          <div className="p-5">
+            <PermissionGrid
+              catalog={catalog.catalog}
+              groups={catalog.groups}
+              selected={templateSelected}
+              onChange={setTemplateSelected}
+              columnsClass="sm:grid-cols-2 xl:grid-cols-3"
+            />
+          </div>
+        </section>
+      )}
+
+      {/* Right drawer */}
+      {drawer && drawer.type !== "password" && (
+        <div className="fixed inset-0 z-40 flex justify-end">
+          <button type="button" className="absolute inset-0 bg-ink/40" aria-label="Fechar" onClick={() => setDrawer(null)} />
+          <aside className="relative flex h-full w-full max-w-md flex-col bg-white shadow-raised sm:max-w-lg">
+            <header className="flex items-start justify-between gap-3 border-b border-slate-200 px-5 py-4">
+              <div>
+                <h2 className="font-display text-lg font-bold text-ink">
+                  {drawer.type === "create" && "Novo utilizador"}
+                  {drawer.type === "edit" && "Editar utilizador"}
+                  {drawer.type === "permissions" && `Permissões — ${drawer.user.name}`}
+                </h2>
+                <p className="mt-1 text-xs text-slate-500">
+                  {drawer.type === "create" && "A credencial temporária deve ser alterada no primeiro acesso."}
+                  {drawer.type === "edit" && drawer.user.email}
+                  {drawer.type === "permissions" && "Ajuste fino só desta conta — não altera o template da função."}
+                </p>
+              </div>
+              <button type="button" className="icon-btn" onClick={() => setDrawer(null)}>
+                ×
+              </button>
+            </header>
+
+            <div className="flex-1 overflow-y-auto p-5">
+              {(drawer.type === "create" || drawer.type === "edit") && (
+                <form
+                  id="user-drawer-form"
+                  onSubmit={drawer.type === "create" ? saveCreate : saveEdit}
+                  className="space-y-4"
+                >
+                  <div>
+                    <label className="label">Nome completo</label>
+                    <input className="input" required minLength={2} value={name} onChange={(e) => setName(e.target.value)} />
+                  </div>
+                  {drawer.type === "create" && (
+                    <div>
+                      <label className="label">Email</label>
+                      <input className="input" required type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+                    </div>
+                  )}
+                  <div>
+                    <label className="label">Função</label>
+                    <select
+                      className="input"
+                      value={role}
+                      disabled={drawer.type === "edit" && drawer.user.id === currentUser?.id}
+                      onChange={(e) => setRole(e.target.value as CompanyUserRole)}
+                    >
+                      {(Object.keys(ROLE_INFO) as CompanyUserRole[]).map((key) => (
+                        <option key={key} value={key}>
+                          {roleLabel(key)}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="mt-1 text-xs text-slate-500">{ROLE_INFO[role].summary}</p>
+                  </div>
+                  {drawer.type === "create" && (
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <label className="label">Palavra-passe temporária</label>
+                        <button type="button" className="text-xs font-semibold text-brand-700" onClick={() => setPassword(generatePassword())}>
+                          Gerar outra
+                        </button>
+                      </div>
+                      <input className="input font-mono" required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} />
+                    </div>
+                  )}
+                  {drawer.type === "edit" && (
+                    <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 p-3">
+                      <input
+                        type="checkbox"
+                        className="mt-1 accent-[#ed6c22]"
+                        checked={isActive}
+                        disabled={drawer.user.id === currentUser?.id}
+                        onChange={(e) => setIsActive(e.target.checked)}
+                      />
+                      <span>
+                        <strong className="block text-sm">Acesso activo</strong>
+                        <small className="text-xs text-slate-500">Desactivar termina todas as sessões; o histórico da obra permanece.</small>
+                      </span>
+                    </label>
+                  )}
+                </form>
+              )}
+
+              {drawer.type === "permissions" && catalog && (
+                <PermissionGrid
+                  catalog={catalog.catalog}
+                  groups={catalog.groups}
+                  selected={userPermSelected}
+                  onChange={setUserPermSelected}
+                  columnsClass="sm:grid-cols-2"
+                />
+              )}
+            </div>
+
+            <footer className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-200 px-5 py-4">
+              {drawer.type === "permissions" ? (
+                <>
+                  <button type="button" className="btn btn-secondary" disabled={saving} onClick={restoreUserPermissions}>
+                    Restaurar padrão da função
+                  </button>
+                  <button type="button" className="btn btn-primary" disabled={saving} onClick={saveUserPermissions}>
+                    {saving ? "A guardar…" : "Concluído"}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button type="button" className="btn btn-secondary" onClick={() => setDrawer(null)}>
+                    Cancelar
+                  </button>
+                  <button type="submit" form="user-drawer-form" className="btn btn-primary" disabled={saving}>
+                    {saving ? "A guardar…" : drawer.type === "create" ? "Criar acesso" : "Guardar"}
+                  </button>
+                </>
+              )}
+            </footer>
+          </aside>
+        </div>
+      )}
+
+      {drawer?.type === "password" && (
+        <Modal title="Redefinir palavra-passe" subtitle={`O acesso de ${drawer.user.name} será terminado em todos os dispositivos.`} onClose={() => setDrawer(null)}>
+          <form onSubmit={savePassword} className="space-y-4">
+            <InlineNotice>Depois de entrar, o utilizador terá de escolher uma nova palavra-passe.</InlineNotice>
+            <div>
+              <div className="flex items-center justify-between">
+                <label className="label">Nova palavra-passe temporária</label>
+                <button type="button" onClick={() => setPassword(generatePassword())} className="text-xs font-semibold text-brand-700">
+                  Gerar outra
+                </button>
+              </div>
+              <input className="input font-mono" required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} />
+            </div>
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => setDrawer(null)} className="btn btn-secondary">
+                Cancelar
+              </button>
+              <button disabled={saving} className="btn btn-primary">
+                {saving ? "A redefinir…" : "Redefinir acesso"}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {deleteTarget && (
+        <Modal title="Remover conta" subtitle={deleteTarget.email} onClose={() => setDeleteTarget(null)}>
+          <p className="text-sm text-slate-600">
+            Remover <strong>{deleteTarget.name}</strong>? Só é possível se a conta nunca tiver entrado. Caso contrário, desactive o acesso.
+          </p>
+          <div className="mt-5 flex justify-end gap-2">
+            <button type="button" className="btn btn-secondary" onClick={() => setDeleteTarget(null)}>
+              Cancelar
+            </button>
+            <button type="button" className="btn btn-danger" disabled={saving} onClick={confirmDelete}>
+              {saving ? "A remover…" : "Remover definitivamente"}
+            </button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
 }

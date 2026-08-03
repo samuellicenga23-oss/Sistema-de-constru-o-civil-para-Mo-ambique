@@ -17,8 +17,8 @@ export function isSigoPricesSupplier(supplier: { name: string }) {
 /**
  * Garante uma referência de preço completa para cada empresa.
  * Os materiais próprios da empresa substituem materiais globais com o mesmo nome.
- * As linhas são apenas uma base comparativa; fornecedores reais continuam a ter prioridade
- * quando apresentam uma cotação mais baixa ou específica para a zona.
+ * As linhas podem formar cotações e estimativas, concorrendo por zona e preço com as restantes.
+ * Continuam a ser referência de mercado: uma ordem de compra exige fornecedor comercial.
  */
 export async function syncSigoPricesForCompany(companyId: string) {
   let [supplier] = await db

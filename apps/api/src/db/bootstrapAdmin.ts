@@ -65,6 +65,7 @@ async function main() {
     email,
     passwordHash,
     role: "super_admin",
+    permissions: ["plataforma.configuracoes"],
   });
 
   console.log(`super_admin criado: ${email}`);

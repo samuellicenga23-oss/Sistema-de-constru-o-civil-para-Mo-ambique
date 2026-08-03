@@ -57,6 +57,22 @@ export function requireRole(...roles: UserRole[]) {
   };
 }
 
+/** Exige uma permissão estável (ex.: `equipa.gerir`). Super admin da plataforma passa sempre. */
+export function requirePermission(...permissionIds: string[]) {
+  return async function (request: FastifyRequest, reply: FastifyReply) {
+    await requireAuth(request, reply);
+    if (reply.sent) return;
+    await requireEnabledModule(request, reply);
+    if (reply.sent) return;
+    const user = request.currentUser;
+    if (!user) return reply.code(403).send({ error: "Sem permissão para esta acção" });
+    if (user.role === "super_admin") return;
+    if (!permissionIds.some((id) => user.permissions.includes(id))) {
+      return reply.code(403).send({ error: "Sem permissão para esta acção" });
+    }
+  };
+}
+
 // Garante que o utilizador pertence a uma empresa (todos os perfis excepto super_admin).
 export async function requireCompanyUser(request: FastifyRequest, reply: FastifyReply) {
   await requireAuth(request, reply);

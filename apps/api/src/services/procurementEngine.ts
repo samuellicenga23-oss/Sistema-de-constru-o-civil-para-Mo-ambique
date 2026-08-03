@@ -88,6 +88,15 @@ export type ProcurementQuote = {
   isReference: boolean;
 };
 
+export function rankProcurementQuotes<T extends { zoneId: string | null; unitCost: string | number }>(quotes: T[], zoneId: string | null): T[] {
+  return [...quotes].sort((left, right) => {
+    const leftZone = zoneId !== null && left.zoneId === zoneId;
+    const rightZone = zoneId !== null && right.zoneId === zoneId;
+    if (leftZone !== rightZone) return leftZone ? -1 : 1;
+    return Number(left.unitCost) - Number(right.unitCost);
+  });
+}
+
 export function calculateProcurementQuantity(args: { requiredQty: number; consumedQty: number; stockQty: number; orderedQty: number; packageSize?: number | null }) {
   const shortageQty = Math.max(0, args.requiredQty - args.consumedQty - Math.max(0, args.stockQty) - args.orderedQty);
   const suggestedOrderQty = args.packageSize ? Math.ceil(shortageQty / args.packageSize) * args.packageSize : shortageQty;
@@ -218,15 +227,8 @@ export async function computeProcurementPlan(args: {
     const availableQuotes = Array.from(quotesByMaterial.get(item.materialId)?.values() ?? []);
     const commercialQuotes = availableQuotes.filter((candidate) => candidate.supplierName !== SIGO_PRICES_SUPPLIER_NAME);
     const referenceQuotes = availableQuotes.filter((candidate) => candidate.supplierName === SIGO_PRICES_SUPPLIER_NAME);
-    const rankQuotes = (left: (typeof quoteRows)[number], right: (typeof quoteRows)[number]) => {
-      const leftZone = left.zoneId === args.zoneId && args.zoneId !== null;
-      const rightZone = right.zoneId === args.zoneId && args.zoneId !== null;
-      if (leftZone !== rightZone) return leftZone ? -1 : 1;
-      return Number(left.unitCost) - Number(right.unitCost);
-    };
-    commercialQuotes.sort(rankQuotes);
-    referenceQuotes.sort(rankQuotes);
-    const quote = commercialQuotes[0] ?? referenceQuotes[0];
+    const rankedQuotes = rankProcurementQuotes([...commercialQuotes, ...referenceQuotes], args.zoneId);
+    const quote = rankedQuotes[0];
     const quoteIsReference = quote?.supplierName === SIGO_PRICES_SUPPLIER_NAME;
     const catalogUnitCost = item.requiredQty > 0 ? item.catalogValue / item.requiredQty : 0;
     const estimatedUnitCost = quote ? Number(quote.unitCost) : catalogUnitCost;
@@ -235,7 +237,7 @@ export async function computeProcurementPlan(args: {
     const matchingTasks = taskRows.filter((task) => phaseKeys.has(mapToPhase(task.name, [], task.name)));
     const suggestedTask = matchingTasks.find((task) => !summaryTaskIds.has(task.id)) ?? matchingTasks[0];
     const estimate = calculateVatTotals(suggestedOrderQty * estimatedUnitCost, args.ivaRate);
-    const quotes: ProcurementQuote[] = [...commercialQuotes, ...referenceQuotes].map((candidate) => {
+    const quotes: ProcurementQuote[] = rankedQuotes.map((candidate) => {
       const totals = calculateVatTotals(suggestedOrderQty * Number(candidate.unitCost), args.ivaRate);
       const isReference = candidate.supplierName === SIGO_PRICES_SUPPLIER_NAME;
       return {

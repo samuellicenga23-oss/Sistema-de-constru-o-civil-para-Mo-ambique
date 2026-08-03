@@ -60,6 +60,8 @@ export const companies = pgTable("companies", {
   documentFooter: text("document_footer"),
   responsibleName: varchar("responsible_name", { length: 150 }),
   enabledModules: jsonb("enabled_modules").$type<CompanyModuleKey[]>().notNull().default([...COMPANY_MODULE_KEYS]),
+  /** Templates de permissões por função — se vazio/null usa SYSTEM_ROLE_PERMISSIONS. */
+  rolePermissions: jsonb("role_permissions").$type<Partial<Record<"admin_empresa" | "orcamentista" | "engenheiro_fiscal" | "visualizador", string[]>>>(),
   brandName: varchar("brand_name", { length: 100 }),
   primaryColor: varchar("primary_color", { length: 7 }).notNull().default("#1AADB4"),
   accentColor: varchar("accent_color", { length: 7 }).notNull().default("#ED6C22"),
@@ -99,6 +101,8 @@ export const users = pgTable("users", {
   // Guardado já para quando houver internacionalização real (Fase 1 do documento diz
   // "futuramente") — hoje não muda nada no comportamento da aplicação.
   preferredLanguage: varchar("preferred_language", { length: 10 }).notNull().default("pt"),
+  /** Permissões efectivas deste utilizador (cópia do template da função na criação; ajuste fino próprio). */
+  permissions: jsonb("permissions").$type<string[]>().notNull().default([]),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

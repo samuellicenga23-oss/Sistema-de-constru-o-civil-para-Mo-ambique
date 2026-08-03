@@ -398,7 +398,8 @@ export default function ProjectPurchasingPage() {
                   </div>
                   {(() => {
                     const commercialQuoteCount = (item.quotes ?? []).filter((quote) => !quote.isReference).length;
-                    return <span className={`badge shrink-0 ${commercialQuoteCount ? "badge-green" : "badge-yellow"}`}>{commercialQuoteCount ? `${commercialQuoteCount} cotação(ões)` : "Só referência"}</span>;
+                    const hasSigoQuote = (item.quotes ?? []).some((quote) => quote.isReference);
+                    return <span className={`badge shrink-0 ${commercialQuoteCount ? "badge-green" : "badge-brand"}`}>{commercialQuoteCount ? `${commercialQuoteCount} fornecedor(es)${hasSigoQuote ? " + SIGO" : ""}` : hasSigoQuote ? "Cotação SIGO" : "Sem cotação"}</span>;
                   })()}
                 </div>
                 <div className="mt-4 grid grid-cols-3 gap-2 rounded-lg bg-slate-50 p-3 text-xs">
@@ -409,7 +410,7 @@ export default function ProjectPurchasingPage() {
                 {item.purchaseQty && item.purchasePackageLabel && <p className="mt-2 text-xs font-medium text-orange-700">Compra sugerida: {item.purchaseQty} × {item.purchasePackageLabel}</p>}
                 {item.suggestedScheduleTaskName && <p className="mt-2 text-xs text-blue-700">Necessário até {item.requiredByDate} · {item.suggestedScheduleTaskName}</p>}
                 <div className="mt-4 flex items-end justify-between gap-3 border-t border-slate-100 pt-4">
-                  <div><span className="block text-xs text-slate-500">{item.supplierId ? "Melhor cotação" : "Referência SIGO"}</span><strong className="mt-0.5 block tabular-nums text-slate-950">{item.estimatedTotalWithVat.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {procurementPlan.currency}</strong><small className="text-slate-400">IVA incluído</small></div>
+                  <div><span className="block text-xs text-slate-500">{item.supplierId ? "Melhor cotação" : item.supplierName === "SIGO Preços" ? "Cotação SIGO" : "Preço do catálogo"}</span><strong className="mt-0.5 block tabular-nums text-slate-950">{item.estimatedTotalWithVat.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {procurementPlan.currency}</strong><small className="text-slate-400">IVA incluído</small></div>
                   <button className="btn btn-primary btn-sm shrink-0" onClick={() => setQuoteRequirement(item)}>Comparar preços</button>
                 </div>
               </article>
@@ -433,7 +434,8 @@ export default function ProjectPurchasingPage() {
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <strong className="text-base text-slate-950">{quote.supplierName}</strong>
-                        {quote.isReference ? <span className="badge badge-gray">Referência de mercado</span> : index === 0 ? <span className="badge badge-green">Menor preço</span> : null}
+                        {quote.isReference && <span className="badge badge-brand">Cotação SIGO</span>}
+                        {index === 0 && <span className="badge badge-green">Menor preço</span>}
                         <span className="badge badge-brand">{quote.quoteSource === "zona" ? "Preço da zona" : quote.quoteSource === "geral" ? "Preço geral" : "Base SIGO"}</span>
                       </div>
                       <p className="mt-2 text-sm text-slate-600">{quote.unitCost.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {quote.currency} / {quoteRequirement.unit}</p>
@@ -445,7 +447,7 @@ export default function ProjectPurchasingPage() {
                         <small className="text-slate-400">Base {quote.estimatedSubtotal.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} + IVA {quote.estimatedVat.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</small>
                       </div>
                       {quote.isReference ? (
-                        <span className="text-xs font-medium text-slate-500">Não seleccionável</span>
+                        <span className="max-w-36 text-right text-xs font-medium text-blue-700">Usado na cotação; confirme fornecedor antes da compra</span>
                       ) : (
                         <button type="button" className="btn btn-primary btn-sm" onClick={() => prepareOrderFromQuote(quoteRequirement, quote)}>Escolher</button>
                       )}

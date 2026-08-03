@@ -1,7 +1,13 @@
 import { eq, gt, and, ne } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { companies, sessions, users } from "../db/schema.js";
-import { COMPANY_MODULE_KEYS, type CompanyModuleKey, type UserRole } from "@sigo/shared";
+import {
+  COMPANY_MODULE_KEYS,
+  isCompanyUserRole,
+  resolveRoleTemplate,
+  type CompanyModuleKey,
+  type UserRole,
+} from "@sigo/shared";
 
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 dias
 
@@ -17,6 +23,7 @@ export type SessionUser = {
   mustChangePassword: boolean;
   preferredLanguage: string;
   enabledModules: CompanyModuleKey[];
+  permissions: string[];
   createdAt: Date;
 };
 
@@ -44,6 +51,8 @@ export async function getSessionUser(sessionId: string): Promise<SessionUser | n
       isActive: users.isActive,
       mustChangePassword: users.mustChangePassword,
       preferredLanguage: users.preferredLanguage,
+      permissions: users.permissions,
+      rolePermissions: companies.rolePermissions,
       enabledModules: companies.enabledModules,
       createdAt: users.createdAt,
     })
@@ -53,7 +62,28 @@ export async function getSessionUser(sessionId: string): Promise<SessionUser | n
     .where(and(eq(sessions.id, sessionId), gt(sessions.expiresAt, new Date()), eq(users.isActive, true)))
     .limit(1);
   const row = rows[0];
-  return row ? { ...row, enabledModules: row.enabledModules ?? [...COMPANY_MODULE_KEYS] } : null;
+  if (!row) return null;
+  const permissions =
+    row.permissions?.length > 0
+      ? row.permissions
+      : isCompanyUserRole(row.role)
+        ? resolveRoleTemplate(row.role, row.rolePermissions)
+        : ["plataforma.configuracoes"];
+  return {
+    id: row.id,
+    companyId: row.companyId,
+    name: row.name,
+    email: row.email,
+    role: row.role,
+    avatarUrl: row.avatarUrl,
+    lastLoginAt: row.lastLoginAt,
+    isActive: row.isActive,
+    mustChangePassword: row.mustChangePassword,
+    preferredLanguage: row.preferredLanguage,
+    enabledModules: row.enabledModules ?? [...COMPANY_MODULE_KEYS],
+    permissions,
+    createdAt: row.createdAt,
+  };
 }
 
 export async function deleteSession(sessionId: string): Promise<void> {

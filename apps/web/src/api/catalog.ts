@@ -49,6 +49,7 @@ export type Material = {
   marketCurrency?: string | null;
   marketSupplierId?: string | null;
   marketSupplierName?: string | null;
+  marketPriceIsReference?: boolean;
   marketPriceIsZoneSpecific?: boolean;
   // Unidade de compra de mercado (ex: "Camião 10m³"), quando difere da unidade de medida —
   // null = compra-se directamente na unidade de medida, sem conversão.

@@ -19,7 +19,7 @@ export default defineConfig({
         clientsClaim: true,
         // Assets versionados são guardados pelo runtime. Não os incluir no precache evita que
         // o service worker volte a descarregar bundles antigos preservados para abas abertas.
-        globPatterns: ["**/*.{html,ico,svg,webmanifest}", "icon-*.png"],
+        globPatterns: ["**/*.{html,ico,svg,webmanifest}", "favicon.png", "icon-*.png", "brand/*.png"],
         navigateFallbackDenylist: [/^\/api\//, /^\/uploads\//],
         runtimeCaching: [
           {

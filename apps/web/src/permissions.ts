@@ -43,3 +43,10 @@ export function isModuleEnabled(pathname: string, enabledModules: CompanyModuleK
   const required = PATH_MODULES.find((entry) => entry.match(pathname))?.module;
   return !required || enabledModules.includes(required);
 }
+
+/** Verifica uma permissão estável do catálogo SIGO (ex.: `equipa.gerir`). */
+export function can(user: Pick<CurrentUser, "role" | "permissions"> | null | undefined, permissionId: string): boolean {
+  if (!user) return false;
+  if (user.role === "super_admin") return true;
+  return Boolean(user.permissions?.includes(permissionId));
+}

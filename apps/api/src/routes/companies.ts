@@ -9,7 +9,7 @@ import { companies, users, subscriptions, projects, sessions } from "../db/schem
 import { requireRole, requireCompanyUser } from "../auth/middleware.js";
 import { hashPassword } from "../auth/password.js";
 import { env } from "../env.js";
-import { COMPANY_MODULE_KEYS, CURRENCIES, SUBSCRIPTION_STATUSES, SUBSCRIPTION_PLAN_KEYS } from "@sigo/shared";
+import { COMPANY_MODULE_KEYS, CURRENCIES, SUBSCRIPTION_STATUSES, SUBSCRIPTION_PLAN_KEYS, resolveRoleTemplate, isCompanyUserRole } from "@sigo/shared";
 import { detectImageExtension } from "../services/imageValidation.js";
 import { syncSigoPricesForCompany } from "../services/sigoPrices.js";
 import { recordAuditEvent } from "../services/auditTrail.js";
@@ -115,7 +115,10 @@ export async function companyRoutes(app: FastifyInstance) {
     const [existing] = await db.select({ id: users.id }).from(users).where(eq(users.email, parsed.data.email)).limit(1);
     if (existing) return reply.code(409).send({ error: "Já existe um utilizador com este email" });
     const passwordHash = await hashPassword(parsed.data.password);
-    const [created] = await db.insert(users).values({ companyId, name: parsed.data.name, email: parsed.data.email, passwordHash, role: parsed.data.role, preferredLanguage: parsed.data.preferredLanguage, mustChangePassword: true }).returning();
+    const permissions = isCompanyUserRole(parsed.data.role)
+      ? resolveRoleTemplate(parsed.data.role, company.rolePermissions)
+      : [];
+    const [created] = await db.insert(users).values({ companyId, name: parsed.data.name, email: parsed.data.email, passwordHash, role: parsed.data.role, preferredLanguage: parsed.data.preferredLanguage, mustChangePassword: true, permissions }).returning();
     await recordAuditEvent({ companyId, actorUserId: request.currentUser!.id, entityType: "user", entityId: created.id, action: "platform_user_created", after: { role: created.role, isActive: created.isActive } });
     return reply.code(201).send({ id: created.id, companyId, companyName: company.name, name: created.name, email: created.email, role: created.role, isActive: created.isActive, mustChangePassword: created.mustChangePassword, preferredLanguage: created.preferredLanguage, lastLoginAt: created.lastLoginAt, createdAt: created.createdAt });
   });
@@ -177,6 +180,7 @@ export async function companyRoutes(app: FastifyInstance) {
         passwordHash,
         role: "admin_empresa",
         mustChangePassword: true,
+        permissions: resolveRoleTemplate("admin_empresa"),
       })
       .returning();
 

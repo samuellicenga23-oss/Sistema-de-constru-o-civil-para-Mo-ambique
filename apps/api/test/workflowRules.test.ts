@@ -3,7 +3,7 @@ import { validateMeasuredQuantity } from "../src/services/measurementEngine.js";
 import { addWorkingDays, computeItemDurationDays, computeNodeDurations } from "../src/services/scheduleEngine.js";
 import type { LineItemNode } from "../src/services/boqEngine.js";
 import { resolveSchedulePrintOptions } from "../src/services/schedulePdf.js";
-import { calculateProcurementQuantity } from "../src/services/procurementEngine.js";
+import { calculateProcurementQuantity, rankProcurementQuotes } from "../src/services/procurementEngine.js";
 import { calculateVatTotals, DEFAULT_IVA_RATE, priceExcludingVat } from "@sigo/shared";
 import { documentLockedMessage, evaluateDocumentReadiness } from "../src/services/documentRules.js";
 
@@ -122,5 +122,21 @@ describe("Regras de Aprovisionamento", () => {
     expect(calculateVatTotals(100_000)).toEqual({ subtotal: 100_000, ivaRate: 0.16, iva: 16_000, total: 116_000 });
     expect(priceExcludingVat(116_000, true)).toBe(100_000);
     expect(priceExcludingVat(100_000, false)).toBe(100_000);
+  });
+
+  it("permite que o preço SIGO forme a cotação quando é o menor aplicável", () => {
+    const ranked = rankProcurementQuotes([
+      { supplier: "Fornecedor comercial", zoneId: null, unitCost: 120 },
+      { supplier: "SIGO Preços", zoneId: null, unitCost: 100 },
+    ], null);
+    expect(ranked[0]).toMatchObject({ supplier: "SIGO Preços", unitCost: 100 });
+  });
+
+  it("prioriza a cotação da zona antes do menor preço geral", () => {
+    const ranked = rankProcurementQuotes([
+      { supplier: "SIGO Preços", zoneId: null, unitCost: 90 },
+      { supplier: "Fornecedor da zona", zoneId: "zona-maputo", unitCost: 110 },
+    ], "zona-maputo");
+    expect(ranked[0]).toMatchObject({ supplier: "Fornecedor da zona", zoneId: "zona-maputo" });
   });
 });

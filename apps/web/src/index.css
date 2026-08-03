@@ -13,11 +13,22 @@
   --color-brand-800: #0e585c;
   --color-brand-900: #10494c;
   --color-brand-950: #142033;
+  --color-brand-orange: #ed6c22;
+  --color-brand-orangeHover: #d85f18;
+  --color-brand-orangeSoft: #fdefe6;
 
   --color-ink: #142033;
   --color-ink-soft: #1c2b42;
+  --color-ink-700: #243553;
+  --color-ink-400: #5b6b85;
+
   --color-teal: #1AADB4;
   --color-teal-bright: #5FE0E4;
+  --color-teal-soft: #bdeef0;
+  --color-teal-50: #effbfb;
+  --color-teal-100: #d6f4f5;
+  --color-teal-600: #158f95;
+  --color-teal-700: #0f6f74;
 
   --color-accent: #ed6c22;
   --color-accent-hover: #d85f18;
@@ -27,8 +38,17 @@
   --color-surface-sidebar: #f7f8fa;
   --color-surface-raised: #ffffff;
 
-  --font-sans: "Aptos", "Segoe UI Variable", "Segoe UI", ui-sans-serif, system-ui, -apple-system, sans-serif;
-  --font-display: "Aptos Display", "Aptos", "Segoe UI", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-sans: "Public Sans", "Aptos", "Segoe UI Variable", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Space Grotesk", "Aptos Display", "Aptos", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --text-eyebrow: 11px;
+  --text-eyebrow--line-height: 14px;
+  --text-eyebrow--letter-spacing: 0.14em;
+
+  --shadow-card: 0 1px 2px rgba(20, 32, 51, 0.04), 0 8px 24px -12px rgba(20, 32, 51, 0.14);
+  --shadow-raised: 0 2px 4px rgba(20, 32, 51, 0.05), 0 18px 40px -18px rgba(20, 32, 51, 0.22);
+  --shadow-mock: 0 40px 80px -40px rgba(20, 32, 51, 0.45), 0 2px 6px rgba(20, 32, 51, 0.08);
 }
 
 * {
@@ -239,4 +259,24 @@ textarea {
   table td {
     overflow-wrap: anywhere;
   }
+}
+
+/* Landing Magic Patterns — atmosfera e grelha */
+.sigo-atmosphere {
+  background-color: var(--color-surface);
+  background-image:
+    radial-gradient(42rem 42rem at 12% -8%, rgba(26, 173, 180, 0.13), transparent 65%),
+    radial-gradient(38rem 38rem at 92% 4%, rgba(237, 108, 34, 0.09), transparent 62%);
+}
+.sigo-grid {
+  background-image:
+    linear-gradient(rgba(20, 32, 51, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(20, 32, 51, 0.045) 1px, transparent 1px);
+  background-size: 56px 56px;
+}
+.sigo-grid-dark {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+  background-size: 48px 48px;
 }

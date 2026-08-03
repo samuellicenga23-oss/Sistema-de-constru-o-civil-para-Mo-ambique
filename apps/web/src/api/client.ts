@@ -13,6 +13,7 @@ export type CurrentUser = {
   mustChangePassword: boolean;
   preferredLanguage: string;
   enabledModules: CompanyModuleKey[];
+  permissions: string[];
   createdAt: string;
 };
 

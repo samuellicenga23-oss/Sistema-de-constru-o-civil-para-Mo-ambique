@@ -281,12 +281,10 @@ export async function catalogRoutes(app: FastifyInstance) {
       const current = bestQuoteByMaterialId.get(quote.materialId);
       const quoteSpecific = zoneId != null && quote.zoneId === zoneId;
       const currentSpecific = zoneId != null && current?.zoneId === zoneId;
-      const quoteIsReference = quote.supplierName === SIGO_PRICES_SUPPLIER_NAME;
-      const currentIsReference = current?.supplierName === SIGO_PRICES_SUPPLIER_NAME;
       if (
         !current ||
-        (!quoteIsReference && currentIsReference) ||
-        (quoteIsReference === currentIsReference && ((quoteSpecific && !currentSpecific) || (quoteSpecific === currentSpecific && Number(quote.unitCost) < Number(current.unitCost))))
+        (quoteSpecific && !currentSpecific) ||
+        (quoteSpecific === currentSpecific && Number(quote.unitCost) < Number(current.unitCost))
       ) {
         bestQuoteByMaterialId.set(quote.materialId, quote);
       }
@@ -308,6 +306,7 @@ export async function catalogRoutes(app: FastifyInstance) {
         marketCurrency: quote?.currency ?? null,
         marketSupplierId: quote?.supplierId ?? null,
         marketSupplierName: quote?.supplierName ?? null,
+        marketPriceIsReference: quote?.supplierName === SIGO_PRICES_SUPPLIER_NAME,
         marketPriceIsZoneSpecific: Boolean(zoneId && quote?.zoneId === zoneId),
       };
     });

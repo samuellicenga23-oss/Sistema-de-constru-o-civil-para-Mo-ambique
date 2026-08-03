@@ -130,15 +130,32 @@ export default function CatalogPage() {
     await reload();
   }
 
-  async function handleSaveMaterialPrice(id: string, baseUnitCost: number) {
+  async function handleSaveMaterialPrice(material: Material, baseUnitCost: number) {
+    const sourceName = material.marketSupplierName ?? "Cotação de fornecedor";
+    const sourceReference = material.marketPriceIsReference
+      ? "Preço de referência SIGO adoptado para cotação. Confirmar disponibilidade, transporte e preço final antes da compra."
+      : `Cotação adoptada de ${sourceName}.`;
     // Com uma zona seleccionada para visualização, editar o preço aqui edita o preço DESSA
     // zona (não o preço base) — coerente com o que a coluna está a mostrar nesse momento.
     if (viewZoneId) {
-      await handleSaveZonePrice(id, viewZoneId, baseUnitCost);
+      await catalogApi.setMaterialZonePrice(material.id, viewZoneId, {
+        unitCost: baseUnitCost,
+        sourceName,
+        sourceReference,
+        includesVat: false,
+        transportIncluded: false,
+      });
+      flash(material.marketPriceIsReference ? "Preço SIGO aplicado à cotação desta zona." : "Cotação do fornecedor aplicada à zona.");
+      await reload();
       return;
     }
-    await catalogApi.updateMaterial(id, { baseUnitCost });
-    flash("Preço actualizado — todas as composições que usam este material foram recalculadas.");
+    await catalogApi.updateMaterial(material.id, {
+      baseUnitCost,
+      priceSourceName: sourceName,
+      sourceReference,
+      includesVat: false,
+    });
+    flash(material.marketPriceIsReference ? "Preço SIGO adoptado para cotações e composições." : "Cotação adoptada — as composições foram recalculadas.");
     await reload();
   }
 
@@ -373,7 +390,7 @@ export default function CatalogPage() {
               <p className="text-xs leading-5 text-gray-500 max-w-3xl">Preço, especificação, perda e unidade de compra de cada material.</p>
               <div className="flex flex-wrap items-center justify-between gap-3"><input type="search" placeholder="Pesquisar por código, material ou categoria..." value={materialQuery} onChange={(e) => setMaterialQuery(e.target.value)} className="input max-w-sm" /><button type="button" onClick={() => setMaterialEditor({ item: null })} className="btn btn-primary btn-sm"><IconPlus className="w-3.5 h-3.5" /> Novo material</button></div>
             </div>
-            <div className="grid divide-y divide-slate-100 sm:grid-cols-2 sm:divide-x 2xl:grid-cols-3">{filteredMaterials.map((m) => <article key={`mobile-${m.id}`} className="p-4"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><span className="font-mono text-[10px] text-slate-400">{m.code || "SEM CÓD."}</span><strong className="mt-1 block text-sm text-slate-900">{m.name}</strong><p className="mt-1 text-xs text-slate-500">{m.category} · {m.unit}</p></div><span className="text-right"><strong className="block text-sm tabular-nums">{money(m.effectiveUnitCost)} {m.currency}</strong><small className="text-[10px] text-slate-500">{m.priceBasis === "zone_specific" ? "preço da zona" : "preço base"}</small></span></div>{m.marketPrice && <div className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-900"><span>Melhor cotação · {m.marketSupplierName}</span><strong className="float-right tabular-nums">{money(m.marketPrice)} {m.marketCurrency}</strong></div>}<div className="mt-3 grid grid-cols-2 gap-2 border-t border-slate-100 pt-3"><button onClick={() => setMaterialEditor({ item: m })} className="btn btn-secondary btn-sm">Editar ficha</button><button onClick={() => setPricingModalMaterial(m)} className="btn btn-secondary btn-sm">Preços e fornecedores</button>{m.marketPrice && <button type="button" onClick={() => handleSaveMaterialPrice(m.id, Number(m.marketPrice))} className="btn btn-primary btn-sm col-span-2">Adoptar melhor cotação</button>}</div></article>)}</div>
+            <div className="grid divide-y divide-slate-100 sm:grid-cols-2 sm:divide-x 2xl:grid-cols-3">{filteredMaterials.map((m) => <article key={`mobile-${m.id}`} className="p-4"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><span className="font-mono text-[10px] text-slate-400">{m.code || "SEM CÓD."}</span><strong className="mt-1 block text-sm text-slate-900">{m.name}</strong><p className="mt-1 text-xs text-slate-500">{m.category} · {m.unit}</p></div><span className="text-right"><strong className="block text-sm tabular-nums">{money(m.effectiveUnitCost)} {m.currency}</strong><small className="text-[10px] text-slate-500">{m.priceBasis === "zone_specific" ? "preço da zona" : "preço base"}</small></span></div>{m.marketPrice && <div className={`mt-3 rounded-lg px-3 py-2 text-xs ${m.marketPriceIsReference ? "bg-blue-50 text-blue-900" : "bg-emerald-50 text-emerald-900"}`}><span>{m.marketPriceIsReference ? "Cotação SIGO" : "Melhor cotação"} · {m.marketSupplierName}</span><strong className="float-right tabular-nums">{money(m.marketPrice)} {m.marketCurrency}</strong></div>}<div className="mt-3 grid grid-cols-2 gap-2 border-t border-slate-100 pt-3"><button onClick={() => setMaterialEditor({ item: m })} className="btn btn-secondary btn-sm">Editar ficha</button><button onClick={() => setPricingModalMaterial(m)} className="btn btn-secondary btn-sm">Preços e fornecedores</button>{m.marketPrice && <button type="button" onClick={() => handleSaveMaterialPrice(m, Number(m.marketPrice))} className="btn btn-primary btn-sm col-span-2">{m.marketPriceIsReference ? "Usar preço SIGO na cotação" : "Adoptar melhor cotação"}</button>}</div></article>)}</div>
           </section>
         )}
 
