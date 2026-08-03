@@ -44,7 +44,7 @@ export type MaterialsByPhaseResult = { phases: PhaseReport[]; currency: string; 
 // Comprimento comercial de barra de aço usado só para dar uma estimativa de nº de varões a
 // comprar quando o diâmetro é conhecido (ver detectSteelBarInfo) — mesmo valor já usado como
 // omissão nos Cálculos Rápidos (calculadora "Laje").
-const STEEL_COMMERCIAL_BAR_LENGTH_M = 5.8;
+const STEEL_COMMERCIAL_BAR_LENGTH_M = 12;
 
 // Peso por metro linear de um varão, a partir do diâmetro (mm) — fórmula universal
 // (π/4 × diâmetro² × densidade do aço, 7850 kg/m³), mesma usada nos Cálculos Rápidos.

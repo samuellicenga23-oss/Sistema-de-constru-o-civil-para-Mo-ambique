@@ -111,6 +111,9 @@ export default function ProjectPurchasingPage() {
       ...item.phases.map((phase) => phase.label),
     ].some((value) => String(value ?? "").toLocaleLowerCase("pt").includes(normalizedQuery))),
   ), [normalizedQuery, procurementPlan?.requirements]);
+  const filteredRebar = useMemo(() => (procurementPlan?.rebarPurchasePlan?.lines ?? []).filter((line) =>
+    !normalizedQuery || `aço armadura varão Ø${line.diameterMm} ${line.diameterMm}mm`.toLocaleLowerCase("pt").includes(normalizedQuery),
+  ), [normalizedQuery, procurementPlan?.rebarPurchasePlan?.lines]);
   const filteredOrders = useMemo(() => orders.filter((order) =>
     !normalizedQuery || [
       order.supplierName,
@@ -357,6 +360,26 @@ export default function ProjectPurchasingPage() {
             resultLabel={`${view === "necessidades" ? filteredRequirements.length : view === "pedidos" ? filteredOrders.length : filteredStock.length + filteredMovements.length} resultado(s)`}
           />
         </section>
+
+        {procurementPlan?.rebarPurchasePlan && view === "necessidades" && filteredRebar.length > 0 && (
+          <section className="card overflow-hidden">
+            <SectionHeader title="Armadura por diâmetro" description={`Lista de compra · ${procurementPlan.rebarPurchasePlan.sourceFileName ?? "projecto estrutural"}`} />
+            <div className="grid gap-px bg-slate-200 sm:grid-cols-2 xl:grid-cols-3">
+              {filteredRebar.map((line) => (
+                <article key={line.diameterMm} className="bg-white p-5">
+                  <div className="flex items-start justify-between gap-3"><strong className="text-base text-slate-950">Aço Ø{line.diameterMm} mm</strong><span className="badge badge-brand">Varão {line.commercialBarLengthM} m</span></div>
+                  <div className="mt-4 grid grid-cols-3 gap-2 rounded-lg bg-slate-50 p-3 text-xs">
+                    <div><span className="block text-slate-500">Mapa</span><strong className="mt-1 block tabular-nums">{line.scheduledWeightKg.toLocaleString("pt-MZ", { maximumFractionDigits: 2 })} kg</strong></div>
+                    <div><span className="block text-slate-500">Comprimento</span><strong className="mt-1 block tabular-nums">{line.requiredLengthM.toLocaleString("pt-MZ", { maximumFractionDigits: 1 })} m</strong></div>
+                    <div><span className="block text-slate-500">Comprar</span><strong className="mt-1 block text-base tabular-nums text-orange-700">{line.barsToBuy} varões</strong></div>
+                  </div>
+                  <p className="mt-3 text-xs text-slate-500">Peso comercial: {line.purchaseWeightKg.toLocaleString("pt-MZ", { maximumFractionDigits: 2 })} kg · sobra de corte: {line.cuttingSurplusKg.toLocaleString("pt-MZ", { maximumFractionDigits: 2 })} kg</p>
+                </article>
+              ))}
+            </div>
+            <div className="border-t border-blue-100 bg-blue-50 px-5 py-3 text-xs text-blue-900">Use esta discriminação para pedir cotações por diâmetro. O item genérico “Aço A400” do orçamento continua a representar o custo aplicado total e não deve ser somado novamente.</div>
+          </section>
+        )}
 
         {procurementPlan && view === "necessidades" && <section className="card overflow-hidden">
           <SectionHeader title="Necessidades" description="Orçamento menos stock e pedidos em curso" />

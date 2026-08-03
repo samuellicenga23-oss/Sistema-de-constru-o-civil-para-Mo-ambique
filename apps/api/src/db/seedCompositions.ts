@@ -95,6 +95,7 @@ const EXTRA_MATERIALS: Array<{
   { name: "Perfilaria metálica para tecto falso", unit: "m2", baseUnitCost: 280 },
   { name: "Janela de alumínio com vidro incolor (kit)", unit: "m2", baseUnitCost: 8500 },
   { name: "Porta interior de madeira (kit completo)", unit: "un", baseUnitCost: 6500 },
+  { name: "Porta exterior de madeira (kit completo)", unit: "un", baseUnitCost: 10500 },
   { name: "Porta exterior metálica (kit completo)", unit: "un", baseUnitCost: 12000 },
   { name: "Guarda-corpos metálico (fabricado)", unit: "ml", baseUnitCost: 3200 },
   { name: "Chapa metálica ondulada para cobertura", unit: "m2", baseUnitCost: 950 },
@@ -372,6 +373,9 @@ const COMPOSITIONS: CompositionSpec[] = [
   { name: "Massa corrida e lixagem antes de pintura", category: "Pinturas", outputUnit: "m2", labour: [["Pintor", 0.25], ["Servente", 0.15]], mats: [["Massa corrida", 0.8], ["Primário acrílico", 0.005]], equip: [] },
 
   // ---- Caixilharias (expansão) ----
+  { name: "Janela de alumínio com vidro montada", category: "Caixilharias e Serralharias", outputUnit: "m2", labour: [["Serralheiro", 0.6], ["Vidraceiro", 0.35], ["Servente", 0.25]], mats: [["Janela de alumínio com vidro incolor (kit)", 1.0], ["Espuma expansiva", 0.05], ["Silicone vedante", 0.02]], equip: [] },
+  { name: "Porta interior de madeira montada", category: "Caixilharias e Serralharias", outputUnit: "un", labour: [["Carpinteiro B", 2.0], ["Servente", 0.5]], mats: [["Porta interior de madeira (kit completo)", 1], ["Ferragens de porta (fechadura, dobradiças)", 1]], equip: [] },
+  { name: "Porta exterior de madeira montada", category: "Caixilharias e Serralharias", outputUnit: "un", labour: [["Carpinteiro B", 2.8], ["Servente", 0.6]], mats: [["Porta exterior de madeira (kit completo)", 1], ["Ferragens de porta (fechadura, dobradiças)", 1]], equip: [] },
   { name: "Janela PVC com vidro montada", category: "Caixilharias e Serralharias", outputUnit: "m2", labour: [["Serralheiro", 0.5], ["Servente", 0.3]], mats: [["Janela PVC com vidro (kit)", 1.0], ["Espuma expansiva", 0.05], ["Silicone vedante", 0.02]], equip: [] },
   { name: "Porta PVC exterior montada", category: "Caixilharias e Serralharias", outputUnit: "un", labour: [["Serralheiro", 2.5], ["Servente", 0.5]], mats: [["Porta PVC exterior (kit)", 1], ["Ferragens de porta (fechadura, dobradiças)", 1]], equip: [] },
   { name: "Portão metálico montado", category: "Caixilharias e Serralharias", outputUnit: "un", labour: [["Serralheiro", 3.0], ["Servente", 1.0]], mats: [["Portão metálico (kit)", 1], ["Parafuso e bucha", 1]], equip: [] },

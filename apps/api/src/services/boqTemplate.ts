@@ -168,6 +168,16 @@ export const STANDARD_CHAPTERS: TemplateChapter[] = [
       { code: "13.4", description: "Rede de terra e equipotencial", unit: "vg", composition: "Rede de terra e equipotencial completa, ensaiada" },
     ],
   },
+  {
+    code: "15",
+    name: "PORTAS, JANELAS E CAIXILHARIAS",
+    items: [
+      { code: "15.1", description: "Portas interiores completas", unit: "un", composition: "Porta interior de madeira montada" },
+      { code: "15.2", description: "Portas exteriores completas", unit: "un", composition: "Porta exterior de madeira montada" },
+      { code: "15.3", description: "Janelas de alumínio com vidro", unit: "m2", composition: "Janela de alumínio com vidro montada" },
+      { code: "15.4", description: "Vergas e peitoris dos vãos", unit: "ml", composition: "Peitoril/lintel em betão B25" },
+    ],
+  },
 ];
 
 const DEFAULT_CHAPTER_METADATA: Record<string, { discipline: string; detectionTags: string[] }> = {
@@ -184,6 +194,7 @@ const DEFAULT_CHAPTER_METADATA: Record<string, { discipline: string; detectionTa
   "11": { discipline: "hidrossanitario", detectionTags: ["água", "sanita", "lavatório", "reservatório"] },
   "12": { discipline: "hidrossanitario", detectionTags: ["fossa séptica", "infiltração", "saneamento"] },
   "13": { discipline: "electricidade", detectionTags: ["quadro eléctrico", "iluminação", "tomada", "terra"] },
+  "15": { discipline: "arquitectura", detectionTags: ["porta", "janela", "caixilharia", "vão"] },
 };
 
 /** Garante uma biblioteca global versionada, sem depender de correr novamente o seed completo. */
@@ -305,7 +316,7 @@ export function selectAdaptiveBoqChapters(context?: AdaptivePlantContext | null)
   const disciplines = new Set(context.disciplines);
   const codes = new Set<string>(["1"]);
   if (disciplines.has("arquitectura") || context.hasRooms) {
-    ["4", "5", "6", "7", "10"].forEach((code) => codes.add(code));
+    ["4", "5", "6", "7", "10", "15"].forEach((code) => codes.add(code));
   }
   if (disciplines.has("estrutura") || context.hasStructuralElements) {
     ["2", "3"].forEach((code) => codes.add(code));

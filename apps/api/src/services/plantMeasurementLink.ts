@@ -1,6 +1,6 @@
 import { eq, desc } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { plants, extractedRooms } from "../db/schema.js";
+import { plants, extractedOpenings, extractedRooms } from "../db/schema.js";
 
 // Liga a régua de medições às áreas dos compartimentos extraídos da planta, por código de item
 // do mapa de quantidades (ex: 5.1 → uma linha por compartimento com a área da planta).
@@ -10,7 +10,19 @@ export type PlantRoom = {
   name: string;
   number: string | null;
   areaM2: number;
+  perimeterM: number | null;
   floor: string | null;
+};
+
+export type PlantOpening = {
+  id: string;
+  kind: "porta" | "janela";
+  widthM: number | null;
+  heightM: number | null;
+  quantity: number;
+  floor: string | null;
+  location: "interior" | "exterior" | "desconhecida";
+  needsConfirmation: boolean;
 };
 
 export function classifyRoomType(name: string): "seco" | "humido" {
@@ -40,8 +52,9 @@ function roomLabel(room: PlantRoom): string {
   return parts.join(" — ") || room.name;
 }
 
-function estimateWallAreaM2(floorAreaM2: number, ceilingHeight = 2.7): number {
+function estimateWallAreaM2(floorAreaM2: number, perimeterM: number | null, ceilingHeight = 2.7): number {
   if (floorAreaM2 <= 0) return 0;
+  if (perimeterM != null && perimeterM > 0) return perimeterM * ceilingHeight;
   const side = Math.sqrt(floorAreaM2);
   return 4 * side * ceilingHeight;
 }
@@ -92,7 +105,38 @@ export type PlantFillResult =
   | { ok: true; lines: PlantMeasurementLineDraft[]; strategy: string; roomCount: number }
   | { ok: false; reason: string };
 
-export function buildMeasurementLinesFromPlant(itemCode: string, rooms: PlantRoom[]): PlantFillResult {
+export function buildMeasurementLinesFromPlant(itemCode: string, rooms: PlantRoom[], openings: PlantOpening[] = []): PlantFillResult {
+  const confirmedOpenings = openings.filter(
+    (opening) => !opening.needsConfirmation && opening.widthM != null && opening.heightM != null && opening.location !== "desconhecida",
+  );
+  const openingLines = (() => {
+    const selected =
+      itemCode === "15.1"
+        ? confirmedOpenings.filter((opening) => opening.kind === "porta" && opening.location === "interior")
+        : itemCode === "15.2"
+          ? confirmedOpenings.filter((opening) => opening.kind === "porta" && opening.location === "exterior")
+          : itemCode === "15.3"
+            ? confirmedOpenings.filter((opening) => opening.kind === "janela")
+            : itemCode === "15.4"
+              ? confirmedOpenings
+              : null;
+    if (selected === null) return null;
+    return selected.map((opening, index) => ({
+      description: `${opening.floor ?? "Piso por confirmar"} — ${opening.kind}`,
+      count: opening.quantity,
+      length: itemCode === "15.3" ? opening.widthM : itemCode === "15.4" ? opening.widthM : null,
+      width: itemCode === "15.3" ? opening.heightM : itemCode === "15.4" ? 1 : null,
+      height: null,
+      sortOrder: index,
+    }));
+  })();
+  if (openingLines !== null) {
+    if (openingLines.length === 0) {
+      return { ok: false, reason: "Não há vãos confirmados desta categoria. Confirme portas e janelas na revisão da planta." };
+    }
+    return { ok: true, lines: openingLines, strategy: "vãos confirmados da planta", roomCount: rooms.length };
+  }
+
   const strategy = ITEM_STRATEGIES[itemCode];
   if (!strategy) {
     return {
@@ -160,7 +204,7 @@ export function buildMeasurementLinesFromPlant(itemCode: string, rooms: PlantRoo
         sortOrder: index,
       };
     }
-    const wallArea = estimateWallAreaM2(room.areaM2, ceilingHeight);
+    const wallArea = estimateWallAreaM2(room.areaM2, room.perimeterM, ceilingHeight);
     return {
       description: `${roomLabel(room)} (≈ parede, h=${ceilingHeight}m)`,
       count: 1,
@@ -171,6 +215,23 @@ export function buildMeasurementLinesFromPlant(itemCode: string, rooms: PlantRoo
     };
   });
 
+  // Só os dois itens de paredes com significado inequívoco recebem desconto
+  // automático. Vãos incertos ou sem classificação interior/exterior ficam fora.
+  const openingLocation = itemCode === "4.1" ? "exterior" : itemCode === "4.2" ? "interior" : null;
+  if (strategy.kind === "per_room_wall" && openingLocation) {
+    const deduction = confirmedOpenings
+      .filter((opening) => opening.location === openingLocation)
+      .reduce((sum, opening) => sum + opening.widthM! * opening.heightM! * opening.quantity, 0);
+    const gross = lines.reduce((sum, line) => sum + (line.length ?? 0), 0);
+    if (deduction > 0 && gross > 0) {
+      for (const line of lines) {
+        const share = (line.length ?? 0) / gross;
+        line.length = Math.max(0, (line.length ?? 0) - deduction * share);
+        line.description = `${line.description} (líquida de vãos confirmados)`;
+      }
+    }
+  }
+
   return {
     ok: true,
     strategy: strategy.kind === "per_room_area" ? `área por compartimento (${strategy.filter})` : `parede estimada (${strategy.filter})`,
@@ -180,10 +241,14 @@ export function buildMeasurementLinesFromPlant(itemCode: string, rooms: PlantRoo
 }
 
 export function supportedPlantItemCodes(): string[] {
-  return Object.keys(ITEM_STRATEGIES);
+  return [...Object.keys(ITEM_STRATEGIES), "15.1", "15.2", "15.3", "15.4"];
 }
 
 export async function loadProjectPlantRooms(projectId: string): Promise<PlantRoom[]> {
+  return (await loadProjectPlantContext(projectId)).rooms;
+}
+
+export async function loadProjectPlantContext(projectId: string): Promise<{ rooms: PlantRoom[]; openings: PlantOpening[] }> {
   const plantRows = await db
     .select()
     .from(plants)
@@ -192,15 +257,31 @@ export async function loadProjectPlantRooms(projectId: string): Promise<PlantRoo
 
   for (const plant of plantRows) {
     if (plant.processingStatus !== "concluido") continue;
-    const rooms = await db.select().from(extractedRooms).where(eq(extractedRooms.plantId, plant.id));
+    const [rooms, openings] = await Promise.all([
+      db.select().from(extractedRooms).where(eq(extractedRooms.plantId, plant.id)),
+      db.select().from(extractedOpenings).where(eq(extractedOpenings.plantId, plant.id)),
+    ]);
     if (rooms.length === 0) continue;
-    return rooms.map((r) => ({
-      id: r.id,
-      name: r.name,
-      number: r.number,
-      areaM2: Number(r.areaM2),
-      floor: r.floor,
-    }));
+    return {
+      rooms: rooms.map((r) => ({
+        id: r.id,
+        name: r.name,
+        number: r.number,
+        areaM2: Number(r.areaM2),
+        perimeterM: r.perimeterM == null ? null : Number(r.perimeterM),
+        floor: r.floor,
+      })),
+      openings: openings.map((opening) => ({
+        id: opening.id,
+        kind: opening.kind as PlantOpening["kind"],
+        widthM: opening.widthM == null ? null : Number(opening.widthM),
+        heightM: opening.heightM == null ? null : Number(opening.heightM),
+        quantity: opening.quantity,
+        floor: opening.floor,
+        location: opening.location as PlantOpening["location"],
+        needsConfirmation: opening.needsConfirmation,
+      })),
+    };
   }
-  return [];
+  return { rooms: [], openings: [] };
 }

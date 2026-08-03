@@ -93,7 +93,7 @@ export default function QuickCalcPage() {
   const [lajeCompDetail, setLajeCompDetail] = useState<CostCompositionDetail | null>(null);
   const [barDiameterMm, setBarDiameterMm] = useState("6");
   const [spacingCm, setSpacingCm] = useState("15");
-  const [barLengthM, setBarLengthM] = useState("5.8");
+  const [barLengthM, setBarLengthM] = useState("12");
   const [acoCompDetail, setAcoCompDetail] = useState<CostCompositionDetail | null>(null);
 
   // --- Betão (volume simples) ---

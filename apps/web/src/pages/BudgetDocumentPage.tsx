@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { boqApi, type BudgetDocumentSummary, type BudgetRepriceResult, type LineItemNode, type MeasurementImportResult, type Project, type ProjectMaterialSpecification } from "../api/boq";
 import { catalogApi, type CostComposition } from "../api/catalog";
 import { measurementApi, type MeasurementDashboard } from "../api/measurement";
-import { plantsApi, type Plant, type ExtractedRoom } from "../api/plants";
+import { plantsApi, type Plant, type ExtractedOpening, type ExtractedRoom } from "../api/plants";
 import LineItemRow, { AddChildForm, BoqHeaderRow, BoqTableHead } from "../components/LineItemRow";
 import QuickEstimateWizard from "../components/QuickEstimateWizard";
 import CalculationReportView from "../components/CalculationReportView";
@@ -67,6 +67,7 @@ export default function BudgetDocumentPage() {
   const [structuralPlant, setStructuralPlant] = useState<Plant | null>(null);
   const [architecturePlant, setArchitecturePlant] = useState<Plant | null>(null);
   const [architectureRooms, setArchitectureRooms] = useState<ExtractedRoom[]>([]);
+  const [architectureOpenings, setArchitectureOpenings] = useState<ExtractedOpening[]>([]);
   const [importingMeasurements, setImportingMeasurements] = useState(false);
   const [importResult, setImportResult] = useState<MeasurementImportResult | null>(null);
   const [showRepriceConfirm, setShowRepriceConfirm] = useState(false);
@@ -98,6 +99,7 @@ export default function BudgetDocumentPage() {
     setStructuralPlant(null);
     setArchitecturePlant(null);
     setArchitectureRooms([]);
+    setArchitectureOpenings([]);
     boqApi
       .getBudgetDocumentSummary(documentId)
       .then(async (s) => {
@@ -134,6 +136,7 @@ export default function BudgetDocumentPage() {
           if (detail.rooms.length > 0) {
             setArchitecturePlant(p);
             setArchitectureRooms(detail.rooms);
+            setArchitectureOpenings(detail.openings);
             break;
           }
         }
@@ -983,6 +986,7 @@ export default function BudgetDocumentPage() {
           structuralSummary={structuralPlant?.structuralSummary}
           structuralPlantName={structuralPlant?.originalFileName}
           architectureRooms={architectureRooms}
+          architectureOpenings={architectureOpenings}
           architecturePlantName={architecturePlant?.originalFileName}
           zoneId={project?.zoneId}
           documentCurrency={document.currency}

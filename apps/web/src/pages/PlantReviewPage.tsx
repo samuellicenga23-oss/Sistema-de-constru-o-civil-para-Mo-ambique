@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { plantsApi, type ExtractedRoom, type ExtractedRebarLine, type Plant } from "../api/plants";
+import { plantsApi, type ExtractedOpening, type ExtractedRoom, type ExtractedRebarLine, type OpeningInput, type Plant } from "../api/plants";
 import { boqApi } from "../api/boq";
 import Layout from "../components/Layout";
-import { IconBack, IconRefresh, IconRuler } from "../components/icons";
+import { IconBack, IconRefresh, IconRuler, IconTrash } from "../components/icons";
+import { buildRebarPurchasePlan } from "@sigo/shared";
 
 const UNASSIGNED_FLOOR = "Piso não identificado";
 const SECTION_STYLES = {
@@ -37,11 +38,13 @@ export default function PlantReviewPage() {
   const navigate = useNavigate();
   const [plant, setPlant] = useState<Plant | null>(null);
   const [rooms, setRooms] = useState<ExtractedRoom[]>([]);
+  const [openings, setOpenings] = useState<ExtractedOpening[]>([]);
   const [rebarSchedules, setRebarSchedules] = useState<ExtractedRebarLine[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [savingRoomId, setSavingRoomId] = useState<string | null>(null);
   const [reprocessing, setReprocessing] = useState(false);
   const [preparingMeasurements, setPreparingMeasurements] = useState(false);
+  const [savingOpeningId, setSavingOpeningId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -50,6 +53,7 @@ export default function PlantReviewPage() {
       .then(async (detail) => {
         setPlant(detail.plant);
         setRooms(detail.rooms);
+        setOpenings(detail.openings);
         setRebarSchedules(detail.rebarSchedules);
       })
       .catch((err) => setError(err.message));
@@ -67,6 +71,7 @@ export default function PlantReviewPage() {
       setPlant(updated);
       const detail = await plantsApi.detail(id);
       setRooms(detail.rooms);
+      setOpenings(detail.openings);
       setRebarSchedules(detail.rebarSchedules);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao reprocessar a planta");
@@ -123,12 +128,63 @@ export default function PlantReviewPage() {
     }
   }
 
+  function openingPayload(opening: ExtractedOpening): OpeningInput {
+    return {
+      kind: opening.kind,
+      code: opening.code,
+      widthM: opening.widthM ? Number(opening.widthM) : null,
+      heightM: opening.heightM ? Number(opening.heightM) : null,
+      sillHeightM: opening.sillHeightM ? Number(opening.sillHeightM) : null,
+      quantity: opening.quantity,
+      floor: opening.floor,
+      location: opening.location,
+      material: opening.material,
+      page: opening.page,
+      confirmed: !opening.needsConfirmation,
+    };
+  }
+
+  async function saveOpening(opening: ExtractedOpening) {
+    if (!id) return;
+    setSavingOpeningId(opening.id);
+    setError(null);
+    try {
+      const updated = await plantsApi.updateOpening(id, opening.id, { ...openingPayload(opening), confirmed: true });
+      setOpenings((items) => items.map((item) => item.id === updated.id ? updated : item));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível guardar o vão");
+    } finally {
+      setSavingOpeningId(null);
+    }
+  }
+
+  async function addOpening() {
+    if (!id) return;
+    setError(null);
+    try {
+      const created = await plantsApi.createOpening(id, { kind: "janela", widthM: 1.2, heightM: 1.2, quantity: 1, floor: floorNames[0] === UNASSIGNED_FLOOR ? null : floorNames[0] ?? null, location: "exterior", page: 1, confirmed: true });
+      setOpenings((items) => [...items, created]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível adicionar o vão");
+    }
+  }
+
+  async function deleteOpening(openingId: string) {
+    if (!id) return;
+    await plantsApi.deleteOpening(id, openingId);
+    setOpenings((items) => items.filter((item) => item.id !== openingId));
+  }
+
   if (!plant) {
     return <div className="min-h-screen flex items-center justify-center text-gray-400">A carregar...</div>;
   }
 
   const totalRoomsArea = rooms.reduce((s, r) => s + Number(r.areaM2), 0);
   const totalRebarWeight = rebarSchedules.reduce((s, r) => s + Number(r.weightKg), 0);
+  const rebarPurchasePlan = useMemo(
+    () => buildRebarPurchasePlan(rebarSchedules.map((line) => ({ diameterMm: Number(line.diameterMm), weightKg: Number(line.weightKg) }))),
+    [rebarSchedules],
+  );
 
   // Lacunas de extracção: o utilizador pediu explicitamente para ser informado do que não foi
   // possível puxar automaticamente da planta, sem lhe perguntar como reformatar o ficheiro — por
@@ -164,6 +220,11 @@ export default function PlantReviewPage() {
     }
     if (hasArchitecture && rooms.length === 0) {
       gaps.push("Não foram identificados compartimentos (áreas) nas páginas de arquitectura.");
+    }
+    if (hasArchitecture && openings.length === 0) {
+      gaps.push("Não foram encontrados quadros ou etiquetas inequívocas de portas e janelas. Registe os vãos manualmente antes de calcular as paredes líquidas.");
+    } else if (openings.some((opening) => opening.needsConfirmation || !opening.widthM || !opening.heightM || opening.location === "desconhecida")) {
+      gaps.push(`${openings.filter((opening) => opening.needsConfirmation || !opening.widthM || !opening.heightM || opening.location === "desconhecida").length} vão(s) precisam de confirmação de dimensão ou localização.`);
     }
   }
 
@@ -279,7 +340,7 @@ export default function PlantReviewPage() {
               <IconRuler className="w-4 h-4 text-brand-700" />
               <h2 className="section-title">Resumo estrutural detectado</h2>
             </div>
-            <div className="grid grid-cols-5 gap-3 text-center mb-3">
+            <div className="mb-3 grid grid-cols-2 gap-3 text-center sm:grid-cols-3 xl:grid-cols-5">
               <div className="rounded-lg border border-gray-200 p-3">
                 <p className="text-xl font-semibold text-gray-900">{plant.structuralSummary.footingsCount}</p>
                 <p className="muted">
@@ -300,7 +361,7 @@ export default function PlantReviewPage() {
               </div>
               <div className="rounded-lg border border-gray-200 p-3">
                 <p className="text-xl font-semibold text-gray-900">{plant.structuralSummary.slabsCount}</p>
-                <p className="muted">folha(s) de laje · e={plant.structuralSummary.slabsAvgThicknessCm.toFixed(0)}cm</p>
+                <p className="muted">laje(s) física(s) por nível</p>
               </div>
               <div className="rounded-lg border border-gray-200 p-3">
                 <p className="text-xl font-semibold text-gray-900">{plant.structuralSummary.totalSteelWeightKg.toFixed(0)}</p>
@@ -312,6 +373,16 @@ export default function PlantReviewPage() {
                 {plant.structuralSummary.staircasesCount} escada(s) detectada(s) — o aço da(s) escada(s) já está incluído no
                 total acima.
               </p>
+            )}
+            {(plant.structuralSummary.slabs?.length ?? 0) > 0 && (
+              <div className="mb-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {plant.structuralSummary.slabs!.map((slab, index) => (
+                  <div key={`${slab.floor ?? "laje"}-${slab.thicknessCm}-${index}`} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                    <strong className="block text-sm text-slate-900">{slab.floor ?? `Laje ${index + 1}`}</strong>
+                    <span className="text-xs text-slate-500">Espessura {slab.thicknessCm.toFixed(1)} cm · páginas {slab.pages.join(", ")}</span>
+                  </div>
+                ))}
+              </div>
             )}
             <p className="text-xs text-gray-500 mb-3">
               Estes números vêm do quadro de elementos de fundação, do quadro de pilares/vigas, das folhas de armadura
@@ -384,14 +455,57 @@ export default function PlantReviewPage() {
           </section>
         )}
 
+        {hasArchitecture && (
+          <section className="card card-pad">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <div><h2 className="section-title">Portas e janelas ({openings.length})</h2><p className="mt-1 text-xs text-slate-500">Confirme dimensão e parede. Só os vãos confirmados entram no cálculo líquido.</p></div>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={addOpening}>Adicionar vão</button>
+            </div>
+            {openings.length === 0 ? <p className="rounded-lg bg-amber-50 px-3 py-3 text-sm text-amber-900">Nenhum vão seguro foi detectado. Adicione portas e janelas manualmente.</p> : (
+              <div className="space-y-2">
+                {openings.map((opening) => (
+                  <div key={opening.id} className={`grid gap-2 rounded-lg border p-3 md:grid-cols-2 xl:grid-cols-[84px_86px_86px_68px_100px_110px_125px_minmax(120px,1fr)_auto] xl:items-end ${opening.needsConfirmation ? "border-amber-200 bg-amber-50/50" : "border-slate-200 bg-white"}`}>
+                    <div><label className="label">Tipo</label><select className="input input-sm" value={opening.kind} onChange={(event) => setOpenings((items) => items.map((item) => item.id === opening.id ? { ...item, kind: event.target.value as ExtractedOpening["kind"], needsConfirmation: true } : item))}><option value="porta">Porta</option><option value="janela">Janela</option></select></div>
+                    <div><label className="label">Largura</label><input className="input input-sm" type="number" step="0.01" min="0" value={opening.widthM ?? ""} onChange={(event) => setOpenings((items) => items.map((item) => item.id === opening.id ? { ...item, widthM: event.target.value || null, needsConfirmation: true } : item))} /></div>
+                    <div><label className="label">Altura</label><input className="input input-sm" type="number" step="0.01" min="0" value={opening.heightM ?? ""} onChange={(event) => setOpenings((items) => items.map((item) => item.id === opening.id ? { ...item, heightM: event.target.value || null, needsConfirmation: true } : item))} /></div>
+                    <div><label className="label">Qtd.</label><input className="input input-sm" type="number" step="1" min="1" value={opening.quantity} onChange={(event) => setOpenings((items) => items.map((item) => item.id === opening.id ? { ...item, quantity: Math.max(1, Number(event.target.value)), needsConfirmation: true } : item))} /></div>
+                    <div><label className="label">Código</label><input className="input input-sm" value={opening.code ?? ""} placeholder="J01" onChange={(event) => setOpenings((items) => items.map((item) => item.id === opening.id ? { ...item, code: event.target.value || null, needsConfirmation: true } : item))} /></div>
+                    <div><label className="label">Piso</label><input className="input input-sm" value={opening.floor ?? ""} placeholder="Piso térreo" onChange={(event) => setOpenings((items) => items.map((item) => item.id === opening.id ? { ...item, floor: event.target.value || null, needsConfirmation: true } : item))} /></div>
+                    <div><label className="label">Parede</label><select className="input input-sm" value={opening.location} onChange={(event) => setOpenings((items) => items.map((item) => item.id === opening.id ? { ...item, location: event.target.value as ExtractedOpening["location"], needsConfirmation: true } : item))}><option value="desconhecida">Por definir</option><option value="interior">Interior</option><option value="exterior">Exterior</option></select></div>
+                    <div><label className="label">Material</label><input className="input input-sm" value={opening.material ?? ""} placeholder="Ex.: alumínio" onChange={(event) => setOpenings((items) => items.map((item) => item.id === opening.id ? { ...item, material: event.target.value || null, needsConfirmation: true } : item))} /></div>
+                    <div className="flex gap-1"><button type="button" className="btn btn-primary btn-sm" disabled={savingOpeningId === opening.id || !opening.widthM || !opening.heightM || opening.location === "desconhecida"} onClick={() => saveOpening(opening)}>{savingOpeningId === opening.id ? "A guardar" : opening.needsConfirmation ? "Confirmar" : "Gravar"}</button><button type="button" className="btn-icon h-9 w-9" aria-label="Eliminar vão" onClick={() => deleteOpening(opening.id)}><IconTrash className="h-4 w-4" /></button></div>
+                    <p className="md:col-span-2 xl:col-span-9 text-[11px] text-slate-500">Página {opening.page} · {opening.source === "quadro" ? "quadro de vãos" : opening.source === "geometria" ? "geometria da planta" : "manual"} · confiança {Math.round(Number(opening.confidence) * 100)}%</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
+
         {rebarSchedules.length > 0 && (
           <section className="card card-pad">
             <h2 className="section-title mb-3">Aço estrutural detectado ({rebarSchedules.length} linhas)</h2>
             <p className="text-sm text-gray-600 mb-3">
               Peso total: <span className="font-semibold text-gray-900">{totalRebarWeight.toFixed(2)} kg</span>. Este
-              total já está incluído no resumo estrutural acima e substitui o rácio genérico kg/m³ do item de aço
-              quando usa o Assistente — sem criar um item por elemento/diâmetro.
+              total já está incluído no resumo estrutural acima. A lista de compra abaixo agrupa o mapa por diâmetro
+              e converte o peso em varões comerciais de 12 m.
             </p>
+            <div className="mb-4 overflow-x-auto rounded-lg border border-slate-200">
+              <table className="w-full min-w-[660px] text-sm">
+                <thead><tr className="table-head-row"><th className="px-3 py-2 text-left">Diâmetro</th><th className="text-right">Peso do mapa</th><th className="text-right">Comprimento</th><th className="text-right">Varões de 12 m</th><th className="pr-3 text-right">Peso de compra</th></tr></thead>
+                <tbody>
+                  {rebarPurchasePlan.map((line) => (
+                    <tr key={line.diameterMm} className="table-row">
+                      <td className="px-3 py-2 font-semibold">Ø{line.diameterMm} mm</td>
+                      <td className="text-right tabular-nums">{line.scheduledWeightKg.toFixed(2)} kg</td>
+                      <td className="text-right tabular-nums">{line.requiredLengthM.toFixed(1)} m</td>
+                      <td className="text-right text-base font-bold tabular-nums text-brand-700">{line.barsToBuy}</td>
+                      <td className="pr-3 text-right tabular-nums">{line.purchaseWeightKg.toFixed(2)} kg</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
             <div className="overflow-x-auto max-h-80 overflow-y-auto">
               <table className="w-full text-sm">
                 <thead>

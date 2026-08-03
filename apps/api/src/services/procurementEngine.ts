@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or } from "drizzle-orm";
 import { db } from "../db/index.js";
 import {
   purchaseOrderLines,
@@ -7,10 +7,46 @@ import {
   supplierMaterialPrices,
   suppliers,
   scheduleTasks,
+  plants,
+  extractedRebarSchedules,
 } from "../db/schema.js";
 import { computeMaterialsByPhase } from "./materialsByPhase.js";
 import { mapToPhase } from "./phaseMapping.js";
-import { calculateVatTotals } from "@sigo/shared";
+import { buildRebarPurchasePlan, calculateVatTotals, type RebarPurchaseLine } from "@sigo/shared";
+
+export type ProjectRebarPurchasePlan = {
+  sourcePlantId: string;
+  sourceFileName: string | null;
+  commercialBarLengthM: number;
+  lines: RebarPurchaseLine[];
+  totalScheduledWeightKg: number;
+  totalPurchaseWeightKg: number;
+};
+
+async function getProjectRebarPurchasePlan(projectId: string): Promise<ProjectRebarPurchasePlan | null> {
+  const candidates = await db
+    .select({ id: plants.id, originalFileName: plants.originalFileName })
+    .from(plants)
+    .where(and(eq(plants.projectId, projectId), eq(plants.processingStatus, "concluido")))
+    .orderBy(desc(plants.uploadedAt));
+  for (const candidate of candidates) {
+    const rows = await db
+      .select({ diameterMm: extractedRebarSchedules.diameterMm, weightKg: extractedRebarSchedules.weightKg })
+      .from(extractedRebarSchedules)
+      .where(eq(extractedRebarSchedules.plantId, candidate.id));
+    if (!rows.length) continue;
+    const lines = buildRebarPurchasePlan(rows.map((row) => ({ diameterMm: Number(row.diameterMm), weightKg: Number(row.weightKg) })));
+    return {
+      sourcePlantId: candidate.id,
+      sourceFileName: candidate.originalFileName,
+      commercialBarLengthM: 12,
+      lines,
+      totalScheduledWeightKg: lines.reduce((sum, line) => sum + line.scheduledWeightKg, 0),
+      totalPurchaseWeightKg: lines.reduce((sum, line) => sum + line.purchaseWeightKg, 0),
+    };
+  }
+  return null;
+}
 
 export type ProcurementRequirement = {
   materialId: string;
@@ -56,6 +92,7 @@ export async function computeProcurementPlan(args: {
 }) {
   const phaseReport = await computeMaterialsByPhase(args.documentId, args.companyId);
   if (!phaseReport) return null;
+  const rebarPurchasePlan = await getProjectRebarPurchasePlan(args.projectId);
 
   type RequiredBucket = {
     materialId: string;
@@ -100,6 +137,7 @@ export async function computeProcurementPlan(args: {
       shortageTotal: 0,
       coveragePercent: 0,
       requirements: [],
+      rebarPurchasePlan,
       missingCompositionItems: phaseReport.phases.flatMap((phase) => phase.itemsWithoutComposition.map((item) => ({ ...item, phase: phase.label }))),
     };
   }
@@ -208,6 +246,7 @@ export async function computeProcurementPlan(args: {
       ? Math.max(0, Math.min(100, (requirements.reduce((sum, item) => sum + Math.min(item.requiredQty, item.consumedQty + Math.max(0, item.stockQty) + item.orderedQty) * item.estimatedUnitCost, 0) / requirements.reduce((sum, item) => sum + item.requiredQty * item.estimatedUnitCost, 0)) * 100))
       : 100,
     requirements,
+    rebarPurchasePlan,
     missingCompositionItems: phaseReport.phases.flatMap((phase) => phase.itemsWithoutComposition.map((item) => ({ ...item, phase: phase.label }))),
   };
 }

@@ -510,6 +510,12 @@ export const plants = pgTable("plants", {
     staircasesCount: number;
     slabsCount: number;
     slabsAvgThicknessCm: number;
+    slabs?: Array<{
+      floor: string | null;
+      thicknessCm: number;
+      layers: Array<"inferior" | "superior" | "geral">;
+      pages: number[];
+    }>;
     totalSteelWeightKg: number;
   } | null>(),
   // Organização virtual de PDFs completos: mantém o original intacto e regista os intervalos
@@ -529,7 +535,26 @@ export const extractedRooms = pgTable("extracted_rooms", {
   // ecrã de confirmação antes de entrar no Assistente de Medições (a detecção automática nem
   // sempre acerta em casos ambíguos, ex: uma casa de banho partilhada entre a casa e um anexo).
   floor: varchar("floor", { length: 100 }),
+  perimeterM: numeric("perimeter_m", { precision: 12, scale: 4 }),
 });
+
+export const extractedOpenings = pgTable("extracted_openings", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  plantId: uuid("plant_id").notNull().references(() => plants.id, { onDelete: "cascade" }),
+  kind: varchar("kind", { length: 10 }).notNull(),
+  code: varchar("code", { length: 40 }),
+  widthM: numeric("width_m", { precision: 8, scale: 3 }),
+  heightM: numeric("height_m", { precision: 8, scale: 3 }),
+  sillHeightM: numeric("sill_height_m", { precision: 8, scale: 3 }),
+  quantity: integer("quantity").notNull().default(1),
+  floor: varchar("floor", { length: 100 }),
+  location: varchar("location", { length: 20 }).notNull().default("desconhecida"),
+  material: varchar("material", { length: 120 }),
+  page: integer("page").notNull(),
+  confidence: numeric("confidence", { precision: 4, scale: 3 }).notNull().default("0"),
+  source: varchar("source", { length: 20 }).notNull(),
+  needsConfirmation: boolean("needs_confirmation").notNull().default(true),
+}, (table) => [index("extracted_openings_plant_idx").on(table.plantId)]);
 
 export const extractedRebarSchedules = pgTable("extracted_rebar_schedules", {
   id: uuid("id").primaryKey().defaultRandom(),

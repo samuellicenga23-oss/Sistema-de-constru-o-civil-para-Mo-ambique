@@ -13,8 +13,17 @@ import { STANDARD_CHAPTERS } from "./boqTemplate.js";
 // Fórmulas e rácios usados são aproximações genéricas de mercado para construção residencial
 // em betão armado — documentadas em cada bloco de cálculo abaixo.
 
-export type RoomInput = { name: string; type: "seco" | "humido"; length: number; width: number };
-export type FloorInput = { ceilingHeight: number; perimeter: number; rooms: RoomInput[] };
+export type RoomInput = { name: string; type: "seco" | "humido"; length: number; width: number; perimeterM?: number };
+export type FloorInput = { label?: string; ceilingHeight: number; perimeter: number; rooms: RoomInput[] };
+export type FloorSlabInput = { label: string; areaM2: number; thicknessM: number };
+export type OpeningInput = {
+  kind: "porta" | "janela";
+  widthM: number;
+  heightM: number;
+  quantity: number;
+  location: "interior" | "exterior" | "desconhecida";
+  confirmed: boolean;
+};
 export type FoundationType = "sapata_isolada" | "sapata_corrida" | "laje";
 export type RoofType = "laje_plana" | "chapa_metalica";
 
@@ -101,7 +110,9 @@ export type QuickEstimateInput = {
   roofArea?: number; // se omitido, estima-se a partir da área do último piso
   steelWeightKg?: number; // se vier de um projecto estrutural real, substitui o rácio kg/m3
   beamConcreteVolumeM3?: number; // idem, calculado a partir do comprimento×secção reais das vigas
-  floorSlabThicknessM?: number; // espessura real da laje (armadura de piso/cobertura) — distinto de slabThickness (fundação em laje)
+  floorSlabThicknessM?: number; // compatibilidade com medições antigas de espessura única
+  floorSlabs?: FloorSlabInput[]; // cada laje física mantém área e espessura próprias
+  openings?: OpeningInput[];
   hydraulic?: HydraulicInput;
   // Opcional: só quando o projecto usa saneamento autónomo (sem ligação à rede pública de
   // esgotos) — dimensiona a fossa séptica e a vala/poço de infiltração a partir do nº de pessoas.
@@ -152,7 +163,7 @@ function roomArea(r: RoomInput) {
   return r.length * r.width;
 }
 function roomPerimeter(r: RoomInput) {
-  return 2 * (r.length + r.width);
+  return r.perimeterM && r.perimeterM > 0 ? r.perimeterM : 2 * (r.length + r.width);
 }
 
 export function computeQuantities(input: QuickEstimateInput) {
@@ -190,6 +201,25 @@ export function computeQuantities(input: QuickEstimateInput) {
     }
   }
 
+  // Só dados confirmados descontam paredes. Um candidato ambíguo permanece no ecrã de revisão,
+  // mas não altera silenciosamente alvenaria, reboco ou pintura.
+  const confirmedOpenings = (input.openings ?? []).filter((opening) => opening.confirmed && opening.location !== "desconhecida");
+  const exteriorOpeningArea = confirmedOpenings
+    .filter((opening) => opening.location === "exterior")
+    .reduce((sum, opening) => sum + opening.widthM * opening.heightM * opening.quantity, 0);
+  const interiorOpeningArea = confirmedOpenings
+    .filter((opening) => opening.location === "interior")
+    .reduce((sum, opening) => sum + opening.widthM * opening.heightM * opening.quantity, 0);
+  const grossExteriorWallArea = totalExteriorWallArea;
+  const grossInteriorWallArea = totalInteriorWallArea;
+  totalExteriorWallArea = Math.max(0, totalExteriorWallArea - exteriorOpeningArea);
+  totalInteriorWallArea = Math.max(0, totalInteriorWallArea - interiorOpeningArea);
+  totalInteriorFinishWallArea = Math.max(0, totalInteriorFinishWallArea - exteriorOpeningArea - interiorOpeningArea * 2);
+  const interiorDoors = confirmedOpenings.filter((opening) => opening.kind === "porta" && opening.location === "interior").reduce((sum, opening) => sum + opening.quantity, 0);
+  const exteriorDoors = confirmedOpenings.filter((opening) => opening.kind === "porta" && opening.location === "exterior").reduce((sum, opening) => sum + opening.quantity, 0);
+  const windowArea = confirmedOpenings.filter((opening) => opening.kind === "janela").reduce((sum, opening) => sum + opening.widthM * opening.heightM * opening.quantity, 0);
+  const openingLintelLength = confirmedOpenings.reduce((sum, opening) => sum + opening.widthM * opening.quantity, 0);
+
   // Estrutura: rácios genéricos m3 betão / m2 construído e kg aço / m3 betão para
   // edifícios residenciais correntes em betão armado — ajustar depois item a item.
   const concreteVolume = totalBuiltArea * 0.12;
@@ -201,7 +231,11 @@ export function computeQuantities(input: QuickEstimateInput) {
   const beamConcreteVolume = input.beamConcreteVolumeM3 ?? concreteVolume * 0.24;
   // Lajes: quando há espessura real (das folhas de armadura de piso/cobertura), o volume é
   // área total construída × espessura real, em vez do rácio genérico.
-  const slabConcreteVolume = input.floorSlabThicknessM ? totalBuiltArea * input.floorSlabThicknessM : concreteVolume * 0.33;
+  const slabConcreteVolume = input.floorSlabs?.length
+    ? input.floorSlabs.reduce((sum, slab) => sum + slab.areaM2 * slab.thicknessM, 0)
+    : input.floorSlabThicknessM
+      ? totalBuiltArea * input.floorSlabThicknessM
+      : concreteVolume * 0.33;
 
   // Volume de betão em sapatas/fundação: a partir de dados contados (nº × área ×
   // profundidade), não de um rácio genérico da área do piso térreo — mais preciso quando
@@ -247,7 +281,7 @@ export function computeQuantities(input: QuickEstimateInput) {
       : `${used.count} sapata × ${fmt(used.avgArea)} m² × ${fmt(used.avgDepth)} m — valores por omissão, sem planta estrutural nem contagem indicada`;
   }
   const beamSource: CalculationSource = input.beamConcreteVolumeM3 !== undefined ? "real" : "estimativa";
-  const slabSource: CalculationSource = input.floorSlabThicknessM !== undefined ? "real" : "estimativa";
+  const slabSource: CalculationSource = input.floorSlabs?.length || input.floorSlabThicknessM !== undefined ? "real" : "estimativa";
   const steelSource: CalculationSource = input.steelWeightKg !== undefined ? "real" : "estimativa";
 
   const report: CalculationReportEntry[] = [];
@@ -311,6 +345,11 @@ export function computeQuantities(input: QuickEstimateInput) {
 
     "12.1": septicTankResult?.volumeM3 ?? 0,
     "12.2": infiltrationAreaM2 ?? 0,
+
+    "15.1": interiorDoors,
+    "15.2": exteriorDoors,
+    "15.3": windowArea,
+    "15.4": openingLintelLength,
   };
 
   const roofFormula = `Área de cobertura indicada no Assistente: ${fmt(roofArea)} m² (${input.roofArea !== undefined ? "confirmada/ajustada pelo utilizador" : `sugerida = área do último piso ${fmt(topFloorArea)} m² × 1.10`})`;
@@ -355,7 +394,9 @@ export function computeQuantities(input: QuickEstimateInput) {
     byCode["3.5"],
     slabSource,
     slabSource === "real"
-      ? `Área construída total (${fmt(totalBuiltArea)} m²) × espessura da laje (${fmt(input.floorSlabThicknessM ?? 0)} m, indicada ou confirmada no Assistente)`
+      ? input.floorSlabs?.length
+        ? input.floorSlabs.map((slab) => `${slab.label}: ${fmt(slab.areaM2)} m² × ${fmt(slab.thicknessM)} m`).join(" + ")
+        : `Área construída total (${fmt(totalBuiltArea)} m²) × espessura da laje (${fmt(input.floorSlabThicknessM ?? 0)} m, indicada ou confirmada no Assistente)`
       : `Volume estrutural total (${fmt(concreteVolume)} m³) × 0.33 (rácio genérico de lajes — sem planta estrutural com espessura real)`
   );
   push(
@@ -381,8 +422,8 @@ export function computeQuantities(input: QuickEstimateInput) {
       : `Volume estrutural de betão (${fmt(concreteStructural)} m³) × 6 m²/m³ (rácio genérico de cofragem)`
   );
 
-  push("4.1", byCode["4.1"], "medido", `Perímetro exterior de cada piso × pé-direito, somado por todos os pisos indicados no Assistente`);
-  push("4.2", byCode["4.2"], "medido", `(Perímetro total dos compartimentos de cada piso − perímetro exterior) ÷ 2, somado por todos os pisos`);
+  push("4.1", byCode["4.1"], "medido", `Parede exterior bruta (${fmt(grossExteriorWallArea)} m²) − vãos exteriores confirmados (${fmt(exteriorOpeningArea)} m²)`);
+  push("4.2", byCode["4.2"], "medido", `Parede interior bruta (${fmt(grossInteriorWallArea)} m²) − vãos interiores confirmados (${fmt(interiorOpeningArea)} m²)`);
 
   push("5.1", byCode["5.1"], "medido", `Soma da área de todos os compartimentos de todos os pisos: ${fmt(totalBuiltArea)} m²`);
   push("5.2", byCode["5.2"], "medido", `Área de paredes interiores e exteriores (ambas as faces), somada por todos os pisos`);
@@ -471,6 +512,11 @@ export function computeQuantities(input: QuickEstimateInput) {
     }
   }
 
+  push("15.1", byCode["15.1"], "medido", `${interiorDoors} porta(s) interior(es) confirmada(s)`);
+  push("15.2", byCode["15.2"], "medido", `${exteriorDoors} porta(s) exterior(es) confirmada(s)`);
+  push("15.3", byCode["15.3"], "medido", `Soma largura × altura × quantidade das janelas confirmadas: ${fmt(windowArea)} m²`);
+  push("15.4", byCode["15.4"], "medido", `Soma das larguras de portas e janelas confirmadas: ${fmt(openingLintelLength)} ml`);
+
   return {
     byCode,
     report,
@@ -480,6 +526,10 @@ export function computeQuantities(input: QuickEstimateInput) {
       roofArea,
       totalExteriorWallArea,
       totalInteriorWallArea,
+      grossExteriorWallArea,
+      grossInteriorWallArea,
+      exteriorOpeningArea,
+      interiorOpeningArea,
       wetRoomsCount,
       concreteVolume,
       steelWeight,

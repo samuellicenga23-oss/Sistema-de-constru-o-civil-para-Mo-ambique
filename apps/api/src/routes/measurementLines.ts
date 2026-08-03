@@ -6,7 +6,7 @@ import { measurementLines, budgetSections, budgetDocuments, lineItems } from "..
 import { requireCompanyUser, requireRole } from "../auth/middleware.js";
 import { assertLineItemOwned } from "../services/accessControl.js";
 import { getMeasurementLines, recomputeItemQuantity, computePartial } from "../services/dimensionEngine.js";
-import { buildMeasurementLinesFromPlant, loadProjectPlantRooms } from "../services/plantMeasurementLink.js";
+import { buildMeasurementLinesFromPlant, loadProjectPlantContext } from "../services/plantMeasurementLink.js";
 import { documentLockedMessage } from "../services/documentRules.js";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista"] as const;
@@ -138,8 +138,8 @@ export async function measurementLineRoutes(app: FastifyInstance) {
       .limit(1);
     if (!projectRow) return reply.code(404).send({ error: "Projecto não encontrado" });
 
-    const rooms = await loadProjectPlantRooms(projectRow.projectId);
-    const built = buildMeasurementLinesFromPlant(item.code, rooms);
+    const { rooms, openings } = await loadProjectPlantContext(projectRow.projectId);
+    const built = buildMeasurementLinesFromPlant(item.code, rooms, openings);
     if (!built.ok) return reply.code(422).send({ error: built.reason });
 
     await db.delete(measurementLines).where(eq(measurementLines.lineItemId, id));

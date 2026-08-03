@@ -14,6 +14,12 @@ export type StructuralSummary = {
   staircasesCount: number;
   slabsCount: number;
   slabsAvgThicknessCm: number;
+  slabs?: Array<{
+    floor: string | null;
+    thicknessCm: number;
+    layers: Array<"inferior" | "superior" | "geral">;
+    pages: number[];
+  }>;
   totalSteelWeightKg: number;
 };
 
@@ -88,6 +94,39 @@ export type ExtractedRoom = {
   areaM2: string;
   page: number;
   floor: string | null;
+  perimeterM: string | null;
+};
+
+export type ExtractedOpening = {
+  id: string;
+  plantId: string;
+  kind: "porta" | "janela";
+  code: string | null;
+  widthM: string | null;
+  heightM: string | null;
+  sillHeightM: string | null;
+  quantity: number;
+  floor: string | null;
+  location: "interior" | "exterior" | "desconhecida";
+  material: string | null;
+  page: number;
+  confidence: string;
+  source: "quadro" | "geometria" | "manual";
+  needsConfirmation: boolean;
+};
+
+export type OpeningInput = {
+  kind: "porta" | "janela";
+  code?: string | null;
+  widthM: number | null;
+  heightM: number | null;
+  sillHeightM?: number | null;
+  quantity: number;
+  floor?: string | null;
+  location: "interior" | "exterior" | "desconhecida";
+  material?: string | null;
+  page?: number;
+  confirmed?: boolean;
 };
 
 export type ExtractedRebarLine = {
@@ -135,7 +174,7 @@ export const plantsApi = {
     }
   },
 
-  detail: (id: string) => request<{ plant: Plant; rooms: ExtractedRoom[]; rebarSchedules: ExtractedRebarLine[] }>(`/plants/${id}`),
+  detail: (id: string) => request<{ plant: Plant; rooms: ExtractedRoom[]; openings: ExtractedOpening[]; rebarSchedules: ExtractedRebarLine[] }>(`/plants/${id}`),
 
   reprocess: async (id: string, onProgress?: (progress: PlantProcessingProgress) => void, options?: { waitForCompletion?: boolean }) => {
     const waitForCompletion = options?.waitForCompletion ?? true;
@@ -157,6 +196,15 @@ export const plantsApi = {
 
   updateRoomFloor: (plantId: string, roomId: string, floor: string | null) =>
     request<ExtractedRoom>(`/plants/${plantId}/rooms/${roomId}`, { method: "PATCH", body: JSON.stringify({ floor }) }),
+
+  createOpening: (plantId: string, input: OpeningInput) =>
+    request<ExtractedOpening>(`/plants/${plantId}/openings`, { method: "POST", body: JSON.stringify(input) }),
+
+  updateOpening: (plantId: string, openingId: string, input: OpeningInput) =>
+    request<ExtractedOpening>(`/plants/${plantId}/openings/${openingId}`, { method: "PUT", body: JSON.stringify(input) }),
+
+  deleteOpening: (plantId: string, openingId: string) =>
+    request<{ ok: true }>(`/plants/${plantId}/openings/${openingId}`, { method: "DELETE" }),
 
   delete: (id: string) => request<{ ok: true }>(`/plants/${id}`, { method: "DELETE" }),
 };

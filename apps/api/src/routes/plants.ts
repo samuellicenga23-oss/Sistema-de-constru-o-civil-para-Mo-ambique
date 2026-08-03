@@ -5,7 +5,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, writeFile, unlink, readFile } from "node:fs/promises";
 import path from "node:path";
 import { db } from "../db/index.js";
-import { plants, projects as projectTable, extractedRooms, extractedRebarSchedules } from "../db/schema.js";
+import { plants, projects as projectTable, extractedRooms, extractedOpenings, extractedRebarSchedules } from "../db/schema.js";
 import { requireCompanyUser, requireRole } from "../auth/middleware.js";
 import { assertProjectOwned, assertPlantOwned } from "../services/accessControl.js";
 import { env } from "../env.js";
@@ -14,7 +14,10 @@ import { loadWorkChapterLibrary } from "../services/boqTemplate.js";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista"] as const;
 const clientPlantIdSchema = z.string().uuid();
-const PLANT_PARSER_VERSION = "2026.08-adaptive-1";
+// Manter alinhado com a geração estrutural do plant-service. O valor participa da
+// chave de cache da BD; ao mudar a leitura de lajes por nível, análises antigas não
+// podem ser reutilizadas silenciosamente em novos uploads do mesmo PDF.
+const PLANT_PARSER_VERSION = "2026.08-openings-3";
 type PlantDetectionContext = { tags: string[]; parserVersion: string };
 
 async function getPlantDetectionContext(companyId: string): Promise<PlantDetectionContext> {
@@ -139,6 +142,7 @@ export async function processPlantFile(plantId: string, buffer: Buffer, filename
   );
 
   await db.delete(extractedRooms).where(eq(extractedRooms.plantId, plantId));
+  await db.delete(extractedOpenings).where(eq(extractedOpenings.plantId, plantId));
   await db.delete(extractedRebarSchedules).where(eq(extractedRebarSchedules.plantId, plantId));
 
   if (parsed.rooms.length) {
@@ -150,8 +154,27 @@ export async function processPlantFile(plantId: string, buffer: Buffer, filename
         areaM2: r.areaM2.toString(),
         page: r.page,
         floor: r.floor,
+        perimeterM: r.perimeterM?.toString() ?? null,
       }))
     );
+  }
+  if (parsed.openings.length) {
+    await db.insert(extractedOpenings).values(parsed.openings.map((opening) => ({
+      plantId,
+      kind: opening.kind,
+      code: opening.code,
+      widthM: opening.widthM?.toString() ?? null,
+      heightM: opening.heightM?.toString() ?? null,
+      sillHeightM: opening.sillHeightM?.toString() ?? null,
+      quantity: opening.quantity,
+      floor: opening.floor,
+      location: opening.location,
+      material: opening.material,
+      page: opening.page,
+      confidence: opening.confidence.toString(),
+      source: opening.source,
+      needsConfirmation: opening.needsConfirmation,
+    })));
   }
   if (parsed.rebarSchedules.length) {
     await db.insert(extractedRebarSchedules).values(
@@ -265,8 +288,9 @@ export async function plantRoutes(app: FastifyInstance) {
       .returning();
 
     if (cachedPlant) {
-      const [cachedRooms, cachedRebar] = await Promise.all([
+      const [cachedRooms, cachedOpenings, cachedRebar] = await Promise.all([
         db.select().from(extractedRooms).where(eq(extractedRooms.plantId, cachedPlant.id)),
+        db.select().from(extractedOpenings).where(eq(extractedOpenings.plantId, cachedPlant.id)),
         db.select().from(extractedRebarSchedules).where(eq(extractedRebarSchedules.plantId, cachedPlant.id)),
       ]);
       if (cachedRooms.length) {
@@ -274,6 +298,9 @@ export async function plantRoutes(app: FastifyInstance) {
       }
       if (cachedRebar.length) {
         await db.insert(extractedRebarSchedules).values(cachedRebar.map(({ id: _id, plantId: _plantId, ...line }) => ({ ...line, plantId: plant.id })));
+      }
+      if (cachedOpenings.length) {
+        await db.insert(extractedOpenings).values(cachedOpenings.map(({ id: _id, plantId: _plantId, ...opening }) => ({ ...opening, plantId: plant.id })));
       }
       const [reused] = await db.update(plants).set({
         discipline: cachedPlant.discipline,
@@ -339,11 +366,12 @@ export async function plantRoutes(app: FastifyInstance) {
     const plant = await assertPlantOwned(id, companyId);
     if (!plant) return reply.code(404).send({ error: "Planta não encontrada" });
 
-    const [rooms, rebarSchedules] = await Promise.all([
+    const [rooms, openings, rebarSchedules] = await Promise.all([
       db.select().from(extractedRooms).where(eq(extractedRooms.plantId, id)),
+      db.select().from(extractedOpenings).where(eq(extractedOpenings.plantId, id)),
       db.select().from(extractedRebarSchedules).where(eq(extractedRebarSchedules.plantId, id)),
     ]);
-    return { plant, rooms, rebarSchedules };
+    return { plant, rooms, openings, rebarSchedules };
   });
 
   app.get("/api/plants/:id/status", { preHandler: requireCompanyUser }, async (request, reply) => {
@@ -399,5 +427,79 @@ export async function plantRoutes(app: FastifyInstance) {
       .returning();
     if (!updated) return reply.code(404).send({ error: "Compartimento não encontrado" });
     return updated;
+  });
+
+  const openingInputSchema = z.object({
+    kind: z.enum(["porta", "janela"]),
+    code: z.string().trim().max(40).nullable().optional(),
+    widthM: z.number().positive().max(20).nullable(),
+    heightM: z.number().positive().max(10).nullable(),
+    sillHeightM: z.number().min(0).max(10).nullable().optional(),
+    quantity: z.number().int().positive().max(1000),
+    floor: z.string().trim().max(100).nullable().optional(),
+    location: z.enum(["interior", "exterior", "desconhecida"]),
+    material: z.string().trim().max(120).nullable().optional(),
+    page: z.number().int().positive().default(1),
+    confirmed: z.boolean().default(true),
+  });
+
+  app.post("/api/plants/:plantId/openings", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
+    const { plantId } = request.params as { plantId: string };
+    const companyId = request.currentUser!.companyId!;
+    if (!await assertPlantOwned(plantId, companyId)) return reply.code(404).send({ error: "Planta não encontrada" });
+    const parsed = openingInputSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    const [created] = await db.insert(extractedOpenings).values({
+      plantId,
+      kind: parsed.data.kind,
+      code: parsed.data.code || null,
+      widthM: parsed.data.widthM?.toString() ?? null,
+      heightM: parsed.data.heightM?.toString() ?? null,
+      sillHeightM: parsed.data.sillHeightM?.toString() ?? null,
+      quantity: parsed.data.quantity,
+      floor: parsed.data.floor || null,
+      location: parsed.data.location,
+      material: parsed.data.material || null,
+      page: parsed.data.page,
+      confidence: "1",
+      source: "manual",
+      needsConfirmation: !parsed.data.confirmed,
+    }).returning();
+    return reply.code(201).send(created);
+  });
+
+  app.put("/api/plants/:plantId/openings/:openingId", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
+    const { plantId, openingId } = request.params as { plantId: string; openingId: string };
+    const companyId = request.currentUser!.companyId!;
+    if (!await assertPlantOwned(plantId, companyId)) return reply.code(404).send({ error: "Planta não encontrada" });
+    const parsed = openingInputSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    const [updated] = await db.update(extractedOpenings).set({
+      kind: parsed.data.kind,
+      code: parsed.data.code || null,
+      widthM: parsed.data.widthM?.toString() ?? null,
+      heightM: parsed.data.heightM?.toString() ?? null,
+      sillHeightM: parsed.data.sillHeightM?.toString() ?? null,
+      quantity: parsed.data.quantity,
+      floor: parsed.data.floor || null,
+      location: parsed.data.location,
+      material: parsed.data.material || null,
+      page: parsed.data.page,
+      confidence: parsed.data.confirmed ? "1" : "0.5",
+      source: parsed.data.confirmed ? "manual" : "geometria",
+      needsConfirmation: !parsed.data.confirmed,
+    }).where(and(eq(extractedOpenings.id, openingId), eq(extractedOpenings.plantId, plantId))).returning();
+    if (!updated) return reply.code(404).send({ error: "Vão não encontrado" });
+    return updated;
+  });
+
+  app.delete("/api/plants/:plantId/openings/:openingId", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
+    const { plantId, openingId } = request.params as { plantId: string; openingId: string };
+    const companyId = request.currentUser!.companyId!;
+    if (!await assertPlantOwned(plantId, companyId)) return reply.code(404).send({ error: "Planta não encontrada" });
+    const [deleted] = await db.delete(extractedOpenings)
+      .where(and(eq(extractedOpenings.id, openingId), eq(extractedOpenings.plantId, plantId))).returning({ id: extractedOpenings.id });
+    if (!deleted) return reply.code(404).send({ error: "Vão não encontrado" });
+    return { ok: true };
   });
 }

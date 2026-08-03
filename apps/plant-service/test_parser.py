@@ -10,13 +10,39 @@ from parser import (
     extract_room_list_fallback,
     extract_rooms,
     extract_rooms_spatial,
+    extract_opening_schedule,
     detect_plan_type,
     is_room_area_page,
     parse_pdf,
+    Slab,
+    summarise_slabs,
 )
 
 
 class RoomExtractionTests(unittest.TestCase):
+    def test_extracts_door_and_window_schedule_with_dimensions_and_quantity(self):
+        text = """PLANTA COTADA PISO T\u00c9RREO
+J01 Janela de alum\u00ednio 1,50 x 1,20 m 4
+P02 Porta interior de madeira 0,90 x 2,10 m 6
+"""
+        openings = extract_opening_schedule(text, 7)
+        self.assertEqual(len(openings), 2)
+        self.assertEqual((openings[0].kind, openings[0].code, openings[0].quantity), ("janela", "J01", 4))
+        self.assertEqual((openings[0].width_m, openings[0].height_m, openings[0].material), (1.5, 1.2, "Alum\u00ednio"))
+        self.assertEqual((openings[1].kind, openings[1].location, openings[1].quantity), ("porta", "interior", 6))
+
+    def test_groups_slab_layers_but_keeps_different_floor_thicknesses(self):
+        slabs = summarise_slabs([
+            Slab("1º Piso", "inferior", 15, 12),
+            Slab("1º Piso", "superior", 15, 13),
+            Slab("Cobertura", "inferior", 12, 14),
+            Slab("Cobertura", "superior", 12, 15),
+        ])
+
+        self.assertEqual(len(slabs), 2)
+        self.assertEqual([(slab.floor, slab.thickness_cm) for slab in slabs], [("1º Piso", 15), ("Cobertura", 12)])
+        self.assertEqual(slabs[0].layers, ["inferior", "superior"])
+
     def test_accepts_mixed_case_and_common_area_labels(self):
         text = """Planta Cotada Piso Térreo
 Suite 2

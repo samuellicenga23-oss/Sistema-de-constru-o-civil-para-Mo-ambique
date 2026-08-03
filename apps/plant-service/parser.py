@@ -28,6 +28,23 @@ class Room:
 
 
 @dataclass
+class Opening:
+    kind: str
+    code: str | None
+    width_m: float | None
+    height_m: float | None
+    sill_height_m: float | None
+    quantity: int
+    floor: str | None
+    location: str
+    material: str | None
+    page: int
+    confidence: float
+    source: str
+    needs_confirmation: bool
+
+
+@dataclass
 class RebarLine:
     element: str
     diameter_mm: float
@@ -78,6 +95,14 @@ class Slab:
 
 
 @dataclass
+class SlabSummary:
+    floor: str | None
+    thickness_cm: float
+    layers: list[str]
+    pages: list[int]
+
+
+@dataclass
 class StructuralSummary:
     footings_count: int
     footings_avg_width_cm: float
@@ -92,6 +117,7 @@ class StructuralSummary:
     staircases_count: int
     slabs_count: int
     slabs_avg_thickness_cm: float
+    slabs: list[SlabSummary]
     total_steel_weight_kg: float
 
 
@@ -139,6 +165,7 @@ class PageClassification:
 class ParseResult:
     metadata: PlantMetadata
     rooms: list[Room] = field(default_factory=list)
+    openings: list[Opening] = field(default_factory=list)
     rebar_schedules: list[RebarLine] = field(default_factory=list)
     staircases: list[Staircase] = field(default_factory=list)
     structural_summary: StructuralSummary | None = None
@@ -366,6 +393,18 @@ ROOM_SCHEDULE_MARKER = re.compile(r"Rooms by stories", re.IGNORECASE)
 AREA_VALUE_LINE = re.compile(r"^([\d.,]+)\s*m[²2]$")
 LENGTH_VALUE_LINE = re.compile(r"^([\d.,]+)\s*m$")
 
+# Quadros de vãos variam muito entre gabinetes, mas normalmente conservam três sinais fortes:
+# código P/D/J/W, designação e dimensão largura x altura. A quantidade no fim é opcional.
+OPENING_SCHEDULE_PATTERN = re.compile(
+    r"(?im)^\s*(?P<code>(?:P|D|J|W)\s*[-.]?\s*\d{1,3})\s+"
+    r"(?P<label>[^\n]{0,90}?)\s+"
+    r"(?P<width>\d(?:[.,]\d{1,3})?)\s*(?:m\s*)?[x×]\s*"
+    r"(?P<height>\d(?:[.,]\d{1,3})?)\s*(?:m)?"
+    r"(?:\s+(?P<quantity>\d{1,3}))?\s*$"
+)
+OPENING_CODE_PATTERN = re.compile(r"^(?P<prefix>[PDJW])\s*[-.]?\s*(?P<number>\d{1,3})$", re.IGNORECASE)
+DECIMAL_DIMENSION_PATTERN = re.compile(r"^\d[,.]\d{1,3}$")
+
 # "Ø10: 3.2" — peso de aço por diâmetro, tipicamente dentro de um bloco "Total+10%: ... Total: x"
 REBAR_DIAMETER_PATTERN = re.compile(r"Ø(\d+)\s*:\s*([\d.,]+)")
 
@@ -440,6 +479,242 @@ def detect_document_default_floor(text: str) -> str | None:
     ):
         return "Piso Térreo"
     return None
+
+
+def _opening_material(label: str) -> str | None:
+    value = _normalise_key(label).lower()
+    if "aluminio" in value:
+        return "Alumínio"
+    if "madeira" in value:
+        return "Madeira"
+    if "pvc" in value:
+        return "PVC"
+    if "aco" in value or "metal" in value:
+        return "Metálico"
+    if "vidro" in value:
+        return "Vidro"
+    return None
+
+
+def _opening_location(label: str) -> str:
+    value = _normalise_key(label).lower()
+    if "exterior" in value or "entrada" in value:
+        return "exterior"
+    if "interior" in value:
+        return "interior"
+    return "desconhecida"
+
+
+def extract_opening_schedule(text: str, page_number: int) -> list[Opening]:
+    floor, _ = detect_floor_label(text)
+    openings: list[Opening] = []
+    for match in OPENING_SCHEDULE_PATTERN.finditer(text):
+        raw_code = re.sub(r"\s+", "", match.group("code")).replace(".", "-").upper()
+        prefix = raw_code[0]
+        label = match.group("label").strip()
+        kind = "janela" if prefix in ("J", "W") or re.search(r"janela|window", label, re.IGNORECASE) else "porta"
+        width = _to_float(match.group("width"))
+        height = _to_float(match.group("height"))
+        if not (0.3 <= width <= 8 and 0.3 <= height <= 5):
+            continue
+        openings.append(
+            Opening(
+                kind=kind,
+                code=raw_code,
+                width_m=width,
+                height_m=height,
+                sill_height_m=None,
+                quantity=int(match.group("quantity") or 1),
+                floor=floor,
+                location=_opening_location(label),
+                material=_opening_material(label),
+                page=page_number,
+                confidence=0.96,
+                source="quadro",
+                needs_confirmation=False,
+            )
+        )
+    return openings
+
+
+def extract_openings_spatial(page, page_number: int, text: str) -> list[Opening]:
+    """Lê portas por arco de abertura e vãos codificados próximos das dimensões.
+
+    Sem código/quadro, janelas não são inventadas: a geometria de linhas de uma janela é
+    indistinguível de vários pormenores CAD. Portas são mais seguras porque o arco de abertura
+    é um sinal geométrico específico; mesmo assim ficam para confirmação do utilizador.
+    """
+    plan_type = detect_plan_type(text)
+    if plan_type not in ("cotada", "geral"):
+        return []
+    floor, _ = detect_floor_label(text)
+    words = page.get_text("words")
+    dimensions = []
+    codes = []
+    for word in words:
+        value = str(word[4]).strip()
+        centre = ((word[0] + word[2]) / 2, (word[1] + word[3]) / 2)
+        if DECIMAL_DIMENSION_PATTERN.fullmatch(value):
+            dimensions.append((centre, _to_float(value), value))
+        code_match = OPENING_CODE_PATTERN.fullmatch(value)
+        if code_match:
+            codes.append((centre, f"{code_match.group('prefix').upper()}{code_match.group('number')}"))
+
+    def nearby_code(cx: float, cy: float, kind: str) -> str | None:
+        allowed = ("J", "W") if kind == "janela" else ("P", "D")
+        candidates = [
+            ((x - cx) ** 2 + (y - cy) ** 2, code)
+            for (x, y), code in codes
+            if code.startswith(allowed) and abs(x - cx) <= 55 and abs(y - cy) <= 55
+        ]
+        return min(candidates)[1] if candidates else None
+
+    candidates: list[tuple[Opening, tuple[float, float]]] = []
+    door_centres: list[tuple[float, float]] = []
+    for drawing in page.get_drawings():
+        for item in drawing["items"]:
+            if item[0] != "c":
+                continue
+            points = item[1:]
+            xs = [point.x for point in points]
+            ys = [point.y for point in points]
+            width_points, height_points = max(xs) - min(xs), max(ys) - min(ys)
+            if not (12 <= width_points <= 55 and 12 <= height_points <= 55):
+                continue
+            cx, cy = (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
+            if any((cx - x) ** 2 + (cy - y) ** 2 < 49 for x, y in door_centres):
+                continue
+            nearby = [
+                (value, x, y)
+                for (x, y), value, _raw in dimensions
+                if min(xs) - 30 <= x <= max(xs) + 30 and min(ys) - 30 <= y <= max(ys) + 30
+            ]
+            pairs = [
+                (abs(x1 - x2) + abs(y1 - y2), w, h)
+                for w, x1, y1 in nearby
+                for h, x2, y2 in nearby
+                if w != h and 0.55 <= w <= 2.2 and 1.8 <= h <= 2.5
+            ]
+            if not pairs:
+                continue
+            _distance, opening_width, opening_height = min(pairs)
+            door_centres.append((cx, cy))
+            candidates.append((Opening(
+                kind="porta",
+                code=nearby_code(cx, cy, "porta"),
+                width_m=opening_width,
+                height_m=opening_height,
+                sill_height_m=0,
+                quantity=1,
+                floor=floor,
+                location="desconhecida",
+                material=None,
+                page=page_number,
+                confidence=0.84,
+                source="geometria",
+                needs_confirmation=True,
+            ), (cx, cy)))
+
+    # Janelas (e portas sem arco) só entram automaticamente quando existe um código inequívoco.
+    for (cx, cy), code in codes:
+        kind = "janela" if code.startswith(("J", "W")) else "porta"
+        if kind == "porta" and any((cx - x) ** 2 + (cy - y) ** 2 <= 55 ** 2 for x, y in door_centres):
+            continue
+        nearby = [(value, x, y) for (x, y), value, _raw in dimensions if abs(x - cx) <= 55 and abs(y - cy) <= 55]
+        pairs = [
+            (abs(x1 - x2) + abs(y1 - y2), w, h)
+            for w, x1, y1 in nearby
+            for h, x2, y2 in nearby
+            if w != h and 0.4 <= w <= 4.5 and 0.4 <= h <= 2.6 and abs(w - 0.2) > 0.01 and abs(h - 0.2) > 0.01
+        ]
+        if not pairs:
+            continue
+        _distance, opening_width, opening_height = min(pairs)
+        candidates.append((Opening(
+            kind=kind,
+            code=code,
+            width_m=opening_width,
+            height_m=opening_height,
+            sill_height_m=None if kind == "janela" else 0,
+            quantity=1,
+            floor=floor,
+            location="desconhecida",
+            material=None,
+            page=page_number,
+            confidence=0.76,
+            source="geometria",
+            needs_confirmation=True,
+        ), (cx, cy)))
+
+    # Alguns gabinetes não usam códigos J01/P01: deixam apenas dois valores juntos do símbolo.
+    # Depois de retirar os pares associados a arcos de porta, conservamos os restantes como
+    # candidatos de janela/portão. Quando o segundo valor parece uma cota de topo (ex. 2,80),
+    # a altura fica deliberadamente vazia para ser confirmada, em vez de assumir 2,80 m.
+    for index, ((x1, y1), first, _raw) in enumerate(dimensions):
+        for (x2, y2), second, _raw2 in dimensions[index + 1:]:
+            gap = ((x1 - x2) ** 2 + (y1 - y2) ** 2) ** 0.5
+            if not ((abs(x1 - x2) <= 2.5 or abs(y1 - y2) <= 2.5) and 4 <= gap <= 10):
+                continue
+            if not (0.45 <= first <= 3.5 and 0.45 <= second <= 3.5):
+                continue
+            cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+            if not (page.rect.width * 0.08 < cx < page.rect.width * 0.85 and page.rect.height * 0.12 < cy < page.rect.height * 0.85):
+                continue
+            if any((cx - x) ** 2 + (cy - y) ** 2 <= 45 ** 2 for x, y in door_centres):
+                continue
+            smaller, larger = sorted((first, second))
+            if smaller >= 2.4 and larger >= 3:
+                kind, opening_width, opening_height = "porta", larger, smaller
+            elif larger >= 2.4:
+                kind, opening_width, opening_height = "janela", smaller, None
+            else:
+                kind, opening_width, opening_height = "janela", larger, smaller
+            candidates.append((Opening(
+                kind=kind,
+                code=None,
+                width_m=opening_width,
+                height_m=opening_height,
+                sill_height_m=None,
+                quantity=1,
+                floor=floor,
+                location="desconhecida",
+                material=None,
+                page=page_number,
+                confidence=0.48,
+                source="geometria",
+                needs_confirmation=True,
+            ), (cx, cy)))
+
+    # Agrupa ocorrências iguais na mesma prancha sem apagar portas realmente repetidas.
+    grouped: dict[tuple, Opening] = {}
+    for opening, _centre in candidates:
+        key = (opening.kind, opening.code, opening.width_m, opening.height_m, opening.floor, opening.page)
+        if key in grouped:
+            grouped[key].quantity += 1
+        else:
+            grouped[key] = opening
+    return list(grouped.values())
+
+
+def merge_openings(openings: list[Opening], document_text: str) -> list[Opening]:
+    defaults = {
+        "janela": "Alumínio" if re.search(r"janelas?.{0,80}alum[ií]nio", document_text, re.IGNORECASE | re.DOTALL) else None,
+        "porta": "Madeira" if re.search(r"portas?.{0,100}madeira", document_text, re.IGNORECASE | re.DOTALL) else None,
+    }
+    schedule_codes = {opening.code for opening in openings if opening.source == "quadro" and opening.code}
+    result: list[Opening] = []
+    seen: set[tuple] = set()
+    for opening in sorted(openings, key=lambda item: (item.source != "quadro", item.page, item.kind, item.code or "")):
+        if opening.source != "quadro" and opening.code in schedule_codes:
+            continue
+        if opening.material is None:
+            opening.material = defaults[opening.kind]
+        key = (opening.source, opening.page, opening.kind, opening.code, opening.width_m, opening.height_m)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(opening)
+    return result
 
 
 # Tipo de folha de arquitectura, lido do campo "Conteúdo" da legenda (ex: "PLANTA COTADA PISO
@@ -544,6 +819,14 @@ def _to_float(value: str) -> float:
 
 
 def _normalise_key(value: str) -> str:
+    # Alguns extractores/PDFs devolvem texto UTF-8 interpretado como Latin-1
+    # (por exemplo, "alumÃ­nio"). Repara apenas quando há sinais claros de
+    # mojibake; se a conversão não for válida, conserva o texto original.
+    if "Ã" in value or "Â" in value:
+        try:
+            value = value.encode("latin-1").decode("utf-8")
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            pass
     decomposed = unicodedata.normalize("NFKD", value)
     ascii_value = "".join(char for char in decomposed if not unicodedata.combining(char))
     return re.sub(r"[^A-Z0-9]+", " ", ascii_value.upper()).strip()
@@ -1148,6 +1431,67 @@ def _avg(values: list[float]) -> float:
     return sum(values) / len(values) if values else 0.0
 
 
+def summarise_slabs(slabs: list[Slab]) -> list[SlabSummary]:
+    """Agrupa desenhos inferior/superior na laje física de cada nível."""
+    groups: list[dict] = []
+    for slab in sorted(slabs, key=lambda item: (item.floor or "", item.page, item.layer)):
+        target = None
+        if slab.floor:
+            target = next(
+                (
+                    group
+                    for group in groups
+                    if group["floor"] == slab.floor and abs(group["thickness_cm"] - slab.thickness_cm) < 0.01
+                ),
+                None,
+            )
+        elif slab.layer == "geral":
+            target = next(
+                (
+                    group
+                    for group in groups
+                    if group["floor"] is None
+                    and group["general_page"] == slab.page
+                    and abs(group["thickness_cm"] - slab.thickness_cm) < 0.01
+                ),
+                None,
+            )
+        else:
+            target = next(
+                (
+                    group
+                    for group in reversed(groups)
+                    if group["floor"] is None
+                    and group["general_page"] is None
+                    and abs(group["thickness_cm"] - slab.thickness_cm) < 0.01
+                    and slab.layer not in group["layers"]
+                    and abs(max(group["pages"]) - slab.page) <= 1
+                ),
+                None,
+            )
+        if target is None:
+            target = {
+                "floor": slab.floor,
+                "thickness_cm": slab.thickness_cm,
+                "layers": set(),
+                "pages": set(),
+                "general_page": slab.page if slab.layer == "geral" else None,
+            }
+            groups.append(target)
+        target["layers"].add(slab.layer)
+        target["pages"].add(slab.page)
+
+    return [
+        SlabSummary(
+            floor=group["floor"],
+            thickness_cm=group["thickness_cm"],
+            layers=sorted(group["layers"]),
+            pages=sorted(group["pages"]),
+        )
+        for group in groups
+    ]
+
+
 def build_structural_summary(
     footings: list[Footing],
     column_groups: list[ColumnGroup],
@@ -1156,7 +1500,7 @@ def build_structural_summary(
     staircases: list[Staircase],
     slabs: list[Slab],
 ) -> StructuralSummary | None:
-    if not footings and not column_groups and not beam_spans:
+    if not footings and not column_groups and not beam_spans and not rebar_schedules and not staircases and not slabs:
         return None
 
     # Cada linha do quadro pode representar várias sapatas/pilares idênticos (ex: "P07, P09,
@@ -1183,8 +1527,8 @@ def build_structural_summary(
 
     # Cada folha de armadura de laje é uma combinação piso×camada (inferior/superior) — conta-se
     # o nº de folhas distintas, e a espessura (h=X) é igual em todas neste tipo de ficheiro.
-    slab_keys = {(s.floor, s.layer, s.page) for s in slabs}
-    slab_thicknesses = [s.thickness_cm for s in slabs]
+    slab_summaries = summarise_slabs(slabs)
+    slab_thicknesses = [s.thickness_cm for s in slab_summaries]
 
     return StructuralSummary(
         footings_count=len(footing_refs),
@@ -1198,8 +1542,9 @@ def build_structural_summary(
         beams_avg_height_cm=_avg(beam_heights),
         beams_concrete_volume_m3=beams_concrete_volume_m3,
         staircases_count=len(staircase_elements),
-        slabs_count=len(slab_keys),
+        slabs_count=len(slab_summaries),
         slabs_avg_thickness_cm=_avg(slab_thicknesses),
+        slabs=slab_summaries,
         # Peso total de aço já com +10% de desperdício, tal como vem calculado nos "Resumo
         # Aço" do projecto — soma de todos os elementos (sapatas, pilares, vigas, escadas,
         # armadura de lajes/cobertura — este último grupo só passou a ser contabilizado
@@ -1212,6 +1557,7 @@ def parse_pdf(file_bytes: bytes, progress_callback=None, detection_tags: list[st
     doc = fitz.open(stream=file_bytes, filetype="pdf")
     metadata = PlantMetadata()
     rooms: list[Room] = []
+    openings: list[Opening] = []
     fallback_rooms: list[Room] = []
     document_text_parts: list[str] = []
     room_page_priorities: dict[int, int] = {}
@@ -1252,6 +1598,8 @@ def parse_pdf(file_bytes: bytes, progress_callback=None, detection_tags: list[st
                 )
             )
             fallback_rooms.extend(extract_room_list_fallback(text, page_number))
+        openings.extend(extract_opening_schedule(text, page_number))
+        openings.extend(extract_openings_spatial(page, page_number, text))
         rebar_schedules.extend(extract_rebar_schedules(text, page_number))
         footings.extend(extract_footings(text, page_number))
         column_groups.extend(extract_column_groups(text, page_number))
@@ -1266,6 +1614,8 @@ def parse_pdf(file_bytes: bytes, progress_callback=None, detection_tags: list[st
     page_hints: dict[int, list[tuple[str, int, str]]] = defaultdict(list)
     for page in {room.page for room in rooms + fallback_rooms}:
         page_hints[page].append(("arquitectura", 7, "compartimentos e áreas reconhecidos"))
+    for page in {opening.page for opening in openings}:
+        page_hints[page].append(("arquitectura", 8, "portas ou janelas reconhecidas"))
     for page in {line.page for line in rebar_schedules}:
         page_hints[page].append(("estrutura", 11, "armaduras reconhecidas"))
     for page in {
@@ -1292,6 +1642,7 @@ def parse_pdf(file_bytes: bytes, progress_callback=None, detection_tags: list[st
     # números de uma memória descritiva sejam confundidos com armaduras.
     rooms = [room for room in rooms if room.page in architecture_pages]
     fallback_rooms = [room for room in fallback_rooms if room.page in architecture_pages]
+    openings = [opening for opening in openings if opening.page in architecture_pages]
     rebar_schedules = [line for line in rebar_schedules if line.page in structure_pages]
     footings = [item for item in footings if item.page in structure_pages]
     column_groups = [item for item in column_groups if item.page in structure_pages]
@@ -1311,6 +1662,7 @@ def parse_pdf(file_bytes: bytes, progress_callback=None, detection_tags: list[st
     return ParseResult(
         metadata=metadata,
         rooms=dedupe_rooms(selected_rooms, room_page_priorities),
+        openings=merge_openings(openings, "\n".join(document_text_parts)),
         rebar_schedules=rebar_schedules,
         staircases=staircases,
         structural_summary=structural_summary,

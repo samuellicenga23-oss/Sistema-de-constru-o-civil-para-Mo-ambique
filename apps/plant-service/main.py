@@ -20,7 +20,7 @@ app = FastAPI(title="SIGO Plant Service")
 # em produção, permissivo em dev sem configuração" (achado da auditoria).
 PLANT_SERVICE_TOKEN = os.environ.get("PLANT_SERVICE_TOKEN")
 IS_PRODUCTION = os.environ.get("ENVIRONMENT") == "production"
-PARSER_VERSION = "2026.08-adaptive-1"
+PARSER_VERSION = "2026.08-openings-3"
 PARSER_CONCURRENCY = max(1, min(2, int(os.environ.get("PLANT_PARSER_CONCURRENCY", "1"))))
 PARSER_CACHE_SIZE = max(1, min(20, int(os.environ.get("PLANT_PARSER_CACHE_SIZE", "6"))))
 parser_slots = asyncio.Semaphore(PARSER_CONCURRENCY)
@@ -75,6 +75,30 @@ class StaircaseOut(BaseModel):
     page: int
 
 
+class SlabOut(BaseModel):
+    floor: str | None
+    perimeterM: float | None
+
+
+class OpeningOut(BaseModel):
+    kind: str
+    code: str | None
+    widthM: float | None
+    heightM: float | None
+    sillHeightM: float | None
+    quantity: int
+    floor: str | None
+    location: str
+    material: str | None
+    page: int
+    confidence: float
+    source: str
+    needsConfirmation: bool
+    thicknessCm: float
+    layers: list[str]
+    pages: list[int]
+
+
 class StructuralSummaryOut(BaseModel):
     footingsCount: int
     footingsAvgWidthCm: float
@@ -89,6 +113,7 @@ class StructuralSummaryOut(BaseModel):
     staircasesCount: int
     slabsCount: int
     slabsAvgThicknessCm: float
+    slabs: list[SlabOut]
     totalSteelWeightKg: float
 
 
@@ -112,6 +137,7 @@ class DocumentAnalysisOut(BaseModel):
 class ParseResponse(BaseModel):
     metadata: MetadataOut
     rooms: list[RoomOut]
+    openings: list[OpeningOut]
     rebarSchedules: list[RebarLineOut]
     staircases: list[StaircaseOut]
     structuralSummary: StructuralSummaryOut | None
@@ -123,7 +149,25 @@ def build_parse_response(result) -> ParseResponse:
     document_analysis = result.document_analysis
     return ParseResponse(
         metadata=MetadataOut(**result.metadata.__dict__),
-        rooms=[RoomOut(name=r.name, number=r.number, areaM2=r.area_m2, page=r.page, floor=r.floor) for r in result.rooms],
+        rooms=[RoomOut(name=r.name, number=r.number, areaM2=r.area_m2, page=r.page, floor=r.floor, perimeterM=r.perimeter_m) for r in result.rooms],
+        openings=[
+            OpeningOut(
+                kind=o.kind,
+                code=o.code,
+                widthM=o.width_m,
+                heightM=o.height_m,
+                sillHeightM=o.sill_height_m,
+                quantity=o.quantity,
+                floor=o.floor,
+                location=o.location,
+                material=o.material,
+                page=o.page,
+                confidence=o.confidence,
+                source=o.source,
+                needsConfirmation=o.needs_confirmation,
+            )
+            for o in result.openings
+        ],
         rebarSchedules=[
             RebarLineOut(element=r.element, diameterMm=r.diameter_mm, weightKg=r.weight_kg, page=r.page)
             for r in result.rebar_schedules
@@ -146,6 +190,15 @@ def build_parse_response(result) -> ParseResponse:
             staircasesCount=summary.staircases_count,
             slabsCount=summary.slabs_count,
             slabsAvgThicknessCm=summary.slabs_avg_thickness_cm,
+            slabs=[
+                SlabOut(
+                    floor=slab.floor,
+                    thicknessCm=slab.thickness_cm,
+                    layers=slab.layers,
+                    pages=slab.pages,
+                )
+                for slab in summary.slabs
+            ],
             totalSteelWeightKg=summary.total_steel_weight_kg,
         )
         if summary

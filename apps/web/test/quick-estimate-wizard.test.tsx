@@ -24,6 +24,10 @@ const structuralSummary = {
   staircasesCount: 1,
   slabsCount: 2,
   slabsAvgThicknessCm: 15,
+  slabs: [
+    { floor: "1º Piso", thicknessCm: 15, layers: ["inferior", "superior"] as Array<"inferior" | "superior" | "geral">, pages: [12, 13] },
+    { floor: "Cobertura", thicknessCm: 12, layers: ["inferior", "superior"] as Array<"inferior" | "superior" | "geral">, pages: [14, 15] },
+  ],
   totalSteelWeightKg: 8450,
 };
 
@@ -37,7 +41,7 @@ describe("QuickEstimateWizard — dados manuais", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Seguinte" }));
 
-    const slabInput = screen.getByLabelText("Espessura média da laje (m)");
+    const slabInput = screen.getByLabelText("Espessura da Laje — Piso Térreo (m)");
     expect(slabInput).toHaveValue(null);
     fireEvent.change(slabInput, { target: { value: "0.18" } });
     expect(slabInput).toHaveValue(0.18);
@@ -57,10 +61,12 @@ describe("QuickEstimateWizard — dados manuais", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Seguinte" }));
 
-    const slabInput = screen.getByLabelText("Espessura média da laje (m)");
+    const firstFloorSlab = screen.getByLabelText("Espessura da 1º Piso (m)");
+    const roofSlab = screen.getByLabelText("Espessura da Cobertura (m)");
     const beamInput = screen.getByLabelText("Betão em vigas (m³)");
     const steelInput = screen.getByLabelText("Peso total de aço (kg)");
-    expect(slabInput).toHaveValue(0.15);
+    expect(firstFloorSlab).toHaveValue(0.15);
+    expect(roofSlab).toHaveValue(0.12);
     expect(beamInput).toHaveValue(7.52);
     expect(steelInput).toHaveValue(8450);
 

@@ -7,6 +7,7 @@ export const extractedRoomSchema = z.object({
   areaM2: z.number().positive(),
   page: z.number().int().positive(),
   floor: z.string().nullable(),
+  perimeterM: z.number().positive().nullable().default(null),
 });
 export type ExtractedRoom = z.infer<typeof extractedRoomSchema>;
 
@@ -17,6 +18,31 @@ export const extractedRebarLineSchema = z.object({
   page: z.number().int().positive(),
 });
 export type ExtractedRebarLine = z.infer<typeof extractedRebarLineSchema>;
+
+export const extractedOpeningSchema = z.object({
+  kind: z.enum(["porta", "janela"]),
+  code: z.string().nullable(),
+  widthM: z.number().positive().nullable(),
+  heightM: z.number().positive().nullable(),
+  sillHeightM: z.number().nonnegative().nullable().default(null),
+  quantity: z.number().int().positive(),
+  floor: z.string().nullable(),
+  location: z.enum(["interior", "exterior", "desconhecida"]).default("desconhecida"),
+  material: z.string().nullable(),
+  page: z.number().int().positive(),
+  confidence: z.number().min(0).max(1),
+  source: z.enum(["quadro", "geometria", "manual"]),
+  needsConfirmation: z.boolean(),
+});
+export type ExtractedOpening = z.infer<typeof extractedOpeningSchema>;
+
+export const extractedSlabSchema = z.object({
+  floor: z.string().nullable(),
+  thicknessCm: z.number().positive(),
+  layers: z.array(z.enum(["inferior", "superior", "geral"])).min(1),
+  pages: z.array(z.number().int().positive()).min(1),
+});
+export type ExtractedSlab = z.infer<typeof extractedSlabSchema>;
 
 export const plantMetadataSchema = z.object({
   proprietario: z.string().nullable(),
@@ -47,6 +73,7 @@ export const structuralSummarySchema = z.object({
   staircasesCount: z.number().int().nonnegative(),
   slabsCount: z.number().int().nonnegative(),
   slabsAvgThicknessCm: z.number().nonnegative(),
+  slabs: z.array(extractedSlabSchema).default([]),
   totalSteelWeightKg: z.number().nonnegative(),
 });
 
@@ -92,6 +119,7 @@ export type DocumentAnalysis = z.infer<typeof documentAnalysisSchema>;
 export const plantParseResultSchema = z.object({
   metadata: plantMetadataSchema,
   rooms: z.array(extractedRoomSchema),
+  openings: z.array(extractedOpeningSchema).default([]),
   rebarSchedules: z.array(extractedRebarLineSchema),
   staircases: z.array(extractedStaircaseSchema),
   structuralSummary: structuralSummarySchema.nullable(),

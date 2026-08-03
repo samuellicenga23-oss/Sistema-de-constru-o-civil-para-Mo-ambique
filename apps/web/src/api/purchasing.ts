@@ -83,6 +83,26 @@ export type ProcurementRequirement = {
   requiredByDate: string | null;
 };
 
+export type RebarPurchaseLine = {
+  diameterMm: number;
+  scheduledWeightKg: number;
+  weightPerMeterKg: number;
+  requiredLengthM: number;
+  commercialBarLengthM: number;
+  barsToBuy: number;
+  purchaseWeightKg: number;
+  cuttingSurplusKg: number;
+};
+
+export type ProjectRebarPurchasePlan = {
+  sourcePlantId: string;
+  sourceFileName: string | null;
+  commercialBarLengthM: number;
+  lines: RebarPurchaseLine[];
+  totalScheduledWeightKg: number;
+  totalPurchaseWeightKg: number;
+};
+
 export type ProcurementPlan = {
   documentId: string;
   currency: string;
@@ -93,6 +113,7 @@ export type ProcurementPlan = {
   shortageTotal: number;
   coveragePercent: number;
   requirements: ProcurementRequirement[];
+  rebarPurchasePlan: ProjectRebarPurchasePlan | null;
   missingCompositionItems: Array<{ code: string | null; description: string; phase: string }>;
 };
 

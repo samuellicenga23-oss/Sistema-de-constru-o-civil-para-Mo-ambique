@@ -11,12 +11,29 @@ const roomSchema = z.object({
   type: z.enum(["seco", "humido"]),
   length: z.number().positive(),
   width: z.number().positive(),
+  perimeterM: z.number().positive().optional(),
 });
 
 const floorSchema = z.object({
+  label: z.string().min(1).optional(),
   ceilingHeight: z.number().positive(),
   perimeter: z.number().positive(),
   rooms: z.array(roomSchema).min(1),
+});
+
+const floorSlabSchema = z.object({
+  label: z.string().min(1),
+  areaM2: z.number().positive(),
+  thicknessM: z.number().positive(),
+});
+
+const openingSchema = z.object({
+  kind: z.enum(["porta", "janela"]),
+  widthM: z.number().positive(),
+  heightM: z.number().positive(),
+  quantity: z.number().int().positive(),
+  location: z.enum(["interior", "exterior", "desconhecida"]),
+  confirmed: z.boolean(),
 });
 
 const footingSchema = z.object({
@@ -52,6 +69,8 @@ const quickEstimateSchema = z.object({
   steelWeightKg: z.number().positive().optional(),
   beamConcreteVolumeM3: z.number().positive().optional(),
   floorSlabThicknessM: z.number().positive().optional(),
+  floorSlabs: z.array(floorSlabSchema).optional(),
+  openings: z.array(openingSchema).optional(),
   columnConcreteVolumeM3: z.number().positive().optional(),
   formworkAreaM2: z.number().positive().optional(),
   backfillEarthVolumeM3: z.number().positive().optional(),
