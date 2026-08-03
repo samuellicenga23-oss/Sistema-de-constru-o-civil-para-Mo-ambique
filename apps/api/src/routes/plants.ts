@@ -206,6 +206,53 @@ export async function processPlantFile(plantId: string, buffer: Buffer, filename
   }).where(eq(plants.id, plantId));
 }
 
+// A leitura nunca pertence ao ciclo de vida do pedido HTTP. A BD é a fila persistente:
+// se a API reiniciar, os registos pendentes/processando são retomados no arranque.
+const activePlantJobs = new Set<string>();
+
+export function enqueuePlantProcessing(plantId: string, suppliedContext?: PlantDetectionContext): void {
+  if (activePlantJobs.has(plantId)) return;
+  activePlantJobs.add(plantId);
+  setImmediate(() => {
+    void (async () => {
+      try {
+        const [plant] = await db.select({ filePath: plants.filePath, originalFileName: plants.originalFileName })
+          .from(plants).where(eq(plants.id, plantId)).limit(1);
+        if (!plant) return;
+        const buffer = await readFile(plant.filePath);
+        await processPlantFile(plantId, buffer, plant.originalFileName ?? "planta.pdf", suppliedContext);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Erro desconhecido a processar a planta";
+        await db.update(plants).set({
+          processingStatus: "erro",
+          processingStage: "Análise interrompida",
+          processingUpdatedAt: new Date(),
+          errorMessage: message,
+        }).where(eq(plants.id, plantId)).catch(() => undefined);
+      } finally {
+        activePlantJobs.delete(plantId);
+      }
+    })();
+  });
+}
+
+export async function resumePlantProcessingJobs(): Promise<number> {
+  const interrupted = await db.select({ id: plants.id }).from(plants).where(or(
+    eq(plants.processingStatus, "pendente"),
+    eq(plants.processingStatus, "processando"),
+  ));
+  if (interrupted.length) {
+    await db.update(plants).set({
+      processingStatus: "processando",
+      processingStage: "Análise retomada em segundo plano",
+      processingUpdatedAt: new Date(),
+      errorMessage: null,
+    }).where(or(eq(plants.processingStatus, "pendente"), eq(plants.processingStatus, "processando")));
+    for (const plant of interrupted) enqueuePlantProcessing(plant.id);
+  }
+  return interrupted.length;
+}
+
 export async function plantRoutes(app: FastifyInstance) {
   app.get("/api/projects/:projectId/plants", { preHandler: requireCompanyUser }, async (request, reply) => {
     const { projectId } = request.params as { projectId: string };
@@ -319,10 +366,7 @@ export async function plantRoutes(app: FastifyInstance) {
     // para a barra de progresso). Antes disto, o pedido HTTP ficava aberto durante toda a
     // análise (por vezes minutos), o que em produção esbarra em timeouts do proxy/CloudPanel —
     // nunca esperar aqui pela leitura inteira antes de responder.
-    processPlantFile(plant.id, buffer, data.filename, detectionContext).catch(async (err) => {
-      const message = err instanceof Error ? err.message : "Erro desconhecido a processar a planta";
-      await db.update(plants).set({ processingStatus: "erro", processingStage: "Análise interrompida", processingUpdatedAt: new Date(), errorMessage: message }).where(eq(plants.id, plant.id));
-    });
+    enqueuePlantProcessing(plant.id, detectionContext);
     return reply.code(201).send(plant);
   });
 
@@ -345,19 +389,9 @@ export async function plantRoutes(app: FastifyInstance) {
       processingUpdatedAt: new Date(),
       errorMessage: null,
     }).where(eq(plants.id, id));
-    try {
-      const buffer = await readFile(plant.filePath);
-      processPlantFile(id, buffer, plant.originalFileName ?? "planta.pdf").catch(async (err) => {
-        const message = err instanceof Error ? err.message : "Erro desconhecido a reprocessar a planta";
-        await db.update(plants).set({ processingStatus: "erro", processingStage: "Análise interrompida", processingUpdatedAt: new Date(), errorMessage: message }).where(eq(plants.id, id));
-      });
-      const [updated] = await db.select().from(plants).where(eq(plants.id, id)).limit(1);
-      return updated;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Erro desconhecido a reprocessar a planta";
-      await db.update(plants).set({ processingStatus: "erro", processingStage: "Análise interrompida", processingUpdatedAt: new Date(), errorMessage: message }).where(eq(plants.id, id));
-      return reply.code(502).send({ error: `Falha ao reprocessar a planta: ${message}` });
-    }
+    enqueuePlantProcessing(id);
+    const [updated] = await db.select().from(plants).where(eq(plants.id, id)).limit(1);
+    return updated;
   });
 
   app.get("/api/plants/:id", { preHandler: requireCompanyUser }, async (request, reply) => {

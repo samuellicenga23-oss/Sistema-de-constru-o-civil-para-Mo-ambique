@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent, type MouseEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { boqApi, type BudgetDocument, type Project, type ProjectMaterialSpecification, type ProjectWorkflowStatus } from "../api/boq";
 import { measurementApi, type MeasurementCertificate } from "../api/measurement";
-import { plantsApi, type Plant } from "../api/plants";
+import { plantsApi, type Plant, type PlantProcessingProgress } from "../api/plants";
 import { catalogApi, type PriceZone } from "../api/catalog";
 import { suppliersApi } from "../api/suppliers";
 import Layout from "../components/Layout";
@@ -55,6 +55,7 @@ export default function ProjectDetailPage() {
   const [selectedDocId, setSelectedDocId] = useState("");
   const [periodDate, setPeriodDate] = useState(todayStr());
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<PlantProcessingProgress | null>(null);
   const [uploadNotice, setUploadNotice] = useState<string | null>(null);
   const [preparingMeasurements, setPreparingMeasurements] = useState(false);
   const [reprocessingPlantId, setReprocessingPlantId] = useState<string | null>(null);
@@ -166,17 +167,17 @@ export default function ProjectDetailPage() {
     setUploading(true);
     setUploadNotice(null);
     try {
-      await plantsApi.upload(projectId, file, "auto", (progress) => {
-        setPlants((current) => current.map((p) => (p.id === progress.id ? { ...p, ...progress } : p)));
-      });
+      const uploaded = await plantsApi.upload(projectId, file, "auto", setUploadProgress);
+      setPlants((current) => current.some((plant) => plant.id === uploaded.id) ? current : [...current, uploaded]);
       fileInput.value = "";
-      await reload();
-      setUploadNotice(`“${file.name}” enviado — a análise continua em segundo plano.`);
+      setUploadProgress(null);
+      setUploadNotice(`“${file.name}” carregado. Pode continuar a trabalhar; avisaremos quando a leitura terminar.`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao carregar a planta");
       await reload().catch(() => {});
     } finally {
       setUploading(false);
+      setUploadProgress(null);
     }
   }
 
@@ -596,6 +597,7 @@ export default function ProjectDetailPage() {
             )}
           </ul>
           <form onSubmit={handleUploadPlant} className="grid items-end gap-3 border-t border-gray-100 px-4 py-4 sm:px-5 sm:grid-cols-[minmax(0,1fr)_auto]">
+            {uploadProgress && <div className="sm:col-span-2"><PlantUploadProgress progress={uploadProgress} compact /></div>}
             {plants.some((p) => p.processingStatus === "processando" || p.processingStatus === "pendente") && (
               <div className="sm:col-span-2">
                 {plants.filter((p) => p.processingStatus === "processando" || p.processingStatus === "pendente").map((p) => (
@@ -610,7 +612,7 @@ export default function ProjectDetailPage() {
             </div>
             <button type="submit" disabled={uploading} className="btn btn-primary w-full sm:w-auto">
               <IconUpload className="w-4 h-4" />
-              {uploading ? "A enviar..." : plants.length > 0 ? "Adicionar PDF" : "Carregar PDF"}
+              {uploading ? "A carregar PDF..." : plants.length > 0 ? "Adicionar PDF" : "Carregar PDF"}
             </button>
           </form>
         </section>

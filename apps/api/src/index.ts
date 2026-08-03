@@ -1,6 +1,7 @@
 import { buildApp } from "./app.js";
 import { sql } from "./db/index.js";
 import { env } from "./env.js";
+import { resumePlantProcessingJobs } from "./routes/plants.js";
 
 const app = await buildApp();
 let shuttingDown = false;
@@ -35,6 +36,8 @@ process.on("uncaughtException", (error) => {
 
 try {
   await app.listen({ port: env.port, host: "0.0.0.0" });
+  const resumedPlantJobs = await resumePlantProcessingJobs();
+  if (resumedPlantJobs > 0) app.log.info({ count: resumedPlantJobs }, "Resumed plant jobs");
 } catch (error) {
   app.log.fatal(error, "API failed to start");
   await sql.end({ timeout: 5 }).catch(() => undefined);

@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent, type MouseEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { boqApi, type Project } from "../api/boq";
 import { catalogApi, type PriceZone } from "../api/catalog";
-import { plantsApi, type PlantProcessingProgress, type PlantUploadDiscipline } from "../api/plants";
+import { plantsApi, type PlantUploadDiscipline } from "../api/plants";
 import Layout from "../components/Layout";
 import Modal from "../components/Modal";
 import ConfirmDialog from "../components/ConfirmDialog";
@@ -132,25 +132,14 @@ export default function ProjectsPage() {
       });
       createdProjectId = created.id;
 
-      const uploadedPlants = [];
-      for (let index = 0; index < technicalFiles.length; index++) {
-        const entry = technicalFiles[index];
-        setCreateProgress(`A enviar ${entry.label}...`);
-        const updateProgress = (progress: PlantProcessingProgress) => {
-          const filePercent = progress.processingProgress;
-          const overall = Math.round(((index + filePercent / 100) / technicalFiles.length) * 100);
-          setAnalysisProgress({
-            percent: overall,
-            filePercent,
-            stage: progress.processingStage ?? "A analisar o PDF",
-            fileName: entry.file.name,
-            currentFile: index + 1,
-            totalFiles: technicalFiles.length,
-            currentPage: progress.processingCurrentPage,
-            totalPages: progress.processingTotalPages,
-          });
-        };
-        uploadedPlants.push(await plantsApi.upload(created.id, entry.file, entry.discipline, updateProgress));
+      if (technicalFiles.length) {
+        // O projecto abre imediatamente. Os ficheiros continuam a carregar mesmo depois da
+        // navegação e o centro global informa o progresso e a conclusão da leitura.
+        for (const entry of technicalFiles) {
+          void plantsApi.upload(created.id, entry.file, entry.discipline).catch(() => undefined);
+        }
+        navigate(`/projectos/${created.id}#plantas-do-projecto`);
+        return;
       }
 
       if (startMode === "importar" && measurementsFile && created.defaultDocumentId) {
@@ -159,9 +148,7 @@ export default function ProjectsPage() {
         navigate(`/documentos/${created.defaultDocumentId}`);
       } else if (startMode === "manual" && created.defaultDocumentId) {
         navigate(workspace === "medicoes" ? `/documentos/${created.defaultDocumentId}?assistente=1` : `/documentos/${created.defaultDocumentId}`);
-      } else {
-        navigate(`/projectos/${created.id}#plantas-do-projecto`);
-      }
+      } else navigate(`/projectos/${created.id}#plantas-do-projecto`);
     } catch (err) {
       if (createdProjectId) {
         const motivo = startMode === "importar" ? "excel" : startMode === "plantas" ? "planta" : "geral";

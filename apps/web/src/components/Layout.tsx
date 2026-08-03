@@ -5,6 +5,7 @@ import { companiesApi } from "../api/companies";
 import UserMenu from "./UserMenu";
 import InstallAppButton from "./InstallAppButton";
 import OfflineBanner from "./OfflineBanner";
+import PlantProcessingCenter from "./PlantProcessingCenter";
 import { IconHome, IconFolder, IconTag, IconBuilding, IconLogout, IconSettings, IconRuler, IconUsers, IconMenu, IconClose } from "./icons";
 import { LogoFull, LogoIcon } from "./Logo";
 import { useLanguage } from "../i18n";
@@ -266,6 +267,7 @@ export default function Layout({
         </header>
 
         <OfflineBanner />
+        <PlantProcessingCenter />
 
         <main className="min-w-0 flex-1 overflow-x-hidden p-3 pb-20 sm:p-5 md:p-8 md:pb-8 xl:p-10 page-enter">
           <div className="mx-auto w-full max-w-[1500px]">{children}</div>

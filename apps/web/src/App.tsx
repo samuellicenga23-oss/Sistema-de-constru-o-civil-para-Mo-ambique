@@ -1,27 +1,29 @@
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { lazy, Suspense } from "react";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import { canAccessPath, isModuleEnabled } from "./permissions";
 import LoadingState from "./components/LoadingState";
-import LoginPage from "./pages/LoginPage";
-import DashboardPage from "./pages/DashboardPage";
-import CatalogPage from "./pages/CatalogPage";
-import ProjectsPage from "./pages/ProjectsPage";
-import ProjectDetailPage from "./pages/ProjectDetailPage";
-import BudgetDocumentPage from "./pages/BudgetDocumentPage";
-import MeasurementCertificatePage from "./pages/MeasurementCertificatePage";
-import PlantReviewPage from "./pages/PlantReviewPage";
-import SuperAdminPage from "./pages/SuperAdminPage";
-import CompositionDetailPage from "./pages/CompositionDetailPage";
-import CompanySettingsPage from "./pages/CompanySettingsPage";
-import ProfilePage from "./pages/ProfilePage";
-import QuickCalcPage from "./pages/QuickCalcPage";
-import ProjectFinancialPage from "./pages/ProjectFinancialPage";
-import ProjectSiteDiaryPage from "./pages/ProjectSiteDiaryPage";
-import SuppliersPage from "./pages/SuppliersPage";
-import ProjectPurchasingPage from "./pages/ProjectPurchasingPage";
-import ProjectSchedulePage from "./pages/ProjectSchedulePage";
-import PublicLandingPage from "./pages/PublicLandingPage";
-import CheckoutPage from "./pages/CheckoutPage";
+
+const LoginPage = lazy(() => import("./pages/LoginPage"));
+const DashboardPage = lazy(() => import("./pages/DashboardPage"));
+const CatalogPage = lazy(() => import("./pages/CatalogPage"));
+const ProjectsPage = lazy(() => import("./pages/ProjectsPage"));
+const ProjectDetailPage = lazy(() => import("./pages/ProjectDetailPage"));
+const BudgetDocumentPage = lazy(() => import("./pages/BudgetDocumentPage"));
+const MeasurementCertificatePage = lazy(() => import("./pages/MeasurementCertificatePage"));
+const PlantReviewPage = lazy(() => import("./pages/PlantReviewPage"));
+const SuperAdminPage = lazy(() => import("./pages/SuperAdminPage"));
+const CompositionDetailPage = lazy(() => import("./pages/CompositionDetailPage"));
+const CompanySettingsPage = lazy(() => import("./pages/CompanySettingsPage"));
+const ProfilePage = lazy(() => import("./pages/ProfilePage"));
+const QuickCalcPage = lazy(() => import("./pages/QuickCalcPage"));
+const ProjectFinancialPage = lazy(() => import("./pages/ProjectFinancialPage"));
+const ProjectSiteDiaryPage = lazy(() => import("./pages/ProjectSiteDiaryPage"));
+const SuppliersPage = lazy(() => import("./pages/SuppliersPage"));
+const ProjectPurchasingPage = lazy(() => import("./pages/ProjectPurchasingPage"));
+const ProjectSchedulePage = lazy(() => import("./pages/ProjectSchedulePage"));
+const PublicLandingPage = lazy(() => import("./pages/PublicLandingPage"));
+const CheckoutPage = lazy(() => import("./pages/CheckoutPage"));
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -210,7 +212,7 @@ function AppRoutes() {
 export default function App() {
   return (
     <AuthProvider>
-      <AppRoutes />
+      <Suspense fallback={<LoadingState fullScreen />}><AppRoutes /></Suspense>
     </AuthProvider>
   );
 }

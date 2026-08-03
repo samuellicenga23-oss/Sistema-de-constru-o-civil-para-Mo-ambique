@@ -1,4 +1,5 @@
 import { request, ApiError } from "./http";
+import { beginPlantProcessingTask, failPlantProcessingTask, updatePlantProcessingTask } from "../services/plantProcessingTracker";
 
 export type StructuralSummary = {
   footingsCount: number;
@@ -82,6 +83,29 @@ export type PlantProcessingProgress = Pick<
 >;
 
 const wait = (milliseconds: number) => new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+
+function uploadPlantForm(url: string, form: FormData, onTransfer: (percent: number) => void): Promise<Plant> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url);
+    xhr.withCredentials = true;
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && event.total > 0) onTransfer(Math.round((event.loaded / event.total) * 100));
+    };
+    xhr.onerror = () => reject(new ApiError(0, "Falha de ligação durante o envio do PDF"));
+    xhr.onload = () => {
+      let body: unknown = null;
+      try { body = JSON.parse(xhr.responseText); } catch { body = null; }
+      if (xhr.status < 200 || xhr.status >= 300) {
+        const message = body && typeof body === "object" && "error" in body ? String(body.error) : `Erro ${xhr.status}`;
+        reject(new ApiError(xhr.status, message));
+        return;
+      }
+      resolve(body as Plant);
+    };
+    xhr.send(form);
+  });
+}
 
 // Devolve o último estado conhecido quando o polling termina (sucesso, erro, ou parado
 // externamente) — quem chama pode assim esperar pelo fim real da leitura em segundo plano em
@@ -176,24 +200,29 @@ export const plantsApi = {
     form.append("clientPlantId", plantId);
     form.append("discipline", discipline);
     form.append("file", file);
-    onProgress?.({ id: plantId, processingStatus: "pendente", processingProgress: 3, processingStage: "A enviar o ficheiro", processingCurrentPage: null, processingTotalPages: null, processingStartedAt: new Date().toISOString(), processingUpdatedAt: new Date().toISOString(), errorMessage: null });
-    let stopped = false;
-    const watcher = waitForCompletion ? watchProgress(plantId, onProgress, () => stopped) : null;
+    const startedAt = new Date().toISOString();
+    const initial: PlantProcessingProgress = { id: plantId, processingStatus: "pendente", processingProgress: 1, processingStage: "A carregar o PDF · 0%", processingCurrentPage: null, processingTotalPages: null, processingStartedAt: startedAt, processingUpdatedAt: startedAt, errorMessage: null };
+    beginPlantProcessingTask({ plantId, projectId, fileName: file.name }, initial);
+    onProgress?.(initial);
     try {
-      const res = await fetch(`/api/projects/${projectId}/plants`, { method: "POST", credentials: "include", body: form });
-      if (!res.ok) {
-        stopped = true;
-        const body = await res.json().catch(() => ({}));
-        throw new ApiError(res.status, body.error ?? `Erro ${res.status}`);
-      }
-      const plant = await res.json() as Plant;
+      const plant = await uploadPlantForm(`/api/projects/${projectId}/plants`, form, (percent) => {
+        const transferProgress: PlantProcessingProgress = { ...initial, processingProgress: Math.max(1, Math.min(10, Math.round(percent / 10))), processingStage: `A carregar o PDF · ${percent}%`, processingUpdatedAt: new Date().toISOString() };
+        updatePlantProcessingTask(plantId, transferProgress);
+        onProgress?.(transferProgress);
+      });
+      updatePlantProcessingTask(plantId, plant);
       onProgress?.(plant);
+      if (plant.processingStatus === "concluido" || plant.processingStatus === "erro") return plant;
       if (!waitForCompletion) return plant;
+      const watcher = watchProgress(plantId, (progress) => {
+        updatePlantProcessingTask(plantId, progress);
+        onProgress?.(progress);
+      }, () => false);
       const finalProgress = await watcher;
       return finalProgress ? { ...plant, ...finalProgress } : plant;
-    } finally {
-      stopped = true;
-      if (watcher) await watcher;
+    } catch (error) {
+      failPlantProcessingTask(plantId, error instanceof Error ? error.message : "Não foi possível carregar o PDF");
+      throw error;
     }
   },
 

@@ -17,8 +17,19 @@ export default defineConfig({
         cleanupOutdatedCaches: true,
         skipWaiting: true,
         clientsClaim: true,
+        // Assets versionados são guardados pelo runtime. Não os incluir no precache evita que
+        // o service worker volte a descarregar bundles antigos preservados para abas abertas.
+        globPatterns: ["**/*.{html,ico,svg,webmanifest}", "icon-*.png"],
         navigateFallbackDenylist: [/^\/api\//, /^\/uploads\//],
         runtimeCaching: [
+          {
+            urlPattern: /^\/assets\//,
+            handler: "CacheFirst",
+            options: {
+              cacheName: "sigo-versioned-assets",
+              expiration: { maxEntries: 12, maxAgeSeconds: 7 * 24 * 60 * 60 },
+            },
+          },
           {
             urlPattern: /^\/api\//,
             handler: "NetworkOnly",
