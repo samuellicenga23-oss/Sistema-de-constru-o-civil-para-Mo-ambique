@@ -11,6 +11,7 @@ import { hashPassword } from "../auth/password.js";
 import { env } from "../env.js";
 import { CURRENCIES, SUBSCRIPTION_STATUSES, SUBSCRIPTION_PLAN_KEYS } from "@sigo/shared";
 import { detectImageExtension } from "../services/imageValidation.js";
+import { syncSigoPricesForCompany } from "../services/sigoPrices.js";
 
 const createCompanySchema = z.object({
   name: z.string().min(1),
@@ -87,6 +88,7 @@ export async function companyRoutes(app: FastifyInstance) {
     // não estão implementadas (precisa de um campo de data de expiração do trial, para adicionar
     // depois); por agora o super_admin muda manualmente o estado quando o trial terminar.
     await db.insert(subscriptions).values({ companyId: company.id, plan: "profissional", status: "trial" });
+    await syncSigoPricesForCompany(company.id);
 
     return reply.code(201).send({
       company,

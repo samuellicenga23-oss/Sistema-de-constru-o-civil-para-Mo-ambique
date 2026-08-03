@@ -18,6 +18,7 @@ import {
 import { requireRole } from "../auth/middleware.js";
 import { computeHourlyRate } from "../services/costEngine.js";
 import { cloneLabourCategoryForCompany, cloneMaterialForCompany, cloneEquipmentForCompany } from "../services/catalogClone.js";
+import { SIGO_PRICES_SUPPLIER_NAME, syncSigoPricesForCompany } from "../services/sigoPrices.js";
 import { CURRENCIES, UNITS, fixedSigo } from "@sigo/shared";
 
 const CATALOG_ROLES = ["super_admin", "admin_empresa", "orcamentista"] as const;
@@ -280,7 +281,13 @@ export async function catalogRoutes(app: FastifyInstance) {
       const current = bestQuoteByMaterialId.get(quote.materialId);
       const quoteSpecific = zoneId != null && quote.zoneId === zoneId;
       const currentSpecific = zoneId != null && current?.zoneId === zoneId;
-      if (!current || (quoteSpecific && !currentSpecific) || (quoteSpecific === currentSpecific && Number(quote.unitCost) < Number(current.unitCost))) {
+      const quoteIsReference = quote.supplierName === SIGO_PRICES_SUPPLIER_NAME;
+      const currentIsReference = current?.supplierName === SIGO_PRICES_SUPPLIER_NAME;
+      if (
+        !current ||
+        (!quoteIsReference && currentIsReference) ||
+        (quoteIsReference === currentIsReference && ((quoteSpecific && !currentSpecific) || (quoteSpecific === currentSpecific && Number(quote.unitCost) < Number(current.unitCost))))
+      ) {
         bestQuoteByMaterialId.set(quote.materialId, quote);
       }
     }
@@ -321,6 +328,7 @@ export async function catalogRoutes(app: FastifyInstance) {
         purchasePackageQty: parsed.data.purchasePackageQty != null ? parsed.data.purchasePackageQty.toString() : null,
       })
       .returning();
+    if (companyId) await syncSigoPricesForCompany(companyId);
     return reply.code(201).send(row);
   });
 
@@ -355,6 +363,7 @@ export async function catalogRoutes(app: FastifyInstance) {
       })
       .where(eq(materials.id, target.id))
       .returning();
+    if (companyId) await syncSigoPricesForCompany(companyId);
     return row;
   });
 

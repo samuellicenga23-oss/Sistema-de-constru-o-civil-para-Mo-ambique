@@ -9,6 +9,9 @@ export type Supplier = {
   nuit: string | null;
   notes: string | null;
   createdAt: string;
+  isReference: boolean;
+  referenceMaterialCount: number | null;
+  referenceDate: string | null;
 };
 
 export type SupplierInput = { name: string; contact?: string; location?: string; nuit?: string; notes?: string };
@@ -23,6 +26,8 @@ export type SupplierMaterialPrice = {
   zoneName: string | null;
   unitCost: string;
   currency: string;
+  materialSourceName: string | null;
+  materialPriceDate: string | null;
 };
 
 export type SupplierMaterialPriceInput = { materialId: string; zoneId?: string | null; unitCost: number; currency?: string };

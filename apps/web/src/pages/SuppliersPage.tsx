@@ -36,7 +36,7 @@ export default function SuppliersPage() {
       [supplier.name, supplier.contact, supplier.location, supplier.nuit]
         .filter(Boolean)
         .some((value) => String(value).toLocaleLowerCase("pt").includes(needle)),
-    );
+    ).sort((a, b) => Number(b.isReference) - Number(a.isReference) || a.name.localeCompare(b.name, "pt"));
   }, [query, suppliers]);
 
   async function handleCreate(e: FormEvent) {
@@ -134,12 +134,17 @@ export default function SuppliersPage() {
 
           <div className="grid gap-px bg-slate-200 sm:grid-cols-2 xl:grid-cols-3">
             {filteredSuppliers.map((supplier) => (
-              <article key={supplier.id} className="flex min-w-0 flex-col bg-white p-5">
+              <article key={supplier.id} className={`flex min-w-0 flex-col bg-white p-5 ${supplier.isReference ? "ring-1 ring-inset ring-brand-200" : ""}`}>
                 <div className="flex items-start gap-3">
                   <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-slate-100 text-sm font-bold text-slate-700">{supplier.name.trim().slice(0, 2).toUpperCase()}</span>
                   <div className="min-w-0">
-                    <h3 className="break-words font-semibold text-slate-950">{supplier.name}</h3>
-                    <p className="mt-1 text-xs text-slate-500">{supplier.location || "Localização por definir"}</p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="break-words font-semibold text-slate-950">{supplier.name}</h3>
+                      {supplier.isReference && <span className="badge badge-brand">Referência SIGO</span>}
+                    </div>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {supplier.isReference ? `${supplier.referenceMaterialCount ?? 0} materiais · preços sem IVA` : supplier.location || "Localização por definir"}
+                    </p>
                   </div>
                 </div>
                 {(supplier.contact || supplier.nuit) && <dl className="mt-4 space-y-2 border-t border-slate-100 pt-4 text-xs">
@@ -147,12 +152,12 @@ export default function SuppliersPage() {
                   {supplier.nuit && <div className="flex justify-between gap-3"><dt className="text-slate-500">NUIT</dt><dd className="text-right font-medium text-slate-700">{supplier.nuit}</dd></div>}
                 </dl>}
                 <div className="mt-auto flex items-center gap-2 pt-5">
-                  <button onClick={() => setMaterialsModalSupplier(supplier)} className="btn btn-secondary btn-sm flex-1">
-                    Cotações e recursos
+                  <button onClick={() => setMaterialsModalSupplier(supplier)} className={`btn btn-sm flex-1 ${supplier.isReference ? "btn-primary" : "btn-secondary"}`}>
+                    {supplier.isReference ? "Consultar preços" : "Cotações e recursos"}
                   </button>
-                  <button onClick={() => setPendingDelete(supplier)} className="icon-btn-danger" title="Eliminar fornecedor">
+                  {!supplier.isReference && <button onClick={() => setPendingDelete(supplier)} className="icon-btn-danger" title="Eliminar fornecedor">
                     <IconTrash className="h-3.5 w-3.5" />
-                  </button>
+                  </button>}
                 </div>
               </article>
             ))}

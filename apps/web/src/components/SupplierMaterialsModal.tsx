@@ -113,7 +113,7 @@ export default function SupplierMaterialsModal({ supplier, onClose }: { supplier
       {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
 
       <div className="workspace-tabs mb-5">
-        {TABS.map((t) => (
+        {TABS.filter((t) => !supplier.isReference || t.id === "materiais").map((t) => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
@@ -124,9 +124,16 @@ export default function SupplierMaterialsModal({ supplier, onClose }: { supplier
         ))}
       </div>
 
+      {supplier.isReference && (
+        <div className="mb-4 flex flex-col gap-1 rounded-xl border border-brand-200 bg-brand-50 px-4 py-3 text-sm text-brand-950 sm:flex-row sm:items-center sm:justify-between">
+          <strong>Referência nacional sem IVA</strong>
+          <span className="text-xs text-brand-800">Revista em {supplier.referenceDate ?? "2026-08-03"} · confirme transporte e cotação antes da compra</span>
+        </div>
+      )}
+
       {optionsEmpty ? (
         <p className="text-xs text-gray-400 mb-3">Sem opções no Catálogo ainda para este tipo de recurso.</p>
-      ) : (
+      ) : !supplier.isReference ? (
         <form onSubmit={handleAdd} className="mb-5 grid items-end gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_9rem_auto]">
           <div className="min-w-0">
             <label className="label">{tab === "materiais" ? "Material" : tab === "mao-de-obra" ? "Categoria" : "Equipamento"}</label>
@@ -178,7 +185,7 @@ export default function SupplierMaterialsModal({ supplier, onClose }: { supplier
             Guardar
           </button>
         </form>
-      )}
+      ) : null}
 
       <div className="mb-3">
         <PageSearch value={query} onChange={setQuery} placeholder="Pesquisar recurso ou zona…" resultLabel={`${visiblePriceCount} preço(s)`} />
@@ -189,7 +196,7 @@ export default function SupplierMaterialsModal({ supplier, onClose }: { supplier
           <thead>
             <tr className="table-head-row">
               <th className="text-left py-2 px-3 font-medium">{tab === "materiais" ? "Material" : tab === "mao-de-obra" ? "Categoria" : "Equipamento"}</th>
-              <th className="text-left font-medium">Zona</th>
+              <th className="text-left font-medium">{supplier.isReference && tab === "materiais" ? "Fonte / data" : "Zona"}</th>
               <th className="text-right font-medium">Preço</th>
               <th className="w-10"></th>
             </tr>
@@ -199,14 +206,18 @@ export default function SupplierMaterialsModal({ supplier, onClose }: { supplier
               filteredMaterialPrices.map((p) => (
                 <tr key={p.id} className="table-row">
                   <td className="py-1.5 px-3">{p.materialName}</td>
-                  <td className="text-gray-500">{p.zoneName ?? "Geral"}</td>
+                  <td className="text-gray-500">
+                    {supplier.isReference
+                      ? <><span className="block max-w-[16rem] truncate">{p.materialSourceName ?? "Referência SIGO"}</span><span className="text-xs text-slate-400">{p.materialPriceDate ?? supplier.referenceDate ?? "—"}</span></>
+                      : p.zoneName ?? "Geral"}
+                  </td>
                   <td className="text-right tabular-nums">
                     {Number(p.unitCost).toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {p.currency}
                   </td>
                   <td className="text-right pr-2">
-                    <button onClick={() => handleRemove("materiais", p.id)} className="icon-btn-danger" title="Remover">
+                    {!supplier.isReference && <button onClick={() => handleRemove("materiais", p.id)} className="icon-btn-danger" title="Remover">
                       <IconTrash className="w-3 h-3" />
-                    </button>
+                    </button>}
                   </td>
                 </tr>
               ))}

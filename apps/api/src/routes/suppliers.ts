@@ -14,6 +14,11 @@ import {
 } from "../db/schema.js";
 import { requireCompanyUser, requireRole } from "../auth/middleware.js";
 import { CURRENCIES } from "@sigo/shared";
+import {
+  isSigoPricesSupplier,
+  SIGO_PRICES_REVIEW_DATE,
+  syncSigoPricesForCompany,
+} from "../services/sigoPrices.js";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista"] as const;
 
@@ -58,7 +63,14 @@ async function assertSupplierOwned(supplierId: string, companyId: string) {
 
 export async function supplierRoutes(app: FastifyInstance) {
   app.get("/api/suppliers", { preHandler: requireCompanyUser }, async (request) => {
-    return db.select().from(suppliers).where(eq(suppliers.companyId, companyIdOf(request))).orderBy(suppliers.name);
+    const reference = await syncSigoPricesForCompany(companyIdOf(request));
+    const rows = await db.select().from(suppliers).where(eq(suppliers.companyId, companyIdOf(request))).orderBy(suppliers.name);
+    return rows.map((supplier) => ({
+      ...supplier,
+      isReference: isSigoPricesSupplier(supplier),
+      referenceMaterialCount: supplier.id === reference.supplier.id ? reference.materials : null,
+      referenceDate: supplier.id === reference.supplier.id ? SIGO_PRICES_REVIEW_DATE : null,
+    }));
   });
 
   app.post("/api/suppliers", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
@@ -70,6 +82,8 @@ export async function supplierRoutes(app: FastifyInstance) {
 
   app.put("/api/suppliers/:id", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
     const { id } = request.params as { id: string };
+    const supplier = await assertSupplierOwned(id, companyIdOf(request));
+    if (supplier && isSigoPricesSupplier(supplier)) return reply.code(409).send({ error: "SIGO Preços é uma referência gerida pelo sistema" });
     const parsed = supplierUpdateSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     const [row] = await db
@@ -83,6 +97,8 @@ export async function supplierRoutes(app: FastifyInstance) {
 
   app.delete("/api/suppliers/:id", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
     const { id } = request.params as { id: string };
+    const supplier = await assertSupplierOwned(id, companyIdOf(request));
+    if (supplier && isSigoPricesSupplier(supplier)) return reply.code(409).send({ error: "SIGO Preços não pode ser eliminado" });
     await db.delete(suppliers).where(and(eq(suppliers.id, id), eq(suppliers.companyId, companyIdOf(request))));
     return { ok: true };
   });
@@ -101,6 +117,8 @@ export async function supplierRoutes(app: FastifyInstance) {
         price: supplierMaterialPrices,
         materialName: materials.name,
         materialUnit: materials.unit,
+        materialSourceName: materials.priceSourceName,
+        materialPriceDate: materials.priceDate,
         zoneName: priceZones.name,
       })
       .from(supplierMaterialPrices)
@@ -108,13 +126,21 @@ export async function supplierRoutes(app: FastifyInstance) {
       .leftJoin(priceZones, eq(supplierMaterialPrices.zoneId, priceZones.id))
       .where(eq(supplierMaterialPrices.supplierId, id));
 
-    return rows.map((r) => ({ ...r.price, materialName: r.materialName, unit: r.materialUnit, zoneName: r.zoneName }));
+    return rows.map((r) => ({
+      ...r.price,
+      materialName: r.materialName,
+      unit: r.materialUnit,
+      materialSourceName: r.materialSourceName,
+      materialPriceDate: r.materialPriceDate,
+      zoneName: r.zoneName,
+    }));
   });
 
   app.put("/api/suppliers/:id/materials", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const companyId = companyIdOf(request);
     const supplier = await assertSupplierOwned(id, companyId);
+    if (supplier && isSigoPricesSupplier(supplier)) return reply.code(409).send({ error: "Os preços SIGO são sincronizados pelo catálogo" });
     if (!supplier) return reply.code(404).send({ error: "Fornecedor não encontrado" });
 
     const parsed = materialPriceSchema.safeParse(request.body);
@@ -158,6 +184,7 @@ export async function supplierRoutes(app: FastifyInstance) {
   app.delete("/api/suppliers/:id/materials/:priceId", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
     const { id, priceId } = request.params as { id: string; priceId: string };
     const supplier = await assertSupplierOwned(id, companyIdOf(request));
+    if (supplier && isSigoPricesSupplier(supplier)) return reply.code(409).send({ error: "Os preços SIGO são sincronizados pelo catálogo" });
     if (!supplier) return { ok: true };
     await db.delete(supplierMaterialPrices).where(and(eq(supplierMaterialPrices.id, priceId), eq(supplierMaterialPrices.supplierId, id)));
     return { ok: true };

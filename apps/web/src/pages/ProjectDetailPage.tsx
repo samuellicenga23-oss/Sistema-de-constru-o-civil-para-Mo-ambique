@@ -307,6 +307,8 @@ export default function ProjectDetailPage() {
         { label: "2. Medições", detail: project.measurementMode === "importar" ? "Quantidades importadas do Excel" : "Introdução manual no assistente", done: project.measurementMode === "importar" || hasMeasuredBudget },
         { label: "3. Orçamento", detail: "Rever quantidades, preços e percentagens", done: hasMeasuredBudget },
       ];
+  const completedWorkflowSteps = workflowSteps.filter((step) => step.done).length;
+  const workflowProgress = Math.round((completedWorkflowSteps / workflowSteps.length) * 100);
 
   return (
     <Layout
@@ -318,7 +320,7 @@ export default function ProjectDetailPage() {
           </Link>
       }
     >
-      <div className="mx-auto grid w-full max-w-[1500px] items-start gap-5 xl:grid-cols-2">
+      <div className="mx-auto grid w-full max-w-7xl items-start gap-5 xl:grid-cols-2">
         <div className="xl:col-span-2"><ProjectWorkspaceNav projectId={projectId!} measurementOnly={project.projectType === "medicao"} /></div>
         {error && <p className="text-sm text-red-600 xl:col-span-2">{error}</p>}
         {uploadNotice && <p className="text-sm text-emerald-700 xl:col-span-2">{uploadNotice}</p>}
@@ -334,11 +336,19 @@ export default function ProjectDetailPage() {
 
         <ProjectWorkflowBanner status={workflowStatus} projectId={projectId!} />
 
-        <section className="card order-2 overflow-hidden border-t-4 border-t-brand-600 xl:col-span-2">
-          <SectionHeader
-            title={usesPlants ? "Da planta ao orçamento" : project.measurementMode === "importar" ? "Medições importadas" : "Medição manual"}
-            description={usesPlants ? "Carregar, confirmar os dados e gerar as medições" : "Continue directamente no Mapa de Quantidades"}
-            actions={
+        <section className="card order-2 overflow-hidden xl:col-span-2">
+          <div className="flex flex-col gap-4 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-sm font-bold text-slate-950">{usesPlants ? "Preparação da obra" : project.measurementMode === "importar" ? "Medições importadas" : "Medição manual"}</h2>
+                <span className="text-xs font-semibold text-slate-500">{completedWorkflowSteps}/{workflowSteps.length}</span>
+              </div>
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
+                <div className="h-full rounded-full bg-brand-600" style={{ width: `${workflowProgress}%` }} />
+              </div>
+            </div>
+            <div className="shrink-0">
+            {
               !usesPlants ? (
                 <button onClick={handlePrepareMeasurements} disabled={preparingMeasurements} className="btn btn-primary btn-sm">
                   <IconRuler className="h-3.5 w-3.5" />
@@ -355,15 +365,13 @@ export default function ProjectDetailPage() {
                 </a>
               )
             }
-          />
-          <div className={`grid gap-px bg-slate-200 ${usesPlants ? "md:grid-cols-5" : "md:grid-cols-3"}`}>
+            </div>
+          </div>
+          <div className="flex overflow-x-auto border-t border-slate-100 px-4 py-3">
             {workflowSteps.map((step) => (
-              <div key={step.label} className="flex items-start gap-3 bg-white px-4 py-3">
-                  <span className={`grid h-6 w-6 place-items-center rounded-full text-xs font-bold ${step.done ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{step.done ? "✓" : "·"}</span>
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-slate-900">{step.label}</p>
-                  <p className="mt-0.5 text-xs text-slate-500">{step.detail}</p>
-                </div>
+              <div key={step.label} className="flex shrink-0 items-center gap-2 pr-5 text-xs">
+                <span className={`grid h-5 w-5 place-items-center rounded-full font-bold ${step.done ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{step.done ? "✓" : "·"}</span>
+                <span className={step.done ? "font-semibold text-slate-700" : "text-slate-500"}>{step.label.replace(/^\d+\.\s*/, "")}</span>
               </div>
             ))}
           </div>
@@ -412,7 +420,7 @@ export default function ProjectDetailPage() {
             {[
               ["Medições", measurementDocuments.length],
               ["Orçamentos", budgetDocuments.length],
-              ["Projectos", plants.length],
+              ["Plantas", plants.length],
             ].map(([label, value]) => (
               <div key={label} className="bg-white px-5 py-4">
                 <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</span>

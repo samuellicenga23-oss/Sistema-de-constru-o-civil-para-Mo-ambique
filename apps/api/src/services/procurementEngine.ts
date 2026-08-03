@@ -13,6 +13,7 @@ import {
 import { computeMaterialsByPhase } from "./materialsByPhase.js";
 import { mapToPhase } from "./phaseMapping.js";
 import { buildRebarPurchasePlan, calculateVatTotals, type RebarPurchaseLine } from "@sigo/shared";
+import { SIGO_PRICES_SUPPLIER_NAME } from "./sigoPrices.js";
 
 export type ProjectRebarPurchasePlan = {
   sourcePlantId: string;
@@ -186,7 +187,13 @@ export async function computeProcurementPlan(args: {
     const current = bestQuote.get(quote.materialId);
     const quoteIsZone = quote.zoneId === args.zoneId && args.zoneId !== null;
     const currentIsZone = current?.zoneId === args.zoneId && args.zoneId !== null;
-    if (!current || (quoteIsZone && !currentIsZone) || (quoteIsZone === currentIsZone && Number(quote.unitCost) < Number(current.unitCost))) {
+    const quoteIsReference = quote.supplierName === SIGO_PRICES_SUPPLIER_NAME;
+    const currentIsReference = current?.supplierName === SIGO_PRICES_SUPPLIER_NAME;
+    if (
+      !current ||
+      (!quoteIsReference && currentIsReference) ||
+      (quoteIsReference === currentIsReference && ((quoteIsZone && !currentIsZone) || (quoteIsZone === currentIsZone && Number(quote.unitCost) < Number(current.unitCost))))
+    ) {
       bestQuote.set(quote.materialId, quote);
     }
   }
@@ -199,9 +206,10 @@ export async function computeProcurementPlan(args: {
     // cada saida de armazem voltaria a aparecer como uma nova compra e duplicaria o custo.
     const { shortageQty, suggestedOrderQty } = calculateProcurementQuantity({ requiredQty: item.requiredQty, consumedQty, stockQty, orderedQty, packageSize: item.packageSize });
     const quote = bestQuote.get(item.materialId);
+    const quoteIsReference = quote?.supplierName === SIGO_PRICES_SUPPLIER_NAME;
     const catalogUnitCost = item.requiredQty > 0 ? item.catalogValue / item.requiredQty : 0;
     const estimatedUnitCost = quote ? Number(quote.unitCost) : catalogUnitCost;
-    const quoteSource: ProcurementRequirement["quoteSource"] = quote ? (quote.zoneId ? "zona" : "geral") : "catalogo";
+    const quoteSource: ProcurementRequirement["quoteSource"] = quote && !quoteIsReference ? (quote.zoneId ? "zona" : "geral") : "catalogo";
     const phaseKeys = new Set(item.phases.map((phase) => phase.key));
     const matchingTasks = taskRows.filter((task) => phaseKeys.has(mapToPhase(task.name, [], task.name)));
     const suggestedTask = matchingTasks.find((task) => !summaryTaskIds.has(task.id)) ?? matchingTasks[0];
@@ -223,7 +231,7 @@ export async function computeProcurementPlan(args: {
       estimatedTotal: estimate.subtotal,
       estimatedVat: estimate.iva,
       estimatedTotalWithVat: estimate.total,
-      supplierId: quote?.supplierId ?? null,
+      supplierId: quoteIsReference ? null : quote?.supplierId ?? null,
       supplierName: quote?.supplierName ?? null,
       quoteSource,
       suggestedScheduleTaskId: suggestedTask?.id ?? null,
