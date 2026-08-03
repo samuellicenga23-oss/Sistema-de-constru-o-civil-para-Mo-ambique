@@ -74,6 +74,16 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
     const requestUrl = request.raw.url ?? "";
     if (requestUrl.startsWith("/api/") && !requestUrl.startsWith("/api/health")) {
       reply.header("Cache-Control", "no-store");
+    } else if (requestUrl.startsWith("/assets/")) {
+      reply.header("Cache-Control", "public, max-age=31536000, immutable");
+    } else if (
+      requestUrl === "/" ||
+      requestUrl.startsWith("/index.html") ||
+      requestUrl.startsWith("/sw.js") ||
+      requestUrl.startsWith("/registerSW.js") ||
+      requestUrl.startsWith("/manifest.webmanifest")
+    ) {
+      reply.header("Cache-Control", "no-cache, must-revalidate");
     }
     return payload;
   });
@@ -147,11 +157,15 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   if (existsSync(webIndexHtml)) {
     await app.register(fastifyStatic, { root: webDistDir, prefix: "/", decorateReply: false });
     app.setNotFoundHandler((request, reply) => {
-      if (request.raw.url?.startsWith("/api/") || request.raw.url?.startsWith("/uploads/")) {
+      const requestPath = (request.raw.url ?? "/").split("?", 1)[0];
+      const isStaticAsset = requestPath.startsWith("/assets/")
+        || requestPath.startsWith("/fonts/")
+        || /^\/(?:favicon|icon-|apple-touch-icon|manifest\.webmanifest|sw\.js|registerSW\.js)/.test(requestPath);
+      if (requestPath.startsWith("/api/") || requestPath.startsWith("/uploads/") || isStaticAsset) {
         reply.code(404).send({ error: "Não encontrado" });
         return;
       }
-      reply.type("text/html").send(readFileSync(webIndexHtml));
+      reply.header("Cache-Control", "no-cache, must-revalidate").type("text/html").send(readFileSync(webIndexHtml));
     });
   }
 

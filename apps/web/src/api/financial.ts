@@ -77,7 +77,7 @@ export const financialApi = {
   createCreditNote: (id: string, data: { creditNumber: string; issueDate: string; amount: number; reason: string }) => request(`/invoices/${id}/credit-notes`, { method: "POST", body: JSON.stringify(data) }),
   issueCreditNote: (id: string) => request(`/credit-notes/${id}/issue`, { method: "PUT" }),
   invoicePdfUrl: (id: string) => `/api/invoices/${id}/export.pdf`,
-  getContract: (projectId: string) => request<ProjectContract>(`/projects/${projectId}/contract`),
+  getContract: (projectId: string) => request<ProjectContract | null>(`/projects/${projectId}/contract`),
   saveContract: (projectId: string, data: { contractNumber: string; clientName: string; originalAmount: number; advanceAmount?: number; retentionRate?: number }) => request<ProjectContract>(`/projects/${projectId}/contract`, { method: "PUT", body: JSON.stringify(data) }),
   clientStatement: (projectId: string) => request<ClientStatement>(`/projects/${projectId}/client-statement`),
 };

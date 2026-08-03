@@ -20,7 +20,7 @@ export async function contractRoutes(app: FastifyInstance) {
   app.get("/api/projects/:projectId/contract", { preHandler: requireCompanyUser }, async (request, reply) => {
     const { projectId } = request.params as { projectId: string };
     const contract = await contractForProject(projectId, request.currentUser!.companyId!);
-    if (!contract) return reply.code(404).send({ error: "Contrato não encontrado" });
+    if (!contract) return reply.send(null);
     const variations = await db.select().from(contractVariations).where(eq(contractVariations.contractId, contract.id));
     const approvedVariations = variations.filter((variation) => variation.status === "aprovada").reduce((sum, variation) => sum + Number(variation.amount), 0);
     return { ...contract, variations, approvedVariations, revisedAmount: Number(contract.originalAmount) + approvedVariations };

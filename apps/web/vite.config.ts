@@ -14,6 +14,9 @@ export default defineConfig({
       // a app abre e mostra a interface, mas qualquer pedido de dados falha com um erro claro
       // (nunca dados desactualizados servidos silenciosamente como se fossem actuais).
       workbox: {
+        cleanupOutdatedCaches: true,
+        skipWaiting: true,
+        clientsClaim: true,
         navigateFallbackDenylist: [/^\/api\//, /^\/uploads\//],
         runtimeCaching: [
           {
@@ -43,6 +46,10 @@ export default defineConfig({
       },
     }),
   ],
+  build: {
+    // Mantém os assets com hash do build anterior para abas abertas durante o deploy.
+    emptyOutDir: false,
+  },
   server: {
     host: "127.0.0.1",
     port: 5273,
