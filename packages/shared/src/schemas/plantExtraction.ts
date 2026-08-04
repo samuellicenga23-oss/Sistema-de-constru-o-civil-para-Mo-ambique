@@ -31,7 +31,7 @@ export const extractedOpeningSchema = z.object({
   material: z.string().nullable(),
   page: z.number().int().positive(),
   confidence: z.number().min(0).max(1),
-  source: z.enum(["quadro", "geometria", "manual"]),
+  source: z.enum(["quadro", "geometria", "manual", "ia"]),
   needsConfirmation: z.boolean(),
 });
 export type ExtractedOpening = z.infer<typeof extractedOpeningSchema>;

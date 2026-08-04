@@ -25,7 +25,7 @@ export type AdminStats = {
   totalUsers: number;
   totalProjects: number;
   planCounts: Record<string, number>;
-  services: { api: boolean; plantService: boolean };
+  services: { api: boolean; plantService: boolean; plantAi?: unknown };
 };
 
 export const dashboardApi = {

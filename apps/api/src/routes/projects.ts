@@ -154,6 +154,23 @@ async function adaptEmptyMeasurementDocument(
 export async function projectRoutes(app: FastifyInstance) {
   app.get("/api/projects", { preHandler: requireCompanyUser }, async (request) => {
     const companyId = request.currentUser!.companyId!;
+    const { readyForSite } = request.query as { readyForSite?: string };
+    if (readyForSite === "1") {
+      const approved = await db
+        .select({ projectId: budgetDocuments.projectId })
+        .from(budgetDocuments)
+        .innerJoin(projects, eq(projects.id, budgetDocuments.projectId))
+        .where(
+          and(
+            eq(projects.companyId, companyId),
+            eq(budgetDocuments.documentType, "orcamento"),
+            eq(budgetDocuments.status, "aprovado"),
+          ),
+        );
+      const ids = [...new Set(approved.map((row) => row.projectId))];
+      if (!ids.length) return [];
+      return db.select().from(projects).where(inArray(projects.id, ids)).orderBy(projects.name);
+    }
     return db.select().from(projects).where(eq(projects.companyId, companyId)).orderBy(projects.createdAt);
   });
 

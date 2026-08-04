@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { boqApi, type Project } from "../api/boq";
 import { financialApi, type ClientStatement, type FinancialEntry, type FinancialSummary, type ProjectControl, type ProjectContract, type ProjectInvoice } from "../api/financial";
 import Layout from "../components/Layout";
@@ -25,6 +25,7 @@ function todayStr() {
 export default function ProjectFinancialPage() {
   const { confirm, dialog } = useConfirmDialog();
   const { projectId } = useParams<{ projectId: string }>();
+  const [searchParams] = useSearchParams();
   const [project, setProject] = useState<Project | null>(null);
   const [entries, setEntries] = useState<FinancialEntry[]>([]);
   const [summary, setSummary] = useState<FinancialSummary | null>(null);
@@ -221,7 +222,7 @@ export default function ProjectFinancialPage() {
       title={`Financeiro — ${project.name}`}
       subtitle="Caixa da obra: compras, autos e pagamentos"
       actions={
-        <Link to={`/projectos/${projectId}`} className="btn btn-ghost btn-sm">
+        <Link to={`/projectos/${projectId}${searchParams.get("fase") === "gestao" ? "?fase=gestao" : ""}`} className="btn btn-ghost btn-sm">
           <IconBack className="w-3.5 h-3.5" />
           Projecto
         </Link>

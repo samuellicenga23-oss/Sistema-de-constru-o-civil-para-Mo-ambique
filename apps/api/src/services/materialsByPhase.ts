@@ -1,3 +1,4 @@
+import { DEFAULT_REBAR_LENGTH_M, rebarWeightPerMeter } from "@sigo/shared";
 import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { budgetDocuments, projects } from "../db/schema.js";
@@ -41,18 +42,6 @@ export type PhaseReport = {
 
 export type MaterialsByPhaseResult = { phases: PhaseReport[]; currency: string; grandTotal: number };
 
-// Comprimento comercial de barra de aço usado só para dar uma estimativa de nº de varões a
-// comprar quando o diâmetro é conhecido (ver detectSteelBarInfo) — mesmo valor já usado como
-// omissão nos Cálculos Rápidos (calculadora "Laje").
-const STEEL_COMMERCIAL_BAR_LENGTH_M = 12;
-
-// Peso por metro linear de um varão, a partir do diâmetro (mm) — fórmula universal
-// (π/4 × diâmetro² × densidade do aço, 7850 kg/m³), mesma usada nos Cálculos Rápidos.
-function steelWeightPerMeter(diameterMm: number): number {
-  const d = diameterMm / 1000;
-  return (Math.PI / 4) * d * d * 7850;
-}
-
 // Itens de aço sem composição associada costumam vir de ficheiros reais importados, discriminados
 // por diâmetro na própria descrição (ex: "Ø6mm", "Ø 10 mm") — quando isso acontece (e a unidade é
 // kg), dá para converter a quantidade em metros lineares e nº de varões a comprar, tal como já se
@@ -65,13 +54,13 @@ function detectSteelBarInfo(description: string, unit: string | null, quantityKg
   if (!match) return null;
   const diameterMm = Number(match[1].replace(",", "."));
   if (!(diameterMm > 0) || !(quantityKg > 0)) return null;
-  const weightPerMeter = steelWeightPerMeter(diameterMm);
+  const weightPerMeter = rebarWeightPerMeter(diameterMm);
   const lengthM = quantityKg / weightPerMeter;
   return {
     diameterMm,
     lengthM,
-    barLengthM: STEEL_COMMERCIAL_BAR_LENGTH_M,
-    barsNeeded: Math.ceil(lengthM / STEEL_COMMERCIAL_BAR_LENGTH_M),
+    barLengthM: DEFAULT_REBAR_LENGTH_M,
+    barsNeeded: Math.ceil(lengthM / DEFAULT_REBAR_LENGTH_M),
   };
 }
 

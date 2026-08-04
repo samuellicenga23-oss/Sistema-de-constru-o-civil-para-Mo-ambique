@@ -50,7 +50,7 @@ export default function MeasurementCertificatePage() {
             title: "Aprovar auto?",
             message: "Aprovar este auto de medição?",
             confirmLabel: "Aprovar",
-            details: ["O valor passará para Contas a Receber", "O progresso actualizará o cronograma"],
+            details: ["Será criada uma factura em rascunho para emissão", "O progresso actualizará o cronograma"],
           }
         : status === "submetido"
           ? {

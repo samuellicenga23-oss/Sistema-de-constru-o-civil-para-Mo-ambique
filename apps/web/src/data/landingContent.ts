@@ -99,7 +99,7 @@ export const roles = [
     role: "Fiscalização",
     description:
       "Verifique quantidades medidas contra o executado, com evidência fotográfica e histórico completo.",
-    points: ["Aprovação de medições", "Registo de não conformidades", "Trilha de auditoria"],
+    points: ["Aprovação de medições", "Registo de não conformidades", "Pista de auditoria"],
   },
   {
     icon: "Landmark",

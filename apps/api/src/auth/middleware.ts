@@ -1,6 +1,9 @@
 import type { FastifyRequest, FastifyReply } from "fastify";
+import { desc, eq } from "drizzle-orm";
 import type { UserRole } from "@sigo/shared";
 import type { CompanyModuleKey } from "@sigo/shared";
+import { db } from "../db/index.js";
+import { subscriptions } from "../db/schema.js";
 import { getSessionUser, type SessionUser } from "./session.js";
 
 declare module "fastify" {
@@ -19,6 +22,7 @@ const MODULE_ROUTES: Array<{ module: CompanyModuleKey; match: RegExp }> = [
   { module: "site_diary", match: /\/site-diary(\/|\?|$)/ },
   { module: "financial", match: /\/(financial|invoices|invoice-receipts|credit-notes|contracts|contract-variations)(\/|\?|$)/ },
   { module: "quick_calculations", match: /\/quick-calc(\/|\?|$)/ },
+  { module: "practice", match: /\/practice(\/|\?|$)/ },
 ];
 
 function requiredModule(url: string): CompanyModuleKey | null {
@@ -41,6 +45,21 @@ export async function requireAuth(request: FastifyRequest, reply: FastifyReply) 
   const user = await getSessionUser(sessionId);
   if (!user) {
     return reply.code(401).send({ error: "Sessão inválida ou expirada" });
+  }
+  // Subscrição suspensa bloqueia a API (não só o login). Logout não usa requireAuth.
+  if (user.role !== "super_admin" && user.companyId) {
+    const [sub] = await db
+      .select({ status: subscriptions.status })
+      .from(subscriptions)
+      .where(eq(subscriptions.companyId, user.companyId))
+      .orderBy(desc(subscriptions.createdAt))
+      .limit(1);
+    if (sub?.status === "suspenso") {
+      return reply.code(403).send({
+        error: "A subscrição da empresa está suspensa. Contacte o suporte.",
+        code: "SUBSCRIPTION_SUSPENDED",
+      });
+    }
   }
   request.currentUser = user;
 }

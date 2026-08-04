@@ -5,6 +5,7 @@ import { db } from "../db/index.js";
 import { scheduleTasks } from "../db/schema.js";
 import { requireCompanyUser, requireRole } from "../auth/middleware.js";
 import { assertDocumentOwned, assertProjectOwned } from "../services/accessControl.js";
+import { assertApprovedOrcamentoForSite } from "../services/siteGate.js";
 import { addWorkingDays, generateSchedule, getProjectSchedule, getTaskDependency, upsertTaskDependency, validateTaskDependency, workingDaysInclusive } from "../services/scheduleEngine.js";
 import { buildSchedulePdf } from "../services/schedulePdf.js";
 
@@ -66,14 +67,17 @@ export async function scheduleRoutes(app: FastifyInstance) {
   app.post("/api/projects/:projectId/schedule/generate", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
     const { projectId } = request.params as { projectId: string };
     const companyId = companyIdOf(request);
-    if (!(await assertProjectOwned(projectId, companyId))) return reply.code(404).send({ error: "Projecto não encontrado" });
+    const gate = await assertApprovedOrcamentoForSite(projectId, companyId);
+    if (!gate.ok) return reply.code(gate.status).send({ error: gate.error });
     const parsed = z.object({ budgetDocumentId: z.string().uuid(), startDate: z.string(), totalDurationDays: z.number().int().min(7).max(3650).optional() }).safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     const document = await assertDocumentOwned(parsed.data.budgetDocumentId, companyId);
     if (!document || document.projectId !== projectId) return reply.code(404).send({ error: "Mapa de Quantidades não encontrado" });
-    const project = await assertProjectOwned(projectId, companyId);
+    if (document.documentType !== "orcamento" || document.status !== "aprovado") {
+      return reply.code(409).send({ error: "Seleccione um orçamento aprovado para gerar o cronograma" });
+    }
     try {
-      return await generateSchedule({ projectId, ...parsed.data, companyId, zoneId: project?.zoneId ?? null });
+      return await generateSchedule({ projectId, ...parsed.data, companyId, zoneId: gate.project.zoneId ?? null });
     } catch (error) {
       return reply.code(409).send({ error: error instanceof Error ? error.message : "Não foi possível gerar o cronograma" });
     }
@@ -83,7 +87,8 @@ export async function scheduleRoutes(app: FastifyInstance) {
   app.post("/api/projects/:projectId/schedule/tasks", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
     const { projectId } = request.params as { projectId: string };
     const companyId = companyIdOf(request);
-    if (!(await assertProjectOwned(projectId, companyId))) return reply.code(404).send({ error: "Projecto não encontrado" });
+    const gate = await assertApprovedOrcamentoForSite(projectId, companyId);
+    if (!gate.ok) return reply.code(gate.status).send({ error: gate.error });
     const parsed = taskInput.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     if (parsed.data.budgetDocumentId) {
@@ -117,8 +122,11 @@ export async function scheduleRoutes(app: FastifyInstance) {
 
   app.put("/api/schedule/tasks/:id", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
     const { id } = request.params as { id: string };
-    const current = await ownedTask(id, companyIdOf(request));
+    const companyId = companyIdOf(request);
+    const current = await ownedTask(id, companyId);
     if (!current) return reply.code(404).send({ error: "Tarefa não encontrada" });
+    const gate = await assertApprovedOrcamentoForSite(current.projectId, companyId);
+    if (!gate.ok) return reply.code(gate.status).send({ error: gate.error });
     const parsed = taskInput.partial().safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     try {

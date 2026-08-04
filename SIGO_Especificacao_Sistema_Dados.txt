@@ -1,0 +1,761 @@
+================================================================================
+SIGO — SISTEMA INTEGRADO DE GESTÃO DE OBRAS
+Documento de dados gerais e específicos para especificação de projecto
+Versão de referência: 0.1.0 | Actualizado: 2026-08-03 (funcionalidades)
+Mercado-alvo: construção civil em Moçambique
+Idioma da aplicação: Português europeu (pt-PT) com vocabulário de obras
+Produção pública: https://sud30s.org
+================================================================================
+
+Este ficheiro reúne informação factual do produto e da implementação actual,
+destinada a alimentar documentos de especificação (requisitos, arquitectura,
+casos de uso, manuais, propostas comerciais e anexos técnicos).
+
+
+================================================================================
+1. DADOS GERAIS DO PRODUTO
+================================================================================
+
+1.1 Identidade
+--------------
+Nome comercial:          SIGO
+Nome completo:           Sistema Integrado de Gestão de Obras
+Tipo de produto:         SaaS B2B multi-empresa (multi-tenant)
+Domínio:                 Construção civil — orçamento, planeamento, compras,
+                         execução de obra, medição e controlo financeiro
+Slogan / mensagem:       "Controle a obra como ela realmente acontece."
+Posicionamento:          Uma plataforma que liga estimativa → orçamento →
+                         cronograma → compras → diário de obra → autos →
+                         financeiro, sem folhas de cálculo paralelas.
+
+1.2 Problema que resolve
+------------------------
+- Excel e ficheiros dispersos por obra, sem versão única
+- Preços de materiais desactualizados no orçamento
+- Diário e Autos desligados do cronograma
+- Compras decididas sem cruzar stock e necessidades do plano
+- Falta de rastreabilidade entre planta, quantidade, composição e preço
+
+1.3 Utilizadores-alvo (personas)
+--------------------------------
+- Construtora / empreiteiro: margem, produção, compras, autos
+- Fiscalização: evidência, medição, aprovação
+- Dono da obra: prazo, compromisso financeiro, visão consolidada
+- Orçamentista: mapas, composições, catálogo, zonas de preço
+- Encarregado / campo: diário, avanço físico (via perfis existentes)
+
+1.4 Contexto normativo / operacional (Moçambique)
+-------------------------------------------------
+O produto alinha-se conceptualmente com fluxos de empreitadas usados no país
+(orçamento e cronograma físico-financeiro, auto emitido pelo empreiteiro,
+certificação pela fiscalização, suporte ao pagamento), e com a necessidade de
+justificação escrita em contratação pública (ex.: Decreto n.º 79/2022), sem
+substituir assessoria jurídica ou certificação contabilística oficial.
+
+1.5 Estado de maturidade (para especificação de lançamento)
+-----------------------------------------------------------
+- Uso actual recomendado: pilotos controlados com validação humana de
+  medições automáticas, preços e autos
+- Não apresentar o SIGO como fonte final de verdade para quantidades
+  extraídas automaticamente, aprovação contratual definitiva ou
+  contabilidade certificada
+- Princípios de produto: isolamento multiempresa; documento aprovado
+  imutável (alteração = revisão); rastreio de origem de valores;
+  medição automática = sugestão confirmável por técnico
+
+
+================================================================================
+2. ARQUITECTURA TÉCNICA (VISÃO GERAL)
+================================================================================
+
+2.1 Monorepo (npm workspaces)
+----------------------------
+apps/web            Frontend React + TypeScript + Tailwind (Vite)
+apps/api            Backend Node.js + TypeScript + Fastify + Drizzle ORM
+apps/plant-service  Microserviço Python (FastAPI) — leitura de plantas PDF
+packages/shared     Tipos, enums, schemas Zod e catálogo de permissões
+
+2.2 Infraestrutura típica de produção
+-------------------------------------
+- Hospedagem: VPS (ex.: Hostinger CloudPanel)
+- URL produção: https://sud30s.org
+- API: processo PM2 (ex.: sigo-api)
+- Base de dados: PostgreSQL (acesso tipicamente só localhost; túnel SSH
+  para administração remota)
+- PDF: gerado na API via Puppeteer (não é serviço separado)
+- Plantas: plant-service em processo/serviço próprio (porta tip. 8001)
+
+2.3 Portas locais de desenvolvimento
+------------------------------------
+Frontend (Vite):     http://127.0.0.1:5273
+API (Fastify):       http://127.0.0.1:4100  (configurável; default env ~4000/4100)
+Plant-service:       http://127.0.0.1:8001
+
+2.4 Autenticação
+----------------
+- Sessão por cookie HTTP (sid), TTL tipicamente 7 dias
+- Login email + palavra-passe
+- Login Google OAuth (opcional; só associa a conta já criada pelo admin)
+- Conta inactiva: rejeição explícita (mensagem clara, não "credenciais inválidas")
+- Subscrição suspensa da empresa: bloqueio de login
+- Alteração forçada de palavra-passe no primeiro acesso (mustChangePassword)
+
+
+================================================================================
+3. MODELO MULTI-EMPRESA E MÓDULOS
+================================================================================
+
+3.1 Tenant
+----------
+Cada cliente opera numa "empresa" (company). Dados operacionais são isolados
+por company_id. Super Admin da plataforma gere empresas e subscrições sem
+entrar nos dados operacionais de obra como utilizador normal.
+
+3.2 Módulos activáveis por empresa (enabledModules)
+---------------------------------------------------
+dashboard
+measurements          (medições / plantas)
+budgets               (orçamentos / documentos)
+catalog               (catálogo e composições)
+suppliers             (fornecedores)
+purchasing            (compras e stock)
+schedule              (cronograma)
+site_diary            (diário de obra)
+financial             (financeiro / autos / contratos)
+quick_calculations    (cálculos rápidos)
+
+Nota: o super_admin pode activar/desactivar módulos por empresa.
+O frontend e o backend filtram rotas/APIs conforme os módulos activos.
+
+3.3 Moedas e unidades
+---------------------
+Moedas: MZN, USD
+Unidades típicas: m, m2, m3, ml, kg, un, vg, h
+Preços podem variar por fornecedor e por zona geográfica
+
+
+================================================================================
+4. PERFIS (ROLES) E PERMISSÕES
+================================================================================
+
+4.1 Papéis do sistema (UserRole)
+--------------------------------
+super_admin          Administração da plataforma SIGO
+admin_empresa        Administrador da empresa cliente
+orcamentista         Orçamentista / preparação de custos e compras
+engenheiro_fiscal    Engenheiro / Fiscal — execução, diário, autos
+visualizador         Consulta sem alterações operacionais
+
+4.2 Modelo de permissões (RBAC com override)
+--------------------------------------------
+- Catálogo de permissões com IDs estáveis (nunca só labels)
+- Template padrão por função (role → permissionIds[])
+- Cópia do template ao criar utilizador
+- Ajuste fino por utilizador (lista própria)
+- Acção "Restaurar padrão da função"
+- Templates personalizáveis por empresa (role_permissions)
+- Alterar template afecta novos users; overrides mantêm-se até restaurar
+- Conta inactiva não autentica; sessões são revogadas ao desactivar
+
+4.3 Catálogo de permissões (IDs)
+--------------------------------
+Grupo OBRAS
+  obras.ver
+  obras.criar
+  obras.editar
+  obras.fechar
+
+Grupo MEDIÇÕES
+  medicoes.ver
+  medicoes.editar
+  medicoes.enviar_orcamento
+
+Grupo ORÇAMENTOS
+  orcamentos.ver
+  orcamentos.editar
+  orcamentos.submeter
+  orcamentos.aprovar
+
+Grupo CATÁLOGO
+  catalogo.ver
+  catalogo.editar
+
+Grupo COMPRAS
+  materiais.ver
+  materiais.requisitar
+  materiais.aprovar
+  fornecedores.gerir
+
+Grupo CRONOGRAMA
+  cronograma.ver
+  cronograma.editar
+
+Grupo DIÁRIO / AUTOS
+  diario.registar
+  diario.aprovar
+  autos.ver
+  autos.editar
+
+Grupo FINANCEIRO
+  financeiro.ver
+  financeiro.lancar
+
+Grupo EQUIPA
+  equipa.gerir
+  equipa.ver
+
+Grupo RELATÓRIOS
+  relatorios.exportar
+
+Grupo PLATAFORMA
+  plataforma.configuracoes
+  calculos.usar
+
+4.4 Pacotes padrão por função (resumo)
+--------------------------------------
+admin_empresa:       todas as permissões
+orcamentista:        obras, medições, orçamentos (até submeter), catálogo,
+                     compras (requisitar), cronograma, diário registar,
+                     autos ver, financeiro ver, equipa ver, exportar, cálculos
+engenheiro_fiscal:   consulta ampla + cronograma editar + diário/autos
+                     (registar e aprovar) + requisitar materiais
+visualizador:        sobretudo permissões de leitura + exportar + cálculos
+
+
+================================================================================
+5. CATÁLOGO DE FUNCIONALIDADES (ESTADO ACTUAL DO CÓDIGO)
+================================================================================
+
+Legenda de estado:
+  [OK]       Implementado e utilizável
+  [PARCIAL]  Existe no código, mas incompleto ou com ressalvas
+  [API]      Disponível na API; UI dedicada ainda limitada ou ausente
+
+Fluxo contratual de ponta a ponta no produto:
+  Medição → Orçamento → Aprovação → Cronograma / Compras / Diário →
+  Auto de Medição → Factura / Financeiro
+
+
+--------------------------------------------------------------------------------
+5.1 Autenticação, sessão e casca da aplicação
+--------------------------------------------------------------------------------
+[OK] Login email + palavra-passe (cookie de sessão, ~7 dias)
+[OK] Rate-limit no login; headers de segurança; CORS restrito em produção
+[OK] Google OAuth opcional (só associa a conta já criada pelo admin)
+[OK] Conta inactiva: rejeição com mensagem explícita (não “credenciais inválidas”)
+[OK] Subscrição da empresa em estado “suspenso”: bloqueio de login
+[OK] Alteração obrigatória de palavra-passe no primeiro acesso
+[OK] Perfil: nome, avatar, sessões activas, terminar sessões / outras sessões
+[OK] PWA instalável (botão instalar + service worker)
+[PARCIAL] Offline: cache da casca PWA — NÃO há sync offline real de diário/medições
+[OK] Navegação por role + módulos activos da empresa (FE e BE)
+
+
+--------------------------------------------------------------------------------
+5.2 Landing pública e comercial
+--------------------------------------------------------------------------------
+[OK] Landing (hero, produto, perfis, planos, FAQ, CTA)
+[OK] Planos comerciais públicos (IVA 16%, visão mensal/anual):
+       Fundamento    ~4.900 MZN/mês equiv. · 3 obras · 5 utilizadores
+       Profissional  ~12.900 MZN/mês equiv. · 15 obras · 20 utilizadores (recomendado)
+       Empresa       ~29.900 MZN/mês equiv. · 50 obras · utilizadores ilimitados
+[OK] Checkout = pedido de activação (WhatsApp / email) — SEM gateway de pagamento
+[OK] Contacto: WhatsApp +258 86 638 4194 | email comercial do produto
+[OK] Mapeamento comercial → plano interno:
+       fundamento→individual | profissional→profissional | empresa→empresa
+
+Planos INTERNOS (activados manualmente pelo super_admin; limites reais na API):
+  free · particular · individual · profissional · empresa · empresarial · institucional
+  Estados: trial | activo | suspenso
+  Nota: a lista “features” dos planos internos é texto comercial; o controlo real
+  no produto é por módulos activos + maxUsers/maxProjects.
+
+
+--------------------------------------------------------------------------------
+5.3 Painel (Dashboard) — /painel
+--------------------------------------------------------------------------------
+[OK] KPIs: projectos, mapas/documentos, certificados (autos), plantas
+[OK] Faixa de fluxo: Medir → Orçamentar → Planear → Comprar → Certificar
+[OK] Resumo financeiro por moeda (recebido, despesas, a receber, a pagar)
+[OK] Certificados recentes e projectos por valor (barra de progresso)
+[OK] Super-admin: mensagem de redireccionamento para /admin
+
+
+--------------------------------------------------------------------------------
+5.4 Medições e Orçamentos (listas / criação)
+--------------------------------------------------------------------------------
+[OK] Áreas de menu SEPARADAS: /medicoes e /orcamentos
+[OK] Projecto com tipo medição / orçamento / híbrido
+[OK] Criar medição: modo plantas (PDF), manual ou assistido
+[OK] Criar orçamento: manual ou importar medições Excel
+[OK] Listas filtráveis / pesquisáveis
+[OK] Projectos só-medição: Diário/Cronograma/Compras/Financeiro ocultos no nav
+[OK] Zona de preços da obra seleccionável
+
+
+--------------------------------------------------------------------------------
+5.5 Visão geral da obra — /projectos/:id
+--------------------------------------------------------------------------------
+[OK] KPIs da obra + cartões distintos Medições vs Orçamentos
+[OK] Upload / reprocessar / eliminar plantas PDF
+[OK] Progresso de análise assíncrono (não bloqueia o pedido HTTP)
+[OK] Banner único “Próximo passo” (workflow consolidado):
+       sem plantas, erro de serviço, leitura parcial, medições vazias,
+       itens sem preço, orçamento não aprovado, certificação disponível, etc.
+[OK] Criar Autos só a partir de orçamentos APROVADOS
+[OK] Nav da obra: Visão geral · Diário · Cronograma · Compras · Financeiro
+
+
+--------------------------------------------------------------------------------
+5.6 Plantas, vãos, lajes e armaduras — /plantas/:id
+--------------------------------------------------------------------------------
+[OK] Extração assíncrona via plant-service (Python/FastAPI)
+[OK] Compartimentos (rooms): editar piso / atributos; confirmação humana
+[OK] Vãos (portas/janelas): CRUD, dimensões, material do catálogo, preço,
+       confirmação, organização por piso
+[OK] Sync dos vãos confirmados para as medições
+[OK] Lajes: lista/espessuras por nível
+[OK] Armaduras (rebar): leitura de folhas estruturais (diâmetro/peso);
+       uso a jusante em compras (varões tip. 12 m)
+[OK] Continuar para assistente de medições / fill-from-plant
+[OK] Assistente de estimativa rápida (quick-estimate): pisos, lajes, aberturas,
+       fundações, hidráulica, fossa → quantidades no mapa
+[PARCIAL] Dependência do plant-service externo; se offline o workflow avisa
+[PARCIAL] Extração automática = sugestão; técnico deve confirmar
+
+
+--------------------------------------------------------------------------------
+5.7 Documento de Medição / Orçamento — /documentos/:id
+--------------------------------------------------------------------------------
+Comum a ambos:
+[OK] Hierarquia capítulo → grupo → item → nota
+[OK] Memória de cálculo dimensional (Nº × C × L × A)
+[OK] Pesquisa contextual na página
+[OK] Estados: rascunho → submetido → aprovado
+[OK] Bloqueio REAL de edição fora de rascunho (frontend + API)
+[OK] Documento aprovado: alteração via nova revisão
+[OK] Readiness antes de submeter/aprovar:
+       ≥1 item com quantidade > 0; unidade nos itens usados;
+       no orçamento preço unitário > 0; qty=0 não bloqueia
+[OK] Export Excel e PDF
+
+Só MEDIÇÃO:
+[OK] Sem preços / margens / IVA nas exportações técnicas
+[OK] “Enviar para orçamento” (idempotente; copia secções/itens/qty/memória;
+       aplica preços actuais das composições; preserva a medição)
+[OK] Assistente de medições + importação Excel
+
+Só ORÇAMENTO:
+[OK] Ligar composição; preço unitário; reprice; especificações técnicas
+[OK] Custos indirectos / margem / contingências / IVA no resumo
+[OK] Filtro e destaque de itens SEM PREÇO (?semPreco=1 + badge na grelha)
+[OK] Materiais por fase (modal + export PDF/XLSX)
+[OK] Perfil visualizador: só preço de venda (custos internos ocultos)
+
+
+--------------------------------------------------------------------------------
+5.8 Catálogo de preços — /catalogo
+--------------------------------------------------------------------------------
+[OK] Separadores: Composições · Capítulos · Mão-de-obra · Materiais · Zonas
+[OK] CRUD de materiais, mão-de-obra, equipamento, composições
+[OK] Composições com rendimentos e custo directo
+[OK] Capítulos de trabalho (work chapters / biblioteca)
+[OK] Preços por zona; qualidade do cadastro (código, especificação, data)
+[OK] Isolamento multiempresa: clone só a partir de recursos GLOBAIS
+[OK] Validação de zona antes de aplicar preços por zona
+
+
+--------------------------------------------------------------------------------
+5.9 SIGO Preços (fornecedor de referência)
+--------------------------------------------------------------------------------
+[OK] Fornecedor sistema “SIGO Preços” sincronizado por empresa
+[OK] Preço = custo base × factor de importação do material
+[OK] Aparece em ranking/comparação de cotações como REFERÊNCIA
+[OK] NÃO pode ser escolhido para criar Ordem de Compra (exige fornecedor comercial)
+[OK] Sync automático ao criar empresa (plataforma)
+
+
+--------------------------------------------------------------------------------
+5.10 Fornecedores — /fornecedores
+--------------------------------------------------------------------------------
+[OK] Directório pesquisável e compacto
+[OK] CRUD de fornecedores; indicadores de qualidade do cadastro
+[OK] Cotações por material / mão-de-obra / equipamento (zona + preço)
+[OK] Modal de recursos/cotações com separadores e pesquisa
+
+
+--------------------------------------------------------------------------------
+5.11 Compras e stock — /projectos/:id/compras
+--------------------------------------------------------------------------------
+[OK] Três etapas: O que comprar · Pedidos · Stock e movimentos
+[OK] Necessidades a partir das composições do MQ + stock/encomendas
+[OK] Melhor cotação automática (zona > geral > catálogo; menor preço)
+[OK] Modal de comparação de cotações (comerciais vs SIGO referência)
+[OK] Armadura por diâmetro (aprovisionamento a partir do rebar da planta)
+[OK] Ordens de compra com estados; auditoria de mudança de estado [API]
+[OK] Stock: entradas/saídas manuais; saldo
+[OK] Saída recusada se ultrapassar saldo (também no consumo do diário)
+
+
+--------------------------------------------------------------------------------
+5.12 Cronograma — /projectos/:id/cronograma
+--------------------------------------------------------------------------------
+[OK] Gerar WBS a partir do mapa de quantidades
+[OK] Duração bottom-up a partir de horas de mão-de-obra (sem pedir “dias totais”)
+[OK] Workspace tipo MS Project: folha editável + Gantt, scroll sincronizado,
+       divisor redimensionável
+[OK] Dependências FS/SS/FF/SF com lag; validação anti-ciclo
+[OK] Progresso, estados, valores planeado/executado
+[OK] Validação de consistência do plano (painel de avisos)
+[OK] Progresso alimentado pelo diário e por autos aprovados
+[OK] Export PDF (papel/escala A3/A2/A1 quando aplicável)
+
+
+--------------------------------------------------------------------------------
+5.13 Diário de obra — /projectos/:id/diario
+--------------------------------------------------------------------------------
+[OK] Entradas por data: clima, notas, fotografias
+[OK] Progresso comunicado a tarefas do cronograma
+[OK] Consumo de materiais (respeita saldo de stock)
+[OK] Export PDF por entrada
+[PARCIAL] “Offline no estaleiro” na comunicação comercial — no código actual
+         é sobretudo PWA/shell, não sync offline completo de entradas
+
+
+--------------------------------------------------------------------------------
+5.14 Autos de medição — /autos/:id
+--------------------------------------------------------------------------------
+[OK] Só sobre orçamento aprovado (lista filtrada na obra)
+[OK] Introdução do executado do PERÍODO (não o acumulado)
+[OK] Acumulado anterior, saldo contratual, justificação de excedente
+[OK] Fluxo: Preparar → Submetido (fiscalização) → Aprovado
+[OK] Devolução com motivo
+[OK] Mão-de-obra por fase (modal)
+[OK] Aprovação actualiza contas a receber e progresso do cronograma
+
+
+--------------------------------------------------------------------------------
+5.15 Financeiro, contratos e facturas — /projectos/:id/financeiro
+--------------------------------------------------------------------------------
+[OK] Lançamentos receita/despesa (categoria, vencimento, pago/pendente)
+[OK] Resumo financeiro da obra
+[OK] Controlo/indicadores agregados da obra
+[OK] Contrato: valor, cliente, número, estados
+[OK] Aditamentos / variações com estados e regras de quem prepara vs activa
+[OK] Extracto do cliente
+[OK] Facturas a partir de auto; emissão (n.º, retenção, datas)
+[OK] Recibos / comprovativos; notas de crédito
+[OK] Export PDF de factura
+
+
+--------------------------------------------------------------------------------
+5.16 Auditoria
+--------------------------------------------------------------------------------
+[API] Tabela imutável audit_events + GET por obra
+[API] Eventos: estados de MQ, Autos, OC; CRUD financeiro e stock manual;
+      alterações de utilizadores (quando registadas)
+[PARCIAL] Sem ecrã web de histórico (consulta via API)
+[PARCIAL] Matriz formal de aprovação por valor / segregação de funções:
+          em roadmap, não como motor completo
+
+
+--------------------------------------------------------------------------------
+5.17 Utilizadores e permissões — /empresa (aba Utilizadores)
+--------------------------------------------------------------------------------
+[OK] Listagem: avatar/iniciais, função, activo/inactivo, nº permissões
+[OK] Toggle activo; criar/editar em drawer lateral
+[OK] Reset de palavra-passe; remoção com confirmação
+      (só se nunca tiver entrado; senão desactivar)
+[OK] Catálogo de permissões com IDs estáveis
+[OK] Templates por função (grelha) editáveis pela empresa
+[OK] Ajuste fino por utilizador + “Restaurar padrão da função”
+[OK] Sessão inclui lista de permissions; helper FE can() e BE requirePermission()
+[PARCIAL] Enforcement fino: muitas rotas ainda usam requireRole(...);
+          o catálogo de permissões está pronto mas não cobre 100% das acções
+
+
+--------------------------------------------------------------------------------
+5.18 Cálculos rápidos — /calculos-rapidos
+--------------------------------------------------------------------------------
+[OK] Calculadora de laje (área, espessura, malha/aço, composição)
+[OK] Calculadora de betão (volume ou dimensões)
+[OK] Genérico por qualquer composição (área/volume/ml/un)
+[OK] Fossa séptica (método Morais/Bartolomeu) + infiltração por solo
+[OK] Custos do catálogo quando aplicável
+[OK] Export PDF (título/referência editáveis)
+
+
+--------------------------------------------------------------------------------
+5.19 Empresa — /empresa (admin_empresa)
+--------------------------------------------------------------------------------
+[OK] Separadores: Geral · Logótipo · Cálculo (IVA/taxas) · Subscrição · Utilizadores
+[OK] Dados da empresa, branding (cores, nome), idioma
+[OK] Uso vs limites do plano (utilizadores / projectos)
+[OK] Gestão completa de acessos (ver 5.17)
+
+
+--------------------------------------------------------------------------------
+5.20 Super Admin — /admin
+--------------------------------------------------------------------------------
+[OK] Criar empresas (+ administrador inicial)
+[OK] Editar branding / moeda / idioma / módulos activos
+[OK] Activar/alterar plano interno e estado (trial/activo/suspenso)
+[OK] Listar/criar/desactivar utilizadores; reset password
+[OK] Estatísticas / saúde do plant-service
+[OK] Sync SIGO Preços ao criar empresa
+
+
+--------------------------------------------------------------------------------
+5.21 Exportações (resumo)
+--------------------------------------------------------------------------------
+[OK] Orçamento / MQ ............... Excel, PDF
+[OK] Medição técnica .............. Excel, PDF (sem preços)
+[OK] Materiais por fase ........... PDF, Excel
+[OK] Cronograma ................... PDF
+[OK] Diário de obra ............... PDF
+[OK] Factura ...................... PDF
+[OK] Cálculo rápido ............... PDF
+
+
+--------------------------------------------------------------------------------
+5.22 Funcionalidades a NÃO listar como prontas (transparência)
+--------------------------------------------------------------------------------
+- Pagamento online / gateway (checkout é lead comercial)
+- Offline completo de campo com sincronização
+- Portal do dono da obra / cliente final como módulo separado
+- SSO empresarial, multi-armazém avançado, IA generativa
+- Ecrã de auditoria completo na UI
+- Enforcement 100% por permission-id em todas as rotas
+- Feature-flags por plano comercial além de módulos + limites numéricos
+
+
+================================================================================
+6. FLUXOS PRINCIPAIS DE NEGÓCIO (PARA CASOS DE USO)
+================================================================================
+
+Fluxo A — Da planta ao orçamento
+  1. Criar projecto (tipo medição; modo plantas/manual)
+  2. Carregar PDF(s) — processamento assíncrono
+  3. Confirmar compartimentos, vãos, lajes (e armaduras se estrutura)
+  4. Gerar / completar medições (assistente ou fill-from-plant)
+  5. Enviar para orçamento
+  6. Aplicar composições, zonas e preços; resolver itens sem preço
+  7. Submeter e aprovar orçamento
+
+Fluxo B — Execução e certificação
+  1. Orçamento aprovado
+  2. Gerar / editar cronograma (WBS + Gantt)
+  3. Registar diário e avanço (e consumos de stock)
+  4. Abrir Auto de medição do período
+  5. Submeter à fiscalização → aprovar
+  6. Reflectir no financeiro / emitir factura a partir do auto
+
+Fluxo C — Compras
+  1. Necessidades a partir do MQ/composições e stock
+  2. Comparar cotações (zona + SIGO Preços como referência)
+  3. Criar ordem de compra com fornecedor comercial
+  4. Aprovar / receber / movimentos de stock
+
+Fluxo D — Administração de acessos
+  1. Admin cria utilizador com função
+  2. Sistema copia permissões padrão da função
+  3. Admin ajusta permissões do user (opcional)
+  4. Admin pode restaurar padrão ou editar template da função
+
+Fluxo E — Controlo de qualidade documental
+  1. Só rascunho é editável
+  2. Submeter exige readiness (quantidades/unidades/preços)
+  3. Aprovado bloqueia edição; nova revisão para alterar
+  4. Banner “Próximo passo” orienta a obra
+
+
+================================================================================
+7. ESTADOS E REGRAS DE DOCUMENTOS
+================================================================================
+
+Estados de documento (mapa / orçamento):
+  rascunho → submetido → aprovado
+
+Regras:
+  - Em submetido/aprovado: edição operacional bloqueada no FE e na API
+  - Aprovado: alterações via nova revisão
+  - Auto de medição: requer orçamento aprovado elegível
+  - Stock: não permitir saída acima do saldo
+  - Auditoria: eventos imutáveis (audit_events) para mudanças de estado
+    relevantes (mapas, autos, OC, financeiro, stock manual, utilizadores)
+
+
+================================================================================
+8. DADOS DE ESTRUTURA DE DOCUMENTO (BOQ)
+================================================================================
+
+Tipos de linha (line item kinds):
+  capitulo | grupo | item | nota
+
+Origens de item:
+  manual | planta | composicao | estimativa
+
+Campos típicos de item:
+  código, descrição, unidade, quantidade, preço unitário,
+  composição ligada, memória de cálculo, notas
+
+Problema tratado na UI:
+  Itens sem composição e sem preço unitário → destaque "sem preço",
+  filtro e avisos de workflow na visão da obra
+
+
+================================================================================
+9. IDENTIDADE VISUAL (PARA ESPECIFICAÇÃO DE UI)
+================================================================================
+
+Cores principais:
+  Ink / navy:     #142033
+  Teal marca:     #1AADB4
+  Teal claro:     #5FE0E4
+  Laranja CTA:    #ed6c22  (hover #d85f18)
+  Surface:        #f4f6f8
+  Sidebar:        #f7f8fa
+  Raised/branco:  #ffffff
+  Selecção:       #bdeef0
+
+Tipografia:
+  Display: Space Grotesk
+  UI: Public Sans / Aptos / Segoe UI
+  Mono (códigos): JetBrains Mono
+
+Logótipo:
+  Marca geométrica teal sobre fundo navy; wordmark SIGO
+
+Padrões UI:
+  Shell com sidebar + header; mobile com bottom bar
+  Botão primário laranja; secundário branco com borda
+  Cards rounded-2xl; inputs rounded-xl
+  Landing: atmosfera com lavagens teal/laranja e grelha subtil
+
+
+================================================================================
+10. ROTAS PRINCIPAIS DA APLICAÇÃO (WEB)
+================================================================================
+
+Públicas:
+  /                         Landing
+  /login                    Entrada
+  /checkout/:planSlug       Pedido de subscrição
+
+Autenticadas:
+  /painel                   Dashboard
+  /medicoes                 Lista/gestão de medições
+  /orcamentos               Lista/gestão de orçamentos
+  /projectos/:id            Hub da obra + plantas + workflow
+  /projectos/:id/cronograma WBS + Gantt (MS Project-like)
+  /projectos/:id/compras    Necessidades · pedidos · stock
+  /projectos/:id/diario     Diário de obra
+  /projectos/:id/financeiro Lançamentos · contrato · facturas
+  /documentos/:id           Medição ou orçamento (BOQ)
+  /autos/:id                Auto de medição / certificado
+  /plantas/:id              Revisão: rooms · vãos · lajes · armaduras
+  /catalogo                 Composições · capítulos · recursos · zonas
+  /catalogo/composicoes/:id Detalhe da composição
+  /fornecedores             Directório + cotações
+  /calculos-rapidos         Laje · betão · fossa · composição
+  /empresa                  Definições + utilizadores/permissões
+  /perfil                   Conta + sessões
+  /admin                    Painel plataforma (super_admin)
+
+
+================================================================================
+11. INTEGRAÇÕES E SERVIÇOS EXTERNOS
+================================================================================
+
+- Google OAuth (opcional) para login
+- WhatsApp (contacto comercial / demonstração)
+- Email (contacto e pedidos de checkout)
+- Puppeteer (exportação PDF na API)
+- Plant-service Python (OCR/análise de plantas PDF)
+- PWA (instalação / uso offline parcial no campo)
+
+
+================================================================================
+12. REQUISITOS NÃO FUNCIONAIS (PARA ESPECIFICAÇÃO)
+================================================================================
+
+Segurança:
+  - Isolamento multiempresa obrigatório
+  - Sessões revogáveis; password hashing (bcrypt)
+  - Rate limit no login
+  - Validação de uploads (assinatura/imagem; evolução antimalware)
+  - Permissões no FE (esconder) e BE (autorizar)
+
+Desempenho:
+  - Processamento de plantas assíncrono (não bloquear a obra)
+  - Build web com code-splitting por rota
+
+Disponibilidade / ops:
+  - PM2 para API
+  - Migrações Drizzle versionadas
+  - Backups de PostgreSQL recomendados (dump + uploads)
+  - CI: build, testes, sync schema/migrations
+
+Usabilidade:
+  - Desktop-first para BOQ e Gantt
+  - Mobile-friendly para painel, diário, consultas
+  - Mensagens de erro em português claro
+
+
+================================================================================
+13. GLOSSÁRIO (VOCABULÁRIO DO DOMÍNIO)
+================================================================================
+
+Obra / Projecto          Empreitada gerida no SIGO
+Medição                  Levantamento de quantidades (técnico)
+Orçamento / Mapa (BOQ)   Documento comercial de quantidades e preços
+Composição               Receita de custo (MO + materiais + equipamento)
+Zona de preços           Região que afecta o preço unitário
+Cronograma / WBS         Plano de execução hierárquico
+Diário de obra           Registo diário do estaleiro
+Auto de medição          Certificado periódico do executado
+OC                       Ordem de compra
+Stock                    Armazém da obra
+Fiscalização             Perfil/processo de validação
+IVA                      16% (contexto Moçambique nos fluxos comerciais)
+
+
+================================================================================
+14. ENTREGÁVEIS ÚTEIS DERIVADOS DESTE FICHEIRO
+================================================================================
+
+Com base neste TXT pode produzir:
+  - Documento de Visão e Âmbito (Vision)
+  - Especificação de Requisitos Funcionais (SRS) por módulo
+  - Matriz de roles × permissões
+  - Diagramas de fluxo (BPMN / UML use cases)
+  - Especificação de API (partindo das rotas /api/...)
+  - Manual de utilizador por perfil
+  - Anexo técnico de arquitectura para RFP/propostas
+  - Casos de teste de aceitação por fluxo A–D
+
+
+================================================================================
+15. LIMITAÇÕES E EVOLUÇÃO CONHECIDAS (TRANSPARÊNCIA PARA ESPEC)
+================================================================================
+
+Já implementado mas ainda a fechar:
+  - Catálogo de permissões + UI de templates: [OK]
+    Enforcement fino (requirePermission) em todas as rotas de negócio: [PARCIAL]
+  - Auditoria em API: [OK] · Ecrã de histórico na web: [PARCIAL / ausente]
+  - PWA instalável: [OK] · Sync offline de diário/medições: [NÃO]
+  - Checkout comercial: [OK como lead] · Gateway de pagamento: [NÃO]
+
+Ops / produção alargada:
+  - Fila/worker robusto para plantas (timeouts, quotas, cancelamento)
+  - Backups cifrados offsite + restauro testado
+  - Monitorização e alertas operacionais
+  - Matriz formal de aprovação por valor e segregação de funções
+  - Feature-gating por plano comercial além de módulos + limites numéricos
+
+Última nota: a secção 5 reflecte o inventário funcional do repositório na data
+indicada (com estados [OK]/[PARCIAL]/[API]). Rever a cada marco de release.
+
+================================================================================
+FIM DO DOCUMENTO
+================================================================================

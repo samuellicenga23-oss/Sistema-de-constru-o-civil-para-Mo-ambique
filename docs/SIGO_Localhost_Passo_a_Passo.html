@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+  <meta charset="UTF-8" />
+  <title>SIGO — Passo a passo para iniciar o localhost</title>
+  <style>
+    @page { size: A4; margin: 16mm 14mm; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: "Segoe UI", Calibri, Arial, sans-serif;
+      color: #0f172a;
+      font-size: 11pt;
+      line-height: 1.45;
+      margin: 0;
+    }
+    h1 {
+      font-size: 20pt;
+      margin: 0 0 4px;
+      color: #0f3d3e;
+    }
+    .subtitle {
+      color: #475569;
+      margin: 0 0 18px;
+      font-size: 10.5pt;
+    }
+    h2 {
+      font-size: 13pt;
+      color: #0f3d3e;
+      border-bottom: 2px solid #14b8a6;
+      padding-bottom: 4px;
+      margin: 22px 0 10px;
+      page-break-after: avoid;
+    }
+    h3 {
+      font-size: 11.5pt;
+      margin: 14px 0 6px;
+      color: #134e4a;
+      page-break-after: avoid;
+    }
+    .meta {
+      background: #f0fdfa;
+      border: 1px solid #99f6e4;
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 16px;
+    }
+    .meta table { width: 100%; border-collapse: collapse; }
+    .meta td { padding: 3px 6px; vertical-align: top; }
+    .meta td:first-child { width: 140px; font-weight: 600; color: #0f766e; }
+    .onde {
+      display: inline-block;
+      background: #fff7ed;
+      color: #9a3412;
+      border: 1px solid #fdba74;
+      border-radius: 4px;
+      padding: 1px 7px;
+      font-size: 9.5pt;
+      font-weight: 700;
+      margin-right: 6px;
+    }
+    .onde.browser { background: #eff6ff; color: #1e40af; border-color: #93c5fd; }
+    .onde.file { background: #faf5ff; color: #6b21a8; border-color: #d8b4fe; }
+    .onde.term { background: #ecfdf5; color: #065f46; border-color: #6ee7b7; }
+    .onde.db { background: #fef2f2; color: #991b1b; border-color: #fca5a5; }
+    .step {
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin: 0 0 10px;
+      page-break-inside: avoid;
+    }
+    .step-num {
+      display: inline-block;
+      width: 22px;
+      height: 22px;
+      line-height: 22px;
+      text-align: center;
+      border-radius: 50%;
+      background: #0f766e;
+      color: white;
+      font-size: 10pt;
+      font-weight: 700;
+      margin-right: 6px;
+    }
+    code, pre {
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 9.5pt;
+    }
+    pre {
+      background: #0f172a;
+      color: #e2e8f0;
+      padding: 10px 12px;
+      border-radius: 6px;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      margin: 8px 0 0;
+    }
+    ul { margin: 6px 0 0 18px; padding: 0; }
+    li { margin: 3px 0; }
+    table.urls {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 8px;
+    }
+    table.urls th, table.urls td {
+      border: 1px solid #cbd5e1;
+      padding: 6px 8px;
+      text-align: left;
+    }
+    table.urls th { background: #f1f5f9; }
+    .note {
+      background: #fffbeb;
+      border-left: 4px solid #f59e0b;
+      padding: 8px 10px;
+      margin: 10px 0;
+      font-size: 10pt;
+    }
+    .ok {
+      background: #ecfdf5;
+      border-left: 4px solid #10b981;
+      padding: 8px 10px;
+      margin: 10px 0;
+      font-size: 10pt;
+    }
+    .footer {
+      margin-top: 24px;
+      font-size: 9pt;
+      color: #64748b;
+      border-top: 1px solid #e2e8f0;
+      padding-top: 8px;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>SIGO — Iniciar o localhost</h1>
+  <p class="subtitle">Passo a passo com indicação de <strong>onde</strong> fazer cada coisa · Windows · PowerShell · Actualizado 2026-08-03</p>
+
+  <div class="meta">
+    <table>
+      <tr><td>Pasta do projecto</td><td><code>C:\Users\Expert Sam\Documents\MediObra</code></td></tr>
+      <tr><td>Frontend (web)</td><td><code>http://127.0.0.1:5273</code></td></tr>
+      <tr><td>API</td><td><code>http://127.0.0.1:4100</code></td></tr>
+      <tr><td>Leitor de plantas</td><td><code>http://127.0.0.1:8001</code></td></tr>
+      <tr><td>Configuração secreta</td><td><code>apps\api\.env</code> (nunca no Git)</td></tr>
+    </table>
+  </div>
+
+  <div class="note">
+    <strong>Legenda “Onde”:</strong>
+    <span class="onde term">Terminal</span>
+    <span class="onde file">Ficheiro</span>
+    <span class="onde db">PostgreSQL</span>
+    <span class="onde browser">Browser</span>
+  </div>
+
+  <!-- ========== PARTE A ========== -->
+  <h2>Parte A — Preparação (só na 1.ª vez)</h2>
+
+  <div class="step">
+    <h3><span class="step-num">1</span> Abrir o PowerShell na pasta do projecto</h3>
+    <p><span class="onde term">Terminal</span> Cursor → painel Terminal · ou PowerShell do Windows</p>
+    <pre>Set-Location "C:\Users\Expert Sam\Documents\MediObra"</pre>
+    <p>Confirme que está na raiz (deve ver pastas <code>apps</code>, <code>packages</code>, <code>package.json</code>).</p>
+  </div>
+
+  <div class="step">
+    <h3><span class="step-num">2</span> Instalar dependências Node</h3>
+    <p><span class="onde term">Terminal</span> na raiz <code>MediObra</code></p>
+    <pre>npm install</pre>
+    <p>Instala web, API e pacote shared. Correr de novo depois de um <code>git pull</code> grande.</p>
+  </div>
+
+  <div class="step">
+    <h3><span class="step-num">3</span> Criar o ficheiro de configuração da API</h3>
+    <p><span class="onde term">Terminal</span> na raiz:</p>
+    <pre>Copy-Item apps\api\.env.example apps\api\.env</pre>
+    <p><span class="onde file">Ficheiro</span> abrir e editar:</p>
+    <pre>apps\api\.env</pre>
+    <p>Valores mínimos recomendados para local:</p>
+    <pre>DATABASE_URL=postgres://postgres:SUA_PASSWORD@localhost:5432/sigo
+PORT=4100
+NODE_ENV=development
+FRONTEND_URL=http://127.0.0.1:5273
+PLANT_SERVICE_URL=http://127.0.0.1:8001
+SESSION_COOKIE_SECRET=segredo-local-qualquer
+CORS_ORIGIN=</pre>
+    <p>Substitua <code>SUA_PASSWORD</code> pela password real do utilizador PostgreSQL.</p>
+  </div>
+
+  <div class="step">
+    <h3><span class="step-num">4</span> Criar a base de dados PostgreSQL</h3>
+    <p><span class="onde db">PostgreSQL</span> serviço Windows do Postgres a correr · depois no Terminal:</p>
+    <pre>psql -U postgres -c "CREATE DATABASE sigo;"</pre>
+    <p>Se a base já existir, ignore o erro “already exists”.</p>
+  </div>
+
+  <div class="step">
+    <h3><span class="step-num">5</span> Migrar e popular a base</h3>
+    <p><span class="onde term">Terminal</span> na raiz <code>MediObra</code>:</p>
+    <pre>npm run db:migrate
+npm run db:seed</pre>
+    <p>Cria as tabelas e carrega catálogo/composições/zonas de preços.</p>
+  </div>
+
+  <div class="step">
+    <h3><span class="step-num">6</span> Criar o primeiro utilizador administrador</h3>
+    <p><span class="onde term">Terminal</span> na raiz:</p>
+    <pre>npm run bootstrap:admin -- --name "Admin" --email admin@local.test --password "ATuaPasswordForte"</pre>
+    <p>Guarde este email e password — são os dados de login no browser.</p>
+  </div>
+
+  <div class="step">
+    <h3><span class="step-num">7</span> (Opcional) Preparar o leitor de plantas Python</h3>
+    <p><span class="onde term">Terminal</span> pasta do serviço:</p>
+    <pre>Set-Location "C:\Users\Expert Sam\Documents\MediObra\apps\plant-service"
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+Set-Location "C:\Users\Expert Sam\Documents\MediObra"</pre>
+    <p>Só necessário se for carregar PDFs de plantas. Orçamento, cronograma, etc. funcionam sem isto.</p>
+  </div>
+
+  <!-- ========== PARTE B ========== -->
+  <h2>Parte B — Arrancar o localhost (todos os dias)</h2>
+  <p>Abra <strong>2 ou 3 terminais</strong> no Cursor (ícone “+” no painel Terminal). Cada serviço fica num terminal separado e deve ficar a correr.</p>
+
+  <div class="step">
+    <h3><span class="step-num">8</span> Terminal 1 — API (backend)</h3>
+    <p><span class="onde term">Terminal 1</span> pasta raiz <code>MediObra</code></p>
+    <pre>Set-Location "C:\Users\Expert Sam\Documents\MediObra"
+npm run dev:api</pre>
+    <p>Deixe este terminal aberto. Quando estiver bem: responde em <code>http://127.0.0.1:4100</code>.</p>
+  </div>
+
+  <div class="step">
+    <h3><span class="step-num">9</span> Terminal 2 — Frontend (web)</h3>
+    <p><span class="onde term">Terminal 2</span> pasta raiz <code>MediObra</code></p>
+    <pre>Set-Location "C:\Users\Expert Sam\Documents\MediObra"
+npm run dev:web</pre>
+    <p>Deixe este terminal aberto. A app fica em <code>http://127.0.0.1:5273</code>.</p>
+  </div>
+
+  <div class="step">
+    <h3><span class="step-num">10</span> Terminal 3 — Leitor de plantas (opcional)</h3>
+    <p><span class="onde term">Terminal 3</span> pasta raiz:</p>
+    <pre>Set-Location "C:\Users\Expert Sam\Documents\MediObra"
+npm run dev:plant</pre>
+    <p>Porta <code>8001</code>. Se não precisar de plantas PDF, pode saltar este passo.</p>
+  </div>
+
+  <div class="step">
+    <h3><span class="step-num">11</span> Abrir a aplicação no browser</h3>
+    <p><span class="onde browser">Browser</span> Chrome / Edge / Firefox</p>
+    <table class="urls">
+      <tr><th>O quê</th><th>Onde abrir</th></tr>
+      <tr><td>App SIGO (usar esta)</td><td><code>http://127.0.0.1:5273</code></td></tr>
+      <tr><td>Login</td><td><code>http://127.0.0.1:5273/login</code></td></tr>
+      <tr><td>Teste da API</td><td><code>http://127.0.0.1:4100/api/health</code></td></tr>
+      <tr><td>Teste do leitor</td><td><code>http://127.0.0.1:8001</code> (ou /docs)</td></tr>
+    </table>
+    <p>Entre com o email/password criados no passo 6.</p>
+  </div>
+
+  <div class="ok">
+    <strong>Pronto:</strong> se a página de login abrir e o health da API responder OK, o localhost está a funcionar.
+  </div>
+
+  <!-- ========== PARTE C ========== -->
+  <h2>Parte C — Mapa rápido “onde fazer o quê”</h2>
+  <table class="urls">
+    <tr>
+      <th>Acção</th>
+      <th>Onde</th>
+    </tr>
+    <tr>
+      <td>Instalar npm / migrate / seed / bootstrap</td>
+      <td>Terminal · pasta <code>C:\Users\Expert Sam\Documents\MediObra</code></td>
+    </tr>
+    <tr>
+      <td>Editar password da base / portas / secrets</td>
+      <td>Ficheiro <code>apps\api\.env</code> (no editor Cursor)</td>
+    </tr>
+    <tr>
+      <td>Criar base <code>sigo</code></td>
+      <td>PostgreSQL via <code>psql</code> no Terminal</td>
+    </tr>
+    <tr>
+      <td>Correr API</td>
+      <td>Terminal 1 · <code>npm run dev:api</code></td>
+    </tr>
+    <tr>
+      <td>Correr frontend</td>
+      <td>Terminal 2 · <code>npm run dev:web</code></td>
+    </tr>
+    <tr>
+      <td>Correr leitor de plantas</td>
+      <td>Terminal 3 · <code>npm run dev:plant</code></td>
+    </tr>
+    <tr>
+      <td>Usar a aplicação</td>
+      <td>Browser · <code>http://127.0.0.1:5273</code></td>
+    </tr>
+    <tr>
+      <td>Ver código da API</td>
+      <td>Pasta <code>apps\api</code></td>
+    </tr>
+    <tr>
+      <td>Ver código do frontend</td>
+      <td>Pasta <code>apps\web</code></td>
+    </tr>
+    <tr>
+      <td>Ver leitor Python</td>
+      <td>Pasta <code>apps\plant-service</code></td>
+    </tr>
+  </table>
+
+  <h2>Parte D — Problemas comuns</h2>
+  <div class="step">
+    <ul>
+      <li><strong>Porta 5273 ocupada</strong> — feche outro Vite antigo; a porta é estrita (<code>strictPort</code>).</li>
+      <li><strong>API não liga</strong> — confira PostgreSQL a correr e o <code>DATABASE_URL</code> em <code>apps\api\.env</code>.</li>
+      <li><strong>Login falha</strong> — confirme que correu o <code>bootstrap:admin</code>; conta inactiva não entra.</li>
+      <li><strong>Plantas falham</strong> — Terminal 3 tem de estar com <code>npm run dev:plant</code>.</li>
+      <li><strong>Não use a porta 4100 no browser para a UI</strong> — use sempre <code>5273</code> em desenvolvimento (o Vite faz proxy do <code>/api</code>).</li>
+    </ul>
+  </div>
+
+  <div class="footer">
+    SIGO — Sistema Integrado de Gestão de Obras · Documento interno de arranque local ·
+    Fonte: estrutura do repositório MediObra / scripts npm da raiz.
+  </div>
+
+</body>
+</html>

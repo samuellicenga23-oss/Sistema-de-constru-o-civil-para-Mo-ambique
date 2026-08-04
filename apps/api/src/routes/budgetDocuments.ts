@@ -3,7 +3,7 @@ import { z } from "zod";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { createHash } from "node:crypto";
 import { db } from "../db/index.js";
-import { budgetDocuments, budgetSections, lineItems, measurementCertificates, projects } from "../db/schema.js";
+import { budgetDocuments, budgetSections, lineItems, measurementCertificates, projects, users } from "../db/schema.js";
 import { requireCompanyUser, requireRole } from "../auth/middleware.js";
 import { getBudgetDocumentSummary, hideInternalPricing } from "../services/boqEngine.js";
 import { computeCompositionUnitCost } from "../services/costEngine.js";
@@ -203,7 +203,20 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
         return reply.code(403).send({ error: "A aprovação do documento exige um administrador da empresa" });
       }
       if (document.submittedByUserId === request.currentUser!.id) {
-        return reply.code(409).send({ error: "Quem submeteu o documento não pode aprová-lo" });
+        const otherAdmins = await db
+          .select({ id: users.id })
+          .from(users)
+          .where(
+            and(
+              eq(users.companyId, companyId),
+              eq(users.role, "admin_empresa"),
+              eq(users.isActive, true),
+            ),
+          );
+        const soleAdmin = otherAdmins.length <= 1;
+        if (!soleAdmin) {
+          return reply.code(409).send({ error: "Quem submeteu o documento não pode aprová-lo" });
+        }
       }
     }
     if (parsed.data.status !== document.status && !transitions[document.status].includes(parsed.data.status)) {
@@ -222,7 +235,12 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
 
     const [updated] = await db.update(budgetDocuments).set({
       status: parsed.data.status,
-      submittedByUserId: parsed.data.status === "submetido" ? request.currentUser!.id : document.submittedByUserId,
+      submittedByUserId:
+        parsed.data.status === "submetido"
+          ? request.currentUser!.id
+          : parsed.data.status === "rascunho"
+            ? null
+            : document.submittedByUserId,
       approvedByUserId: parsed.data.status === "aprovado" ? request.currentUser!.id : document.approvedByUserId,
       approvalNote: parsed.data.decisionNote ?? document.approvalNote,
     }).where(eq(budgetDocuments.id, id)).returning();
@@ -251,6 +269,9 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
     if (source.documentType !== "medicao") {
       return reply.code(409).send({ error: "Só documentos de medição podem ser enviados para orçamento." });
     }
+    if (source.status !== "aprovado") {
+      return reply.code(409).send({ error: "Aprove a medição antes de criar o orçamento." });
+    }
     const options = z
       .object({
         createRevision: z.boolean().default(false),
@@ -273,6 +294,12 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
 
     const project = await assertProjectOwned(source.projectId, companyId);
     if (!project) return reply.code(404).send({ error: "Projecto não encontrado" });
+    // Preços vêm do catálogo (MZN). Evita orçamentos rotulados USD com custos em meticais.
+    if (project.currency !== "MZN") {
+      return reply.code(409).send({
+        error: "Os orçamentos gerados a partir da medição usam o catálogo em MZN. Defina a moeda da obra como MZN, ou crie um orçamento vazio/importado na moeda da obra.",
+      });
+    }
     const sourceSections = await db.select().from(budgetSections).where(eq(budgetSections.documentId, id)).orderBy(budgetSections.sortOrder);
     const sourceItems = sourceSections.length
       ? await db.select().from(lineItems).where(inArray(lineItems.sectionId, sourceSections.map((section) => section.id))).orderBy(lineItems.sortOrder)
@@ -391,6 +418,120 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
     }
     const result = await applyProjectSpecificationsToDocument(id, document.projectId);
     return result;
+  });
+
+  // Nova revisão de orçamento a partir de um documento submetido/aprovado — preserva o original
+  // e abre um rascunho editável (preços e quantidades copiados; o utilizador pode depois repricing).
+  app.post("/api/budget-documents/:id/revise", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const companyId = companyIdOf(request);
+    const source = await assertDocumentOwned(id, companyId);
+    if (!source) return reply.code(404).send({ error: "Documento não encontrado" });
+    if (source.documentType !== "orcamento") {
+      return reply.code(409).send({ error: "Só orçamentos podem gerar uma revisão directa. Use «Criar orçamento» a partir da medição." });
+    }
+    if (source.status === "rascunho") {
+      return reply.code(409).send({ error: "Este orçamento já está em rascunho — edite-o directamente." });
+    }
+
+    const relatedWhere = source.sourceMeasurementDocumentId
+      ? and(
+          eq(budgetDocuments.projectId, source.projectId),
+          eq(budgetDocuments.documentType, "orcamento"),
+          eq(budgetDocuments.sourceMeasurementDocumentId, source.sourceMeasurementDocumentId),
+        )
+      : and(eq(budgetDocuments.projectId, source.projectId), eq(budgetDocuments.documentType, "orcamento"));
+    const related = await db.select({ id: budgetDocuments.id }).from(budgetDocuments).where(relatedWhere);
+    const nextRevision = String(related.length);
+
+    const sourceSections = await db
+      .select()
+      .from(budgetSections)
+      .where(eq(budgetSections.documentId, id))
+      .orderBy(budgetSections.sortOrder);
+    const sourceItems = sourceSections.length
+      ? await db
+          .select()
+          .from(lineItems)
+          .where(inArray(lineItems.sectionId, sourceSections.map((section) => section.id)))
+          .orderBy(lineItems.sortOrder)
+      : [];
+
+    const baseTitle = source.title.replace(/\s*\(rev\.\s*\d+\)\s*$/i, "").trim();
+    const target = await db.transaction(async (tx) => {
+      const [created] = await tx
+        .insert(budgetDocuments)
+        .values({
+          projectId: source.projectId,
+          title: `${baseTitle} (rev. ${nextRevision})`,
+          documentType: "orcamento",
+          sourceMeasurementDocumentId: source.sourceMeasurementDocumentId,
+          sourceMeasurementFingerprint: source.sourceMeasurementFingerprint,
+          revision: nextRevision,
+          currency: source.currency,
+          ivaRate: source.ivaRate,
+          contingenciasRate: source.contingenciasRate,
+          siteCostsRate: source.siteCostsRate,
+          indirectCostsRate: source.indirectCostsRate,
+          profitMarginRate: source.profitMarginRate,
+          status: "rascunho",
+        })
+        .returning();
+
+      for (const sourceSection of sourceSections) {
+        const [targetSection] = await tx
+          .insert(budgetSections)
+          .values({
+            documentId: created.id,
+            name: sourceSection.name,
+            sortOrder: sourceSection.sortOrder,
+            templateKey: sourceSection.templateKey,
+          })
+          .returning();
+
+        const copyLevel = async (sourceParentId: string | null, targetParentId: string | null): Promise<void> => {
+          const siblings = sourceItems.filter(
+            (item) => item.sectionId === sourceSection.id && item.parentId === sourceParentId,
+          );
+          for (const item of siblings) {
+            const [targetItem] = await tx
+              .insert(lineItems)
+              .values({
+                sectionId: targetSection.id,
+                parentId: targetParentId,
+                sourceMeasurementItemId: item.sourceMeasurementItemId,
+                kind: item.kind,
+                code: item.code,
+                description: item.description,
+                unit: item.unit,
+                quantity: item.quantity,
+                unitPrice: item.unitPrice,
+                compositionId: item.compositionId,
+                origin: item.origin,
+                sortOrder: item.sortOrder,
+              })
+              .returning();
+            await copyLevel(item.id, targetItem.id);
+          }
+        };
+        await copyLevel(null, null);
+      }
+
+      return created;
+    });
+
+    await recordAuditEvent({
+      companyId,
+      projectId: source.projectId,
+      actorUserId: request.currentUser!.id,
+      entityType: "budget_document",
+      entityId: target.id,
+      action: "revised",
+      before: { sourceDocumentId: source.id, sourceStatus: source.status, sourceRevision: source.revision },
+      after: { id: target.id, revision: target.revision, status: target.status },
+    });
+
+    return reply.code(201).send({ document: target, sourceDocumentId: source.id });
   });
 
   // Actualiza, de forma EXPLÍCITA, os snapshots de preço dos itens ligados a composições.

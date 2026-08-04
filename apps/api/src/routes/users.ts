@@ -24,7 +24,7 @@ const roleEnum = z.enum(COMPANY_USER_ROLES);
 const createUserSchema = z.object({
   name: z.string().trim().min(2),
   email: z.string().trim().toLowerCase().email(),
-  password: z.string().min(8, "A password deve ter pelo menos 8 caracteres"),
+  password: z.string().min(8, "A palavra-passe deve ter pelo menos 8 caracteres"),
   role: roleEnum,
   preferredLanguage: z.enum(["pt", "en"]).optional(),
 });
@@ -39,7 +39,7 @@ const updateUserSchema = z
   .refine((data) => Object.keys(data).length > 0, "Indique pelo menos uma alteração");
 
 const resetPasswordSchema = z.object({
-  password: z.string().min(8, "A password deve ter pelo menos 8 caracteres"),
+  password: z.string().min(8, "A palavra-passe deve ter pelo menos 8 caracteres"),
 });
 
 const rolePermissionsSchema = z.object({

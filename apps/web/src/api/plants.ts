@@ -155,7 +155,7 @@ export type ExtractedOpening = {
   technicalSpecification: string | null;
   page: number;
   confidence: string;
-  source: "quadro" | "geometria" | "manual";
+  source: "quadro" | "geometria" | "manual" | "ia";
   needsConfirmation: boolean;
 };
 

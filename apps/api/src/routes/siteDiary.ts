@@ -8,6 +8,7 @@ import { db } from "../db/index.js";
 import { materials, projects, scheduleTasks, siteDiaryEntries, siteDiaryTaskProgress, stockMovements } from "../db/schema.js";
 import { requireCompanyUser, requireRole } from "../auth/middleware.js";
 import { assertProjectOwned } from "../services/accessControl.js";
+import { assertApprovedOrcamentoForSite } from "../services/siteGate.js";
 import { detectImageExtension } from "../services/imageValidation.js";
 import { buildSiteDiaryPdf } from "../services/siteDiaryExport.js";
 import { env } from "../env.js";
@@ -74,8 +75,8 @@ export async function siteDiaryRoutes(app: FastifyInstance) {
 
   app.post("/api/projects/:projectId/site-diary", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
     const { projectId } = request.params as { projectId: string };
-    const project = await assertProjectOwned(projectId, companyIdOf(request));
-    if (!project) return reply.code(404).send({ error: "Projecto não encontrado" });
+    const gate = await assertApprovedOrcamentoForSite(projectId, companyIdOf(request));
+    if (!gate.ok) return reply.code(gate.status).send({ error: gate.error });
 
     const parsed = entrySchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
@@ -197,7 +198,7 @@ export async function siteDiaryRoutes(app: FastifyInstance) {
     const entry = await assertEntryOwned(id, companyIdOf(request));
     if (!entry) return reply.code(404).send({ error: "Registo não encontrado" });
     const { url } = request.query as { url?: string };
-    if (!url) return reply.code(400).send({ error: "url em falta" });
+    if (!url) return reply.code(400).send({ error: "URL da fotografia em falta" });
     const [row] = await db
       .update(siteDiaryEntries)
       .set({ photoUrls: entry.photoUrls.filter((u) => u !== url) })

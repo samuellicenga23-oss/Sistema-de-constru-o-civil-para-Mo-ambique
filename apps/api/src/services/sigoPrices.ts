@@ -5,9 +5,9 @@ import { materials, supplierMaterialPrices, suppliers } from "../db/schema.js";
 export const SIGO_PRICES_SUPPLIER_NAME = "SIGO Preços";
 export const SIGO_PRICES_REVIEW_DATE = "2026-08-03";
 export const SIGO_PRICES_NOTES = [
-  "Referência nacional SIGO, sem IVA.",
-  "Base: INE Moçambique e preços públicos de fornecedores locais.",
-  "Confirme a cotação e o transporte antes de comprar.",
+  "Fornecedor SIGO (catálogo nacional), sem IVA.",
+  "Base inicial: INE Moçambique e preços públicos de fornecedores locais.",
+  "Os preços podem ser editados; novos materiais do catálogo são acrescentados automaticamente.",
 ].join(" ");
 
 export function isSigoPricesSupplier(supplier: { name: string }) {
@@ -15,10 +15,10 @@ export function isSigoPricesSupplier(supplier: { name: string }) {
 }
 
 /**
- * Garante uma referência de preço completa para cada empresa.
- * Os materiais próprios da empresa substituem materiais globais com o mesmo nome.
- * As linhas podem formar cotações e estimativas, concorrendo por zona e preço com as restantes.
- * Continuam a ser referência de mercado: uma ordem de compra exige fornecedor comercial.
+ * Garante o fornecedor «SIGO Preços» e preenche cotações em falta para cada empresa.
+ * Materiais próprios da empresa substituem globais com o mesmo nome.
+ * Preços já existentes NÃO são sobrescritos — a empresa pode editá-los livremente.
+ * Só materiais novos (ainda sem linha) recebem o preço base do catálogo.
  */
 export async function syncSigoPricesForCompany(companyId: string) {
   let [supplier] = await db
@@ -65,28 +65,19 @@ export async function syncSigoPricesForCompany(companyId: string) {
     .where(and(eq(supplierMaterialPrices.supplierId, supplier.id), isNull(supplierMaterialPrices.zoneId)));
   const currentByMaterial = new Map(current.map((price) => [price.materialId, price]));
   let created = 0;
-  let updated = 0;
 
   for (const material of visible) {
+    if (currentByMaterial.has(material.id)) continue;
     const unitCost = (Number(material.baseUnitCost) * Number(material.importFactor)).toFixed(2);
-    const existing = currentByMaterial.get(material.id);
-    if (!existing) {
-      await db.insert(supplierMaterialPrices).values({
-        supplierId: supplier.id,
-        materialId: material.id,
-        zoneId: null,
-        unitCost,
-        currency: material.currency,
-      });
-      created += 1;
-    } else if (Number(existing.unitCost).toFixed(2) !== unitCost || existing.currency !== material.currency) {
-      await db
-        .update(supplierMaterialPrices)
-        .set({ unitCost, currency: material.currency })
-        .where(eq(supplierMaterialPrices.id, existing.id));
-      updated += 1;
-    }
+    await db.insert(supplierMaterialPrices).values({
+      supplierId: supplier.id,
+      materialId: material.id,
+      zoneId: null,
+      unitCost,
+      currency: material.currency,
+    });
+    created += 1;
   }
 
-  return { supplier, materials: visible.length, created, updated };
+  return { supplier, materials: visible.length, created, updated: 0 };
 }

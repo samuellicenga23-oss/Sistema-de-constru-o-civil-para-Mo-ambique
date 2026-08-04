@@ -45,10 +45,26 @@ export default function ProjectsPage() {
   const [query, setQuery] = useState("");
   const [pendingDelete, setPendingDelete] = useState<{ id: string; name: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [openingId, setOpeningId] = useState<string | null>(null);
+
+  const fase = workspace === "medicoes" ? "medicao" : "orcamento";
+  const TYPE_BADGE: Record<Project["projectType"], string> = {
+    medicao: "Medição",
+    orcamento: "Orçamento",
+    hibrido: "Híbrido",
+  };
 
   async function reload() {
     setProjects(await boqApi.listProjects());
     setLoading(false);
+  }
+
+  async function openProject(project: Project) {
+    // Sempre o hub da fase — plantas, assistente, Preparar obra e submissão
+    // ficam no projecto; o documento abre-se a partir daí com o contexto certo.
+    setOpeningId(project.id);
+    navigate(`/projectos/${project.id}?fase=${fase}`);
+    setOpeningId(null);
   }
 
   useEffect(() => {
@@ -347,20 +363,32 @@ export default function ProjectsPage() {
           </div>
         ) : (
           <div className="card overflow-hidden">
-            <div className="hidden sm:grid grid-cols-[minmax(0,1fr)_minmax(10rem,0.7fr)_10rem_6rem] gap-4 px-5 py-2.5 table-head-row border-x-0 border-t-0">
-              <span>Projecto</span><span>Dono da obra</span><span>Zona</span><span>Moeda</span>
+            <div className="hidden sm:grid grid-cols-[minmax(0,1fr)_minmax(10rem,0.7fr)_10rem_7rem_6rem] gap-4 px-5 py-2.5 table-head-row border-x-0 border-t-0">
+              <span>Projecto</span><span>Dono da obra</span><span>Zona</span><span>Tipo</span><span>Moeda</span>
             </div>
             {filteredProjects.map((p) => (
               <div key={p.id} className="group clickable-row grid grid-cols-[minmax(0,1fr)_auto] items-center border-b border-slate-100 last:border-0">
-                <Link to={`/projectos/${p.id}`} className="grid min-w-0 gap-3 px-4 py-4 sm:grid-cols-[minmax(0,1fr)_minmax(10rem,0.7fr)_10rem_6rem] sm:items-center sm:gap-4 sm:px-5">
+                <button
+                  type="button"
+                  disabled={openingId === p.id}
+                  onClick={() => openProject(p)}
+                  className="grid min-w-0 gap-3 px-4 py-4 text-left sm:grid-cols-[minmax(0,1fr)_minmax(10rem,0.7fr)_10rem_7rem_6rem] sm:items-center sm:gap-4 sm:px-5"
+                >
                   <div className="flex min-w-0 items-center gap-3">
                     <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-700"><IconFolder className="h-4.5 w-4.5" /></div>
-                    <div className="min-w-0"><p className="truncate font-semibold text-slate-900 group-hover:text-brand-700">{p.name}</p><p className="mt-0.5 truncate text-xs text-slate-500 sm:hidden">{[p.client, zoneName(p.zoneId)].filter(Boolean).join(" · ") || "Sem cliente ou zona"}</p><span className="click-hint mt-1 sm:hidden">Abrir projecto →</span></div>
+                    <div className="min-w-0">
+                      <p className="truncate font-semibold text-slate-900 group-hover:text-brand-700">{p.name}</p>
+                      <p className="mt-0.5 truncate text-xs text-slate-500 sm:hidden">{[p.client, zoneName(p.zoneId)].filter(Boolean).join(" · ") || "Sem cliente ou zona"}</p>
+                      <span className="click-hint mt-1 sm:hidden">
+                        {openingId === p.id ? "A abrir…" : workspace === "medicoes" ? "Abrir medição →" : "Abrir orçamento →"}
+                      </span>
+                    </div>
                   </div>
                   <span className="hidden truncate text-sm text-slate-600 sm:block">{p.client || "—"}</span>
                   <span className="hidden truncate text-sm text-slate-500 sm:block">{zoneName(p.zoneId) || "—"}</span>
+                  <span className={`badge hidden w-fit sm:inline-flex ${p.projectType === "hibrido" ? "badge-brand" : "badge-gray"}`}>{TYPE_BADGE[p.projectType]}</span>
                   <span className="badge badge-gray hidden w-fit sm:inline-flex">{p.currency}</span>
-                </Link>
+                </button>
                 <button onClick={(e) => handleDelete(e, p.id, p.name)} className="icon-btn-danger mr-3 sm:mr-4" title={`Eliminar ${p.name}`} aria-label={`Eliminar ${p.name}`}><IconTrash className="h-3.5 w-3.5" /></button>
               </div>
             ))}

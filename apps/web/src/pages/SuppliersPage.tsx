@@ -140,10 +140,12 @@ export default function SuppliersPage() {
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <h3 className="break-words font-semibold text-slate-950">{supplier.name}</h3>
-                      {supplier.isReference && <span className="badge badge-brand">Referência SIGO</span>}
+                      {supplier.isReference && <span className="badge badge-brand">Fornecedor SIGO</span>}
                     </div>
                     <p className="mt-1 text-xs text-slate-500">
-                      {supplier.isReference ? `${supplier.referenceMaterialCount ?? 0} materiais · preços sem IVA` : supplier.location || "Localização por definir"}
+                      {supplier.isReference
+                        ? `${supplier.referenceMaterialCount ?? 0} materiais · preços editáveis · sem IVA`
+                        : supplier.location || "Localização por definir"}
                     </p>
                   </div>
                 </div>
@@ -153,7 +155,7 @@ export default function SuppliersPage() {
                 </dl>}
                 <div className="mt-auto flex items-center gap-2 pt-5">
                   <button onClick={() => setMaterialsModalSupplier(supplier)} className={`btn btn-sm flex-1 ${supplier.isReference ? "btn-primary" : "btn-secondary"}`}>
-                    {supplier.isReference ? "Consultar preços" : "Cotações e recursos"}
+                    {supplier.isReference ? "Editar preços" : "Cotações e recursos"}
                   </button>
                   {!supplier.isReference && <button onClick={() => setPendingDelete(supplier)} className="icon-btn-danger" title="Eliminar fornecedor">
                     <IconTrash className="h-3.5 w-3.5" />

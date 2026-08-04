@@ -3,14 +3,15 @@ import { z } from "zod";
 import { eq, and, or, isNull, desc, sql as drizzleSql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { purchaseOrders, purchaseOrderLines, stockMovements, suppliers, materials, budgetDocuments, financialEntries, scheduleTasks } from "../db/schema.js";
-import { requireCompanyUser, requireRole } from "../auth/middleware.js";
+import { requireCompanyUser, requirePermission, requireRole } from "../auth/middleware.js";
 import { assertProjectOwned } from "../services/accessControl.js";
+import { assertApprovedOrcamentoForSite } from "../services/siteGate.js";
 import { calculateVatTotals, CURRENCIES } from "@sigo/shared";
 import { computeProcurementPlan } from "../services/procurementEngine.js";
 import { recordAuditEvent } from "../services/auditTrail.js";
-import { isSigoPricesSupplier } from "../services/sigoPrices.js";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista"] as const;
+const canRequestMaterials = requirePermission("materiais.requisitar");
 
 function companyIdOf(request: FastifyRequest): string {
   return request.currentUser!.companyId!;
@@ -66,11 +67,21 @@ export async function purchasingRoutes(app: FastifyInstance) {
     if (!project) return reply.code(404).send({ error: "Projecto não encontrado" });
 
     const { budgetDocumentId } = request.query as { budgetDocumentId?: string };
-    const documents = await db.select().from(budgetDocuments).where(eq(budgetDocuments.projectId, projectId)).orderBy(desc(budgetDocuments.createdAt));
+    const documents = await db
+      .select()
+      .from(budgetDocuments)
+      .where(and(eq(budgetDocuments.projectId, projectId), eq(budgetDocuments.documentType, "orcamento")))
+      .orderBy(desc(budgetDocuments.createdAt));
     const document = budgetDocumentId
       ? documents.find((item) => item.id === budgetDocumentId)
-      : documents.find((item) => item.status === "aprovado" && item.currency === project.currency) ?? documents.find((item) => item.currency === project.currency);
-    if (!document) return reply.code(404).send({ error: "Crie primeiro um Mapa de Quantidades para gerar necessidades de compra" });
+      : documents.find((item) => item.status === "aprovado" && item.currency === project.currency)
+        ?? documents.find((item) => item.status === "aprovado");
+    if (!document) {
+      return reply.code(404).send({ error: "Crie e aprove um orçamento para gerar necessidades de compra" });
+    }
+    if (document.status !== "aprovado") {
+      return reply.code(409).send({ error: "Aprove o orçamento antes de gerar o plano de compras" });
+    }
 
     return computeProcurementPlan({ projectId, documentId: document.id, companyId, zoneId: project.zoneId, currency: project.currency, ivaRate: Number(project.ivaRate) });
   });
@@ -97,11 +108,12 @@ export async function purchasingRoutes(app: FastifyInstance) {
     );
   });
 
-  app.post("/api/projects/:projectId/purchase-orders", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
+  app.post("/api/projects/:projectId/purchase-orders", { preHandler: canRequestMaterials }, async (request, reply) => {
     const { projectId } = request.params as { projectId: string };
     const companyId = companyIdOf(request);
-    const project = await assertProjectOwned(projectId, companyId);
-    if (!project) return reply.code(404).send({ error: "Projecto não encontrado" });
+    const gate = await assertApprovedOrcamentoForSite(projectId, companyId);
+    if (!gate.ok) return reply.code(gate.status).send({ error: gate.error });
+    const project = gate.project;
 
     const parsed = purchaseOrderSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
@@ -118,9 +130,6 @@ export async function purchasingRoutes(app: FastifyInstance) {
       .where(and(eq(suppliers.id, parsed.data.supplierId), eq(suppliers.companyId, companyId)))
       .limit(1);
     if (!supplier) return reply.code(404).send({ error: "Fornecedor não encontrado" });
-    if (isSigoPricesSupplier(supplier)) {
-      return reply.code(409).send({ error: "SIGO Preços é uma referência de mercado. Escolha um fornecedor comercial para criar a ordem." });
-    }
 
     if (parsed.data.scheduleTaskId) {
       const [task] = await db.select().from(scheduleTasks).where(eq(scheduleTasks.id, parsed.data.scheduleTaskId)).limit(1);
@@ -165,23 +174,108 @@ export async function purchasingRoutes(app: FastifyInstance) {
     return reply.code(201).send({ ...order, supplierName: supplier.name, lines });
   });
 
+  /** Pedido leve do engenheiro: material + quantidade, sem cotação. Vira OC em rascunho. */
+  app.post("/api/projects/:projectId/material-requests", { preHandler: canRequestMaterials }, async (request, reply) => {
+    const { projectId } = request.params as { projectId: string };
+    const companyId = companyIdOf(request);
+    const gate = await assertApprovedOrcamentoForSite(projectId, companyId);
+    if (!gate.ok) return reply.code(gate.status).send({ error: gate.error });
+    const project = gate.project;
+
+    const parsed = z
+      .object({
+        notes: z.string().optional(),
+        lines: z
+          .array(
+            z.object({
+              materialId: z.string().uuid(),
+              quantity: z.number().positive(),
+            }),
+          )
+          .min(1),
+      })
+      .safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: "Indique pelo menos um material com quantidade" });
+    if (new Set(parsed.data.lines.map((line) => line.materialId)).size !== parsed.data.lines.length) {
+      return reply.code(400).send({ error: "Agrupe quantidades repetidas do mesmo material numa única linha" });
+    }
+
+    for (const line of parsed.data.lines) {
+      const material = await findVisibleMaterial(line.materialId, companyId);
+      if (!material) return reply.code(404).send({ error: "Material não encontrado no Catálogo" });
+    }
+
+    let [supplier] = await db
+      .select()
+      .from(suppliers)
+      .where(and(eq(suppliers.companyId, companyId), eq(suppliers.name, "Pedido de obra")))
+      .limit(1);
+    if (!supplier) {
+      [supplier] = await db
+        .insert(suppliers)
+        .values({
+          companyId,
+          name: "Pedido de obra",
+          notes: "Fornecedor interno para pedidos de material sem cotação ainda.",
+        })
+        .returning();
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    const order = await db.transaction(async (tx) => {
+      const [created] = await tx
+        .insert(purchaseOrders)
+        .values({
+          projectId,
+          supplierId: supplier.id,
+          orderDate: today,
+          notes: parsed.data.notes?.trim() || "Pedido de materiais da obra",
+          ivaRate: project.ivaRate,
+          createdByUserId: request.currentUser!.id,
+        })
+        .returning();
+      await tx.insert(purchaseOrderLines).values(
+        parsed.data.lines.map((line) => ({
+          purchaseOrderId: created.id,
+          materialId: line.materialId,
+          quantity: line.quantity.toString(),
+          unitCost: "0",
+          currency: project.currency,
+        })),
+      );
+      return created;
+    });
+
+    const lines = (await getOrderWithLines(order.id)).map((l) => ({ ...l.line, materialName: l.materialName, unit: l.materialUnit }));
+    await recordAuditEvent({
+      companyId,
+      projectId,
+      actorUserId: request.currentUser!.id,
+      entityType: "purchase_order",
+      entityId: order.id,
+      action: "material_request_created",
+      after: { status: order.status, lineCount: lines.length },
+    });
+    return reply.code(201).send({ ...order, supplierName: supplier.name, lines });
+  });
+
   // Mudar de estado — "recebido" gera automaticamente as entradas de stock (uma por linha), tal
   // como o fluxo do documento comercial descreve (recepção do material → entrada no armazém).
   // Só se gera uma vez: se já existirem movimentos de stock ligados a esta ordem, não duplica.
-  app.put("/api/purchase-orders/:id/status", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
+  app.put("/api/purchase-orders/:id/status", { preHandler: requirePermission("materiais.requisitar", "materiais.aprovar") }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const order = await assertPurchaseOrderOwned(id, companyIdOf(request));
     if (!order) return reply.code(404).send({ error: "Ordem de compra não encontrada" });
 
     const parsed = z.object({ status: z.enum(["rascunho", "aprovado", "recebido", "cancelado"]), effectiveDate: z.string().optional() }).safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
-    if (parsed.data.status === "aprovado") {
-      if (request.currentUser!.role !== "admin_empresa") {
-        return reply.code(403).send({ error: "A aprovação da ordem exige um administrador da empresa" });
-      }
-      if (order.createdByUserId === request.currentUser!.id) {
-        return reply.code(409).send({ error: "Quem criou a ordem não pode aprová-la" });
-      }
+    const user = request.currentUser!;
+    const canApprove = user.role === "super_admin" || user.role === "admin_empresa" || user.permissions.includes("materiais.aprovar");
+    if ((parsed.data.status === "aprovado" || parsed.data.status === "recebido") && !canApprove) {
+      return reply.code(403).send({ error: "Sem permissão para aprovar ou receber pedidos de material" });
+    }
+    if (parsed.data.status === "aprovado" && order.createdByUserId === user.id && user.role !== "admin_empresa") {
+      return reply.code(409).send({ error: "Quem criou a ordem não pode aprová-la" });
     }
 
     const transitions: Record<typeof order.status, typeof order.status[]> = {

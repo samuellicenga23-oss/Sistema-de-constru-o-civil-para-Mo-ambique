@@ -316,6 +316,48 @@
       "when": 1785780000000,
       "tag": "0044_user_permissions",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1785830000000,
+      "tag": "0045_practice_office",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1785840000000,
+      "tag": "0046_practice_comercial",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1785850000000,
+      "tag": "0047_practice_quote_acceptance",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1785860000000,
+      "tag": "0048_practice_advanced_quotes",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1785870000000,
+      "tag": "0049_practice_team_expenses",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1785880000000,
+      "tag": "0050_practice_schedule_addenda",
+      "breakpoints": true
     }
   ]
 }

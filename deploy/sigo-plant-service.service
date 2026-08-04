@@ -3,25 +3,32 @@
 #
 # Instalar:
 #   sudo cp deploy/sigo-plant-service.service /etc/systemd/system/
+#   sudo cp deploy/sigo-plant-service.env.example /etc/default/sigo-plant-service  # se ainda não existir
 #   sudo systemctl daemon-reload
 #   sudo systemctl enable --now sigo-plant-service
 #   sudo systemctl status sigo-plant-service
+#   curl -s http://127.0.0.1:8001/health
 #
 # Ajustar User=/WorkingDirectory se o caminho do repositório ou o utilizador do sistema forem
 # diferentes de /home/sigo/htdocs/sud30s.org e sigo (padrão CloudPanel: site user = "sigo").
 
 [Unit]
 Description=SIGO Plant Service (FastAPI)
-After=network.target
+After=network.target ollama.service
+Wants=ollama.service
 
 [Service]
 Type=simple
 User=sigo
 WorkingDirectory=/home/sigo/htdocs/sud30s.org/apps/plant-service
+EnvironmentFile=-/etc/default/sigo-plant-service
 # Uma análise pesada por processo evita que dois PDFs grandes disputem CPU e tornem ambos lentos.
 # O cache em memória complementa o cache persistente por hash mantido pela API.
 Environment=PLANT_PARSER_CONCURRENCY=1
 Environment=PLANT_PARSER_CACHE_SIZE=6
+Environment=PLANT_AI_ENABLED=1
+Environment=OLLAMA_HOST=http://127.0.0.1:11434
+Environment=PLANT_AI_MODEL=qwen2.5:7b
 ExecStart=/home/sigo/htdocs/sud30s.org/apps/plant-service/.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8001
 Restart=on-failure
 RestartSec=3

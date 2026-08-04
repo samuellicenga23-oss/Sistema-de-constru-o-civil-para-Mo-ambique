@@ -371,9 +371,13 @@ ROOM_LIST_PATTERN = re.compile(
 )
 
 ROOM_NAME_REJECT_PATTERN = re.compile(
-    r"^(?:fase|especialidade|propriet[aá]ri[oa]|projectou|conte[uú]do|nome\s+do\s+desenho|"
+    r"^(?:"
+    r"fase|especialidade|propriet[aá]ri[oa]|projectou|conte[uú]do|nome\s+do\s+desenho|"
     r"layout\s+id|revision|revis[aã]o|escala|n[uú]mero|legenda|observa[çc][õo]es|"
-    r"planta|projecto|projeto|al[çc]ado|corte|pormenor|detalhe|gspublisherversion)\b",
+    r"planta|projecto|projeto|al[çc]ado|corte|pormenor|detalhe|gspublisherversion|"
+    r"nomeclatura|quantidade|largura|altura"
+    r")\b|"
+    r"^(?:area|área|measured|perimeter|wall\s*surf\.?|r\.?\s*height|story|room|total)$",
     re.IGNORECASE,
 )
 
@@ -394,15 +398,22 @@ AREA_VALUE_LINE = re.compile(r"^([\d.,]+)\s*m[²2]$")
 LENGTH_VALUE_LINE = re.compile(r"^([\d.,]+)\s*m$")
 
 # Quadros de vãos variam muito entre gabinetes, mas normalmente conservam três sinais fortes:
-# código P/D/J/W, designação e dimensão largura x altura. A quantidade no fim é opcional.
+# código P/D/J/W/WD/DOO, designação e dimensão largura x altura. A quantidade no fim é opcional.
 OPENING_SCHEDULE_PATTERN = re.compile(
-    r"(?im)^\s*(?P<code>(?:P|D|J|W)\s*[-.]?\s*\d{1,3})\s+"
+    r"(?im)^\s*(?P<code>(?:WD|DOO|P|D|J|W)\s*[-.]?\s*\d{1,3})\s+"
     r"(?P<label>[^\n]{0,90}?)\s+"
     r"(?P<width>\d(?:[.,]\d{1,3})?)\s*(?:m\s*)?[x×]\s*"
     r"(?P<height>\d(?:[.,]\d{1,3})?)\s*(?:m)?"
     r"(?:\s+(?P<quantity>\d{1,3}))?\s*$"
 )
-OPENING_CODE_PATTERN = re.compile(r"^(?P<prefix>[PDJW])\s*[-.]?\s*(?P<number>\d{1,3})$", re.IGNORECASE)
+OPENING_CODE_PATTERN = re.compile(
+    r"^(?P<prefix>WD|DOO|[PDJW])\s*[-.]?\s*(?P<number>\d{1,3})$",
+    re.IGNORECASE,
+)
+OPENING_MAP_DIM_PATTERN = re.compile(
+    r"^(?P<width>\d(?:[.,]\d{1,3})?)\s*[x×]\s*(?P<height>\d(?:[.,]\d{1,3})?)$",
+    re.IGNORECASE,
+)
 DECIMAL_DIMENSION_PATTERN = re.compile(r"^\d[,.]\d{1,3}$")
 
 # "Ø10: 3.2" — peso de aço por diâmetro, tipicamente dentro de um bloco "Total+10%: ... Total: x"
@@ -451,10 +462,10 @@ FLOOR_LABEL_PATTERNS: list[tuple[re.Pattern, str | None, int]] = [
     (re.compile(r"piso\s*superior", re.IGNORECASE), "Piso Superior", 1),
     # Ordinais por extenso (ex: "Segundo Piso" nas folhas de armadura de lajes) — mapeados
     # para o mesmo formato "Nº Piso" usado pelo padrão numérico, para ordenarem em conjunto.
-    (re.compile(r"primeiro\s*piso", re.IGNORECASE), "1º Piso", 1),
-    (re.compile(r"segundo\s*piso", re.IGNORECASE), "2º Piso", 1),
-    (re.compile(r"terceiro\s*piso", re.IGNORECASE), "3º Piso", 1),
-    (re.compile(r"(\d+)\s*[ºªo]\s*piso", re.IGNORECASE), None, 1),  # capturado dinamicamente
+    (re.compile(r"primeiro\s*(?:piso|andar)", re.IGNORECASE), "1º Piso", 1),
+    (re.compile(r"segundo\s*(?:piso|andar)", re.IGNORECASE), "2º Piso", 1),
+    (re.compile(r"terceiro\s*(?:piso|andar)", re.IGNORECASE), "3º Piso", 1),
+    (re.compile(r"(\d+)\s*[ºªo]\s*(?:piso|andar)", re.IGNORECASE), None, 1),  # capturado dinamicamente
 ]
 
 
@@ -505,14 +516,29 @@ def _opening_location(label: str) -> str:
     return "desconhecida"
 
 
+def _opening_kind_from_code(code: str, label: str = "") -> str:
+    prefix = re.match(r"^([A-Z]+)", code.upper())
+    token = prefix.group(1) if prefix else ""
+    if token in ("J", "W", "WD") or re.search(r"janela|window", label, re.IGNORECASE):
+        return "janela"
+    return "porta"
+
+
+def _normalise_opening_code(raw_code: str) -> str:
+    cleaned = re.sub(r"\s+", "", raw_code).replace(".", "-").upper()
+    match = re.match(r"^(WD|DOO|[PDJW])-?(\d{1,3})$", cleaned)
+    if not match:
+        return cleaned
+    return f"{match.group(1)}-{match.group(2)}"
+
+
 def extract_opening_schedule(text: str, page_number: int) -> list[Opening]:
     floor, _ = detect_floor_label(text)
     openings: list[Opening] = []
     for match in OPENING_SCHEDULE_PATTERN.finditer(text):
-        raw_code = re.sub(r"\s+", "", match.group("code")).replace(".", "-").upper()
-        prefix = raw_code[0]
+        raw_code = _normalise_opening_code(match.group("code"))
         label = match.group("label").strip()
-        kind = "janela" if prefix in ("J", "W") or re.search(r"janela|window", label, re.IGNORECASE) else "porta"
+        kind = _opening_kind_from_code(raw_code, label)
         width = _to_float(match.group("width"))
         height = _to_float(match.group("height"))
         if not (0.3 <= width <= 8 and 0.3 <= height <= 5):
@@ -532,6 +558,84 @@ def extract_opening_schedule(text: str, page_number: int) -> list[Opening]:
                 confidence=0.96,
                 source="quadro",
                 needs_confirmation=False,
+            )
+        )
+    openings.extend(extract_opening_map_table(text, page_number, floor))
+    return openings
+
+
+def extract_opening_map_table(text: str, page_number: int, floor: str | None = None) -> list[Opening]:
+    """Mapas ArchiCAD/IMOLAR em colunas: Nomeclatura / Quantidade / Largura×Altura."""
+    if not re.search(r"nomeclatura|mapa\s+de\s+(?:v[ãa]os|janelas|portas)", text, re.IGNORECASE):
+        return []
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    codes: list[str] = []
+    quantities: list[int] = []
+    dims: list[tuple[float, float]] = []
+    mode: str | None = None
+    for line in lines:
+        lower = line.lower()
+        if "nomeclatura" in lower:
+            mode = "code"
+            continue
+        if lower.startswith("quantidade"):
+            mode = "qty"
+            continue
+        if "largura" in lower and "altura" in lower:
+            mode = "dim"
+            continue
+        if lower.startswith("altura da") or lower.startswith("altura do") or lower.startswith("planta") or lower.startswith("al"):
+            mode = None
+            continue
+        if mode == "code":
+            code_match = OPENING_CODE_PATTERN.fullmatch(line.replace(" ", "")) or OPENING_CODE_PATTERN.fullmatch(line)
+            if not code_match:
+                # "WD - 010" with spaces
+                spaced = re.fullmatch(r"(WD|DOO|[PDJW])\s*[-.]?\s*(\d{1,3})", line, re.IGNORECASE)
+                if not spaced:
+                    mode = None
+                    continue
+                codes.append(_normalise_opening_code(f"{spaced.group(1)}-{spaced.group(2)}"))
+            else:
+                codes.append(_normalise_opening_code(f"{code_match.group('prefix')}-{code_match.group('number')}"))
+        elif mode == "qty":
+            if re.fullmatch(r"\d{1,3}", line):
+                quantities.append(int(line))
+            else:
+                mode = None
+        elif mode == "dim":
+            dim_match = OPENING_MAP_DIM_PATTERN.fullmatch(line)
+            if dim_match:
+                dims.append((_to_float(dim_match.group("width")), _to_float(dim_match.group("height"))))
+            else:
+                mode = None
+
+    count = min(len(codes), len(dims))
+    if count == 0:
+        return []
+    while len(quantities) < count:
+        quantities.append(1)
+    openings: list[Opening] = []
+    for index in range(count):
+        width, height = dims[index]
+        if not (0.3 <= width <= 8 and 0.3 <= height <= 8):
+            continue
+        code = codes[index]
+        openings.append(
+            Opening(
+                kind=_opening_kind_from_code(code),
+                code=code,
+                width_m=width,
+                height_m=height,
+                sill_height_m=None,
+                quantity=max(1, quantities[index]),
+                floor=floor,
+                location="desconhecida",
+                material=None,
+                page=page_number,
+                confidence=0.9,
+                source="quadro",
+                needs_confirmation=True,
             )
         )
     return openings
@@ -558,14 +662,14 @@ def extract_openings_spatial(page, page_number: int, text: str) -> list[Opening]
             dimensions.append((centre, _to_float(value), value))
         code_match = OPENING_CODE_PATTERN.fullmatch(value)
         if code_match:
-            codes.append((centre, f"{code_match.group('prefix').upper()}{code_match.group('number')}"))
+            codes.append((centre, _normalise_opening_code(f"{code_match.group('prefix')}-{code_match.group('number')}")))
 
     def nearby_code(cx: float, cy: float, kind: str) -> str | None:
-        allowed = ("J", "W") if kind == "janela" else ("P", "D")
+        allowed = ("J", "W", "WD") if kind == "janela" else ("P", "D", "DOO")
         candidates = [
             ((x - cx) ** 2 + (y - cy) ** 2, code)
             for (x, y), code in codes
-            if code.startswith(allowed) and abs(x - cx) <= 55 and abs(y - cy) <= 55
+            if any(code.startswith(prefix) for prefix in allowed) and abs(x - cx) <= 55 and abs(y - cy) <= 55
         ]
         return min(candidates)[1] if candidates else None
 
@@ -751,13 +855,11 @@ def detect_plan_type(text: str) -> str | None:
 
 
 # Só se exclui uma folha da extracção de áreas quando o tipo é identificado POSITIVAMENTE como
-# não sendo "cotada" (mobilada, implantação, localização) — nunca quando o tipo não é detectado
-# (legenda em formato diferente, ou projecto que não distingue "cotada"/"mobilada" e só tem um
-# tipo de planta): nesse caso continua-se a extrair, tal como antes desta alteração, para não
-# fazer desaparecer silenciosamente todos os compartimentos de projectos sem essa legenda.
+# não sendo útil para áreas (implantação, cobertura, alçados…). A planta MOBILADA passou a
+# ser aceite com prioridade baixa: em muitos gabinetes a cotada só tem medidas lineares e as
+# áreas "A: … m²" estão só na mobilada (ex.: projecto Celso Acácio / IMOLAR).
 ROOM_EXCLUDED_PLAN_TYPES = {
     "imagem_satelite",
-    "mobiliada",
     "implantacao",
     "localizacao",
     "fundacao",
@@ -766,7 +868,7 @@ ROOM_EXCLUDED_PLAN_TYPES = {
     "cortes",
 }
 
-ROOM_PAGE_PRIORITY = {"cotada": 4, "geral": 3, None: 2}
+ROOM_PAGE_PRIORITY = {"cotada": 4, "geral": 3, None: 2, "mobiliada": 1}
 
 # Achado real (projecto "Fernando Gore Chaera", Chimoio): folhas de OUTRA especialidade
 # (hidráulica, eléctrica, drenagem, estrutura) redesenham as mesmas paredes/compartimentos como
@@ -1091,10 +1193,15 @@ def extract_room_schedule(text: str, page_number: int) -> list[Room]:
             # A área medida do compartimento é sempre o último valor "m²" do grupo (a
             # tabela tem "Measured Area" como última coluna); o perímetro é o único valor
             # "m" (sem "²") do grupo, quando presente.
+            identity = _room_identity(room_name)
+            if not identity:
+                i = j
+                continue
+            name, number = identity
             area = _to_float(area_matches[-1].group(1))
             perimeter = _to_float(length_matches[0].group(1)) if length_matches else None
             if area > 0:
-                rooms.append(Room(name=room_name, number=None, area_m2=area, page=page_number, floor=current_floor, perimeter_m=perimeter))
+                rooms.append(Room(name=name, number=number, area_m2=area, page=page_number, floor=current_floor, perimeter_m=perimeter))
         i = j
     return rooms
 
@@ -1234,10 +1341,9 @@ def merge_page_room_sources(*sources: list[Room]) -> list[Room]:
     return merged
 
 
-def extract_rebar_schedules(text: str, page_number: int) -> list[RebarLine]:
+def extract_rebar_total_plus10(text: str, page_number: int) -> list[RebarLine]:
+    """Nível 1 do aço: blocos clássicos «Total+10%: Ød: kg … Total:»."""
     lines = []
-    # Percorre o texto associando cada bloco "Total+10%: Ø..: x Ø..: y Total: z" ao
-    # rótulo de elemento mais próximo que o precede (ex: "P1", "Pórtico 6").
     element_positions = [(m.start(), m.group(1)) for m in ELEMENT_LABEL_PATTERN.finditer(text)]
     for block_match in re.finditer(r"Total\+10%:.{0,200}?Total:\s*[\d.,]+", text, re.DOTALL):
         block_start = block_match.start()
@@ -1254,6 +1360,18 @@ def extract_rebar_schedules(text: str, page_number: int) -> list[RebarLine]:
             diameter_mm = float(diam_match.group(1))
             weight_kg = _to_float(diam_match.group(2))
             lines.append(RebarLine(element=current_element, diameter_mm=diameter_mm, weight_kg=weight_kg, page=page_number))
+    return lines
+
+
+def extract_rebar_schedules(text: str, page_number: int) -> list[RebarLine]:
+    """Compat: Total+10% + Peso+10%. A cascata em parse_pdf separa os níveis."""
+    lines = extract_rebar_total_plus10(text, page_number)
+    try:
+        from rebar_estimate import extract_rebar_peso_plus10_table
+
+        lines.extend(extract_rebar_peso_plus10_table(text, page_number))
+    except Exception:
+        pass
     return lines
 
 
@@ -1556,12 +1674,18 @@ def build_structural_summary(
 def parse_pdf(file_bytes: bytes, progress_callback=None, detection_tags: list[str] | None = None) -> ParseResult:
     doc = fitz.open(stream=file_bytes, filetype="pdf")
     metadata = PlantMetadata()
-    rooms: list[Room] = []
-    openings: list[Opening] = []
-    fallback_rooms: list[Room] = []
     document_text_parts: list[str] = []
     room_page_priorities: dict[int, int] = {}
-    rebar_schedules: list[RebarLine] = []
+
+    # Candidatos por nível — a cascata escolhe um nível depois da classificação.
+    rooms_schedule: list[Room] = []
+    rooms_cotada: list[Room] = []
+    rooms_mobiliada: list[Room] = []
+    rooms_fallback: list[Room] = []
+    openings_quadro: list[Opening] = []
+    openings_spatial: list[Opening] = []
+    rebar_total10: list[RebarLine] = []
+    rebar_peso10: list[RebarLine] = []
     footings: list[Footing] = []
     column_groups: list[ColumnGroup] = []
     beam_spans: list[BeamSpan] = []
@@ -1570,8 +1694,6 @@ def parse_pdf(file_bytes: bytes, progress_callback=None, detection_tags: list[st
 
     for page_index in range(doc.page_count):
         page = doc[page_index]
-        # Reutiliza o mesmo TextPage para texto corrido e geometria. Sem isto, PyMuPDF voltava a
-        # interpretar fontes e objectos da página duas ou três vezes nas plantas cotadas.
         text_page = page.get_textpage()
         text = page.get_text("text", textpage=text_page)
         page_number = page_index + 1
@@ -1582,25 +1704,36 @@ def parse_pdf(file_bytes: bytes, progress_callback=None, detection_tags: list[st
             if any(v for v in page_metadata.__dict__.values()):
                 metadata = page_metadata
 
-        # Só se extraem áreas de compartimento de folhas "planta cotada" — uma folha "planta
-        # mobilada"/"planta de implantação" do mesmo piso mostra a mesma área outra vez, e nem
-        # sempre repete o número do compartimento (ver is_room_area_page), o que faz o duplicado
-        # escapar à de-duplicação e inflacionar a área total do piso.
         if is_room_area_page(text):
             plan_type = detect_plan_type(text)
             room_page_priorities[page_number] = ROOM_PAGE_PRIORITY.get(plan_type, 1)
             page_dict = page.get_text("dict", textpage=text_page)
-            rooms.extend(
-                merge_page_room_sources(
+            schedule_rooms = extract_room_schedule(text, page_number)
+            if schedule_rooms:
+                rooms_schedule.extend(schedule_rooms)
+            else:
+                labeled = merge_page_room_sources(
                     extract_rooms(text, page_number),
                     extract_rooms_spatial(page, page_number, text, page_dict),
-                    extract_room_schedule(text, page_number),
                 )
-            )
-            fallback_rooms.extend(extract_room_list_fallback(text, page_number))
-        openings.extend(extract_opening_schedule(text, page_number))
-        openings.extend(extract_openings_spatial(page, page_number, text))
-        rebar_schedules.extend(extract_rebar_schedules(text, page_number))
+                if plan_type == "mobiliada":
+                    rooms_mobiliada.extend(labeled)
+                else:
+                    rooms_cotada.extend(labeled)
+            rooms_fallback.extend(extract_room_list_fallback(text, page_number))
+
+        # Vãos: quadro e geometria ficam separados para a cascata.
+        openings_quadro.extend(extract_opening_schedule(text, page_number))
+        openings_spatial.extend(extract_openings_spatial(page, page_number, text))
+
+        rebar_total10.extend(extract_rebar_total_plus10(text, page_number))
+        try:
+            from rebar_estimate import extract_rebar_peso_plus10_table
+
+            rebar_peso10.extend(extract_rebar_peso_plus10_table(text, page_number))
+        except Exception:
+            pass
+
         footings.extend(extract_footings(text, page_number))
         column_groups.extend(extract_column_groups(text, page_number))
         beam_spans.extend(extract_beam_spans(text, page_number))
@@ -1609,14 +1742,15 @@ def parse_pdf(file_bytes: bytes, progress_callback=None, detection_tags: list[st
         if progress_callback:
             progress_callback(page_number, doc.page_count)
 
-    # Conteúdo já extraído é também evidência. Isto mantém a leitura robusta quando um gabinete
-    # entrega pranchas sem capa, sem código normalizado e até sem o campo "Especialidade".
     page_hints: dict[int, list[tuple[str, int, str]]] = defaultdict(list)
-    for page in {room.page for room in rooms + fallback_rooms}:
+    for page in {
+        room.page
+        for room in rooms_schedule + rooms_cotada + rooms_mobiliada + rooms_fallback
+    }:
         page_hints[page].append(("arquitectura", 7, "compartimentos e áreas reconhecidos"))
-    for page in {opening.page for opening in openings}:
+    for page in {opening.page for opening in openings_quadro + openings_spatial}:
         page_hints[page].append(("arquitectura", 8, "portas ou janelas reconhecidas"))
-    for page in {line.page for line in rebar_schedules}:
+    for page in {line.page for line in rebar_total10 + rebar_peso10}:
         page_hints[page].append(("estrutura", 11, "armaduras reconhecidas"))
     for page in {
         item.page
@@ -1636,33 +1770,79 @@ def parse_pdf(file_bytes: bytes, progress_callback=None, detection_tags: list[st
     architecture_pages = {page.page for page in classifications if page.discipline == "arquitectura"}
     structure_pages = {page.page for page in classifications if page.discipline == "estrutura"}
 
-    # A extracção é feita enquanto cada página é lida para manter o progresso real; depois da
-    # classificação global retêm-se os resultados da especialidade certa. Isto evita que uma
-    # planta hidrossanitária que reutiliza o fundo arquitectónico duplique compartimentos, ou que
-    # números de uma memória descritiva sejam confundidos com armaduras.
-    rooms = [room for room in rooms if room.page in architecture_pages]
-    fallback_rooms = [room for room in fallback_rooms if room.page in architecture_pages]
-    openings = [opening for opening in openings if opening.page in architecture_pages]
-    rebar_schedules = [line for line in rebar_schedules if line.page in structure_pages]
-    footings = [item for item in footings if item.page in structure_pages]
-    column_groups = [item for item in column_groups if item.page in structure_pages]
-    beam_spans = [item for item in beam_spans if item.page in structure_pages]
-    staircases = [item for item in staircases if item.page in structure_pages]
-    slabs = [item for item in slabs if item.page in structure_pages]
+    def _on_arch(items):
+        return [item for item in items if item.page in architecture_pages]
+
+    def _on_struct(items):
+        return [item for item in items if item.page in structure_pages]
+
+    rooms_schedule = _on_arch(rooms_schedule)
+    rooms_cotada = _on_arch(rooms_cotada)
+    rooms_mobiliada = _on_arch(rooms_mobiliada)
+    rooms_fallback = _on_arch(rooms_fallback)
+    openings_quadro = _on_arch(openings_quadro)
+    openings_spatial = _on_arch(openings_spatial)
+    rebar_total10 = _on_struct(rebar_total10)
+    rebar_peso10 = _on_struct(rebar_peso10)
+    footings = _on_struct(footings)
+    column_groups = _on_struct(column_groups)
+    beam_spans = _on_struct(beam_spans)
+    staircases = _on_struct(staircases)
+    slabs = _on_struct(slabs)
 
     default_floor = detect_document_default_floor("\n".join(document_text_parts))
-    selected_rooms = rooms if rooms else fallback_rooms
-    if default_floor:
-        for room in selected_rooms:
-            if room.floor is None:
-                room.floor = default_floor
+    page_texts_map = {index + 1: text for index, text in enumerate(document_text_parts)}
+    document_text = "\n".join(document_text_parts)
+
+    from resolve_cascade import (
+        cascade_log_lines,
+        resolve_openings_cascade,
+        resolve_rebar_cascade,
+        resolve_rooms_cascade,
+    )
+
+    selected_rooms, rooms_cascade = resolve_rooms_cascade(
+        schedule_rooms=rooms_schedule,
+        labeled_cotada_rooms=rooms_cotada,
+        mobiliada_rooms=rooms_mobiliada,
+        fallback_rooms=rooms_fallback,
+        page_priorities=room_page_priorities,
+        page_texts=document_text_parts,
+        architecture_pages=architecture_pages,
+        default_floor=default_floor,
+    )
+    selected_openings, openings_cascade = resolve_openings_cascade(
+        quadro_openings=openings_quadro,
+        spatial_openings=openings_spatial,
+        page_texts=document_text_parts,
+        architecture_pages=architecture_pages,
+        document_text=document_text,
+    )
+    rebar_schedules, rebar_cascade = resolve_rebar_cascade(
+        total_plus10_lines=rebar_total10,
+        peso_plus10_lines=rebar_peso10,
+        page_texts=page_texts_map,
+        structure_pages=structure_pages,
+        rooms=selected_rooms,
+        footings=footings,
+        beam_spans=beam_spans,
+        slabs=slabs,
+    )
+
+    # Evidência da cascata no matchedTags (visível em diagnóstico / health de parse).
+    for line in cascade_log_lines([rooms_cascade, openings_cascade, rebar_cascade]):
+        tag = line.lower()
+        if tag not in document_analysis.matched_tags:
+            document_analysis.matched_tags.append(tag)
 
     doc.close()
-    structural_summary = build_structural_summary(footings, column_groups, beam_spans, rebar_schedules, staircases, slabs)
+    structural_summary = build_structural_summary(
+        footings, column_groups, beam_spans, rebar_schedules, staircases, slabs
+    )
     return ParseResult(
         metadata=metadata,
-        rooms=dedupe_rooms(selected_rooms, room_page_priorities),
-        openings=merge_openings(openings, "\n".join(document_text_parts)),
+        rooms=selected_rooms,
+        openings=selected_openings,
         rebar_schedules=rebar_schedules,
         staircases=staircases,
         structural_summary=structural_summary,

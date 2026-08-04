@@ -302,7 +302,7 @@ export default function CompositionDetailPage() {
     reload(id).catch((err) => setError(err.message));
   }, [id]);
 
-  // Gravar sempre funciona directamente — se a composição ainda pertencer ao catálogo
+  // Guardar sempre funciona directamente — se a composição ainda pertencer ao catálogo
   // partilhado, o backend clona-a silenciosamente para a empresa; se o id devolvido for
   // diferente do actual, navegamos para o novo endereço (a "sua" cópia) sem o utilizador notar.
   async function handleSave() {
@@ -334,7 +334,7 @@ export default function CompositionDetailPage() {
         await reload(id);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro ao gravar");
+      setError(err instanceof Error ? err.message : "Erro ao guardar");
     } finally {
       setSaving(false);
     }
@@ -384,7 +384,7 @@ export default function CompositionDetailPage() {
         <>
           <span className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold tabular-nums text-slate-900">{money(unitCost)} MZN/{detail.outputUnit}</span>
           <label className="flex min-h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600"><input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} /> Disponível</label>
-          <button onClick={handleSave} disabled={saving} className="btn btn-primary btn-sm">{saving ? "A gravar..." : "Gravar"}</button>
+          <button onClick={handleSave} disabled={saving} className="btn btn-primary btn-sm">{saving ? "A guardar..." : "Guardar"}</button>
           <Link to="/catalogo" className="btn btn-ghost btn-sm"><IconBack className="w-3.5 h-3.5" /> Catálogo</Link>
         </>
       }

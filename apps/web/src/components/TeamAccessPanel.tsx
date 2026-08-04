@@ -384,7 +384,7 @@ export default function TeamAccessPanel({
                   <div className="min-w-0">
                     <p className="flex flex-wrap items-center gap-1.5 text-sm font-semibold text-slate-900">
                       <span className="truncate">{member.name}</span>
-                      {member.id === currentUser?.id && <span className="badge badge-brand">Você</span>}
+                      {member.id === currentUser?.id && <span className="badge badge-brand">Eu</span>}
                       <span className={`badge ${ROLE_INFO[member.role].badgeClass}`}>{roleLabel(member.role)}</span>
                       <span className={`badge ${member.isActive ? "badge-green" : "badge-gray"}`}>
                         {member.isActive ? "Activo" : "Inactivo"}

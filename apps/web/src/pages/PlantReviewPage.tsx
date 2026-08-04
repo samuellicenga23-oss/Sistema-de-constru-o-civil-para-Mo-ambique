@@ -6,7 +6,12 @@ import { catalogApi, type Material } from "../api/catalog";
 import Layout from "../components/Layout";
 import Modal from "../components/Modal";
 import { IconBack, IconRefresh, IconRuler, IconTrash } from "../components/icons";
-import { buildRebarPurchasePlan } from "@sigo/shared";
+import {
+  buildRebarPurchasePlan,
+  computeSlabRebarWeightLines,
+  DEFAULT_REBAR_LENGTH_M,
+  DEFAULT_SLAB_LAP_FACTOR,
+} from "@sigo/shared";
 
 const UNASSIGNED_FLOOR = "Piso não identificado";
 const SECTION_STYLES = {
@@ -371,21 +376,51 @@ export default function PlantReviewPage() {
 
   function slabSteelWeight(slab: StructuralSlab): number {
     const area = Number(slab.areaM2 ?? 0);
-    const layerWeight = (layer?: SlabRebarLayer | null) => layer && layer.xDiameterMm > 0 && layer.xSpacingCm > 0 && layer.yDiameterMm > 0 && layer.ySpacingCm > 0
-      ? area * (((layer.xDiameterMm ** 2 / 162) / (layer.xSpacingCm / 100)) + ((layer.yDiameterMm ** 2 / 162) / (layer.ySpacingCm / 100)))
-      : 0;
-    return layerWeight(slab.topRebar) + layerWeight(slab.bottomRebar);
+    const toLayer = (label: string, layer?: SlabRebarLayer | null) =>
+      layer && layer.xDiameterMm > 0 && layer.xSpacingCm > 0 && layer.yDiameterMm > 0 && layer.ySpacingCm > 0
+        ? {
+            label,
+            directions: [
+              { diameterMm: layer.xDiameterMm, spacingCm: layer.xSpacingCm, role: "X" },
+              { diameterMm: layer.yDiameterMm, spacingCm: layer.ySpacingCm, role: "Y" },
+            ],
+          }
+        : null;
+    const layers = [toLayer("inferior", slab.bottomRebar), toLayer("superior", slab.topRebar)].filter(
+      (layer): layer is NonNullable<typeof layer> => Boolean(layer),
+    );
+    return computeSlabRebarWeightLines({
+      areaM2: area,
+      layers,
+      lapFactor: DEFAULT_SLAB_LAP_FACTOR,
+    }).reduce((sum, line) => sum + line.weightKg, 0);
   }
 
   function slabBarPurchaseSummary(slab: StructuralSlab): string {
     const area = Number(slab.areaM2 ?? 0);
-    const lengths = new Map<number, number>();
-    for (const layer of [slab.bottomRebar, slab.topRebar]) {
-      if (!layer) continue;
-      if (layer.xDiameterMm > 0 && layer.xSpacingCm > 0) lengths.set(layer.xDiameterMm, (lengths.get(layer.xDiameterMm) ?? 0) + area / (layer.xSpacingCm / 100));
-      if (layer.yDiameterMm > 0 && layer.ySpacingCm > 0) lengths.set(layer.yDiameterMm, (lengths.get(layer.yDiameterMm) ?? 0) + area / (layer.ySpacingCm / 100));
-    }
-    return [...lengths.entries()].sort(([a], [b]) => a - b).map(([diameter, length]) => `Ø${diameter}: ${Math.ceil((length * 1.05) / 5.75)} varões`).join(" · ");
+    const toLayer = (label: string, layer?: SlabRebarLayer | null) =>
+      layer && layer.xDiameterMm > 0 && layer.xSpacingCm > 0 && layer.yDiameterMm > 0 && layer.ySpacingCm > 0
+        ? {
+            label,
+            directions: [
+              { diameterMm: layer.xDiameterMm, spacingCm: layer.xSpacingCm, role: "X" },
+              { diameterMm: layer.yDiameterMm, spacingCm: layer.ySpacingCm, role: "Y" },
+            ],
+          }
+        : null;
+    const layers = [toLayer("inferior", slab.bottomRebar), toLayer("superior", slab.topRebar)].filter(
+      (layer): layer is NonNullable<typeof layer> => Boolean(layer),
+    );
+    const weightLines = computeSlabRebarWeightLines({
+      areaM2: area,
+      layers,
+      lapFactor: DEFAULT_SLAB_LAP_FACTOR,
+    });
+    const plan = buildRebarPurchasePlan(
+      weightLines.map((line) => ({ diameterMm: line.diameterMm, weightKg: line.weightKg * 1.05 })),
+      DEFAULT_REBAR_LENGTH_M,
+    );
+    return plan.map((line) => `Ø${line.diameterMm}: ${line.barsToBuy} varões`).join(" · ");
   }
 
   async function saveSlabs() {
@@ -790,7 +825,7 @@ export default function PlantReviewPage() {
               {slabDrafts.map((slab, index) => (
                 <article key={index} className="overflow-hidden rounded-xl border border-slate-200 bg-white">
                   <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3">
-                    <div><strong className="text-sm text-slate-900">{slab.name || `Laje ${index + 1}`}</strong><span className="ml-2 text-xs text-slate-500">{(Number(slab.areaM2 ?? 0) * slab.thicknessCm / 100).toFixed(2)} m³ betão · {slabSteelWeight(slab).toFixed(2)} kg aço estimado</span>{slabBarPurchaseSummary(slab) && <span className="mt-1 block text-xs font-medium text-brand-700">Compra em barras de 5,75 m (+5%): {slabBarPurchaseSummary(slab)}</span>}</div>
+                    <div><strong className="text-sm text-slate-900">{slab.name || `Laje ${index + 1}`}</strong><span className="ml-2 text-xs text-slate-500">{(Number(slab.areaM2 ?? 0) * slab.thicknessCm / 100).toFixed(2)} m³ betão · {slabSteelWeight(slab).toFixed(2)} kg aço estimado</span>{slabBarPurchaseSummary(slab) && <span className="mt-1 block text-xs font-medium text-brand-700">Compra em barras de {DEFAULT_REBAR_LENGTH_M} m (+10% emendas +5% corte): {slabBarPurchaseSummary(slab)}</span>}</div>
                     <button type="button" className="btn btn-secondary btn-sm text-red-600" onClick={() => setSlabDrafts((items) => items.filter((_, slabIndex) => slabIndex !== index))}><IconTrash className="h-4 w-4" /> Remover</button>
                   </header>
                   <div className="space-y-4 p-4">

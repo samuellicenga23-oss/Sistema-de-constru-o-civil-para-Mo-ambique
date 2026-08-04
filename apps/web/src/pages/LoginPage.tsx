@@ -8,7 +8,7 @@ import { Button } from "../components/landing/ui/Button";
 import AlertBanner from "../components/AlertBanner";
 
 const GOOGLE_ERROR_MESSAGES: Record<string, string> = {
-  google_nao_configurado: "O login com Google não está disponível neste momento.",
+  google_nao_configurado: "O início de sessão com Google não está disponível neste momento.",
   falha_google: "Não foi possível confirmar a sua conta Google. Tente novamente.",
   email_google_nao_verificado: "O seu email Google não está verificado.",
   conta_google_nao_encontrada: "Não existe nenhuma conta SIGO com este email. Peça ao administrador da sua empresa para a criar primeiro.",

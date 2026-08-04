@@ -2,7 +2,15 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { eq, desc, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { financialEntries, budgetDocuments, invoiceCreditNotes, invoiceReceipts, projectInvoices } from "../db/schema.js";
+import {
+  financialEntries,
+  budgetDocuments,
+  invoiceCreditNotes,
+  invoiceReceipts,
+  practiceInvoices,
+  practiceReceipts,
+  projectInvoices,
+} from "../db/schema.js";
 import { requireCompanyUser, requireRole } from "../auth/middleware.js";
 import { assertProjectOwned } from "../services/accessControl.js";
 import { getBudgetDocumentSummary } from "../services/boqEngine.js";
@@ -134,17 +142,24 @@ export async function financialRoutes(app: FastifyInstance) {
     const summary = latestDocument ? await getBudgetDocumentSummary(latestDocument.id) : null;
     const valorContratado = summary?.total ?? 0;
 
-    const [entries, invoices] = await Promise.all([
+    const [entries, invoices, commercialInvoices] = await Promise.all([
       db.select().from(financialEntries).where(eq(financialEntries.projectId, projectId)),
       db.select().from(projectInvoices).where(eq(projectInvoices.projectId, projectId)),
+      db.select().from(practiceInvoices).where(eq(practiceInvoices.projectId, projectId)),
     ]);
     const invoiceIds = invoices.map((invoice) => invoice.id);
-    const [receipts, creditNotes] = invoiceIds.length
-      ? await Promise.all([
-          db.select().from(invoiceReceipts).where(inArray(invoiceReceipts.invoiceId, invoiceIds)),
-          db.select().from(invoiceCreditNotes).where(inArray(invoiceCreditNotes.invoiceId, invoiceIds)),
-        ])
-      : [[], []];
+    const commercialIds = commercialInvoices.map((invoice) => invoice.id);
+    const [receipts, creditNotes, commercialReceipts] = await Promise.all([
+      invoiceIds.length
+        ? db.select().from(invoiceReceipts).where(inArray(invoiceReceipts.invoiceId, invoiceIds))
+        : Promise.resolve([]),
+      invoiceIds.length
+        ? db.select().from(invoiceCreditNotes).where(inArray(invoiceCreditNotes.invoiceId, invoiceIds))
+        : Promise.resolve([]),
+      commercialIds.length
+        ? db.select().from(practiceReceipts).where(inArray(practiceReceipts.invoiceId, commercialIds))
+        : Promise.resolve([]),
+    ]);
 
     let valorRecebido = 0;
     let custoRealizado = 0;
@@ -155,10 +170,8 @@ export async function financialRoutes(app: FastifyInstance) {
     for (const e of entries) {
       const amount = Number(e.amount);
       if (e.type === "receita") {
-        // A factura conserva um lançamento de origem para rastreabilidade, mas o valor financeiro
-        // real vem dos seus recebimentos. Sem este desvio, pagamentos parciais seriam contados
-        // como se toda a factura tivesse sido recebida ou estivesse em aberto.
-        if (e.sourceType === "invoice") continue;
+        // Facturas (obra e Comercial) têm lançamento de rastreio; o valor real vem dos recibos.
+        if (e.sourceType === "invoice" || e.sourceType === "practice_invoice") continue;
         if (e.status === "pago") {
           valorRecebido += amount;
           const month = (e.paidDate ?? e.createdAt.toISOString().slice(0, 10)).slice(0, 7);
@@ -201,6 +214,24 @@ export async function financialRoutes(app: FastifyInstance) {
     for (const invoice of invoices) {
       if (invoice.status === "rascunho" || invoice.status === "cancelada" || invoice.currency !== project.currency) continue;
       contasAReceber += Math.max(0, Number(invoice.netAmount) - (creditsByInvoice.get(invoice.id) ?? 0) - (receiptsByInvoice.get(invoice.id) ?? 0));
+    }
+
+    const commercialById = new Map(commercialInvoices.map((invoice) => [invoice.id, invoice]));
+    const commercialReceiptsByInvoice = new Map<string, number>();
+    for (const receipt of commercialReceipts) {
+      const invoice = commercialById.get(receipt.invoiceId);
+      if (!invoice || invoice.status === "cancelada" || invoice.currency !== project.currency) continue;
+      const amount = Number(receipt.amount);
+      commercialReceiptsByInvoice.set(receipt.invoiceId, (commercialReceiptsByInvoice.get(receipt.invoiceId) ?? 0) + amount);
+      valorRecebido += amount;
+      const month = receipt.receivedDate.slice(0, 7);
+      const bucket = cashFlowByMonth.get(month) ?? { receitas: 0, despesas: 0 };
+      bucket.receitas += amount;
+      cashFlowByMonth.set(month, bucket);
+    }
+    for (const invoice of commercialInvoices) {
+      if (["rascunho", "cancelada"].includes(invoice.status) || invoice.currency !== project.currency) continue;
+      contasAReceber += Math.max(0, Number(invoice.netAmount) - (commercialReceiptsByInvoice.get(invoice.id) ?? 0));
     }
 
     const fluxoCaixaMensal = Array.from(cashFlowByMonth.entries())

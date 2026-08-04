@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { boqApi, type BudgetDocument, type Project } from "../api/boq";
 import { scheduleApi, type ProjectSchedule, type SchedulePaper, type SchedulePrintScale, type ScheduleTask, type ScheduleTaskStatus } from "../api/schedule";
 import { workingDaysInclusive, nextWorkingDay } from "@sigo/shared";
@@ -34,6 +34,7 @@ function fmtDate(value: string | null) {
 
 export default function ProjectSchedulePage() {
   const { projectId } = useParams<{ projectId: string }>();
+  const [searchParams] = useSearchParams();
   const { confirm, dialog } = useConfirmDialog();
   const [project, setProject] = useState<Project | null>(null);
   const [documents, setDocuments] = useState<BudgetDocument[]>([]);
@@ -237,7 +238,7 @@ export default function ProjectSchedulePage() {
           >
             <IconDownload className="h-4 w-4" /> PDF
           </a>
-          <Link className="btn btn-ghost btn-sm" to={`/projectos/${project.id}`}>
+          <Link className="btn btn-ghost btn-sm" to={`/projectos/${project.id}${searchParams.get("fase") === "gestao" ? "?fase=gestao" : ""}`}>
             <IconBack className="h-4 w-4" /> Projecto
           </Link>
         </>

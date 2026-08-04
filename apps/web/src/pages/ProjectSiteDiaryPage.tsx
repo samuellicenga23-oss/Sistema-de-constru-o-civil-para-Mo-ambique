@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { boqApi, type Project } from "../api/boq";
 import { siteDiaryApi, type SiteDiaryEntry } from "../api/siteDiary";
 import { scheduleApi, type ScheduleTask } from "../api/schedule";
@@ -22,6 +22,7 @@ const WEATHER_OPTIONS = ["Sol", "Nublado", "Chuva", "Chuva forte (obra parada)"]
 export default function ProjectSiteDiaryPage() {
   const { confirm, dialog } = useConfirmDialog();
   const { projectId } = useParams<{ projectId: string }>();
+  const [searchParams] = useSearchParams();
   const [project, setProject] = useState<Project | null>(null);
   const [entries, setEntries] = useState<SiteDiaryEntry[]>([]);
   const [tasks, setTasks] = useState<ScheduleTask[]>([]);
@@ -172,7 +173,7 @@ export default function ProjectSiteDiaryPage() {
       title={`Diário de Obra — ${project.name}`}
       subtitle="Trabalhos, equipa, materiais e ocorrências por dia"
       actions={
-        <Link to={`/projectos/${projectId}`} className="btn btn-ghost btn-sm">
+        <Link to={`/projectos/${projectId}${searchParams.get("fase") === "gestao" ? "?fase=gestao" : ""}`} className="btn btn-ghost btn-sm">
           <IconBack className="w-3.5 h-3.5" />
           Projecto
         </Link>

@@ -34,7 +34,7 @@ export type Company = {
   subscription?: Subscription | null;
 };
 
-export type CompanyModuleKey = "dashboard" | "measurements" | "budgets" | "catalog" | "suppliers" | "purchasing" | "schedule" | "site_diary" | "financial" | "quick_calculations";
+export type CompanyModuleKey = "dashboard" | "measurements" | "budgets" | "catalog" | "suppliers" | "purchasing" | "schedule" | "site_diary" | "financial" | "quick_calculations" | "practice";
 
 export type AdminCompanyUser = {
   id: string;

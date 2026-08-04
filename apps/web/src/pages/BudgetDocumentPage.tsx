@@ -18,8 +18,10 @@ import AlertBanner from "../components/AlertBanner";
 import ActionMenu from "../components/ActionMenu";
 import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { SectionHeader } from "../components/WorkspaceUI";
-import { IconBack, IconChart, IconClipboard, IconDoc, IconDownload, IconPencil, IconPlus, IconRefresh, IconRuler, IconTrash } from "../components/icons";
+import { IconChart, IconClipboard, IconDoc, IconDownload, IconPencil, IconPlus, IconRefresh, IconRuler, IconTrash } from "../components/icons";
 import { useAuth } from "../auth/AuthContext";
+import { can } from "../permissions";
+import { practiceApi } from "../api/practice";
 import { collectUnpricedItems, filterTreeToUnpricedOnly } from "../utils/boqHelpers";
 import { ApiError } from "../api/http";
 
@@ -50,6 +52,7 @@ function containsBudgetMatch(items: LineItemNode[], needle: string): boolean {
 
 export default function BudgetDocumentPage() {
   const { user } = useAuth();
+  const canManageCommercial = can(user, "escritorio.gerir");
   const { documentId } = useParams<{ documentId: string }>();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -81,10 +84,34 @@ export default function BudgetDocumentPage() {
   const [itemQuery, setItemQuery] = useState("");
   const [showOnlyUnpriced, setShowOnlyUnpriced] = useState(searchParams.get("semPreco") === "1");
   const [submittingToBudget, setSubmittingToBudget] = useState(false);
+  const [revisingDocument, setRevisingDocument] = useState(false);
   const [materialSpecs, setMaterialSpecs] = useState<ProjectMaterialSpecification[]>([]);
   const [applyingSpecs, setApplyingSpecs] = useState(false);
   const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
   const [sectionNameDraft, setSectionNameDraft] = useState("");
+  const [showCommercialProposal, setShowCommercialProposal] = useState(false);
+  const [proposalAttachMode, setProposalAttachMode] = useState<"nada" | "resumo" | "mapa">("resumo");
+  const [creatingProposal, setCreatingProposal] = useState(false);
+
+  async function handleGenerateCommercialProposal() {
+    if (!documentId) return;
+    setCreatingProposal(true);
+    setError(null);
+    try {
+      const quote = await practiceApi.createQuoteFromBudget({
+        documentId,
+        attachMode: proposalAttachMode,
+        assignNumber: true,
+      });
+      setShowCommercialProposal(false);
+      navigate(`/escritorio?tab=propostas&quote=${quote.id}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao gerar proposta comercial");
+    } finally {
+      setCreatingProposal(false);
+    }
+  }
+
   async function reload() {
     if (!documentId) return;
     const s = await boqApi.getBudgetDocumentSummary(documentId);
@@ -161,7 +188,9 @@ export default function BudgetDocumentPage() {
   useEffect(() => {
     if (searchParams.get("assistente") !== "1" || !summary || plantContextLoading) return;
     setShowWizard(true);
-    setSearchParams({}, { replace: true });
+    const next = new URLSearchParams(searchParams);
+    next.delete("assistente");
+    setSearchParams(next, { replace: true });
   }, [searchParams, setSearchParams, summary, plantContextLoading]);
 
   async function handleAddSection(e: FormEvent) {
@@ -264,12 +293,41 @@ export default function BudgetDocumentPage() {
     }
   }
 
+  async function handleReviseBudget() {
+    if (!documentId || !summary) return;
+    const ok = await confirm({
+      title: "Criar revisão?",
+      message: "Será criado um novo orçamento em rascunho a partir deste documento. O original permanece intacto.",
+      confirmLabel: "Criar revisão",
+      details: ["Pode editar quantidades e preços na nova revisão", "O documento actual continua protegido"],
+    });
+    if (!ok) return;
+    setRevisingDocument(true);
+    setError(null);
+    try {
+      const { document } = await boqApi.reviseBudgetDocument(documentId);
+      navigate(`/documentos/${document.id}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao criar revisão do orçamento");
+    } finally {
+      setRevisingDocument(false);
+    }
+  }
+
   const [changingStatus, setChangingStatus] = useState(false);
 
   async function handleStatusChange(status: "rascunho" | "submetido" | "aprovado") {
-    if (!documentId) return;
+    if (!documentId || !summary) return;
+    const isMed = summary.document.documentType === "medicao";
     const prompts = {
-      aprovado: { title: "Aprovar orçamento?", message: "Passa a ser a referência do cronograma e dos autos.", confirmLabel: "Aprovar", danger: false },
+      aprovado: {
+        title: isMed ? "Aprovar medição?" : "Aprovar orçamento?",
+        message: isMed
+          ? "A medição fica protegida e pode ser enviada para Orçamentos."
+          : "Passa a ser a referência do cronograma e dos autos.",
+        confirmLabel: "Aprovar",
+        danger: false,
+      },
       submetido: { title: "Submeter para aprovação?", message: "O documento fica pendente de validação.", confirmLabel: "Submeter", danger: false },
       rascunho: { title: "Devolver a rascunho?", message: "Volta a permitir edição livre.", confirmLabel: "Devolver", danger: true },
     } as const;
@@ -425,9 +483,18 @@ export default function BudgetDocumentPage() {
   const openingsMissingDimensions = pendingOpenings.filter((opening) => !opening.widthM || !opening.heightM).length;
   const openingsMissingLocation = pendingOpenings.filter((opening) => opening.location === "desconhecida").length;
 
+  const projectBackTo = `/projectos/${document.projectId}${
+    searchParams.get("fase")
+      ? `?fase=${searchParams.get("fase")}`
+      : isMeasurementDocument
+        ? "?fase=medicao"
+        : "?fase=orcamento"
+  }`;
+
   return (
     <Layout
       title={document.title}
+      back={{ label: "Projecto", fallbackTo: projectBackTo }}
       subtitle={isMeasurementDocument
         ? `Medição técnica · revisão ${document.revision ?? "-"} · ${document.status}`
         : `Orçamento · revisão ${document.revision ?? "-"} · ${currency} · ${document.status}`}
@@ -441,9 +508,11 @@ export default function BudgetDocumentPage() {
           {!isClientView && document.status === "submetido" && (
             <>
               <button onClick={() => handleStatusChange("rascunho")} disabled={changingStatus} className="btn btn-secondary btn-sm">Devolver</button>
-              <button onClick={() => handleStatusChange("aprovado")} disabled={changingStatus} className="btn btn-success btn-sm">
-                <IconChart className="w-3.5 h-3.5" /> Aprovar
-              </button>
+              {user?.role === "admin_empresa" && (
+                <button onClick={() => handleStatusChange("aprovado")} disabled={changingStatus} className="btn btn-success btn-sm">
+                  <IconChart className="w-3.5 h-3.5" /> Aprovar
+                </button>
+              )}
             </>
           )}
           {!isReadOnly && (
@@ -456,16 +525,40 @@ export default function BudgetDocumentPage() {
               {compositionLinkedCount > 0 ? "Medições" : preparingAutomaticDocument ? "A preparar..." : "Medir"}
             </button>
           )}
-          {isMeasurementDocument && !isClientView && (
+          {isMeasurementDocument && !isClientView && document.status === "aprovado" && (
             <button type="button" onClick={() => handleSubmitToBudget(false)} disabled={submittingToBudget} className="btn btn-primary btn-sm">
               <IconDoc className="w-3.5 h-3.5" />
               {submittingToBudget ? "A enviar..." : "Criar orçamento"}
             </button>
           )}
-          <Link to={`/projectos/${document.projectId}`} className="btn btn-ghost btn-sm">
-            <IconBack className="w-3.5 h-3.5" />
-            Projecto
-          </Link>
+          {isMeasurementDocument && !isClientView && document.status !== "aprovado" && (
+            <span className="hidden text-xs text-slate-500 sm:inline">Aprove a medição para enviar a Orçamentos</span>
+          )}
+          {!isMeasurementDocument && document.status !== "rascunho" && !isClientView && (
+            <button
+              type="button"
+              onClick={() => handleReviseBudget()}
+              disabled={revisingDocument}
+              className="btn btn-secondary btn-sm"
+            >
+              <IconRefresh className="w-3.5 h-3.5" />
+              {revisingDocument ? "A criar..." : "Criar revisão"}
+            </button>
+          )}
+          {!isMeasurementDocument && document.status === "aprovado" && !isClientView && (
+            <Link to={`/projectos/${document.projectId}?fase=gestao`} className="btn btn-primary btn-sm">
+              Abrir gestão da obra
+            </Link>
+          )}
+          {document.status === "aprovado" && !isClientView && canManageCommercial && (
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => setShowCommercialProposal(true)}
+            >
+              <IconDoc className="w-3.5 h-3.5" /> Gerar Proposta Comercial
+            </button>
+          )}
           <ActionMenu
             items={[
               {
@@ -473,7 +566,7 @@ export default function BudgetDocumentPage() {
                 label: "Criar outro cenário de orçamento",
                 icon: <IconDoc className="w-3.5 h-3.5" />,
                 onClick: () => handleSubmitToBudget(true),
-                hidden: !isMeasurementDocument || isClientView,
+                hidden: !isMeasurementDocument || isClientView || document.status !== "aprovado",
               },
               {
                 id: "materials",
@@ -515,7 +608,16 @@ export default function BudgetDocumentPage() {
       }
     >
       <div className="space-y-5">
-        <ProjectWorkspaceNav projectId={document.projectId} measurementOnly={isMeasurementDocument && project?.projectType === "medicao"} />
+        <ProjectWorkspaceNav
+          projectId={document.projectId}
+          mode={
+            searchParams.get("fase") === "gestao"
+              ? "site"
+              : isMeasurementDocument
+                ? "measurement"
+                : "budget"
+          }
+        />
         {!isClientView && document.status !== "rascunho" && (
           <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm">
             <span className="font-medium text-slate-700">
@@ -667,15 +769,27 @@ export default function BudgetDocumentPage() {
                   )}
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => compositionLinkedCount > 0 ? setShowRepriceConfirm(true) : handlePrepareAutomaticDocument()}
-                disabled={compositionLinkedCount > 0 ? document.status !== "rascunho" || repricing : preparingAutomaticDocument}
-                className="btn btn-secondary btn-sm shrink-0"
-              >
-                {compositionLinkedCount > 0 ? <IconRefresh className="h-3.5 w-3.5" /> : <IconRuler className="h-3.5 w-3.5" />}
-                {compositionLinkedCount > 0 ? "Actualizar preços" : preparingAutomaticDocument ? "A preparar..." : "Preparar medição pelas plantas"}
-              </button>
+              {compositionLinkedCount > 0 && document.status !== "rascunho" ? (
+                <button
+                  type="button"
+                  onClick={() => handleReviseBudget()}
+                  disabled={revisingDocument}
+                  className="btn btn-secondary btn-sm shrink-0"
+                >
+                  <IconRefresh className="h-3.5 w-3.5" />
+                  {revisingDocument ? "A criar..." : "Criar revisão"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => compositionLinkedCount > 0 ? setShowRepriceConfirm(true) : handlePrepareAutomaticDocument()}
+                  disabled={compositionLinkedCount > 0 ? document.status !== "rascunho" || repricing : preparingAutomaticDocument}
+                  className="btn btn-secondary btn-sm shrink-0"
+                >
+                  {compositionLinkedCount > 0 ? <IconRefresh className="h-3.5 w-3.5" /> : <IconRuler className="h-3.5 w-3.5" />}
+                  {compositionLinkedCount > 0 ? "Actualizar preços" : preparingAutomaticDocument ? "A preparar..." : "Preparar medição pelas plantas"}
+                </button>
+              )}
             </div>
             {repriceResult && (
               <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
@@ -1065,6 +1179,54 @@ export default function BudgetDocumentPage() {
           onConfirm={handleReprice}
           onCancel={() => setShowRepriceConfirm(false)}
         />
+      )}
+
+      {showCommercialProposal && (
+        <ModalPortal>
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/50 p-4">
+            <div className="w-full max-w-lg rounded-xl bg-white p-5 shadow-xl">
+              <h2 className="text-lg font-semibold text-slate-900">Gerar Proposta Comercial</h2>
+              {error && <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+              <p className="mt-1 text-sm text-slate-600">
+                Cria uma proposta de execução no Comercial a partir deste documento aprovado. As quantidades não são recalculadas.
+              </p>
+              {isMeasurementDocument && (
+                <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                  Medição técnica: se ainda não tiver preços de venda, prefira gerar a partir do orçamento aprovado.
+                </p>
+              )}
+              <div className="mt-4 space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Anexar ao escopo</p>
+                {(
+                  [
+                    ["nada", "Nada — uma linha com o total"],
+                    ["resumo", "Resumo — capítulos + contingências/IVA"],
+                    ["mapa", "Mapa completo — itens com qtd. e PU"],
+                  ] as const
+                ).map(([value, label]) => (
+                  <label key={value} className="flex cursor-pointer items-start gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50">
+                    <input
+                      type="radio"
+                      className="mt-0.5"
+                      name="attachMode"
+                      checked={proposalAttachMode === value}
+                      onChange={() => setProposalAttachMode(value)}
+                    />
+                    <span>{label}</span>
+                  </label>
+                ))}
+              </div>
+              <div className="mt-5 flex justify-end gap-2">
+                <button type="button" className="btn btn-secondary" onClick={() => setShowCommercialProposal(false)} disabled={creatingProposal}>
+                  Cancelar
+                </button>
+                <button type="button" className="btn btn-primary" disabled={creatingProposal} onClick={handleGenerateCommercialProposal}>
+                  {creatingProposal ? "A gerar…" : "Gerar proposta"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </ModalPortal>
       )}
 
       {dialog}

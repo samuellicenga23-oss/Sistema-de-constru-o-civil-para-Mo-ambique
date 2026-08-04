@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { requireRole } from "../auth/middleware.js";
 import { assertDocumentOwned } from "../services/accessControl.js";
+import { documentLockedMessage } from "../services/documentRules.js";
 import { applyQuickEstimate, getStandardSectionId } from "../services/quickEstimate.js";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista"] as const;
@@ -88,6 +89,9 @@ export async function quickEstimateRoutes(app: FastifyInstance) {
     const companyId = request.currentUser!.companyId!;
     const document = await assertDocumentOwned(id, companyId);
     if (!document) return reply.code(404).send({ error: "Documento não encontrado" });
+    if (document.status !== "rascunho") {
+      return reply.code(409).send({ error: documentLockedMessage(document.status) });
+    }
 
     const parsed = quickEstimateSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });

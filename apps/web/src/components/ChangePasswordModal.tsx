@@ -14,7 +14,7 @@ export default function ChangePasswordModal({ onClose, onSuccess }: { onClose: (
     e.preventDefault();
     setError(null);
     if (newPassword !== confirmPassword) {
-      setError("A nova password e a confirmação não coincidem");
+      setError("A nova palavra-passe e a confirmação não coincidem");
       return;
     }
     setSaving(true);
@@ -23,7 +23,7 @@ export default function ChangePasswordModal({ onClose, onSuccess }: { onClose: (
       await onSuccess?.();
       setDone(true);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Erro ao mudar a password");
+      setError(err instanceof ApiError ? err.message : "Erro ao mudar a palavra-passe");
     } finally {
       setSaving(false);
     }

@@ -20,7 +20,7 @@ app = FastAPI(title="SIGO Plant Service")
 # em produção, permissivo em dev sem configuração" (achado da auditoria).
 PLANT_SERVICE_TOKEN = os.environ.get("PLANT_SERVICE_TOKEN")
 IS_PRODUCTION = os.environ.get("ENVIRONMENT") == "production"
-PARSER_VERSION = "2026.08-openings-3"
+PARSER_VERSION = "2026.08-cascade-1"
 PARSER_CONCURRENCY = max(1, min(2, int(os.environ.get("PLANT_PARSER_CONCURRENCY", "1"))))
 PARSER_CACHE_SIZE = max(1, min(20, int(os.environ.get("PLANT_PARSER_CACHE_SIZE", "6"))))
 parser_slots = asyncio.Semaphore(PARSER_CONCURRENCY)
@@ -36,7 +36,14 @@ if IS_PRODUCTION and not PLANT_SERVICE_TOKEN:
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    try:
+        from ai_assist import ai_config, ollama_reachable
+
+        cfg = ai_config()
+        ai = {**cfg, "reachable": ollama_reachable() if cfg["enabled"] else False}
+    except Exception as exc:  # noqa: BLE001
+        ai = {"enabled": False, "reachable": False, "error": str(exc)[:120]}
+    return {"status": "ok", "parserVersion": PARSER_VERSION, "ai": ai}
 
 
 class RoomOut(BaseModel):

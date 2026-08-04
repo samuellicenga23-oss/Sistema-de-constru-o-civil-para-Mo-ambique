@@ -673,6 +673,391 @@ export const invoiceCreditNotes = pgTable("invoice_credit_notes", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (table) => [unique("invoice_credit_note_number_unique").on(table.invoiceId, table.creditNumber)]);
 
+// ---------- Escritório (arquitectos / engenheiros autónomos) ----------
+// Ciclo comercial próprio, independente do financeiro de obra (Autos → facturas de medição):
+// cotação ao cliente → aprovação → factura de honorários → recibos em parcelas com destinos
+// (caixa do escritório vs pagamento a terceiros).
+
+export const practiceQuoteStatusEnum = pgEnum("practice_quote_status", [
+  "rascunho",
+  "enviada",
+  "aprovada",
+  "rejeitada",
+  "cancelada",
+]);
+export const practiceInvoiceStatusEnum = pgEnum("practice_invoice_status", [
+  "rascunho",
+  "emitida",
+  "parcial",
+  "paga",
+  "cancelada",
+]);
+export const practiceDestinationKindEnum = pgEnum("practice_destination_kind", ["caixa", "terceiro"]);
+
+export const practiceEngagementStatusEnum = pgEnum("practice_engagement_status", [
+  "rascunho",
+  "activo",
+  "concluido",
+  "cancelado",
+]);
+export const practiceMilestoneStatusEnum = pgEnum("practice_milestone_status", [
+  "pendente",
+  "facturado",
+  "pago",
+]);
+export const practiceDocumentSeriesKindEnum = pgEnum("practice_document_series_kind", ["PRO", "FT", "RC"]);
+
+export const practiceClients = pgTable("practice_clients", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 200 }).notNull(),
+  contact: varchar("contact", { length: 200 }),
+  email: varchar("email", { length: 200 }),
+  phone: varchar("phone", { length: 80 }),
+  address: text("address"),
+  nuit: varchar("nuit", { length: 50 }),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const practiceDocumentSeries = pgTable("practice_document_series", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+  kind: practiceDocumentSeriesKindEnum("kind").notNull(),
+  year: integer("year").notNull(),
+  nextNumber: integer("next_number").notNull().default(1),
+}, (table) => [unique("practice_document_series_unique").on(table.companyId, table.kind, table.year)]);
+
+export type PracticeQuoteConditions = {
+  intro?: string;
+  objectText?: string;
+  paymentTerms?: string;
+  exclusions?: string;
+  revisionsIncluded?: number;
+  taxNote?: string;
+  reimbursablesNote?: string;
+  validityText?: string;
+  deadlineText?: string;
+  additionalNotes?: string;
+  acceptanceText?: string;
+};
+
+export const practiceQuotes = pgTable("practice_quotes", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+  clientId: uuid("client_id").references(() => practiceClients.id, { onDelete: "set null" }),
+  projectId: uuid("project_id").references(() => projects.id, { onDelete: "set null" }),
+  /** Documento de orçamento/medição origem (obrigatório para execução de obra). */
+  sourceBudgetDocumentId: uuid("source_budget_document_id"),
+  title: varchar("title", { length: 240 }).notNull(),
+  clientName: varchar("client_name", { length: 200 }).notNull(),
+  status: practiceQuoteStatusEnum("status").notNull().default("rascunho"),
+  quoteNumber: varchar("quote_number", { length: 80 }),
+  issueDate: date("issue_date"),
+  validUntil: date("valid_until"),
+  currency: currencyEnum("currency").notNull().default("MZN"),
+  notes: text("notes"),
+  /** project | technical | construction */
+  serviceCategory: varchar("service_category", { length: 40 }),
+  /** ex.: arquitectura, estrutural, fiscalizacao, execucao_obra */
+  serviceType: varchar("service_type", { length: 80 }),
+  pricingMode: varchar("pricing_mode", { length: 40 }).default("por_fase"),
+  projectDesignation: varchar("project_designation", { length: 240 }),
+  workType: varchar("work_type", { length: 120 }),
+  location: varchar("location", { length: 240 }),
+  ownerName: varchar("owner_name", { length: 200 }),
+  estimatedArea: varchar("estimated_area", { length: 80 }),
+  floors: varchar("floors", { length: 40 }),
+  projectDescription: text("project_description"),
+  observations: text("observations"),
+  plannedStartDate: date("planned_start_date"),
+  clientDeadline: varchar("client_deadline", { length: 120 }),
+  conditions: jsonb("conditions").$type<PracticeQuoteConditions>().default({}),
+  totalAmount: numeric("total_amount", { precision: 14, scale: 2 }).notNull().default("0"),
+  /** Valor efectivamente aceite pelo cliente (pode ser inferior à proposta — desconto). */
+  acceptedAmount: numeric("accepted_amount", { precision: 14, scale: 2 }),
+  discountAmount: numeric("discount_amount", { precision: 14, scale: 2 }),
+  discountPercent: numeric("discount_percent", { precision: 5, scale: 2 }),
+  acceptanceNotes: text("acceptance_notes"),
+  sentAt: timestamp("sent_at"),
+  createdByUserId: uuid("created_by_user_id").references(() => users.id),
+  approvedAt: timestamp("approved_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const practiceQuoteLines = pgTable("practice_quote_lines", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  quoteId: uuid("quote_id").notNull().references(() => practiceQuotes.id, { onDelete: "cascade" }),
+  phase: varchar("phase", { length: 120 }),
+  specialty: varchar("specialty", { length: 120 }),
+  description: text("description").notNull(),
+  quantity: numeric("quantity", { precision: 12, scale: 3 }).notNull().default("1"),
+  unit: varchar("unit", { length: 20 }).notNull().default("un"),
+  unitPrice: numeric("unit_price", { precision: 14, scale: 2 }).notNull(),
+  lineTotal: numeric("line_total", { precision: 14, scale: 2 }).notNull(),
+  included: boolean("included").notNull().default(true),
+  optional: boolean("optional").notNull().default(false),
+  durationDays: integer("duration_days"),
+  sortOrder: integer("sort_order").notNull().default(0),
+});
+
+export const practiceTeamPayModeEnum = pgEnum("practice_team_pay_mode", [
+  "fixo",
+  "percentagem",
+  "hora",
+  "dia",
+  "entregavel",
+  "fase",
+]);
+export const practiceTeamPayStatusEnum = pgEnum("practice_team_pay_status", [
+  "pendente",
+  "parcial",
+  "pago",
+]);
+export const practiceExpenseKindEnum = pgEnum("practice_expense_kind", [
+  "interno",
+  "reembolsavel",
+]);
+
+export const practiceEngagements = pgTable("practice_engagements", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+  clientId: uuid("client_id").references(() => practiceClients.id, { onDelete: "set null" }),
+  quoteId: uuid("quote_id").references(() => practiceQuotes.id, { onDelete: "set null" }),
+  projectId: uuid("project_id").references(() => projects.id, { onDelete: "set null" }),
+  title: varchar("title", { length: 240 }).notNull(),
+  clientName: varchar("client_name", { length: 200 }).notNull(),
+  status: practiceEngagementStatusEnum("status").notNull().default("activo"),
+  currency: currencyEnum("currency").notNull().default("MZN"),
+  totalAmount: numeric("total_amount", { precision: 14, scale: 2 }).notNull(),
+  notes: text("notes"),
+  /** Tipo de projecto de serviços (não confundir com obra de execução). */
+  serviceProjectType: varchar("service_project_type", { length: 80 }),
+  serviceType: varchar("service_type", { length: 80 }),
+  createdByUserId: uuid("created_by_user_id").references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+/** Membro da equipa / honorários a pagar num contrato de serviços. */
+export const practiceTeamMembers = pgTable("practice_team_members", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  engagementId: uuid("engagement_id").notNull().references(() => practiceEngagements.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 200 }).notNull(),
+  role: varchar("role", { length: 120 }).notNull(),
+  specialty: varchar("specialty", { length: 120 }),
+  contact: varchar("contact", { length: 200 }),
+  isExternal: boolean("is_external").notNull().default(false),
+  payMode: practiceTeamPayModeEnum("pay_mode").notNull().default("fixo"),
+  agreedAmount: numeric("agreed_amount", { precision: 14, scale: 2 }).notNull().default("0"),
+  percent: numeric("percent", { precision: 5, scale: 2 }),
+  hourlyRate: numeric("hourly_rate", { precision: 14, scale: 2 }),
+  hours: numeric("hours", { precision: 10, scale: 2 }),
+  dailyRate: numeric("daily_rate", { precision: 14, scale: 2 }),
+  days: numeric("days", { precision: 10, scale: 2 }),
+  deliverableLabel: varchar("deliverable_label", { length: 200 }),
+  phaseLabel: varchar("phase_label", { length: 120 }),
+  plannedPayDate: date("planned_pay_date"),
+  paidAmount: numeric("paid_amount", { precision: 14, scale: 2 }).notNull().default("0"),
+  payStatus: practiceTeamPayStatusEnum("pay_status").notNull().default("pendente"),
+  notes: text("notes"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+/** Custos / despesas do contrato (internos ou reembolsáveis). */
+export const practiceExpenses = pgTable("practice_expenses", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  engagementId: uuid("engagement_id").notNull().references(() => practiceEngagements.id, { onDelete: "cascade" }),
+  kind: practiceExpenseKindEnum("kind").notNull().default("interno"),
+  category: varchar("category", { length: 80 }).notNull(),
+  description: text("description").notNull(),
+  amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
+  incurredDate: date("incurred_date"),
+  paidAt: date("paid_at"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const practicePhaseStatusEnum = pgEnum("practice_phase_status", [
+  "nao_iniciado",
+  "em_preparacao",
+  "em_curso",
+  "aguardando_cliente",
+  "aguardando_terceiro",
+  "em_revisao",
+  "concluido",
+  "suspenso",
+  "atrasado",
+]);
+
+export const practiceDeliverableStatusEnum = pgEnum("practice_deliverable_status", [
+  "pendente",
+  "em_curso",
+  "entregue",
+  "em_revisao",
+  "aprovado",
+  "rejeitado",
+]);
+
+export const practiceAddendumKindEnum = pgEnum("practice_addendum_kind", [
+  "trabalho_adicional",
+  "alteracao_escopo",
+  "nova_especialidade",
+  "revisao_extraordinaria",
+  "extensao_fiscalizacao",
+  "consultoria_adicional",
+]);
+
+export const practiceAddendumStatusEnum = pgEnum("practice_addendum_status", [
+  "rascunho",
+  "enviada",
+  "aprovada",
+  "rejeitada",
+  "cancelada",
+]);
+
+/** Fase do cronograma de serviço (não confundir com parcelas de facturação). */
+export const practiceSchedulePhases = pgTable("practice_schedule_phases", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  engagementId: uuid("engagement_id").notNull().references(() => practiceEngagements.id, { onDelete: "cascade" }),
+  title: varchar("title", { length: 200 }).notNull(),
+  assigneeName: varchar("assignee_name", { length: 200 }),
+  startDate: date("start_date"),
+  endDate: date("end_date"),
+  durationDays: integer("duration_days"),
+  status: practicePhaseStatusEnum("status").notNull().default("nao_iniciado"),
+  notes: text("notes"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const practiceDeliverables = pgTable("practice_deliverables", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  engagementId: uuid("engagement_id").notNull().references(() => practiceEngagements.id, { onDelete: "cascade" }),
+  phaseId: uuid("phase_id").references(() => practiceSchedulePhases.id, { onDelete: "set null" }),
+  title: varchar("title", { length: 240 }).notNull(),
+  assigneeName: varchar("assignee_name", { length: 200 }),
+  dueDate: date("due_date"),
+  status: practiceDeliverableStatusEnum("status").notNull().default("pendente"),
+  deliveredAt: date("delivered_at"),
+  revisionNumber: integer("revision_number").notNull().default(0),
+  version: varchar("version", { length: 40 }),
+  notes: text("notes"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const practiceClientRevisions = pgTable("practice_client_revisions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  engagementId: uuid("engagement_id").notNull().references(() => practiceEngagements.id, { onDelete: "cascade" }),
+  phaseId: uuid("phase_id").references(() => practiceSchedulePhases.id, { onDelete: "set null" }),
+  deliverableId: uuid("deliverable_id").references(() => practiceDeliverables.id, { onDelete: "set null" }),
+  revisionDate: date("revision_date").notNull(),
+  description: text("description").notNull(),
+  assigneeName: varchar("assignee_name", { length: 200 }),
+  impactDays: integer("impact_days").notNull().default(0),
+  impactAmount: numeric("impact_amount", { precision: 14, scale: 2 }).notNull().default("0"),
+  includedInContract: boolean("included_in_contract").notNull().default(true),
+  isAdditionalWork: boolean("is_additional_work").notNull().default(false),
+  addendumId: uuid("addendum_id"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const practiceAddenda = pgTable("practice_addenda", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  engagementId: uuid("engagement_id").notNull().references(() => practiceEngagements.id, { onDelete: "cascade" }),
+  revisionId: uuid("revision_id").references(() => practiceClientRevisions.id, { onDelete: "set null" }),
+  quoteId: uuid("quote_id").references(() => practiceQuotes.id, { onDelete: "set null" }),
+  addendumNumber: varchar("addendum_number", { length: 80 }),
+  kind: practiceAddendumKindEnum("kind").notNull().default("trabalho_adicional"),
+  title: varchar("title", { length: 240 }).notNull(),
+  description: text("description"),
+  amount: numeric("amount", { precision: 14, scale: 2 }).notNull().default("0"),
+  currency: currencyEnum("currency").notNull().default("MZN"),
+  impactDays: integer("impact_days").notNull().default(0),
+  status: practiceAddendumStatusEnum("status").notNull().default("rascunho"),
+  createdByUserId: uuid("created_by_user_id").references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const practiceInvoices = pgTable("practice_invoices", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+  quoteId: uuid("quote_id").references(() => practiceQuotes.id, { onDelete: "set null" }),
+  engagementId: uuid("engagement_id").references(() => practiceEngagements.id, { onDelete: "set null" }),
+  clientId: uuid("client_id").references(() => practiceClients.id, { onDelete: "set null" }),
+  projectId: uuid("project_id").references(() => projects.id, { onDelete: "set null" }),
+  invoiceNumber: varchar("invoice_number", { length: 80 }),
+  clientName: varchar("client_name", { length: 200 }).notNull(),
+  status: practiceInvoiceStatusEnum("status").notNull().default("rascunho"),
+  issueDate: date("issue_date"),
+  dueDate: date("due_date"),
+  currency: currencyEnum("currency").notNull().default("MZN"),
+  grossAmount: numeric("gross_amount", { precision: 14, scale: 2 }).notNull(),
+  ivaRate: numeric("iva_rate", { precision: 5, scale: 4 }).notNull().default("0"),
+  netAmount: numeric("net_amount", { precision: 14, scale: 2 }).notNull(),
+  notes: text("notes"),
+  createdByUserId: uuid("created_by_user_id").references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => [unique("practice_invoice_number_unique").on(table.companyId, table.invoiceNumber)]);
+
+export const practiceMilestones = pgTable("practice_milestones", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  engagementId: uuid("engagement_id").notNull().references(() => practiceEngagements.id, { onDelete: "cascade" }),
+  title: varchar("title", { length: 200 }).notNull(),
+  percent: numeric("percent", { precision: 5, scale: 2 }),
+  amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
+  dueDate: date("due_date"),
+  status: practiceMilestoneStatusEnum("status").notNull().default("pendente"),
+  invoiceId: uuid("invoice_id").references(() => practiceInvoices.id, { onDelete: "set null" }),
+  sortOrder: integer("sort_order").notNull().default(0),
+});
+
+export const practiceInvoiceLines = pgTable("practice_invoice_lines", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  invoiceId: uuid("invoice_id").notNull().references(() => practiceInvoices.id, { onDelete: "cascade" }),
+  description: text("description").notNull(),
+  quantity: numeric("quantity", { precision: 12, scale: 3 }).notNull().default("1"),
+  unit: varchar("unit", { length: 20 }).notNull().default("un"),
+  unitPrice: numeric("unit_price", { precision: 14, scale: 2 }).notNull(),
+  lineTotal: numeric("line_total", { precision: 14, scale: 2 }).notNull(),
+  sortOrder: integer("sort_order").notNull().default(0),
+});
+
+export const practiceReceipts = pgTable("practice_receipts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  invoiceId: uuid("invoice_id").notNull().references(() => practiceInvoices.id, { onDelete: "cascade" }),
+  companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+  receiptNumber: varchar("receipt_number", { length: 80 }),
+  amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
+  receivedDate: date("received_date").notNull(),
+  reference: varchar("reference", { length: 150 }),
+  notes: text("notes"),
+  createdByUserId: uuid("created_by_user_id").references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+/** Destino de cada parcela recebida: fica em caixa ou vai para serviço de terceiro. */
+export const practiceReceiptDestinations = pgTable("practice_receipt_destinations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  receiptId: uuid("receipt_id").notNull().references(() => practiceReceipts.id, { onDelete: "cascade" }),
+  kind: practiceDestinationKindEnum("kind").notNull(),
+  amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
+  partyName: varchar("party_name", { length: 200 }),
+  description: text("description"),
+  /** Quando kind=terceiro: null = ainda a desembolsar; preenchido = já pago ao terceiro. */
+  paidAt: date("paid_at"),
+});
+
 // O contrato é a referência comercial da obra. Adendas nunca reescrevem o valor original:
 // cada uma guarda a sua decisão e só as aprovadas entram no valor contratual revisto.
 export const projectContracts = pgTable("project_contracts", {

@@ -135,6 +135,14 @@ export const purchasingApi = {
   listOrders: (projectId: string) => request<PurchaseOrder[]>(`/projects/${projectId}/purchase-orders`),
   createOrder: (projectId: string, data: PurchaseOrderInput) =>
     request<PurchaseOrder>(`/projects/${projectId}/purchase-orders`, { method: "POST", body: JSON.stringify(data) }),
+  createMaterialRequest: (
+    projectId: string,
+    data: { notes?: string; lines: Array<{ materialId: string; quantity: number }> },
+  ) =>
+    request<PurchaseOrder>(`/projects/${projectId}/material-requests`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
   updateOrderStatus: (id: string, status: PurchaseOrder["status"]) =>
     request<PurchaseOrder>(`/purchase-orders/${id}/status`, { method: "PUT", body: JSON.stringify({ status }) }),
   deleteOrder: (id: string) => request<{ ok: true }>(`/purchase-orders/${id}`, { method: "DELETE" }),

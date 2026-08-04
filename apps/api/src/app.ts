@@ -34,6 +34,7 @@ import { projectControlRoutes } from "./routes/projectControl.js";
 import { invoiceRoutes } from "./routes/invoices.js";
 import { contractRoutes } from "./routes/contracts.js";
 import { workChapterRoutes } from "./routes/workChapters.js";
+import { practiceRoutes } from "./routes/practice.js";
 import { mutationOriginAllowed, SECURITY_HEADERS } from "./services/httpSecurity.js";
 import { normalizeSigoDecimals } from "@sigo/shared";
 
@@ -147,6 +148,7 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   await app.register(invoiceRoutes);
   await app.register(contractRoutes);
   await app.register(workChapterRoutes);
+  await app.register(practiceRoutes);
 
   // Em produção corremos um único processo Node (padrão CloudPanel: um domínio → um appPort) —
   // a API também serve o build do frontend, em vez de depender de um Nginx separado a servir

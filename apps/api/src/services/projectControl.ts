@@ -43,6 +43,8 @@ export async function getProjectControl(projectId: string, currency: string) {
   const financial = entries.filter((entry) => entry.currency === currency).reduce((acc, entry) => {
     const amount = Number(entry.amount);
     if (entry.type === "receita") {
+      // Lançamentos de factura (obra / Comercial) reflectem o estado agregado; pagamentos
+      // parciais detalham-se no resumo financeiro via recibos.
       if (entry.status === "pago") acc.received += amount;
       else acc.receivable += amount;
       if (entry.sourceType === "measurement_certificate") acc.certified += amount;

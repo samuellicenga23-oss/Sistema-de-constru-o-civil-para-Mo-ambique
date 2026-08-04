@@ -30,7 +30,7 @@ const GENERAL_FIELDS: Array<{ key: keyof CompanyUpdateInput; label: string }> = 
   { key: "district", label: "Distrito" },
   { key: "phone", label: "Telefone" },
   { key: "email", label: "Email" },
-  { key: "website", label: "Website" },
+  { key: "website", label: "Sítio web" },
   { key: "responsibleName", label: "Responsável / assinatura" },
 ];
 
@@ -213,12 +213,22 @@ export default function CompanySettingsPage() {
                 ))}
               </div>
               <div>
-                <label className="label">Dados bancários</label>
-                <textarea value={form.bankDetails ?? ""} onChange={(e) => setForm((f) => ({ ...f, bankDetails: e.target.value }))} disabled={!canEdit} className="input min-h-20" placeholder="Banco, NIB, conta..." />
+                <label className="label">Meios de pagamento</label>
+                <textarea
+                  value={form.bankDetails ?? ""}
+                  onChange={(e) => setForm((f) => ({ ...f, bankDetails: e.target.value }))}
+                  disabled={!canEdit}
+                  className="input min-h-20"
+                  placeholder={"Banco XYZ\nConta / NIB: …\nM-Pesa / e-Mola: …\nTitular: …"}
+                />
+                <p className="mt-1 text-xs text-slate-500">
+                  Aparece nas propostas, facturas e recibos do Comercial como «Meios de pagamento».
+                </p>
               </div>
               <div>
                 <label className="label">Rodapé dos documentos exportados</label>
-                <textarea value={form.documentFooter ?? ""} onChange={(e) => setForm((f) => ({ ...f, documentFooter: e.target.value }))} disabled={!canEdit} className="input min-h-16" />
+                <textarea value={form.documentFooter ?? ""} onChange={(e) => setForm((f) => ({ ...f, documentFooter: e.target.value }))} disabled={!canEdit} className="input min-h-16" placeholder="Morada, site, agradecimento…" />
+                <p className="mt-1 text-xs text-slate-500">Texto complementar no rodapé do PDF (além dos meios de pagamento).</p>
               </div>
               {canEdit && (
                 <button type="submit" disabled={saving} className="btn btn-primary">{saving ? "A guardar..." : "Guardar dados"}</button>
@@ -230,7 +240,7 @@ export default function CompanySettingsPage() {
         {tab === "logotipo" && (
           <section className="card card-pad">
             <h2 className="section-title mb-2">Logótipo</h2>
-            <p className="muted mb-4">Aparece na barra lateral e nos documentos exportados.</p>
+            <p className="muted mb-4">Aparece na barra lateral e no cabeçalho dos PDFs do Comercial (propostas, facturas, recibos).</p>
             {company.logoUrl && <img src={company.logoUrl} alt="Logótipo" className="mb-4 h-20 object-contain" />}
             {canEdit ? (
               <>

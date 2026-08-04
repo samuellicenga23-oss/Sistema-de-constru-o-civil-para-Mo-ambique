@@ -2,12 +2,13 @@ import type { FastifyInstance } from "fastify";
 import { and, desc, eq, sql as drizzleSql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db/index.js";
-import { invoiceCreditNotes, invoiceReceipts, measurementCertificates, projectInvoices } from "../db/schema.js";
+import { invoiceCreditNotes, invoiceReceipts, measurementCertificates, projectInvoices, users } from "../db/schema.js";
 import { requireCompanyUser, requireRole } from "../auth/middleware.js";
 import { assertCertificateOwned, assertProjectOwned } from "../services/accessControl.js";
 import { invoiceCreditAmount, invoicePaidAmount, syncInvoiceReceivable } from "../services/invoicing.js";
 import { recordAuditEvent } from "../services/auditTrail.js";
 import { buildInvoicePdf } from "../services/invoicePdf.js";
+import { loadCompanyBrand } from "../services/companyBrand.js";
 import { projects } from "../db/schema.js";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -58,7 +59,15 @@ export async function invoiceRoutes(app: FastifyInstance) {
     if (!project) return reply.code(404).send({ error: "Projecto não encontrado" });
     const paidAmount = receipts.reduce((total, receipt) => total + Number(receipt.amount), 0);
     const creditAmount = creditNotes.reduce((total, note) => total + Number(note.amount), 0);
-    const buffer = await buildInvoicePdf({ invoice, project, paidAmount, creditAmount, outstandingAmount: Math.max(0, Number(invoice.netAmount) - creditAmount - paidAmount) });
+    const company = await loadCompanyBrand(request.currentUser!.companyId!);
+    const buffer = await buildInvoicePdf({
+      invoice,
+      project,
+      company,
+      paidAmount,
+      creditAmount,
+      outstandingAmount: Math.max(0, Number(invoice.netAmount) - creditAmount - paidAmount),
+    });
     reply.header("Content-Type", "application/pdf").header("Content-Disposition", `attachment; filename="Factura-${(invoice.invoiceNumber ?? id).replace(/[^\\w-]/g, "")}.pdf"`).send(buffer);
   });
 
@@ -80,7 +89,21 @@ export async function invoiceRoutes(app: FastifyInstance) {
     if (invoice.status !== "rascunho") return reply.code(409).send({ error: "Apenas facturas em rascunho podem ser emitidas" });
     const parsed = z.object({ invoiceNumber: z.string().trim().min(1).max(80), issueDate: z.string().min(1), dueDate: z.string().optional(), retentionRate: z.number().min(0).max(1).default(0), notes: z.string().max(2000).optional() }).safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
-    if (invoice.createdByUserId === request.currentUser!.id) return reply.code(409).send({ error: "Quem preparou a factura não pode emiti-la" });
+    if (invoice.createdByUserId === request.currentUser!.id) {
+      const admins = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(
+          and(
+            eq(users.companyId, request.currentUser!.companyId!),
+            eq(users.role, "admin_empresa"),
+            eq(users.isActive, true),
+          ),
+        );
+      if (admins.length > 1) {
+        return reply.code(409).send({ error: "Quem preparou a factura não pode emiti-la" });
+      }
+    }
     const retentionAmount = Number(invoice.grossAmount) * parsed.data.retentionRate;
     const netAmount = Number(invoice.grossAmount) - retentionAmount;
     const [updated] = await db.update(projectInvoices).set({ status: "emitida", invoiceNumber: parsed.data.invoiceNumber, issueDate: parsed.data.issueDate, dueDate: parsed.data.dueDate, retentionRate: parsed.data.retentionRate.toString(), retentionAmount: retentionAmount.toFixed(2), netAmount: netAmount.toFixed(2), notes: parsed.data.notes, issuedByUserId: request.currentUser!.id }).where(eq(projectInvoices.id, id)).returning();

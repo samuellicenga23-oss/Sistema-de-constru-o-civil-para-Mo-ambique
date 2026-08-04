@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { and, eq, desc, count } from "drizzle-orm";
+import { and, eq, desc, count, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -21,7 +21,7 @@ const createCompanySchema = z.object({
   defaultCurrency: z.enum(CURRENCIES).default("MZN"),
   adminName: z.string().min(1),
   adminEmail: z.string().trim().toLowerCase().email(),
-  adminPassword: z.string().min(8, "A password deve ter pelo menos 8 caracteres"),
+  adminPassword: z.string().min(8, "A palavra-passe deve ter pelo menos 8 caracteres"),
 });
 
 const colourSchema = z.string().regex(/^#[0-9A-Fa-f]{6}$/, "Use uma cor hexadecimal válida");
@@ -209,16 +209,27 @@ export async function companyRoutes(app: FastifyInstance) {
     const current = await getLatestSubscription(id);
     if (!current) return reply.code(404).send({ error: "Empresa sem subscrição" });
 
+    const nextStatus = parsed.data.status ?? current.status;
     const [row] = await db
       .update(subscriptions)
       .set({
-        status: parsed.data.status ?? current.status,
+        status: nextStatus,
         plan: parsed.data.plan ?? current.plan,
-        activatedAt: parsed.data.status === "activo" ? new Date() : current.activatedAt,
-        activatedByUserId: parsed.data.status === "activo" ? request.currentUser!.id : current.activatedByUserId,
+        activatedAt: nextStatus === "activo" ? new Date() : current.activatedAt,
+        activatedByUserId: nextStatus === "activo" ? request.currentUser!.id : current.activatedByUserId,
       })
       .where(eq(subscriptions.id, current.id))
       .returning();
+
+    // Ao suspender, termina sessões activas da empresa para o bloqueio não depender do TTL.
+    if (nextStatus === "suspenso" && nextStatus !== current.status) {
+      const companyUsers = await db.select({ id: users.id }).from(users).where(eq(users.companyId, id));
+      const userIds = companyUsers.map((u) => u.id);
+      if (userIds.length) {
+        await db.delete(sessions).where(inArray(sessions.userId, userIds));
+      }
+    }
+
     return row;
   });
 
@@ -254,9 +265,18 @@ export async function companyRoutes(app: FastifyInstance) {
     // Estado dos serviços — a própria API está claramente "no ar" (está a responder a este
     // pedido); o plant-service precisa de um ping real porque corre num processo à parte.
     let plantServiceUp = false;
+    let plantAi: unknown = null;
     try {
       const res = await fetch(`${env.plantServiceUrl}/health`, { signal: AbortSignal.timeout(3000) });
       plantServiceUp = res.ok;
+      if (res.ok) {
+        try {
+          const body = (await res.json()) as { ai?: unknown };
+          plantAi = body.ai ?? null;
+        } catch {
+          plantAi = null;
+        }
+      }
     } catch {
       plantServiceUp = false;
     }
@@ -269,7 +289,7 @@ export async function companyRoutes(app: FastifyInstance) {
       totalUsers: Number(totalUsers),
       totalProjects: Number(totalProjects),
       planCounts,
-      services: { api: true, plantService: plantServiceUp },
+      services: { api: true, plantService: plantServiceUp, plantAi },
     };
   });
 

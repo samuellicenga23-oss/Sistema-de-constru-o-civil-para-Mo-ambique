@@ -175,6 +175,7 @@ export function computeQuantities(input: QuickEstimateInput) {
   const topFloorArea = topFloor.rooms.reduce((s, r) => s + roomArea(r), 0);
   const roofArea = input.roofArea ?? topFloorArea * 1.1;
   const totalBuiltArea = floors.reduce((s, f) => s + f.rooms.reduce((s2, r) => s2 + roomArea(r), 0), 0);
+  const totalRooms = floors.reduce((s, f) => s + f.rooms.length, 0);
 
   let totalExteriorWallArea = 0;
   let totalInteriorWallArea = 0;
@@ -299,7 +300,8 @@ export function computeQuantities(input: QuickEstimateInput) {
     "2.1": excavationVolume,
     "2.2": backfillVolume,
     "2.3": input.backfillEarthVolumeM3 ?? groundFloorArea * 0.5,
-    "2.4": groundFloorArea,
+    // Enrocamento é m³: área × espessura típica do leito (15 cm sob pavimento/fundações).
+    "2.4": groundFloorArea * 0.15,
     "2.5": groundFloorArea,
 
     "3.1": footingConcreteVolume * 0.15,
@@ -346,6 +348,12 @@ export function computeQuantities(input: QuickEstimateInput) {
     "12.1": septicTankResult?.volumeM3 ?? 0,
     "12.2": infiltrationAreaM2 ?? 0,
 
+    // Eléctricas — rácios de pré-dimensionamento (não substituem projecto eléctrico).
+    "13.1": totalRooms > 0 ? 1 : 0,
+    "13.2": totalRooms > 0 ? Math.max(totalRooms, Math.round(totalBuiltArea / 12)) : 0,
+    "13.3": totalRooms > 0 ? Math.max(totalRooms * 2, Math.round(totalBuiltArea / 8)) : 0,
+    "13.4": totalRooms > 0 ? 1 : 0,
+
     "15.1": interiorDoors,
     "15.2": exteriorDoors,
     "15.3": windowArea,
@@ -368,7 +376,12 @@ export function computeQuantities(input: QuickEstimateInput) {
       ? `Valor indicado no Assistente (ajuste avançado): ${fmt(input.backfillEarthVolumeM3)} m³`
       : `Área do piso térreo (${fmt(groundFloorArea)} m²) × 0.50 (rácio genérico de enrocamento — sem dado real de espessura do leito)`
   );
-  push("2.4", byCode["2.4"], "medido", `Área do piso térreo (${fmt(groundFloorArea)} m²)`);
+  push(
+    "2.4",
+    byCode["2.4"],
+    "estimativa",
+    `Área do piso térreo (${fmt(groundFloorArea)} m²) × 0.15 m (espessura típica do leito de enrocamento)`,
+  );
   push("2.5", byCode["2.5"], "medido", `Área do piso térreo (${fmt(groundFloorArea)} m²)`);
 
   push("3.1", byCode["3.1"], footingSource, `Volume de betão de fundação (${fmt(footingConcreteVolume)} m³) × 0.15 (rácio genérico de betão de limpeza)`);
@@ -511,6 +524,21 @@ export function computeQuantities(input: QuickEstimateInput) {
       );
     }
   }
+
+  push("13.1", byCode["13.1"], "estimativa", totalRooms > 0 ? "1 quadro principal (rácio de pré-dimensionamento — 1 por edifício)" : "Sem compartimentos — eléctricas a zero");
+  push(
+    "13.2",
+    byCode["13.2"],
+    "estimativa",
+    `${totalRooms} compartimento(s) / área ${fmt(totalBuiltArea)} m² → máx(compartimentos, área÷12) pontos de iluminação (estimativa)`,
+  );
+  push(
+    "13.3",
+    byCode["13.3"],
+    "estimativa",
+    `${totalRooms} compartimento(s) / área ${fmt(totalBuiltArea)} m² → máx(2×compartimentos, área÷8) tomadas (estimativa)`,
+  );
+  push("13.4", byCode["13.4"], "estimativa", totalRooms > 0 ? "1 vg rede de terra (rácio de pré-dimensionamento)" : "Sem compartimentos — eléctricas a zero");
 
   push("15.1", byCode["15.1"], "medido", `${interiorDoors} porta(s) interior(es) confirmada(s)`);
   push("15.2", byCode["15.2"], "medido", `${exteriorDoors} porta(s) exterior(es) confirmada(s)`);

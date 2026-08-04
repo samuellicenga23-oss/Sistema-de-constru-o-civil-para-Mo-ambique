@@ -65,13 +65,18 @@ type MeasureStrategy =
   | { kind: "per_room_area"; filter: RoomFilter }
   | { kind: "per_room_wall"; filter: Exclude<RoomFilter, "ground">; ceilingHeight?: number }
   | { kind: "single_total"; filter: RoomFilter }
+  /** Área total × espessura → volume (ex. enrocamento m³). */
+  | { kind: "single_volume"; filter: RoomFilter; thicknessM: number }
   | { kind: "count_rooms"; filter: Exclude<RoomFilter, "ground"> };
+
+// Espessura típica do leito de enrocamento sob pavimento/fundações (alinha ao Assistente).
+const DEFAULT_ENROCKMENT_THICKNESS_M = 0.15;
 
 // Códigos do mapa padrão SIGO (boqTemplate) com regra de preenchimento a partir da planta.
 const ITEM_STRATEGIES: Record<string, MeasureStrategy> = {
   "1.1": { kind: "single_total", filter: "ground" },
   "1.3": { kind: "single_total", filter: "ground" },
-  "2.4": { kind: "single_total", filter: "ground" },
+  "2.4": { kind: "single_volume", filter: "ground", thicknessM: DEFAULT_ENROCKMENT_THICKNESS_M },
   "2.5": { kind: "single_total", filter: "ground" },
   "4.1": { kind: "per_room_wall", filter: "all" },
   "4.2": { kind: "per_room_wall", filter: "all" },
@@ -186,6 +191,26 @@ export function buildMeasurementLinesFromPlant(itemCode: string, rooms: PlantRoo
           length: null,
           width: null,
           height: null,
+          sortOrder: 0,
+        },
+      ],
+    };
+  }
+
+  if (strategy.kind === "single_volume") {
+    const totalArea = filtered.reduce((s, r) => s + r.areaM2, 0);
+    const thicknessM = strategy.thicknessM;
+    return {
+      ok: true,
+      strategy: `volume = área × ${thicknessM} m (${strategy.filter})`,
+      roomCount: filtered.length,
+      lines: [
+        {
+          description: `Soma de ${filtered.length} compartimento(s) — planta × ${thicknessM} m (espessura do leito)`,
+          count: 1,
+          length: totalArea,
+          width: 1,
+          height: thicknessM,
           sortOrder: 0,
         },
       ],

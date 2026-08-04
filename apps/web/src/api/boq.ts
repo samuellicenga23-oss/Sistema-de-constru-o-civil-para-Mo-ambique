@@ -124,6 +124,7 @@ export type BudgetRepriceResult = {
 
 export const boqApi = {
   listProjects: () => request<Project[]>("/projects"),
+  listProjectsReadyForSite: () => request<Project[]>("/projects?readyForSite=1"),
   getProject: (id: string) => request<Project>(`/projects/${id}`),
   getProjectWorkflow: (id: string) => request<ProjectWorkflowStatus>(`/projects/${id}/workflow`),
   createProject: (data: {
@@ -184,6 +185,10 @@ export const boqApi = {
       { method: "POST", body: JSON.stringify(body) },
     );
   },
+  reviseBudgetDocument: (id: string) =>
+    request<{ document: BudgetDocument; sourceDocumentId: string }>(`/budget-documents/${id}/revise`, {
+      method: "POST",
+    }),
   applySpecifications: (id: string) =>
     request<{ updated: number }>(`/budget-documents/${id}/apply-specifications`, { method: "POST" }),
   measurementExcelUrl: (id: string) => `/api/budget-documents/${id}/export-measurements.xlsx`,

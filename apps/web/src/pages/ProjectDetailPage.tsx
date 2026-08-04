@@ -12,7 +12,7 @@ import { usePlantPolling } from "../hooks/usePlantPolling";
 import { SectionHeader } from "../components/WorkspaceUI";
 import ProjectWorkspaceNav from "../components/ProjectWorkspaceNav";
 import ProjectWorkflowBanner from "../components/ProjectWorkflowBanner";
-import { IconBack, IconDoc, IconClipboard, IconMap, IconPlus, IconRuler, IconTrash, IconUpload } from "../components/icons";
+import { IconDoc, IconClipboard, IconMap, IconPlus, IconRuler, IconTrash, IconUpload } from "../components/icons";
 import { UNITS, type Unit } from "@sigo/shared";
 
 const PLANT_STATUS_BADGE: Record<Plant["processingStatus"], { label: string; cls: string }> = {
@@ -295,34 +295,78 @@ export default function ProjectDetailPage() {
   const hasMeasuredBudget = measurementDocuments.some((document) => document.lastEstimateReport?.entries?.length);
   const latestCompletedPlant = completedPlants[completedPlants.length - 1];
   const usesPlants = project.measurementMode === "plantas";
-  const workflowSteps = usesPlants
+
+  const faseParam = searchParams.get("fase");
+  const fase: "medicao" | "orcamento" | "gestao" | "hibrido" =
+    faseParam === "gestao"
+      ? "gestao"
+      : faseParam === "medicao" || faseParam === "orcamento"
+        ? faseParam
+        : project.projectType === "medicao"
+          ? "medicao"
+          : project.projectType === "orcamento"
+            ? "orcamento"
+            : "hibrido";
+  // Em projectos híbridos, o hub deve mostrar medições E orçamentos mesmo quando
+  // se entra a partir de /medicoes ou /orcamentos (fase filtrada).
+  const isHibrido = project.projectType === "hibrido";
+  const showMedicao = fase === "medicao" || fase === "hibrido" || fase === "gestao" || isHibrido;
+  const showOrcamento = fase === "orcamento" || fase === "hibrido" || fase === "gestao" || isHibrido;
+  // Plantas e preparação de preços são o ponto de partida da obra — não esconder
+  // só porque se entrou por Orçamentos; em gestão mantêm-se acessíveis.
+  const showPlantas = fase !== "gestao" || usesPlants || plants.length > 0;
+  const showPrepararObra = fase !== "gestao";
+  const showCertificados = fase === "gestao" || (fase === "orcamento" && approvedBudgetDocuments.length > 0);
+
+  const workflowSteps = fase === "orcamento"
     ? [
-        { label: "1. Identificar a obra", detail: "Projecto criado", done: true },
-        { label: "2. Carregar projectos", detail: plants.length ? `${plants.length} ficheiro(s)` : "Arquitectura, estrutura ou ambos", done: plants.length > 0 },
-        { label: "3. Confirmar dados", detail: failedPlants.length ? `${failedPlants.length} ficheiro(s) requerem atenção` : completedPlants.length ? "Dados prontos para revisão" : "A aguardar análise", done: completedPlants.length > 0 && failedPlants.length === 0 },
-        { label: "4. Medir", detail: hasMeasuredBudget ? "Quantidades prontas" : "Diagnóstico antes do cálculo", done: hasMeasuredBudget },
-        { label: "5. Orçamentar", detail: budgetDocuments.length ? "Medição ligada ao orçamento" : "Enviar quando a medição estiver pronta", done: budgetDocuments.length > 0 },
-      ]
-    : [
         { label: "1. Projecto", detail: "Dados da obra registados", done: true },
-        { label: "2. Medições", detail: project.measurementMode === "importar" ? "Quantidades importadas do Excel" : "Introdução manual no assistente", done: project.measurementMode === "importar" || hasMeasuredBudget },
-        { label: "3. Orçamento", detail: "Rever quantidades, preços e percentagens", done: hasMeasuredBudget },
-      ];
+        { label: "2. Preços", detail: project.zoneId ? "Zona definida" : "Definir zona e cotações", done: Boolean(project.zoneId) },
+        { label: "3. Orçamento", detail: budgetDocuments.length ? "Mapa criado" : "Criar ou receber da medição", done: budgetDocuments.length > 0 },
+        { label: "4. Aprovar", detail: approvedBudgetDocuments.length ? "Pronto para gestão" : "Submeter e aprovar", done: approvedBudgetDocuments.length > 0 },
+      ]
+    : usesPlants
+      ? [
+          { label: "1. Identificar a obra", detail: "Projecto criado", done: true },
+          { label: "2. Carregar projectos", detail: plants.length ? `${plants.length} ficheiro(s)` : "Arquitectura, estrutura ou ambos", done: plants.length > 0 },
+          { label: "3. Confirmar dados", detail: failedPlants.length ? `${failedPlants.length} ficheiro(s) requerem atenção` : completedPlants.length ? "Dados prontos para revisão" : "A aguardar análise", done: completedPlants.length > 0 && failedPlants.length === 0 },
+          { label: "4. Medir", detail: hasMeasuredBudget ? "Quantidades prontas" : "Diagnóstico antes do cálculo", done: hasMeasuredBudget },
+          ...(fase === "medicao"
+            ? [{ label: "5. Enviar a orçamentos", detail: budgetDocuments.length ? "Já enviado" : "Aprovar medição e criar orçamento", done: budgetDocuments.length > 0 }]
+            : [{ label: "5. Orçamentar", detail: budgetDocuments.length ? "Medição ligada ao orçamento" : "Enviar quando a medição estiver pronta", done: budgetDocuments.length > 0 }]),
+        ]
+      : [
+          { label: "1. Projecto", detail: "Dados da obra registados", done: true },
+          { label: "2. Medições", detail: project.measurementMode === "importar" ? "Quantidades importadas do Excel" : "Introdução manual no assistente", done: project.measurementMode === "importar" || hasMeasuredBudget },
+          ...(fase === "medicao"
+            ? [{ label: "3. Enviar a orçamentos", detail: budgetDocuments.length ? "Já enviado" : "Aprovar e criar orçamento", done: budgetDocuments.length > 0 }]
+            : [{ label: "3. Orçamento", detail: "Rever quantidades, preços e percentagens", done: hasMeasuredBudget }]),
+        ];
   const completedWorkflowSteps = workflowSteps.filter((step) => step.done).length;
   const workflowProgress = Math.round((completedWorkflowSteps / workflowSteps.length) * 100);
+
+  const backTo =
+    fase === "gestao" ? "/gestao" : fase === "medicao" ? "/medicoes" : fase === "orcamento" ? "/orcamentos" : project.projectType === "medicao" ? "/medicoes" : "/orcamentos";
+  const backLabel = fase === "gestao" ? "Gestão" : fase === "medicao" ? "Medições" : "Orçamentos";
+  const navMode = fase === "gestao" ? "site" : fase === "medicao" ? "measurement" : "budget";
+  const faseQuery = fase === "gestao" ? "?fase=gestao" : `?fase=${fase === "hibrido" ? "orcamento" : fase}`;
 
   return (
     <Layout
       title={project.name}
+      back={{ label: backLabel, fallbackTo: backTo }}
       actions={
-          <Link to={project.projectType === "medicao" ? "/medicoes" : "/orcamentos"} className="btn btn-ghost btn-sm">
-            <IconBack className="w-3.5 h-3.5" />
-            {project.projectType === "medicao" ? "Medições" : "Orçamentos"}
-          </Link>
+          approvedBudgetDocuments.length > 0 && fase !== "gestao" ? (
+              <Link to={`/projectos/${projectId}?fase=gestao`} className="btn btn-primary btn-sm">
+                Abrir gestão da obra
+              </Link>
+          ) : undefined
       }
     >
       <div className="mx-auto grid w-full max-w-7xl items-start gap-5 xl:grid-cols-2">
-        <div className="xl:col-span-2"><ProjectWorkspaceNav projectId={projectId!} measurementOnly={project.projectType === "medicao"} /></div>
+        <div className="xl:col-span-2">
+          <ProjectWorkspaceNav projectId={projectId!} mode={navMode} />
+        </div>
         {error && <p className="text-sm text-red-600 xl:col-span-2">{error}</p>}
         {uploadNotice && <p className="text-sm text-emerald-700 xl:col-span-2">{uploadNotice}</p>}
         {searchParams.get("uploadErro") === "1" && (
@@ -337,6 +381,7 @@ export default function ProjectDetailPage() {
 
         <ProjectWorkflowBanner status={workflowStatus} projectId={projectId!} />
 
+        {(fase === "medicao" || fase === "hibrido" || (fase === "orcamento" && usesPlants && !budgetDocuments.length)) && (
         <section className="card order-2 overflow-hidden xl:col-span-2">
           <div className="flex flex-col gap-4 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0 flex-1">
@@ -383,6 +428,31 @@ export default function ProjectDetailPage() {
             </div>
           )}
         </section>
+        )}
+
+        {fase === "orcamento" && (
+        <section className="card order-2 overflow-hidden xl:col-span-2">
+          <div className="flex flex-col gap-4 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-sm font-bold text-slate-950">Fluxo de orçamento</h2>
+                <span className="text-xs font-semibold text-slate-500">{completedWorkflowSteps}/{workflowSteps.length}</span>
+              </div>
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
+                <div className="h-full rounded-full bg-brand-600" style={{ width: `${workflowProgress}%` }} />
+              </div>
+            </div>
+          </div>
+          <div className="flex overflow-x-auto border-t border-slate-100 px-4 py-3">
+            {workflowSteps.map((step) => (
+              <div key={step.label} className="flex shrink-0 items-center gap-2 pr-5 text-xs">
+                <span className={`grid h-5 w-5 place-items-center rounded-full font-bold ${step.done ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{step.done ? "✓" : "·"}</span>
+                <span className={step.done ? "font-semibold text-slate-700" : "text-slate-500"}>{step.label.replace(/^\d+\.\s*/, "")}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+        )}
 
         <details className="card order-6 overflow-hidden xl:col-span-2">
           <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4">
@@ -417,17 +487,25 @@ export default function ProjectDetailPage() {
         </details>
 
         <section className="card order-1 overflow-hidden xl:col-span-2">
-          <div className="grid gap-px bg-slate-200 sm:grid-cols-3 xl:grid-cols-[0.8fr_0.8fr_0.8fr_1.8fr]">
-            {[
-              ["Medições", measurementDocuments.length],
-              ["Orçamentos", budgetDocuments.length],
-              ["Plantas", plants.length],
-            ].map(([label, value]) => (
-              <div key={label} className="bg-white px-5 py-4">
+          <div className={`grid gap-px bg-slate-200 sm:grid-cols-3 ${showPrepararObra ? "xl:grid-cols-[0.8fr_0.8fr_0.8fr_1.8fr]" : "xl:grid-cols-3"}`}>
+            {(fase === "orcamento"
+              ? [
+                  ["Orçamentos", budgetDocuments.length],
+                  ["Aprovados", approvedBudgetDocuments.length],
+                  ["Medições origem", measurementDocuments.length],
+                ]
+              : [
+                  ["Medições", measurementDocuments.length],
+                  ...(showOrcamento ? [["Orçamentos", budgetDocuments.length] as const] : [["A enviar", budgetDocuments.length ? "Sim" : "Não"] as const]),
+                  ["Plantas", plants.length],
+                ]
+            ).map(([label, value]) => (
+              <div key={String(label)} className="bg-white px-5 py-4">
                 <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</span>
                 <strong className="mt-1 block text-2xl text-slate-950">{value}</strong>
               </div>
             ))}
+            {showPrepararObra && (
             <label className="bg-white px-5 py-4 sm:col-span-3 xl:col-span-1">
               <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Zona de preços</span>
               <select
@@ -442,9 +520,11 @@ export default function ProjectDetailPage() {
                 ))}
               </select>
             </label>
+            )}
           </div>
         </section>
 
+        {showPrepararObra && (
         <details
           id="preparar-obra"
           open={!project.zoneId || costReadiness.compositions === 0 || (costReadiness.suppliers > 0 && costReadiness.quoted === 0)}
@@ -482,14 +562,16 @@ export default function ProjectDetailPage() {
             ))}
           </div>
         </details>
+        )}
 
         {/* Medições técnicas */}
+        {showMedicao && (
         <section className="card order-3">
           <SectionHeader title="Medições" description="Quantidades, memória de cálculo e origem dos dados — sem preços" actions={<IconRuler className="w-4 h-4 text-blue-700" />} />
           <ul>
             {measurementDocuments.map((d) => (
               <li key={d.id} className="table-row group">
-                <Link to={`/documentos/${d.id}`} className="flex flex-col gap-2 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <Link to={`/documentos/${d.id}${faseQuery}`} className="flex flex-col gap-2 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
                   <span className="min-w-0 break-words font-medium text-gray-900">{d.title} {d.revision ? <span className="font-normal text-gray-400">rev. {d.revision}</span> : ""}</span>
                   <span className="flex shrink-0 flex-wrap items-center gap-2">
                     <span className="badge badge-brand">Quantidades</span>
@@ -502,8 +584,10 @@ export default function ProjectDetailPage() {
             {measurementDocuments.length === 0 && <li className="px-5 py-4 text-sm text-gray-400">Sem medição técnica. Prepare uma a partir das plantas ou manualmente.</li>}
           </ul>
         </section>
+        )}
 
         {/* Orçamentos */}
+        {showOrcamento && (
         <section className="card order-3">
           <SectionHeader title="Orçamentos" description="Cenários comerciais a partir das medições — sem repetir quantidades" actions={<IconDoc className="w-4 h-4 text-blue-700" />} />
           <ul>
@@ -516,7 +600,7 @@ export default function ProjectDetailPage() {
                 : 0;
               return (
               <li key={d.id} className="table-row group">
-                <Link to={`/documentos/${d.id}`} className="flex flex-col gap-2 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <Link to={`/documentos/${d.id}${faseQuery}`} className="flex flex-col gap-2 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
                   <span className="min-w-0">
                     <span className="block break-words font-medium text-gray-900">
                       {d.title} {d.revision ? <span className="text-gray-400 font-normal">rev. {d.revision}</span> : ""}
@@ -564,8 +648,10 @@ export default function ProjectDetailPage() {
             </form>
           </details>
         </section>
+        )}
 
         {/* Plantas */}
+        {showPlantas && (
         <section id="plantas-do-projecto" className="card order-4 scroll-mt-24">
           <SectionHeader title="Projectos e desenhos" description="Carregue arquitectura, estrutura ou outras disciplinas disponíveis" actions={<IconMap className="w-4 h-4 text-blue-700" />} />
           <ul>
@@ -654,8 +740,10 @@ export default function ProjectDetailPage() {
             </button>
           </form>
         </section>
+        )}
 
         {/* Certificados de obra (avanço físico — distinto das medições de projecto) */}
+        {showCertificados && (
         <section id="certificados-obra" className="card order-8 xl:col-span-2 scroll-mt-24">
           <SectionHeader
             title="Certificados de obra"
@@ -665,8 +753,8 @@ export default function ProjectDetailPage() {
           {approvedBudgetDocuments.length === 0 ? (
             <div className="border-t border-gray-100 px-5 py-4 text-sm text-slate-600">
               <p>Aprove um orçamento para abrir o primeiro Auto de Medição.</p>
-              {budgetDocuments[0] && <Link to={`/documentos/${budgetDocuments[0].id}`} className="action-link mt-2 inline-block">Rever orçamento →</Link>}
-              {!budgetDocuments[0] && measurementDocuments[0] && <Link to={`/documentos/${measurementDocuments[0].id}`} className="action-link mt-2 inline-block">Enviar medição para orçamento →</Link>}
+              {budgetDocuments[0] && <Link to={`/documentos/${budgetDocuments[0].id}${faseQuery}`} className="action-link mt-2 inline-block">Rever orçamento →</Link>}
+              {!budgetDocuments[0] && measurementDocuments[0] && <Link to={`/documentos/${measurementDocuments[0].id}${faseQuery}`} className="action-link mt-2 inline-block">Enviar medição para orçamento →</Link>}
             </div>
           ) : (
           <div className="grid md:grid-cols-2">
@@ -715,6 +803,7 @@ export default function ProjectDetailPage() {
           </div>
           )}
         </section>
+        )}
       </div>
       {dialog}
     </Layout>

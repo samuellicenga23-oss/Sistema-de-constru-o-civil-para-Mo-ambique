@@ -23,10 +23,17 @@ export async function createDraftInvoiceForCertificate(certificateId: string, ac
     siteCostsRate: Number(document.siteCostsRate), indirectCostsRate: Number(document.indirectCostsRate),
     contingenciasRate: Number(document.contingenciasRate), profitMarginRate: Number(document.profitMarginRate), ivaRate: Number(document.ivaRate),
   }).total;
+  // Quem prepara a factura em rascunho deve ser o submissor do Auto (não o aprovador),
+  // para o admin que aprovou poder emitir sem deadlock de SoD. Se for a mesma pessoa
+  // (admin único), createdBy fica null e a emissão permite-se no endpoint de issue.
+  const preparerId =
+    certificate.submittedByUserId && certificate.submittedByUserId !== actorUserId
+      ? certificate.submittedByUserId
+      : null;
   const [invoice] = await db.insert(projectInvoices).values({
     projectId: certificate.projectId, measurementCertificateId: certificateId, clientName: project.client,
     grossAmount: grossAmount.toFixed(2), ivaRate: document.ivaRate, netAmount: grossAmount.toFixed(2),
-    currency: document.currency, createdByUserId: actorUserId,
+    currency: document.currency, createdByUserId: preparerId,
   }).returning();
   return invoice;
 }

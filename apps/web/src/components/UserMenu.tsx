@@ -11,10 +11,8 @@ function initials(name: string | undefined): string {
   return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase();
 }
 
-// Menu do perfil no cabeçalho — pedido explícito do documento da Fase 1 (Prioridade 5:
-// "Menu do perfil" como elemento do layout, disponível em qualquer página, não só na barra
-// lateral). Fecha ao clicar fora.
-export default function UserMenu() {
+/** Menu de perfil no cabeçalho: nome visível + Perfil e Sair em destaque. */
+export default function UserMenu({ compact = false }: { compact?: boolean }) {
   const { user, logout } = useAuth();
   const { t } = useLanguage();
   const [open, setOpen] = useState(false);
@@ -32,29 +30,53 @@ export default function UserMenu() {
 
   return (
     <div className="relative" ref={ref}>
-      <button type="button" onClick={() => setOpen((o) => !o)} className="grid h-10 w-10 shrink-0 appearance-none place-items-center overflow-hidden rounded-full border-0 bg-transparent p-1" title={user.name} aria-label={`${t("profile")}: ${user.name}`}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={`flex max-w-[14rem] items-center gap-2 rounded-full border border-slate-200 bg-white shadow-sm transition hover:border-slate-300 hover:bg-slate-50 ${
+          compact ? "h-10 w-10 justify-center p-0.5" : "h-10 pl-1.5 pr-3"
+        }`}
+        title={user.name}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        aria-label={`${t("profile")}: ${user.name}`}
+      >
         {user.avatarUrl ? (
-          <img src={user.avatarUrl} alt={user.name} draggable={false} className="block h-8 w-8 rounded-full object-cover" />
+          <img src={user.avatarUrl} alt="" draggable={false} className="h-7 w-7 shrink-0 rounded-full object-cover" />
         ) : (
-          <div className="w-8 h-8 rounded-full bg-brand-100 text-brand-800 flex items-center justify-center text-xs font-semibold">
+          <div className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-brand-100 text-xs font-semibold text-brand-800">
             {initials(user.name)}
           </div>
         )}
+        {!compact && (
+          <span className="min-w-0 text-left">
+            <span className="block truncate text-xs font-semibold text-slate-900">{user.name.split(" ")[0]}</span>
+            <span className="block truncate text-[10px] text-slate-500">Perfil</span>
+          </span>
+        )}
       </button>
       {open && (
-        <div className="absolute right-0 mt-2 w-56 card p-1 z-20 shadow-lg">
-          <div className="px-3 py-2 border-b border-gray-100">
-            <p className="text-sm font-medium text-gray-900 truncate">{user.name}</p>
-            <p className="muted">{roleLabel(user.role)}</p>
+        <div className="absolute right-0 z-30 mt-2 w-64 overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-lg" role="menu">
+          <div className="border-b border-slate-100 px-3 py-3">
+            <p className="truncate text-sm font-semibold text-slate-900">{user.name}</p>
+            <p className="truncate text-xs text-slate-500">{user.email}</p>
+            <p className="mt-0.5 text-[11px] text-slate-400">{roleLabel(user.role)}</p>
           </div>
-          <Link to="/perfil" onClick={() => setOpen(false)} className="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-md">
+          <Link
+            to="/perfil"
+            onClick={() => setOpen(false)}
+            className="mt-1 flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium text-slate-800 hover:bg-slate-50"
+            role="menuitem"
+          >
             {t("profile")}
           </Link>
           <button
+            type="button"
             onClick={() => logout()}
-            className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-md flex items-center gap-2"
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium text-rose-600 hover:bg-rose-50"
+            role="menuitem"
           >
-            <IconLogout className="w-3.5 h-3.5" />
+            <IconLogout className="h-4 w-4" />
             {t("logout")}
           </button>
         </div>

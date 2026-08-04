@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { boqApi, type Project } from "../api/boq";
 import { suppliersApi, type Supplier, type SupplierMaterialPrice } from "../api/suppliers";
 import { catalogApi, type Material } from "../api/catalog";
@@ -22,6 +22,8 @@ import Modal from "../components/Modal";
 import PageSearch from "../components/PageSearch";
 import { IconBack, IconPlus, IconTrash } from "../components/icons";
 import { calculateVatTotals } from "@sigo/shared";
+import { useAuth } from "../auth/AuthContext";
+import { can } from "../permissions";
 
 const STATUS_LABELS: Record<PurchaseOrder["status"], string> = {
   rascunho: "Rascunho",
@@ -69,7 +71,11 @@ function stockMovementTotals(movement: StockMovement, ivaRate: number) {
 
 export default function ProjectPurchasingPage() {
   const { confirm, dialog } = useConfirmDialog();
+  const { user } = useAuth();
   const { projectId } = useParams<{ projectId: string }>();
+  const [searchParams] = useSearchParams();
+  const canRequest = can(user, "materiais.requisitar");
+  const canApprove = can(user, "materiais.aprovar") || user?.role === "admin_empresa";
   const [project, setProject] = useState<Project | null>(null);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
@@ -93,6 +99,12 @@ export default function ProjectPurchasingPage() {
   const [lines, setLines] = useState<PurchaseOrderLineInput[]>([]);
   const [quoteRequirement, setQuoteRequirement] = useState<ProcurementRequirement | null>(null);
 
+  const [showRequestForm, setShowRequestForm] = useState(false);
+  const [requestNotes, setRequestNotes] = useState("");
+  const [requestLines, setRequestLines] = useState<Array<{ materialId: string; quantity: string }>>([
+    { materialId: "", quantity: "1" },
+  ]);
+
   const [movMaterialId, setMovMaterialId] = useState("");
   const [showMovementForm, setShowMovementForm] = useState(false);
   const [movType, setMovType] = useState<"entrada" | "saida">("saida");
@@ -102,7 +114,7 @@ export default function ProjectPurchasingPage() {
   const [movDate, setMovDate] = useState(todayStr());
 
   const materialById = useMemo(() => new Map(materials.map((m) => [m.id, m])), [materials]);
-  const commercialSuppliers = useMemo(() => suppliers.filter((supplier) => !supplier.isReference), [suppliers]);
+  const orderSuppliers = useMemo(() => suppliers, [suppliers]);
   const orderDraftTotals = useMemo(() => calculateVatTotals(lines.reduce((sum, line) => sum + Number(line.quantity || 0) * Number(line.unitCost || 0), 0), Number(project?.ivaRate ?? 0.16)), [lines, project?.ivaRate]);
   const movementDraftTotals = useMemo(() => calculateVatTotals(Number(movQty || 0) * Number(movUnitCost || 0), Number(project?.ivaRate ?? 0.16)), [movQty, movUnitCost, project?.ivaRate]);
   const normalizedQuery = query.trim().toLocaleLowerCase("pt");
@@ -155,10 +167,9 @@ export default function ProjectPurchasingPage() {
     setStockSummary(summary);
     setProcurementPlan(plan);
     setScheduleTasks(schedule?.tasks ?? []);
-    const firstCommercialSupplier = sups.find((supplier) => !supplier.isReference);
     const selectedSupplier = sups.find((supplier) => supplier.id === supplierId);
-    if (!selectedSupplier || selectedSupplier.isReference) {
-      setSupplierId(firstCommercialSupplier?.id ?? "");
+    if (!selectedSupplier) {
+      setSupplierId(sups[0]?.id ?? "");
     }
     if (!movMaterialId && mats.length) setMovMaterialId(mats[0].id);
     if (lines.length === 0 && mats.length) setLines([emptyLine(mats)]);
@@ -201,12 +212,12 @@ export default function ProjectPurchasingPage() {
   }
 
   function prepareOrderFromQuote(suggestion: ProcurementRequirement, quote: ProcurementQuote) {
-    if (!quote.supplierId || quote.isReference) return;
+    if (!quote.supplierId) return;
     setSupplierId(quote.supplierId);
     setScheduleTaskId(suggestion.suggestedScheduleTaskId ?? "");
     setRequiredByDate(suggestion.requiredByDate ?? "");
     setLines([{ materialId: suggestion.materialId, quantity: suggestion.suggestedOrderQty, unitCost: quote.unitCost, currency: project?.currency }]);
-    setOrderNotes(`Cotação escolhida: ${quote.supplierName}`);
+    setOrderNotes(quote.isReference ? `Pedido com preços SIGO (${quote.supplierName})` : `Cotação escolhida: ${quote.supplierName}`);
     setQuoteRequirement(null);
     setView("pedidos");
     setShowOrderForm(true);
@@ -236,6 +247,35 @@ export default function ProjectPurchasingPage() {
       await reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao criar ordem de compra");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleMaterialRequest(e: FormEvent) {
+    e.preventDefault();
+    if (!projectId) return;
+    const linesPayload = requestLines
+      .map((line) => ({ materialId: line.materialId, quantity: Number(line.quantity) }))
+      .filter((line) => line.materialId && line.quantity > 0);
+    if (!linesPayload.length) {
+      setError("Indique pelo menos um material com quantidade.");
+      return;
+    }
+    setError(null);
+    setSaving(true);
+    try {
+      await purchasingApi.createMaterialRequest(projectId, {
+        notes: requestNotes.trim() || undefined,
+        lines: linesPayload,
+      });
+      setRequestNotes("");
+      setRequestLines([{ materialId: materials[0]?.id ?? "", quantity: "1" }]);
+      setShowRequestForm(false);
+      setView("pedidos");
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao criar pedido de materiais");
     } finally {
       setSaving(false);
     }
@@ -317,12 +357,30 @@ export default function ProjectPurchasingPage() {
     <>
     <Layout
       title={`Compras e Armazém — ${project.name}`}
-      subtitle="Necessidades, pedidos e stock da obra"
+      subtitle="Peça materiais, aprove pedidos e acompanhe o stock"
       actions={
-        <Link to={`/projectos/${projectId}`} className="btn btn-ghost btn-sm">
-          <IconBack className="w-3.5 h-3.5" />
-          Projecto
-        </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          {canRequest && (
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={() => {
+                setRequestLines([{ materialId: materials[0]?.id ?? "", quantity: "1" }]);
+                setShowRequestForm(true);
+                setView("pedidos");
+              }}
+            >
+              <IconPlus className="h-3.5 w-3.5" /> Pedir materiais
+            </button>
+          )}
+          <Link
+            to={`/projectos/${projectId}${searchParams.get("fase") === "gestao" ? "?fase=gestao" : ""}`}
+            className="btn btn-ghost btn-sm"
+          >
+            <IconBack className="w-3.5 h-3.5" />
+            Projecto
+          </Link>
+        </div>
       }
     >
       <div className="mx-auto w-full max-w-7xl space-y-5">
@@ -397,9 +455,9 @@ export default function ProjectPurchasingPage() {
                     <span className="mt-1 block text-xs leading-5 text-slate-500">{item.phases.map((phase) => phase.label).join(" · ")}</span>
                   </div>
                   {(() => {
-                    const commercialQuoteCount = (item.quotes ?? []).filter((quote) => !quote.isReference).length;
+                    const quoteCount = (item.quotes ?? []).length;
                     const hasSigoQuote = (item.quotes ?? []).some((quote) => quote.isReference);
-                    return <span className={`badge shrink-0 ${commercialQuoteCount ? "badge-green" : "badge-brand"}`}>{commercialQuoteCount ? `${commercialQuoteCount} fornecedor(es)${hasSigoQuote ? " + SIGO" : ""}` : hasSigoQuote ? "Cotação SIGO" : "Sem cotação"}</span>;
+                    return <span className={`badge shrink-0 ${quoteCount ? "badge-green" : "badge-gray"}`}>{quoteCount ? `${quoteCount} fornecedor(es)${hasSigoQuote ? " · incl. SIGO" : ""}` : "Sem cotação"}</span>;
                   })()}
                 </div>
                 <div className="mt-4 grid grid-cols-3 gap-2 rounded-lg bg-slate-50 p-3 text-xs">
@@ -410,7 +468,7 @@ export default function ProjectPurchasingPage() {
                 {item.purchaseQty && item.purchasePackageLabel && <p className="mt-2 text-xs font-medium text-orange-700">Compra sugerida: {item.purchaseQty} × {item.purchasePackageLabel}</p>}
                 {item.suggestedScheduleTaskName && <p className="mt-2 text-xs text-blue-700">Necessário até {item.requiredByDate} · {item.suggestedScheduleTaskName}</p>}
                 <div className="mt-4 flex items-end justify-between gap-3 border-t border-slate-100 pt-4">
-                  <div><span className="block text-xs text-slate-500">{item.supplierId ? "Melhor cotação" : item.supplierName === "SIGO Preços" ? "Cotação SIGO" : "Preço do catálogo"}</span><strong className="mt-0.5 block tabular-nums text-slate-950">{item.estimatedTotalWithVat.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {procurementPlan.currency}</strong><small className="text-slate-400">IVA incluído</small></div>
+                  <div><span className="block text-xs text-slate-500">{item.supplierId ? (item.supplierName === "SIGO Preços" ? "Melhor: SIGO Preços" : "Melhor cotação") : "Preço do catálogo"}</span><strong className="mt-0.5 block tabular-nums text-slate-950">{item.estimatedTotalWithVat.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {procurementPlan.currency}</strong><small className="text-slate-400">IVA incluído</small></div>
                   <button className="btn btn-primary btn-sm shrink-0" onClick={() => setQuoteRequirement(item)}>Comparar preços</button>
                 </div>
               </article>
@@ -429,14 +487,14 @@ export default function ProjectPurchasingPage() {
           >
             <div className="space-y-3">
               {(quoteRequirement.quotes ?? []).map((quote, index) => (
-                <article key={`${quote.supplierName}-${quote.zoneId ?? "geral"}`} className={`rounded-xl border p-4 ${quote.isReference ? "border-slate-200 bg-slate-50" : index === 0 ? "border-emerald-300 bg-emerald-50/50" : "border-slate-200 bg-white"}`}>
+                <article key={`${quote.supplierName}-${quote.zoneId ?? "geral"}`} className={`rounded-xl border p-4 ${index === 0 ? "border-emerald-300 bg-emerald-50/50" : "border-slate-200 bg-white"}`}>
                   <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <strong className="text-base text-slate-950">{quote.supplierName}</strong>
-                        {quote.isReference && <span className="badge badge-brand">Cotação SIGO</span>}
+                        {quote.isReference && <span className="badge badge-brand">SIGO</span>}
                         {index === 0 && <span className="badge badge-green">Menor preço</span>}
-                        <span className="badge badge-brand">{quote.quoteSource === "zona" ? "Preço da zona" : quote.quoteSource === "geral" ? "Preço geral" : "Base SIGO"}</span>
+                        <span className="badge badge-gray">{quote.quoteSource === "zona" ? "Preço da zona" : quote.quoteSource === "geral" ? "Preço geral" : "Catálogo SIGO"}</span>
                       </div>
                       <p className="mt-2 text-sm text-slate-600">{quote.unitCost.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {quote.currency} / {quoteRequirement.unit}</p>
                     </div>
@@ -446,18 +504,16 @@ export default function ProjectPurchasingPage() {
                         <strong className="mt-1 block text-lg tabular-nums text-slate-950">{quote.estimatedTotalWithVat.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {quote.currency}</strong>
                         <small className="text-slate-400">Base {quote.estimatedSubtotal.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} + IVA {quote.estimatedVat.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</small>
                       </div>
-                      {quote.isReference ? (
-                        <span className="max-w-36 text-right text-xs font-medium text-blue-700">Usado na cotação; confirme fornecedor antes da compra</span>
-                      ) : (
-                        <button type="button" className="btn btn-primary btn-sm" onClick={() => prepareOrderFromQuote(quoteRequirement, quote)}>Escolher</button>
-                      )}
+                      <button type="button" className="btn btn-primary btn-sm" disabled={!quote.supplierId} onClick={() => prepareOrderFromQuote(quoteRequirement, quote)}>
+                        Escolher
+                      </button>
                     </div>
                   </div>
                 </article>
               ))}
-              {(quoteRequirement.quotes ?? []).filter((quote) => !quote.isReference).length === 0 && (
+              {(quoteRequirement.quotes ?? []).length === 0 && (
                 <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-                  Ainda não há fornecedor comercial cotado para este material. <Link to="/fornecedores" className="font-semibold underline">Adicionar cotação</Link>
+                  Ainda não há cotação para este material. <Link to="/fornecedores" className="font-semibold underline">Adicionar fornecedor</Link>
                 </div>
               )}
             </div>
@@ -503,11 +559,91 @@ export default function ProjectPurchasingPage() {
 
         {/* Ordens de compra */}
         {view === "pedidos" && <section className="card">
-          <SectionHeader title="Ordens de compra" description="Aprovação, recepção e entrada automática em stock" actions={
-            <button onClick={() => setShowOrderForm(true)} className="btn btn-secondary btn-sm">
-              <IconPlus className="w-3.5 h-3.5" /> Nova ordem
-            </button>
+          <SectionHeader title="Pedidos de materiais" description="Pedidos simples da obra e ordens com fornecedor" actions={
+            <div className="flex flex-wrap gap-2">
+              {canRequest && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRequestLines([{ materialId: materials[0]?.id ?? "", quantity: "1" }]);
+                    setShowRequestForm(true);
+                  }}
+                  className="btn btn-primary btn-sm"
+                >
+                  <IconPlus className="w-3.5 h-3.5" /> Pedir materiais
+                </button>
+              )}
+              {canRequest && (
+                <button onClick={() => setShowOrderForm(true)} className="btn btn-secondary btn-sm">
+                  <IconPlus className="w-3.5 h-3.5" /> Ordem com fornecedor
+                </button>
+              )}
+            </div>
           } />
+
+          {showRequestForm && (
+            <Modal title="Pedir materiais" subtitle="Pedido rápido — fica em rascunho até ser aprovado" onClose={() => setShowRequestForm(false)} maxWidth="max-w-lg">
+              <form className="space-y-4" onSubmit={handleMaterialRequest}>
+                <div className="space-y-2">
+                  {requestLines.map((line, index) => (
+                    <div key={index} className="grid grid-cols-[1fr_100px_auto] gap-2">
+                      <select
+                        className="input"
+                        value={line.materialId}
+                        onChange={(e) =>
+                          setRequestLines(requestLines.map((row, i) => (i === index ? { ...row, materialId: e.target.value } : row)))
+                        }
+                      >
+                        <option value="">Material…</option>
+                        {materials.map((material) => (
+                          <option key={material.id} value={material.id}>
+                            {material.name} ({material.unit})
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        className="input"
+                        type="number"
+                        min={0.001}
+                        step="0.001"
+                        value={line.quantity}
+                        onChange={(e) =>
+                          setRequestLines(requestLines.map((row, i) => (i === index ? { ...row, quantity: e.target.value } : row)))
+                        }
+                      />
+                      <button
+                        type="button"
+                        className="icon-btn-danger"
+                        disabled={requestLines.length <= 1}
+                        onClick={() => setRequestLines(requestLines.filter((_, i) => i !== index))}
+                      >
+                        <IconTrash className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => setRequestLines([...requestLines, { materialId: "", quantity: "1" }])}
+                  >
+                    <IconPlus className="h-3.5 w-3.5" /> Linha
+                  </button>
+                </div>
+                <div>
+                  <label className="label">Nota (opcional)</label>
+                  <input className="input" value={requestNotes} onChange={(e) => setRequestNotes(e.target.value)} placeholder="Urgente para a laje…" />
+                </div>
+                <div className="flex justify-end gap-2">
+                  <button type="button" className="btn btn-secondary" onClick={() => setShowRequestForm(false)}>
+                    Cancelar
+                  </button>
+                  <button type="submit" className="btn btn-primary" disabled={saving || !materials.length}>
+                    {saving ? "A guardar…" : "Enviar pedido"}
+                  </button>
+                </div>
+              </form>
+            </Modal>
+          )}
 
           {showOrderForm && (
             <Modal title="Nova ordem de compra" subtitle={`Fornecedor, entrega e materiais · IVA ${(Number(project.ivaRate) * 100).toFixed(2)}%`} onClose={() => setShowOrderForm(false)} maxWidth="max-w-6xl">
@@ -516,14 +652,14 @@ export default function ProjectPurchasingPage() {
                 <div>
                   <label className="label">Fornecedor</label>
                   <select value={supplierId} onChange={(e) => setSupplierId(e.target.value)} className="input">
-                    {commercialSuppliers.length === 0 && <option value="">Sem fornecedores comerciais</option>}
-                    {commercialSuppliers.map((s) => (
+                    {orderSuppliers.length === 0 && <option value="">Sem fornecedores</option>}
+                    {orderSuppliers.map((s) => (
                       <option key={s.id} value={s.id}>
-                        {s.name}
+                        {s.isReference ? `${s.name} (catálogo SIGO)` : s.name}
                       </option>
                     ))}
                   </select>
-                  {commercialSuppliers.length === 0 && (
+                  {orderSuppliers.length === 0 && (
                     <Link to="/fornecedores" className="mt-1.5 inline-flex text-xs font-semibold text-brand-700 hover:underline">
                       Abrir fornecedores e registar cotações →
                     </Link>
@@ -637,17 +773,17 @@ export default function ProjectPurchasingPage() {
                   </div>
                   <div className="flex flex-wrap items-center justify-end gap-2">
                     <span className={`badge ${STATUS_BADGE[o.status]}`}>{STATUS_LABELS[o.status]}</span>
-                    {o.status === "rascunho" && (
+                    {o.status === "rascunho" && canApprove && (
                       <button onClick={() => handleStatusChange(o, "aprovado")} className="btn btn-secondary btn-sm text-brand-700">
-                        Aprovar ordem
+                        Aprovar
                       </button>
                     )}
-                    {o.status === "aprovado" && (
+                    {o.status === "aprovado" && canApprove && (
                       <button onClick={() => handleStatusChange(o, "recebido")} className="btn btn-secondary btn-sm text-green-700">
                         Receber no stock
                       </button>
                     )}
-                    {o.status !== "cancelado" && o.status !== "recebido" && (
+                    {o.status !== "cancelado" && o.status !== "recebido" && canRequest && (
                       <button onClick={() => handleStatusChange(o, "cancelado")} className="btn btn-secondary btn-sm text-red-600">
                         Cancelar
                       </button>

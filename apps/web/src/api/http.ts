@@ -34,8 +34,16 @@ export async function request<T>(path: string, options?: RequestInit & { timeout
   }
 
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new ApiError(res.status, body.error ?? `Erro ${res.status}`, typeof body.code === "string" ? body.code : undefined);
+    const body = await res.json().catch(() => ({} as { error?: unknown; code?: unknown }));
+    const raw = body.error;
+    const message =
+      typeof raw === "string"
+        ? raw
+        : raw && typeof raw === "object"
+          ? // Zod flatten / object errors — evita "[object Object]" na UI
+            JSON.stringify(raw)
+          : `Erro ${res.status}`;
+    throw new ApiError(res.status, message, typeof body.code === "string" ? body.code : undefined);
   }
   return res.json();
 }

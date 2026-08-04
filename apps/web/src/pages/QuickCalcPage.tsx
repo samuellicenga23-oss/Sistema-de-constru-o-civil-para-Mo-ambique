@@ -1,11 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
-import { buildRebarPurchasePlan, rebarWeightPerMeter } from "@sigo/shared";
+import {
+  buildRebarPurchasePlan,
+  computeSlabRebarWeightLines,
+  DEFAULT_REBAR_LENGTH_M,
+  DEFAULT_SLAB_LAP_FACTOR,
+} from "@sigo/shared";
 import { catalogApi, type CostComposition, type CostCompositionDetail, type PriceZone } from "../api/catalog";
 import { quickCalcApi, downloadBlob, type QuickCalcResult } from "../api/quickCalc";
 import Layout from "../components/Layout";
 import { IconRuler, IconDownload } from "../components/icons";
 
 type ConcreteMixing = "obra_betoneira" | "caminho_betoneira";
+type LayerMode = "single" | "dual";
 
 function normalize(text: string) {
   return text
@@ -29,6 +35,24 @@ function compositionCostWithoutMixer(detail: CostCompositionDetail, volumeM3: nu
     total: Math.max(0, volumeM3 * (detail.unitCost - mixerPerUnit)),
     mixerRemoved: volumeM3 * mixerPerUnit,
   };
+}
+
+/** Quantidade de material com desperdício da composição (igual ao motor de custos). */
+function explodeMaterialLines(detail: CostCompositionDetail, qty: number, zoneId: string) {
+  return detail.materialLines.map((l) => {
+    const wasteFactor = 1 + Number(l.wastePct ?? 0) / 100;
+    const qtyPerUnit = Number(l.qtyPerUnit) * wasteFactor;
+    const unitPrice = Number(l.unitCost) * Number(l.importFactor ?? 1);
+    return {
+      name: l.name,
+      quantity: qty * qtyPerUnit,
+      unit: l.unit ?? "",
+      unitPrice,
+      totalPrice: qty * qtyPerUnit * unitPrice,
+      currency: detail.currency,
+      priceSource: zoneId ? "Preço ajustado à zona seleccionada" : "Preço base do Catálogo",
+    };
+  });
 }
 
 function fmt(n: number) {
@@ -108,7 +132,9 @@ export default function QuickCalcPage() {
   const [longSpacingCm, setLongSpacingCm] = useState("15");
   const [transDiameterMm, setTransDiameterMm] = useState("6");
   const [transSpacingCm, setTransSpacingCm] = useState("15");
-  const [barLengthM, setBarLengthM] = useState("5.75");
+  const [layerMode, setLayerMode] = useState<LayerMode>("dual");
+  const [lapPct, setLapPct] = useState(String(Math.round((DEFAULT_SLAB_LAP_FACTOR - 1) * 100)));
+  const [barLengthM, setBarLengthM] = useState(String(DEFAULT_REBAR_LENGTH_M));
   const [lajeMixing, setLajeMixing] = useState<ConcreteMixing>("obra_betoneira");
   const [acoCompDetail, setAcoCompDetail] = useState<CostCompositionDetail | null>(null);
 
@@ -208,41 +234,30 @@ export default function QuickCalcPage() {
     const transDiameter = Number(transDiameterMm);
     const transSpacing = Number(transSpacingCm);
     const barLength = Number(barLengthM);
+    const lapFactor = 1 + Math.max(0, Number(lapPct) || 0) / 100;
     if (!lajeCompDetail || !(area > 0) || !(thickness > 0)) return null;
 
     const volumeM3 = area * (thickness / 100);
-    const materialLines = lajeCompDetail.materialLines.map((l) => ({
-      name: l.name,
-      quantity: volumeM3 * Number(l.qtyPerUnit),
-      unit: l.unit ?? "",
-      unitPrice: Number(l.unitCost) * Number(l.importFactor ?? 1),
-      totalPrice: volumeM3 * Number(l.qtyPerUnit) * Number(l.unitCost) * Number(l.importFactor ?? 1),
-      currency: lajeCompDetail.currency,
-      priceSource: zoneId ? "Preço ajustado à zona seleccionada" : "Preço base do Catálogo",
-    }));
+    const materialLines = explodeMaterialLines(lajeCompDetail, volumeM3, zoneId);
 
-    const weightLines: Array<{ diameterMm: number; weightKg: number; role: string }> = [];
-    if (longDiameter > 0 && longSpacing > 0) {
-      const w = rebarWeightPerMeter(longDiameter);
-      weightLines.push({
-        diameterMm: longDiameter,
-        weightKg: area * (w / (longSpacing / 100)),
-        role: "longitudinal",
-      });
-    }
-    if (transDiameter > 0 && transSpacing > 0) {
-      const w = rebarWeightPerMeter(transDiameter);
-      weightLines.push({
-        diameterMm: transDiameter,
-        weightKg: area * (w / (transSpacing / 100)),
-        role: "transversal",
-      });
-    }
+    const directions = [
+      { diameterMm: longDiameter, spacingCm: longSpacing, role: "longitudinal" },
+      { diameterMm: transDiameter, spacingCm: transSpacing, role: "transversal" },
+    ];
+    const layers =
+      layerMode === "dual"
+        ? [
+            { label: "inferior", directions },
+            { label: "superior", directions },
+          ]
+        : [{ label: "única", directions }];
 
+    const weightLines = computeSlabRebarWeightLines({ areaM2: area, layers, lapFactor });
+    const steelMeshKg = weightLines.reduce((sum, line) => sum + line.weightKg / lapFactor, 0);
     const steelNetKg = weightLines.reduce((sum, line) => sum + line.weightKg, 0);
     const purchasePlan = buildRebarPurchasePlan(
       weightLines.map((line) => ({ diameterMm: line.diameterMm, weightKg: line.weightKg * steelCutWasteRatio })),
-      barLength > 0 ? barLength : 5.75,
+      barLength > 0 ? barLength : DEFAULT_REBAR_LENGTH_M,
     );
     const steelPurchaseKg = purchasePlan.reduce((sum, line) => sum + line.purchaseWeightKg, 0);
     const steelLengthM = purchasePlan.reduce((sum, line) => sum + line.requiredLengthM, 0);
@@ -257,12 +272,15 @@ export default function QuickCalcPage() {
       mixerRemoved: concrete.mixerRemoved,
       mixing: lajeMixing,
       currency: lajeCompDetail.currency,
+      steelMeshKg,
       steelNetKg,
       steelPurchaseKg,
       steelLengthM,
       barsNeeded,
       tieWireKg,
       barLength,
+      lapFactor,
+      layerMode,
       weightLines,
       purchasePlan,
     };
@@ -274,6 +292,8 @@ export default function QuickCalcPage() {
     longSpacingCm,
     transDiameterMm,
     transSpacingCm,
+    layerMode,
+    lapPct,
     barLengthM,
     steelCutWasteRatio,
     tieWireRatio,
@@ -288,15 +308,7 @@ export default function QuickCalcPage() {
 
   const betaoResult = useMemo(() => {
     if (!betaoCompDetail || !(betaoVolumeM3 > 0)) return null;
-    const materialLines = betaoCompDetail.materialLines.map((l) => ({
-      name: l.name,
-      quantity: betaoVolumeM3 * Number(l.qtyPerUnit),
-      unit: l.unit ?? "",
-      unitPrice: Number(l.unitCost) * Number(l.importFactor ?? 1),
-      totalPrice: betaoVolumeM3 * Number(l.qtyPerUnit) * Number(l.unitCost) * Number(l.importFactor ?? 1),
-      currency: betaoCompDetail.currency,
-      priceSource: zoneId ? "Preço ajustado à zona seleccionada" : "Preço base do Catálogo",
-    }));
+    const materialLines = explodeMaterialLines(betaoCompDetail, betaoVolumeM3, zoneId);
 
     let steelNetKg = 0;
     let steelPurchaseKg = 0;
@@ -314,7 +326,7 @@ export default function QuickCalcPage() {
       if (transDiameter > 0 && transKg > 0) weightLines.push({ diameterMm: transDiameter, weightKg: transKg, role: "transversal" });
       purchasePlan = buildRebarPurchasePlan(
         weightLines.map((line) => ({ diameterMm: line.diameterMm, weightKg: line.weightKg * steelCutWasteRatio })),
-        Number(barLengthM) > 0 ? Number(barLengthM) : 5.75,
+        Number(barLengthM) > 0 ? Number(barLengthM) : DEFAULT_REBAR_LENGTH_M,
       );
       steelPurchaseKg = purchasePlan.reduce((sum, line) => sum + line.purchaseWeightKg, 0);
       tieWireKg = steelNetKg * tieWireRatio;
@@ -364,15 +376,7 @@ export default function QuickCalcPage() {
   const genericoResult = useMemo(() => {
     const qty = Number(genericoQty);
     if (!genericoCompDetail || !selectedGenericoComposition || !(qty > 0)) return null;
-    const materialLines = genericoCompDetail.materialLines.map((l) => ({
-      name: l.name,
-      quantity: qty * Number(l.qtyPerUnit),
-      unit: l.unit ?? "",
-      unitPrice: Number(l.unitCost) * Number(l.importFactor ?? 1),
-      totalPrice: qty * Number(l.qtyPerUnit) * Number(l.unitCost) * Number(l.importFactor ?? 1),
-      currency: selectedGenericoComposition.currency,
-      priceSource: zoneId ? "Preço ajustado à zona seleccionada" : "Preço base do Catálogo",
-    }));
+    const materialLines = explodeMaterialLines(genericoCompDetail, qty, zoneId);
     const totalValue = qty * selectedGenericoComposition.unitCost;
     return { materialLines, totalValue, currency: selectedGenericoComposition.currency };
   }, [genericoCompDetail, selectedGenericoComposition, genericoQty]);
@@ -396,8 +400,10 @@ export default function QuickCalcPage() {
         `Espessura: ${fmt(Number(thicknessCm))} cm`,
         `Classe do betão: ${lajeCompDetail.name}`,
         `Produção do betão: ${lajeResult.mixing === "obra_betoneira" ? "Betoneira de obra" : "Camião betoneira (betão pronto)"}`,
+        `Camadas de armadura: ${lajeResult.layerMode === "dual" ? "inferior + superior" : "malha única"}`,
         `Armadura longitudinal: Ø${longDiameterMm} mm a cada ${longSpacingCm} cm`,
         `Armadura transversal: Ø${transDiameterMm} mm a cada ${transSpacingCm} cm`,
+        `Emendas/sobreposições: ${fmt((lajeResult.lapFactor - 1) * 100)} %`,
         `Comprimento comercial da barra: ${fmt(lajeResult.barLength)} m`,
       ],
       lines: [
@@ -413,11 +419,12 @@ export default function QuickCalcPage() {
           priceSource: "Materiais + mão-de-obra + equipamento aplicável",
         },
         ...lajeResult.weightLines.map((line) => ({
-          name: `Aço líquido ${line.role} Ø${line.diameterMm} mm`,
+          name: `Aço ${line.layer} ${line.role} Ø${line.diameterMm} mm (com emendas)`,
           quantity: line.weightKg,
           unit: "kg",
         })),
-        { name: "Aço líquido total", quantity: lajeResult.steelNetKg, unit: "kg" },
+        { name: "Aço malha (sem emendas)", quantity: lajeResult.steelMeshKg, unit: "kg" },
+        { name: "Aço líquido total (com emendas)", quantity: lajeResult.steelNetKg, unit: "kg" },
         ...lajeResult.purchasePlan.map((line) => ({
           name: `Aço a comprar Ø${line.diameterMm} mm (${line.barsToBuy} varões × ${fmt(line.commercialBarLengthM)} m)`,
           quantity: line.purchaseWeightKg,
@@ -428,8 +435,9 @@ export default function QuickCalcPage() {
       ],
       notes: [
         "Volume de betão = área × espessura.",
-        "Armadura longitudinal e transversal calculadas em separado: kg/m² = peso/metro ÷ espaçamento.",
+        "Armadura: kg = área × (peso/metro ÷ espaçamento) × camadas × factor de emendas; depois × desperdício de corte do catálogo.",
         "Quantidades por diâmetro usam o plano de compra comercial (barras inteiras).",
+        "Materiais da composição incluem desperdício (wastePct) definido no catálogo.",
         lajeResult.mixing === "caminho_betoneira"
           ? "Modo camião betoneira: horas de betoneira de obra foram retiradas do custo da composição."
           : "Modo betoneira de obra: custo inclui o equipamento da composição do catálogo.",
@@ -628,7 +636,7 @@ export default function QuickCalcPage() {
               <IconRuler className="w-4 h-4 text-brand-700" />
               <h2 className="section-title">Laje — área e espessura</h2>
             </div>
-            <p className="text-xs leading-5 text-gray-500">Volume, materiais e armadura longitudinal/transversal por diâmetro — com modo de produção do betão.</p>
+            <p className="text-xs leading-5 text-gray-500">Volume, materiais (com desperdício do catálogo) e armadura por diâmetro — camadas, emendas e compra em barras.</p>
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
                 <label className="label">Área (m²)</label>
@@ -654,6 +662,17 @@ export default function QuickCalcPage() {
                   <option value="obra_betoneira">Betoneira de obra</option>
                   <option value="caminho_betoneira">Camião betoneira (betão pronto)</option>
                 </select>
+              </div>
+              <div>
+                <label className="label">Camadas de armadura</label>
+                <select value={layerMode} onChange={(e) => setLayerMode(e.target.value as LayerMode)} className="input">
+                  <option value="single">Malha única</option>
+                  <option value="dual">Inferior + superior</option>
+                </select>
+              </div>
+              <div>
+                <label className="label">Emendas / sobreposições (%)</label>
+                <input type="number" step="1" min="0" max="50" value={lapPct} onChange={(e) => setLapPct(e.target.value)} className="input" />
               </div>
               <div>
                 <label className="label">Ø longitudinal (mm)</label>
@@ -712,12 +731,22 @@ export default function QuickCalcPage() {
                       </td>
                     </tr>
                     {lajeResult.weightLines.map((line) => (
-                      <tr key={`net-${line.role}-${line.diameterMm}`} className="table-row">
-                        <td className="py-2 px-4">Aço líquido {line.role} Ø{line.diameterMm} mm</td>
+                      <tr key={`net-${line.layer}-${line.role}-${line.diameterMm}`} className="table-row">
+                        <td className="py-2 px-4">Aço {line.layer} {line.role} Ø{line.diameterMm} mm</td>
                         <td className="text-right pr-4 tabular-nums">{fmt(line.weightKg)} kg</td>
                         <td className="text-right pr-4 text-slate-400">—</td><td className="text-right pr-4 text-slate-400">—</td>
                       </tr>
                     ))}
+                    <tr className="table-row">
+                      <td className="py-2 px-4">Aço malha (sem emendas)</td>
+                      <td className="text-right pr-4 tabular-nums">{fmt(lajeResult.steelMeshKg)} kg</td>
+                      <td className="text-right pr-4 text-slate-400">—</td><td className="text-right pr-4 text-slate-400">—</td>
+                    </tr>
+                    <tr className="table-row">
+                      <td className="py-2 px-4 font-medium">Aço líquido total (com {fmt((lajeResult.lapFactor - 1) * 100)}% emendas)</td>
+                      <td className="text-right pr-4 tabular-nums font-medium">{fmt(lajeResult.steelNetKg)} kg</td>
+                      <td className="text-right pr-4 text-slate-400">—</td><td className="text-right pr-4 text-slate-400">—</td>
+                    </tr>
                     {lajeResult.purchasePlan.map((line) => (
                       <tr key={`buy-${line.diameterMm}`} className="table-row bg-brand-50/60">
                         <td className="py-2 px-4 font-medium">Aço a comprar Ø{line.diameterMm} mm ({line.barsToBuy} varões × {fmt(line.commercialBarLengthM)} m)</td>

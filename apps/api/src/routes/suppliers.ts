@@ -140,7 +140,6 @@ export async function supplierRoutes(app: FastifyInstance) {
     const { id } = request.params as { id: string };
     const companyId = companyIdOf(request);
     const supplier = await assertSupplierOwned(id, companyId);
-    if (supplier && isSigoPricesSupplier(supplier)) return reply.code(409).send({ error: "Os preços SIGO são sincronizados pelo catálogo" });
     if (!supplier) return reply.code(404).send({ error: "Fornecedor não encontrado" });
 
     const parsed = materialPriceSchema.safeParse(request.body);
@@ -184,7 +183,6 @@ export async function supplierRoutes(app: FastifyInstance) {
   app.delete("/api/suppliers/:id/materials/:priceId", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
     const { id, priceId } = request.params as { id: string; priceId: string };
     const supplier = await assertSupplierOwned(id, companyIdOf(request));
-    if (supplier && isSigoPricesSupplier(supplier)) return reply.code(409).send({ error: "Os preços SIGO são sincronizados pelo catálogo" });
     if (!supplier) return { ok: true };
     await db.delete(supplierMaterialPrices).where(and(eq(supplierMaterialPrices.id, priceId), eq(supplierMaterialPrices.supplierId, id)));
     return { ok: true };

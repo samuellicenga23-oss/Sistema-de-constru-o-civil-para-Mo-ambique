@@ -7,7 +7,7 @@ compras, stock, execução, medição e controlo financeiro.
 
 - `apps/web` — frontend React + TypeScript + Tailwind (Vite)
 - `apps/api` — backend Node.js + TypeScript + Fastify + Drizzle ORM (PostgreSQL)
-- `apps/plant-service` — microserviço Python (FastAPI) para leitura automática de plantas ArchiCAD
+- `apps/plant-service` — microserviço Python (FastAPI) para leitura de plantas PDF; regras clássicas + fallback Ollama (IA local) quando o formato diverge
 - `packages/shared` — tipos e schemas Zod partilhados entre web e api
 
 ## Desenvolvimento local
@@ -32,8 +32,12 @@ npm run dev:web
 cd apps/plant-service
 ./.venv/Scripts/activate
 uvicorn main:app --reload --port 8001
+
+# Opcional: fallback IA local (Ollama). Em produção no VPS já está activo.
+# PLANT_AI_ENABLED=1 OLLAMA_HOST=http://127.0.0.1:11434 PLANT_AI_MODEL=qwen2.5:7b
 ```
 
+Sem Ollama a correr, o leitor continua só com as regras clássicas.
 ## Testes
 
 ```bash

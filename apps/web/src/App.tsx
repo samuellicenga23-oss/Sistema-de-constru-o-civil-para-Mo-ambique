@@ -24,6 +24,8 @@ const ProjectSiteDiaryPage = lazy(() => import("./pages/ProjectSiteDiaryPage"));
 const SuppliersPage = lazy(() => import("./pages/SuppliersPage"));
 const ProjectPurchasingPage = lazy(() => import("./pages/ProjectPurchasingPage"));
 const ProjectSchedulePage = lazy(() => import("./pages/ProjectSchedulePage"));
+const PracticeOfficePage = lazy(() => import("./pages/PracticeOfficePage"));
+const SiteManagementPage = lazy(() => import("./pages/SiteManagementPage"));
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -97,6 +99,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <ProjectsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/gestao"
+        element={
+          <ProtectedRoute>
+            <SiteManagementPage />
           </ProtectedRoute>
         }
       />
@@ -194,6 +204,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <QuickCalcPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/escritorio"
+        element={
+          <ProtectedRoute>
+            <PracticeOfficePage />
           </ProtectedRoute>
         }
       />

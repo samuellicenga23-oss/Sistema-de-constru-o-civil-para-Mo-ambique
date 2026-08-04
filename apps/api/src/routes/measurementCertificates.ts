@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { budgetDocuments, financialEntries, measurementCertificateLines, measurementCertificates } from "../db/schema.js";
+import { budgetDocuments, financialEntries, measurementCertificateLines, measurementCertificates, users } from "../db/schema.js";
 import { requireCompanyUser, requireRole } from "../auth/middleware.js";
 import { assertCertificateOwned, assertDocumentOwned, assertProjectOwned } from "../services/accessControl.js";
 import {
@@ -128,7 +128,19 @@ export async function measurementCertificateRoutes(app: FastifyInstance) {
         return reply.code(403).send({ error: "A aprovação do Auto exige um administrador da empresa" });
       }
       if (certificate.submittedByUserId === request.currentUser!.id) {
-        return reply.code(409).send({ error: "Quem submeteu o Auto não pode aprová-lo" });
+        const admins = await db
+          .select({ id: users.id })
+          .from(users)
+          .where(
+            and(
+              eq(users.companyId, request.currentUser!.companyId!),
+              eq(users.role, "admin_empresa"),
+              eq(users.isActive, true),
+            ),
+          );
+        if (admins.length > 1) {
+          return reply.code(409).send({ error: "Quem submeteu o Auto não pode aprová-lo" });
+        }
       }
     }
     if (parsed.data.status !== certificate.status && !transitions[certificate.status].includes(parsed.data.status)) {
@@ -151,7 +163,12 @@ export async function measurementCertificateRoutes(app: FastifyInstance) {
     const [updated] = await db.update(measurementCertificates).set({
       status: parsed.data.status,
       ...timestamps,
-      submittedByUserId: parsed.data.status === "submetido" ? request.currentUser!.id : certificate.submittedByUserId,
+      submittedByUserId:
+        parsed.data.status === "submetido"
+          ? request.currentUser!.id
+          : parsed.data.status === "rascunho"
+            ? null
+            : certificate.submittedByUserId,
       approvedByUserId: parsed.data.status === "aprovado" ? request.currentUser!.id : certificate.approvedByUserId,
       approvalNote: parsed.data.decisionNote ?? certificate.approvalNote,
     }).where(eq(measurementCertificates.id, id)).returning();

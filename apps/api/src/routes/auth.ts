@@ -49,7 +49,7 @@ const loginSchema = z.object({
 
 const changePasswordSchema = z.object({
   currentPassword: z.string().min(1),
-  newPassword: z.string().min(8, "A password deve ter pelo menos 8 caracteres"),
+  newPassword: z.string().min(8, "A palavra-passe deve ter pelo menos 8 caracteres"),
 });
 
 // `secure` só em produção (HTTPS) — em dev corre em http://localhost, onde um cookie "secure"
@@ -147,7 +147,7 @@ export async function authRoutes(app: FastifyInstance) {
   // link forjado).
   app.get("/api/auth/google/start", async (request, reply) => {
     if (!env.googleClientId || !env.googleRedirectUri) {
-      return reply.code(503).send({ error: "Login com Google não está configurado" });
+      return reply.code(503).send({ error: "Início de sessão com Google não está configurado" });
     }
     const state = randomBytes(24).toString("hex");
     reply.setCookie(GOOGLE_STATE_COOKIE, state, {

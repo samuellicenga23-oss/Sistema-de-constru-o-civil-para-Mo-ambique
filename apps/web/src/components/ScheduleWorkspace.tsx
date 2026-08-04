@@ -350,7 +350,7 @@ export default function ScheduleWorkspace({
                 : "border-amber-200 bg-amber-50 text-amber-900"
             }`}
           >
-            {errors + warnings === 0 ? "Validação OK" : `${errors} erros · ${warnings} avisos`}
+            {errors + warnings === 0 ? "Validação correcta" : `${errors} erros · ${warnings} avisos`}
           </button>
         </div>
       </div>

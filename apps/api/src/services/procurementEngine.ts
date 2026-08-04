@@ -12,7 +12,7 @@ import {
 } from "../db/schema.js";
 import { computeMaterialsByPhase } from "./materialsByPhase.js";
 import { mapToPhase } from "./phaseMapping.js";
-import { buildRebarPurchasePlan, calculateVatTotals, type RebarPurchaseLine } from "@sigo/shared";
+import { buildRebarPurchasePlan, calculateVatTotals, DEFAULT_REBAR_LENGTH_M, type RebarPurchaseLine } from "@sigo/shared";
 import { SIGO_PRICES_SUPPLIER_NAME } from "./sigoPrices.js";
 
 export type ProjectRebarPurchasePlan = {
@@ -36,11 +36,14 @@ async function getProjectRebarPurchasePlan(projectId: string): Promise<ProjectRe
       .from(extractedRebarSchedules)
       .where(eq(extractedRebarSchedules.plantId, candidate.id));
     if (!rows.length) continue;
-    const lines = buildRebarPurchasePlan(rows.map((row) => ({ diameterMm: Number(row.diameterMm), weightKg: Number(row.weightKg) })));
+    const lines = buildRebarPurchasePlan(
+      rows.map((row) => ({ diameterMm: Number(row.diameterMm), weightKg: Number(row.weightKg) })),
+      DEFAULT_REBAR_LENGTH_M,
+    );
     return {
       sourcePlantId: candidate.id,
       sourceFileName: candidate.originalFileName,
-      commercialBarLengthM: 12,
+      commercialBarLengthM: DEFAULT_REBAR_LENGTH_M,
       lines,
       totalScheduledWeightKg: lines.reduce((sum, line) => sum + line.scheduledWeightKg, 0),
       totalPurchaseWeightKg: lines.reduce((sum, line) => sum + line.purchaseWeightKg, 0),
@@ -225,23 +228,28 @@ export async function computeProcurementPlan(args: {
     // cada saida de armazem voltaria a aparecer como uma nova compra e duplicaria o custo.
     const { shortageQty, suggestedOrderQty } = calculateProcurementQuantity({ requiredQty: item.requiredQty, consumedQty, stockQty, orderedQty, packageSize: item.packageSize });
     const availableQuotes = Array.from(quotesByMaterial.get(item.materialId)?.values() ?? []);
-    const commercialQuotes = availableQuotes.filter((candidate) => candidate.supplierName !== SIGO_PRICES_SUPPLIER_NAME);
-    const referenceQuotes = availableQuotes.filter((candidate) => candidate.supplierName === SIGO_PRICES_SUPPLIER_NAME);
-    const rankedQuotes = rankProcurementQuotes([...commercialQuotes, ...referenceQuotes], args.zoneId);
+    // SIGO Preços compete em igualdade com fornecedores comerciais — pode ser escolhido para OC.
+    const rankedQuotes = rankProcurementQuotes(availableQuotes, args.zoneId);
     const quote = rankedQuotes[0];
-    const quoteIsReference = quote?.supplierName === SIGO_PRICES_SUPPLIER_NAME;
+    const quoteIsSigo = quote?.supplierName === SIGO_PRICES_SUPPLIER_NAME;
     const catalogUnitCost = item.requiredQty > 0 ? item.catalogValue / item.requiredQty : 0;
     const estimatedUnitCost = quote ? Number(quote.unitCost) : catalogUnitCost;
-    const quoteSource: ProcurementRequirement["quoteSource"] = quote && !quoteIsReference ? (quote.zoneId ? "zona" : "geral") : "catalogo";
+    const quoteSource: ProcurementRequirement["quoteSource"] = !quote
+      ? "catalogo"
+      : quote.zoneId
+        ? "zona"
+        : quoteIsSigo
+          ? "catalogo"
+          : "geral";
     const phaseKeys = new Set(item.phases.map((phase) => phase.key));
     const matchingTasks = taskRows.filter((task) => phaseKeys.has(mapToPhase(task.name, [], task.name)));
     const suggestedTask = matchingTasks.find((task) => !summaryTaskIds.has(task.id)) ?? matchingTasks[0];
     const estimate = calculateVatTotals(suggestedOrderQty * estimatedUnitCost, args.ivaRate);
     const quotes: ProcurementQuote[] = rankedQuotes.map((candidate) => {
       const totals = calculateVatTotals(suggestedOrderQty * Number(candidate.unitCost), args.ivaRate);
-      const isReference = candidate.supplierName === SIGO_PRICES_SUPPLIER_NAME;
+      const isSigo = candidate.supplierName === SIGO_PRICES_SUPPLIER_NAME;
       return {
-        supplierId: isReference ? null : candidate.supplierId,
+        supplierId: candidate.supplierId,
         supplierName: candidate.supplierName,
         unitCost: Number(candidate.unitCost),
         estimatedSubtotal: totals.subtotal,
@@ -249,8 +257,9 @@ export async function computeProcurementPlan(args: {
         estimatedTotalWithVat: totals.total,
         currency: candidate.currency,
         zoneId: candidate.zoneId,
-        quoteSource: isReference ? "catalogo" : candidate.zoneId ? "zona" : "geral",
-        isReference,
+        quoteSource: candidate.zoneId ? "zona" : isSigo ? "catalogo" : "geral",
+        // Mantido para a UI (badge); já não bloqueia a criação de ordem de compra.
+        isReference: isSigo,
       };
     });
     return {
@@ -270,7 +279,7 @@ export async function computeProcurementPlan(args: {
       estimatedTotal: estimate.subtotal,
       estimatedVat: estimate.iva,
       estimatedTotalWithVat: estimate.total,
-      supplierId: quoteIsReference ? null : quote?.supplierId ?? null,
+      supplierId: quote?.supplierId ?? null,
       supplierName: quote?.supplierName ?? null,
       quoteSource,
       quotes,

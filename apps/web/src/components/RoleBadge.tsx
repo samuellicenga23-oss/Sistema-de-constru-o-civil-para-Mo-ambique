@@ -4,7 +4,7 @@ type Role = CurrentUser["role"];
 
 const ROLE_INFO: Record<Role, { label: string; description: string }> = {
   super_admin: {
-    label: "Super Admin",
+    label: "Super-administrador",
     description: "Gere todas as empresas, planos e o catálogo global da plataforma.",
   },
   admin_empresa: {

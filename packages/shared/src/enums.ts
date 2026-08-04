@@ -17,6 +17,7 @@ export const COMPANY_MODULE_KEYS = [
   "site_diary",
   "financial",
   "quick_calculations",
+  "practice",
 ] as const;
 export type CompanyModuleKey = (typeof COMPANY_MODULE_KEYS)[number];
 export type UserRole = (typeof USER_ROLES)[number];
@@ -50,7 +51,7 @@ export type SubscriptionStatus = (typeof SUBSCRIPTION_STATUSES)[number];
 export const SUBSCRIPTION_PLANS = [
   {
     key: "free",
-    label: "Free",
+    label: "Gratuito",
     maxUsers: 1,
     maxProjects: 1,
     monthlyPriceMzn: 0,
@@ -61,7 +62,7 @@ export const SUBSCRIPTION_PLANS = [
       "Mapa de Quantidades e Catálogo básicos",
       "Até 10 composições personalizadas",
       "Calculadoras simples",
-      "Exportação com marca de água \"Gerado pelo SIGO Free\"",
+      "Exportação com marca de água \"Gerado pelo SIGO Gratuito\"",
     ],
   },
   {
@@ -126,7 +127,7 @@ export const SUBSCRIPTION_PLANS = [
       "Gestão financeira completa (centro de custos, margens)",
       "Armazém completo e múltiplos armazéns",
       "Trabalhadores e equipamentos",
-      "Contratos e aditamentos",
+      "Contratos e adendas",
       "Cronograma avançado e Curva S",
     ],
   },
@@ -143,7 +144,7 @@ export const SUBSCRIPTION_PLANS = [
       "Projectos activos ilimitados",
       "Multi-filial e multi-armazém",
       "API com limites comerciais",
-      "Dashboards executivos e IA",
+      "Painéis executivos e IA",
       "Gestor de conta dedicado",
     ],
   },
@@ -158,7 +159,7 @@ export const SUBSCRIPTION_PLANS = [
     features: [
       "Tudo do Empresarial",
       "Infra-estrutura e base de dados dedicadas",
-      "Single Sign-On e auditoria institucional",
+      "Início de sessão único (SSO) e auditoria institucional",
       "Acordo de nível de serviço (SLA)",
       "Formação presencial e migração de dados",
       "Consultoria e suporte dedicado",
