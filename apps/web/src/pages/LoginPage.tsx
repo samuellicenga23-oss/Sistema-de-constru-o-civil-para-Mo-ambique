@@ -1,9 +1,10 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { Eye, EyeOff, Loader2 } from "lucide-react";
+import { motion } from "framer-motion";
+import { Eye, EyeOff } from "lucide-react";
 import { useAuth, ApiError } from "../auth/AuthContext";
-import { SIGO_WHATSAPP_NUMBER } from "../commercialPlans";
-import { LogoFull } from "../components/Logo";
+import { Logo } from "../components/landing/brand/Logo";
+import { Button } from "../components/landing/ui/Button";
 import AlertBanner from "../components/AlertBanner";
 
 const GOOGLE_ERROR_MESSAGES: Record<string, string> = {
@@ -72,39 +73,53 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="relative min-h-dvh overflow-hidden bg-[#f3f6f8] text-ink">
-      <div aria-hidden className="pointer-events-none absolute inset-0">
-        <div className="absolute inset-0 bg-[radial-gradient(42rem_28rem_at_50%_-10%,rgba(26,173,180,0.16),transparent_60%),radial-gradient(28rem_22rem_at_100%_100%,rgba(237,108,34,0.08),transparent_55%)]" />
-      </div>
+    <div className="relative min-h-dvh overflow-hidden bg-surface text-ink">
+      <div className="sigo-grid absolute inset-0 opacity-70" aria-hidden="true" />
+      <div
+        className="absolute inset-x-0 top-0 h-[560px]"
+        style={{
+          background:
+            "radial-gradient(40rem 34rem at 18% 0%, rgba(26,173,180,0.16), transparent 62%), radial-gradient(36rem 30rem at 88% 8%, rgba(237,108,34,0.12), transparent 60%)",
+        }}
+        aria-hidden="true"
+      />
 
-      <div className="relative z-10 mx-auto flex min-h-dvh w-full max-w-[400px] flex-col justify-center px-5 py-12">
-        <header className="page-enter text-center">
+      <div className="relative z-10 mx-auto flex min-h-dvh w-full max-w-[420px] flex-col justify-center px-5 py-12 sm:px-6">
+        <motion.header
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4 }}
+          className="text-center"
+        >
           <Link
             to="/"
-            className="inline-flex rounded-lg transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40"
+            className="inline-flex rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal"
             aria-label="SIGO — voltar ao site"
           >
-            <LogoFull tagline={false} className="mx-auto h-12 sm:h-14" />
+            <Logo size={56} className="mx-auto" />
           </Link>
-          <p className="mx-auto mt-5 max-w-[22ch] font-display text-[1.35rem] font-semibold leading-snug tracking-[-0.02em] text-slate-900 sm:text-[1.5rem]">
-            Entrar
+          <p className="mt-5 text-[14px] leading-5 text-ink-400">
+            Acesso à plataforma
           </p>
-          <p className="mt-2 text-[14px] leading-5 text-slate-500">
-            Email e palavra-passe da sua empresa.
-          </p>
-        </header>
+        </motion.header>
 
-        <main className="mt-8">
+        <motion.main
+          initial={{ opacity: 0, y: 14 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.45, delay: 0.06 }}
+          className="mt-8"
+        >
           <form
             onSubmit={handleSubmit}
             noValidate
             aria-busy={submitting}
-            className="page-enter space-y-5"
-            style={{ animationDelay: "40ms" }}
+            className="rounded-2xl border border-slate-200/90 bg-white p-6 shadow-raised sm:p-7"
           >
             <div className="space-y-4">
               <div>
-                <label className="label" htmlFor={emailId}>Email</label>
+                <label className="mb-1.5 block text-[13px] font-semibold text-ink" htmlFor={emailId}>
+                  Email
+                </label>
                 <input
                   ref={emailRef}
                   id={emailId}
@@ -124,13 +139,15 @@ export default function LoginPage() {
                   disabled={submitting}
                   aria-invalid={Boolean(error)}
                   aria-describedby={error ? errorId : undefined}
-                  className="input min-h-11 bg-white"
+                  className="h-12 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-[15px] text-ink outline-none transition placeholder:text-slate-400 focus:border-teal focus:ring-2 focus:ring-teal/25 disabled:opacity-60"
                   placeholder="nome@empresa.co.mz"
                 />
               </div>
 
               <div>
-                <label className="label" htmlFor={passwordId}>Palavra-passe</label>
+                <label className="mb-1.5 block text-[13px] font-semibold text-ink" htmlFor={passwordId}>
+                  Palavra-passe
+                </label>
                 <div className="relative">
                   <input
                     id={passwordId}
@@ -146,14 +163,14 @@ export default function LoginPage() {
                     disabled={submitting}
                     aria-invalid={Boolean(error)}
                     aria-describedby={error ? errorId : undefined}
-                    className="input min-h-11 bg-white pr-12"
+                    className="h-12 w-full rounded-xl border border-slate-200 bg-white px-3.5 pr-12 text-[15px] text-ink outline-none transition placeholder:text-slate-400 focus:border-teal focus:ring-2 focus:ring-teal/25 disabled:opacity-60"
                     placeholder="••••••••"
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword((current) => !current)}
                     disabled={submitting}
-                    className="absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-xl text-slate-400 transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/35"
+                    className="absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-xl text-ink-400 transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal"
                     aria-label={showPassword ? "Ocultar palavra-passe" : "Mostrar palavra-passe"}
                     aria-pressed={showPassword}
                   >
@@ -163,7 +180,7 @@ export default function LoginPage() {
               </div>
             </div>
 
-            <div id={errorId} aria-live="polite" className="min-h-0">
+            <div id={errorId} aria-live="polite" className="mt-4 min-h-0">
               {error && (
                 <AlertBanner tone="error" onDismiss={() => setError(null)}>
                   {error}
@@ -171,26 +188,15 @@ export default function LoginPage() {
               )}
             </div>
 
-            <button
-              type="submit"
-              disabled={submitting}
-              className="btn btn-primary w-full min-h-11 !py-3 text-[15px]"
-            >
-              {submitting ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                  A entrar...
-                </>
-              ) : (
-                "Entrar"
-              )}
-            </button>
+            <Button type="submit" size="lg" fullWidth loading={submitting} className="mt-5">
+              {submitting ? "A entrar..." : "Entrar"}
+            </Button>
 
             {googleEnabled && (
-              <div className="space-y-4 pt-1">
+              <div className="mt-5 space-y-4">
                 <div className="flex items-center gap-3" role="separator" aria-label="ou">
                   <div className="h-px flex-1 bg-slate-200" />
-                  <span className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-400">ou</span>
+                  <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-400">ou</span>
                   <div className="h-px flex-1 bg-slate-200" />
                 </div>
                 <a
@@ -199,42 +205,36 @@ export default function LoginPage() {
                   onClick={(event) => {
                     if (submitting) event.preventDefault();
                   }}
-                  className={`btn btn-secondary w-full min-h-11 !py-3 bg-white ${submitting ? "pointer-events-none opacity-50" : ""}`}
+                  className={submitting ? "pointer-events-none opacity-45" : undefined}
                 >
-                  <svg viewBox="0 0 48 48" className="h-4 w-4" aria-hidden="true">
-                    <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
-                    <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.9-2.26 5.36-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
-                    <path fill="#FBBC05" d="M10.53 28.59A14.5 14.5 0 0 1 9.5 24c0-1.59.27-3.13.76-4.59l-7.98-6.19A23.94 23.94 0 0 0 0 24c0 3.87.92 7.53 2.56 10.78z" />
-                    <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
-                  </svg>
-                  Continuar com Google
+                  <span className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white text-[15px] font-semibold text-ink transition hover:border-slate-300 hover:bg-slate-50">
+                    <svg viewBox="0 0 48 48" className="h-4 w-4" aria-hidden="true">
+                      <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+                      <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.9-2.26 5.36-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
+                      <path fill="#FBBC05" d="M10.53 28.59A14.5 14.5 0 0 1 9.5 24c0-1.59.27-3.13.76-4.59l-7.98-6.19A23.94 23.94 0 0 0 0 24c0 3.87.92 7.53 2.56 10.78z" />
+                      <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+                    </svg>
+                    Continuar com Google
+                  </span>
                 </a>
               </div>
             )}
           </form>
-        </main>
+        </motion.main>
 
-        <footer
-          className="page-enter mt-10 flex flex-wrap items-center justify-center gap-x-1 text-[13px] text-slate-400"
-          style={{ animationDelay: "80ms" }}
+        <motion.footer
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.4, delay: 0.12 }}
+          className="mt-8 text-center"
         >
-          <Link to="/" className="rounded-md px-2 py-1 font-medium text-slate-500 transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/35">
-            Site
-          </Link>
-          <span aria-hidden className="text-slate-300">·</span>
-          <Link to="/#planos" className="rounded-md px-2 py-1 font-medium text-slate-500 transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/35">
-            Planos
-          </Link>
-          <span aria-hidden className="text-slate-300">·</span>
-          <a
-            href={`https://wa.me/${SIGO_WHATSAPP_NUMBER}?text=${encodeURIComponent("Olá. Gostaria de uma demonstração do SIGO.")}`}
-            target="_blank"
-            rel="noreferrer"
-            className="rounded-md px-2 py-1 font-medium text-slate-500 transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/35"
+          <Link
+            to="/"
+            className="text-[13.5px] font-semibold text-ink-400 transition-colors hover:text-teal-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal"
           >
-            Pedir demonstração
-          </a>
-        </footer>
+            ← Voltar ao site
+          </Link>
+        </motion.footer>
       </div>
     </div>
   );
