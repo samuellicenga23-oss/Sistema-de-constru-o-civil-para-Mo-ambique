@@ -72,31 +72,25 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="relative min-h-dvh overflow-hidden bg-[#0e1828] text-white">
+    <div className="relative min-h-dvh overflow-hidden bg-[#f3f6f8] text-ink">
       <div aria-hidden className="pointer-events-none absolute inset-0">
-        <div className="absolute inset-0 bg-[radial-gradient(64rem_36rem_at_12%_-8%,rgba(26,173,180,0.26),transparent_58%),radial-gradient(48rem_32rem_at_100%_0%,rgba(237,108,34,0.14),transparent_52%),radial-gradient(36rem_24rem_at_60%_110%,rgba(26,173,180,0.12),transparent_55%)]" />
-        <div
-          className="absolute inset-0 opacity-[0.07]"
-          style={{
-            backgroundImage:
-              "linear-gradient(rgba(255,255,255,0.65) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.65) 1px, transparent 1px)",
-            backgroundSize: "64px 64px",
-            maskImage: "radial-gradient(ellipse 75% 60% at 50% 28%, black, transparent)",
-          }}
-        />
+        <div className="absolute inset-0 bg-[radial-gradient(42rem_28rem_at_50%_-10%,rgba(26,173,180,0.16),transparent_60%),radial-gradient(28rem_22rem_at_100%_100%,rgba(237,108,34,0.08),transparent_55%)]" />
       </div>
 
-      <div className="relative z-10 mx-auto flex min-h-dvh w-full max-w-[440px] flex-col justify-center px-5 py-12 sm:px-6">
+      <div className="relative z-10 mx-auto flex min-h-dvh w-full max-w-[400px] flex-col justify-center px-5 py-12">
         <header className="page-enter text-center">
           <Link
             to="/"
-            className="inline-flex rounded-xl transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-bright/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0e1828]"
+            className="inline-flex rounded-lg transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40"
             aria-label="SIGO — voltar ao site"
           >
-            <LogoFull dark tagline={false} className="mx-auto h-[3.25rem] sm:h-14" />
+            <LogoFull tagline={false} className="mx-auto h-12 sm:h-14" />
           </Link>
-          <p className="mx-auto mt-4 max-w-[26ch] font-display text-[1.2rem] font-semibold leading-snug tracking-[-0.02em] text-white/95 sm:text-[1.35rem]">
-            Controle a obra como ela realmente acontece.
+          <p className="mx-auto mt-5 max-w-[22ch] font-display text-[1.35rem] font-semibold leading-snug tracking-[-0.02em] text-slate-900 sm:text-[1.5rem]">
+            Entrar
+          </p>
+          <p className="mt-2 text-[14px] leading-5 text-slate-500">
+            Email e palavra-passe da sua empresa.
           </p>
         </header>
 
@@ -105,17 +99,10 @@ export default function LoginPage() {
             onSubmit={handleSubmit}
             noValidate
             aria-busy={submitting}
-            className="page-enter space-y-6 rounded-[1.35rem] border border-white/12 bg-white p-6 text-ink shadow-[0_28px_70px_-36px_rgba(0,0,0,0.65)] sm:p-8"
-            style={{ animationDelay: "50ms" }}
+            className="page-enter space-y-5"
+            style={{ animationDelay: "40ms" }}
           >
-            <div>
-              <h1 className="font-display text-[1.45rem] font-bold tracking-tight text-ink">Entrar</h1>
-              <p className="mt-1.5 text-[13.5px] leading-5 text-slate-500">
-                Use o email e a palavra-passe da sua empresa.
-              </p>
-            </div>
-
-            <div className="space-y-5">
+            <div className="space-y-4">
               <div>
                 <label className="label" htmlFor={emailId}>Email</label>
                 <input
@@ -137,7 +124,7 @@ export default function LoginPage() {
                   disabled={submitting}
                   aria-invalid={Boolean(error)}
                   aria-describedby={error ? errorId : undefined}
-                  className="input min-h-11"
+                  className="input min-h-11 bg-white"
                   placeholder="nome@empresa.co.mz"
                 />
               </div>
@@ -159,7 +146,7 @@ export default function LoginPage() {
                     disabled={submitting}
                     aria-invalid={Boolean(error)}
                     aria-describedby={error ? errorId : undefined}
-                    className="input min-h-11 pr-12"
+                    className="input min-h-11 bg-white pr-12"
                     placeholder="••••••••"
                   />
                   <button
@@ -200,7 +187,7 @@ export default function LoginPage() {
             </button>
 
             {googleEnabled && (
-              <div className="space-y-4 pt-0.5">
+              <div className="space-y-4 pt-1">
                 <div className="flex items-center gap-3" role="separator" aria-label="ou">
                   <div className="h-px flex-1 bg-slate-200" />
                   <span className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-400">ou</span>
@@ -212,7 +199,7 @@ export default function LoginPage() {
                   onClick={(event) => {
                     if (submitting) event.preventDefault();
                   }}
-                  className={`btn btn-secondary w-full min-h-11 !py-3 ${submitting ? "pointer-events-none opacity-50" : ""}`}
+                  className={`btn btn-secondary w-full min-h-11 !py-3 bg-white ${submitting ? "pointer-events-none opacity-50" : ""}`}
                 >
                   <svg viewBox="0 0 48 48" className="h-4 w-4" aria-hidden="true">
                     <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
@@ -228,22 +215,22 @@ export default function LoginPage() {
         </main>
 
         <footer
-          className="page-enter mt-7 flex flex-wrap items-center justify-center gap-x-1 text-[13px] text-white/55"
-          style={{ animationDelay: "100ms" }}
+          className="page-enter mt-10 flex flex-wrap items-center justify-center gap-x-1 text-[13px] text-slate-400"
+          style={{ animationDelay: "80ms" }}
         >
-          <Link to="/" className="rounded-md px-2 py-1 font-medium text-white/75 transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-bright/50">
+          <Link to="/" className="rounded-md px-2 py-1 font-medium text-slate-500 transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/35">
             Site
           </Link>
-          <span aria-hidden className="text-white/25">·</span>
-          <Link to="/#planos" className="rounded-md px-2 py-1 font-medium text-white/75 transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-bright/50">
+          <span aria-hidden className="text-slate-300">·</span>
+          <Link to="/#planos" className="rounded-md px-2 py-1 font-medium text-slate-500 transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/35">
             Planos
           </Link>
-          <span aria-hidden className="text-white/25">·</span>
+          <span aria-hidden className="text-slate-300">·</span>
           <a
             href={`https://wa.me/${SIGO_WHATSAPP_NUMBER}?text=${encodeURIComponent("Olá. Gostaria de uma demonstração do SIGO.")}`}
             target="_blank"
             rel="noreferrer"
-            className="rounded-md px-2 py-1 font-medium text-white/75 transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-bright/50"
+            className="rounded-md px-2 py-1 font-medium text-slate-500 transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/35"
           >
             Pedir demonstração
           </a>
