@@ -1,11 +1,11 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { useAuth, ApiError } from "../auth/AuthContext";
+import { SIGO_WHATSAPP_NUMBER } from "../commercialPlans";
 import { LogoFull } from "../components/Logo";
 import AlertBanner from "../components/AlertBanner";
 
-// Mensagens para os códigos de erro que a API devolve via query string depois de um callback do
-// Google mal sucedido (não há forma de devolver JSON num redirect de browser completo).
 const GOOGLE_ERROR_MESSAGES: Record<string, string> = {
   google_nao_configurado: "O login com Google não está disponível neste momento.",
   falha_google: "Não foi possível confirmar a sua conta Google. Tente novamente.",
@@ -19,11 +19,24 @@ export default function LoginPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const emailId = useId();
+  const passwordId = useId();
+  const errorId = useId();
+  const emailRef = useRef<HTMLInputElement>(null);
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [googleEnabled, setGoogleEnabled] = useState(false);
+
+  useEffect(() => {
+    document.title = "Entrar — SIGO";
+    return () => {
+      document.title = "SIGO — Sistema Integrado de Gestão de Obras";
+    };
+  }, []);
 
   useEffect(() => {
     const code = searchParams.get("error");
@@ -37,101 +50,204 @@ export default function LoginPage() {
       .catch(() => setGoogleEnabled(false));
   }, []);
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => emailRef.current?.focus(), 80);
+    return () => window.clearTimeout(timer);
+  }, []);
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    if (submitting) return;
     setError(null);
     setSubmitting(true);
     try {
-      const loggedInUser = await login(email, password);
+      const loggedInUser = await login(email.trim(), password);
       navigate(loggedInUser.mustChangePassword ? "/perfil?password=required" : loggedInUser.role === "super_admin" ? "/admin" : "/painel");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Erro ao entrar");
+      window.setTimeout(() => document.getElementById(passwordId)?.focus(), 0);
     } finally {
       setSubmitting(false);
     }
   }
 
   return (
-    <div className="min-h-screen grid lg:grid-cols-2 bg-ink">
-      {/* Painel de marca */}
-      <div className="relative hidden overflow-hidden lg:flex flex-col justify-between text-white p-14 xl:p-20">
-        <div aria-hidden className="pointer-events-none absolute inset-0">
-          <div className="absolute -left-20 top-10 h-80 w-80 rounded-full bg-[radial-gradient(circle,rgba(26,173,180,0.28),transparent_70%)]" />
-          <div className="absolute -right-10 bottom-0 h-96 w-96 rounded-full bg-[radial-gradient(circle,rgba(237,108,34,0.18),transparent_72%)]" />
-          <div className="absolute inset-0 opacity-20" style={{ backgroundImage: "linear-gradient(rgba(255,255,255,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.06) 1px, transparent 1px)", backgroundSize: "42px 42px" }} />
-        </div>
-        <Link to="/" className="relative inline-block">
-          <LogoFull dark tagline={false} />
-        </Link>
-        <div className="relative max-w-lg">
-          <p className="mb-4 text-[11px] font-display font-black uppercase tracking-[0.16em] text-teal-bright">SIGO</p>
-          <h1 className="font-display text-4xl font-black leading-tight tracking-tight">Gestão de obras sem complicação.</h1>
-          <p className="mt-4 max-w-md text-base leading-7 text-slate-300">
-            Orçamentos, medições, compras e controlo financeiro numa plataforma feita para equipas de construção.
-          </p>
-          <div className="mt-8 space-y-3 text-sm text-slate-200">
-            {["Planeamento e orçamento", "Acompanhamento da execução", "Controlo de custos e compras"].map((item) => (
-              <div key={item} className="flex items-center gap-3">
-                <span className="grid h-5 w-5 place-items-center rounded-full bg-white/10 text-teal text-xs">✓</span>
-                <span>{item}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-        <p className="relative text-xs text-slate-500">Moçambique · MZN & USD</p>
+    <div className="relative min-h-dvh overflow-hidden bg-[#0e1828] text-white">
+      <div aria-hidden className="pointer-events-none absolute inset-0">
+        <div className="absolute inset-0 bg-[radial-gradient(64rem_36rem_at_12%_-8%,rgba(26,173,180,0.26),transparent_58%),radial-gradient(48rem_32rem_at_100%_0%,rgba(237,108,34,0.14),transparent_52%),radial-gradient(36rem_24rem_at_60%_110%,rgba(26,173,180,0.12),transparent_55%)]" />
+        <div
+          className="absolute inset-0 opacity-[0.07]"
+          style={{
+            backgroundImage:
+              "linear-gradient(rgba(255,255,255,0.65) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.65) 1px, transparent 1px)",
+            backgroundSize: "64px 64px",
+            maskImage: "radial-gradient(ellipse 75% 60% at 50% 28%, black, transparent)",
+          }}
+        />
       </div>
 
-      {/* Formulário */}
-      <div className="flex items-center justify-center bg-surface px-6 py-12">
-        <div className="w-full max-w-md page-enter">
-          <div className="lg:hidden flex items-center justify-center mb-6">
-            <LogoFull />
-          </div>
-          <div className="rounded-2xl border border-slate-200 bg-white p-7 md:p-9 shadow-[0_20px_50px_-24px_rgba(20,32,51,0.35)]">
-            <p className="eyebrow mb-2">Acesso à plataforma</p>
-            <h2 className="font-display text-2xl font-bold tracking-tight text-slate-900">Entrar no SIGO</h2>
-            <p className="text-sm text-slate-500 mt-1 mb-7">Utilize as credenciais da sua empresa.</p>
+      <div className="relative z-10 mx-auto flex min-h-dvh w-full max-w-[440px] flex-col justify-center px-5 py-12 sm:px-6">
+        <header className="page-enter text-center">
+          <Link
+            to="/"
+            className="inline-flex rounded-xl transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-bright/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0e1828]"
+            aria-label="SIGO — voltar ao site"
+          >
+            <LogoFull dark tagline={false} className="mx-auto h-[3.25rem] sm:h-14" />
+          </Link>
+          <p className="mx-auto mt-4 max-w-[26ch] font-display text-[1.2rem] font-semibold leading-snug tracking-[-0.02em] text-white/95 sm:text-[1.35rem]">
+            Controle a obra como ela realmente acontece.
+          </p>
+        </header>
 
-            <form onSubmit={handleSubmit} className="space-y-4">
+        <main className="mt-8">
+          <form
+            onSubmit={handleSubmit}
+            noValidate
+            aria-busy={submitting}
+            className="page-enter space-y-6 rounded-[1.35rem] border border-white/12 bg-white p-6 text-ink shadow-[0_28px_70px_-36px_rgba(0,0,0,0.65)] sm:p-8"
+            style={{ animationDelay: "50ms" }}
+          >
+            <div>
+              <h1 className="font-display text-[1.45rem] font-bold tracking-tight text-ink">Entrar</h1>
+              <p className="mt-1.5 text-[13.5px] leading-5 text-slate-500">
+                Use o email e a palavra-passe da sua empresa.
+              </p>
+            </div>
+
+            <div className="space-y-5">
               <div>
-                <label className="label">Email</label>
-                <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className="input" placeholder="nome@empresa.co.mz" />
+                <label className="label" htmlFor={emailId}>Email</label>
+                <input
+                  ref={emailRef}
+                  id={emailId}
+                  name="email"
+                  type="email"
+                  inputMode="email"
+                  autoComplete="username"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  required
+                  value={email}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    if (error) setError(null);
+                  }}
+                  disabled={submitting}
+                  aria-invalid={Boolean(error)}
+                  aria-describedby={error ? errorId : undefined}
+                  className="input min-h-11"
+                  placeholder="nome@empresa.co.mz"
+                />
               </div>
+
               <div>
-                <label className="label">Palavra-passe</label>
-                <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className="input" placeholder="••••••••" />
+                <label className="label" htmlFor={passwordId}>Palavra-passe</label>
+                <div className="relative">
+                  <input
+                    id={passwordId}
+                    name="password"
+                    type={showPassword ? "text" : "password"}
+                    autoComplete="current-password"
+                    required
+                    value={password}
+                    onChange={(e) => {
+                      setPassword(e.target.value);
+                      if (error) setError(null);
+                    }}
+                    disabled={submitting}
+                    aria-invalid={Boolean(error)}
+                    aria-describedby={error ? errorId : undefined}
+                    className="input min-h-11 pr-12"
+                    placeholder="••••••••"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((current) => !current)}
+                    disabled={submitting}
+                    className="absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-xl text-slate-400 transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/35"
+                    aria-label={showPassword ? "Ocultar palavra-passe" : "Mostrar palavra-passe"}
+                    aria-pressed={showPassword}
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
               </div>
+            </div>
 
-              {error && <AlertBanner tone="error" onDismiss={() => setError(null)}>{error}</AlertBanner>}
+            <div id={errorId} aria-live="polite" className="min-h-0">
+              {error && (
+                <AlertBanner tone="error" onDismiss={() => setError(null)}>
+                  {error}
+                </AlertBanner>
+              )}
+            </div>
 
-              <button type="submit" disabled={submitting} className="btn btn-primary w-full">
-                {submitting ? "A entrar..." : "Entrar"}
-              </button>
-            </form>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="btn btn-primary w-full min-h-11 !py-3 text-[15px]"
+            >
+              {submitting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                  A entrar...
+                </>
+              ) : (
+                "Entrar"
+              )}
+            </button>
 
             {googleEnabled && (
-              <>
-                <div className="flex items-center gap-3 my-4">
-                  <div className="h-px bg-gray-200 flex-1" />
-                  <span className="text-xs text-gray-400">ou</span>
-                  <div className="h-px bg-gray-200 flex-1" />
+              <div className="space-y-4 pt-0.5">
+                <div className="flex items-center gap-3" role="separator" aria-label="ou">
+                  <div className="h-px flex-1 bg-slate-200" />
+                  <span className="text-[11px] font-medium uppercase tracking-[0.14em] text-slate-400">ou</span>
+                  <div className="h-px flex-1 bg-slate-200" />
                 </div>
                 <a
                   href="/api/auth/google/start"
-                  className="btn btn-secondary w-full flex items-center justify-center gap-2"
+                  aria-disabled={submitting}
+                  onClick={(event) => {
+                    if (submitting) event.preventDefault();
+                  }}
+                  className={`btn btn-secondary w-full min-h-11 !py-3 ${submitting ? "pointer-events-none opacity-50" : ""}`}
                 >
-                  <svg viewBox="0 0 48 48" className="w-4 h-4" aria-hidden="true">
+                  <svg viewBox="0 0 48 48" className="h-4 w-4" aria-hidden="true">
                     <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
                     <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.9-2.26 5.36-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
                     <path fill="#FBBC05" d="M10.53 28.59A14.5 14.5 0 0 1 9.5 24c0-1.59.27-3.13.76-4.59l-7.98-6.19A23.94 23.94 0 0 0 0 24c0 3.87.92 7.53 2.56 10.78z" />
                     <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
                   </svg>
-                  Entrar com Google
+                  Continuar com Google
                 </a>
-              </>
+              </div>
             )}
-          </div>
-        </div>
+          </form>
+        </main>
+
+        <footer
+          className="page-enter mt-7 flex flex-wrap items-center justify-center gap-x-1 text-[13px] text-white/55"
+          style={{ animationDelay: "100ms" }}
+        >
+          <Link to="/" className="rounded-md px-2 py-1 font-medium text-white/75 transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-bright/50">
+            Site
+          </Link>
+          <span aria-hidden className="text-white/25">·</span>
+          <Link to="/#planos" className="rounded-md px-2 py-1 font-medium text-white/75 transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-bright/50">
+            Planos
+          </Link>
+          <span aria-hidden className="text-white/25">·</span>
+          <a
+            href={`https://wa.me/${SIGO_WHATSAPP_NUMBER}?text=${encodeURIComponent("Olá. Gostaria de uma demonstração do SIGO.")}`}
+            target="_blank"
+            rel="noreferrer"
+            className="rounded-md px-2 py-1 font-medium text-white/75 transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-bright/50"
+          >
+            Pedir demonstração
+          </a>
+        </footer>
       </div>
     </div>
   );

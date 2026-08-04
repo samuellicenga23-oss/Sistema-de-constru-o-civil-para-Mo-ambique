@@ -16,6 +16,7 @@ export type WorkflowCycleId =
   | "planta_servico_indisponivel"
   | "planta_erro_total"
   | "planta_parcial"
+  | "planta_em_processamento"
   | "planta_sem_compartimentos"
   | "medicoes_vazias"
   | "medicoes_sem_assistente"
@@ -155,7 +156,7 @@ export async function getProjectWorkflowStatus(projectId: string): Promise<Proje
 
       if (processing.length > 0) {
         guidance.push({
-          id: "planta_parcial",
+          id: "planta_em_processamento",
           severity: "info",
           title: "Análise em curso",
           message: `${processing.length} ficheiro(s) ainda a ser processado(s). Pode aguardar ou começar a medição manual em paralelo.`,

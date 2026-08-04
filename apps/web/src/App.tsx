@@ -3,8 +3,10 @@ import { lazy, Suspense } from "react";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import { canAccessPath, isModuleEnabled } from "./permissions";
 import LoadingState from "./components/LoadingState";
+import LoginPage from "./pages/LoginPage";
+import PublicLandingPage from "./pages/PublicLandingPage";
+import CheckoutPage from "./pages/CheckoutPage";
 
-const LoginPage = lazy(() => import("./pages/LoginPage"));
 const DashboardPage = lazy(() => import("./pages/DashboardPage"));
 const CatalogPage = lazy(() => import("./pages/CatalogPage"));
 const ProjectsPage = lazy(() => import("./pages/ProjectsPage"));
@@ -22,8 +24,6 @@ const ProjectSiteDiaryPage = lazy(() => import("./pages/ProjectSiteDiaryPage"));
 const SuppliersPage = lazy(() => import("./pages/SuppliersPage"));
 const ProjectPurchasingPage = lazy(() => import("./pages/ProjectPurchasingPage"));
 const ProjectSchedulePage = lazy(() => import("./pages/ProjectSchedulePage"));
-const PublicLandingPage = lazy(() => import("./pages/PublicLandingPage"));
-const CheckoutPage = lazy(() => import("./pages/CheckoutPage"));
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();

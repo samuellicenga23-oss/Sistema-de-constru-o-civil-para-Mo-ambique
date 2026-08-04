@@ -24,10 +24,10 @@ export default defineConfig({
         runtimeCaching: [
           {
             urlPattern: /^\/assets\//,
-            handler: "CacheFirst",
+            handler: "StaleWhileRevalidate",
             options: {
               cacheName: "sigo-versioned-assets",
-              expiration: { maxEntries: 12, maxAgeSeconds: 7 * 24 * 60 * 60 },
+              expiration: { maxEntries: 80, maxAgeSeconds: 7 * 24 * 60 * 60 },
             },
           },
           {
@@ -58,8 +58,8 @@ export default defineConfig({
     }),
   ],
   build: {
-    // Mantém os assets com hash do build anterior para abas abertas durante o deploy.
-    emptyOutDir: false,
+    // Limpa dist em cada build para evitar misturar chunks de gerações antigas (PWA/cache).
+    emptyOutDir: true,
   },
   server: {
     host: "127.0.0.1",

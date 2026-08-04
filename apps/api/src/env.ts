@@ -29,7 +29,7 @@ export const env = {
   databaseUrl: required("DATABASE_URL"),
   port: Number(process.env.PORT ?? 4000),
   sessionCookieSecret: process.env.SESSION_COOKIE_SECRET ?? DEV_SESSION_SECRET,
-  plantServiceUrl: process.env.PLANT_SERVICE_URL ?? "http://localhost:8001",
+  plantServiceUrl: process.env.PLANT_SERVICE_URL ?? "http://127.0.0.1:8001",
   // Segredo partilhado enviado ao plant-service (ver PLANT_SERVICE_TOKEN aí) — undefined em dev
   // sem configuração, tal como o resto dos controlos "seguro em produção, permissivo em dev".
   // Obrigatório em produção (verificado acima, antes deste objecto ser construído).

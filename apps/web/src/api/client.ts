@@ -27,7 +27,7 @@ export type UserSession = {
 };
 
 export const api = {
-  me: () => request<CurrentUser>("/auth/me"),
+  me: () => request<CurrentUser>("/auth/me", { timeoutMs: 8_000 }),
   login: (email: string, password: string) =>
     request<CurrentUser>("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }),
   logout: () => request<{ ok: true }>("/auth/logout", { method: "POST" }),

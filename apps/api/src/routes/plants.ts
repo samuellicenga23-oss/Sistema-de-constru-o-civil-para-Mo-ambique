@@ -58,8 +58,13 @@ async function fetchPlantService(form: FormData): Promise<Response> {
       method: "POST",
       body: form,
       headers: env.plantServiceToken ? { "X-Internal-Token": env.plantServiceToken } : undefined,
+      // PDFs grandes podem demorar; sem timeout o job fica preso em "processando".
+      signal: AbortSignal.timeout(180_000),
     });
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
+      throw new Error("O leitor de plantas demorou demasiado a responder. Tente novamente ou use medição manual.");
+    }
     throw new Error(plantServiceUnavailableMessage());
   }
 }

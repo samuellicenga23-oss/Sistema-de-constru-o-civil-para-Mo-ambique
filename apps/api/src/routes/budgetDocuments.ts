@@ -281,7 +281,8 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
     const latestBudget = existingBudgets[0];
     const forceNew = options.data.createScenario || options.data.createRevision;
     if (!forceNew) {
-      if (latestBudget?.sourceMeasurementFingerprint === fingerprint || (latestBudget && !latestBudget.sourceMeasurementFingerprint)) {
+      // Orçamentos legados sem fingerprint não contam como "iguais" — forçam revisão explícita.
+      if (latestBudget?.sourceMeasurementFingerprint && latestBudget.sourceMeasurementFingerprint === fingerprint) {
         return { document: latestBudget, created: false, revisionCreated: false, scenarioCreated: false };
       }
       if (latestBudget) {
