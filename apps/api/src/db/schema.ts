@@ -76,8 +76,35 @@ export const subscriptions = pgTable("subscriptions", {
   status: subscriptionStatusEnum("status").notNull().default("trial"),
   activatedAt: timestamp("activated_at"),
   activatedByUserId: uuid("activated_by_user_id"),
+  /** Fim do período pago ou do trial — null = sem data definida. */
+  expiresAt: timestamp("expires_at"),
+  /** monthly | annual | custom | trial */
+  billingCycle: varchar("billing_cycle", { length: 20 }),
+  notes: text("notes"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
+
+/** Pagamentos SaaS registados manualmente pelo super_admin (sem gateway). */
+export const platformPayments = pgTable(
+  "platform_payments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+    amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
+    currency: currencyEnum("currency").notNull().default("MZN"),
+    paidAt: timestamp("paid_at").notNull().defaultNow(),
+    periodStart: date("period_start"),
+    periodEnd: date("period_end"),
+    plan: varchar("plan", { length: 50 }).notNull(),
+    billingCycle: varchar("billing_cycle", { length: 20 }),
+    method: varchar("method", { length: 40 }).notNull().default("transferencia"),
+    reference: varchar("reference", { length: 120 }),
+    notes: text("notes"),
+    recordedByUserId: uuid("recorded_by_user_id"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [index("platform_payments_company_id_idx").on(table.companyId)]
+);
 
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),

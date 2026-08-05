@@ -25,6 +25,11 @@ export type AdminStats = {
   totalUsers: number;
   totalProjects: number;
   planCounts: Record<string, number>;
+  estimatedMonthlyRevenueMzn: number;
+  totalCollectedMzn: number;
+  collectedThisMonthMzn: number;
+  expiringSoon: Array<{ id: string; name: string; expiresAt: string; status: string; plan: string }>;
+  nearLimit: Array<{ id: string; name: string; users: number; maxUsers: number | null; projects: number; maxProjects: number | null }>;
   services: { api: boolean; plantService: boolean; plantAi?: unknown };
 };
 

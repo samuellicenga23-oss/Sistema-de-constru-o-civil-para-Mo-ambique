@@ -7,6 +7,44 @@ export type Subscription = {
   plan: string;
   status: "trial" | "activo" | "suspenso";
   activatedAt: string | null;
+  activatedByUserId?: string | null;
+  expiresAt?: string | null;
+  billingCycle?: "monthly" | "annual" | "custom" | "trial" | null;
+  notes?: string | null;
+  createdAt?: string;
+};
+
+export type CompanyUsage = {
+  users: number;
+  activeUsers: number;
+  projects: number;
+  budgets: number;
+  plants: number;
+  practiceClients: number;
+  practiceQuotes: number;
+  practiceEngagements: number;
+  maxUsers: number | null;
+  maxProjects: number | null;
+  usersNearLimit: boolean;
+  projectsNearLimit: boolean;
+  lastLoginAt: string | null;
+};
+
+export type PlatformPayment = {
+  id: string;
+  companyId: string;
+  amount: string;
+  currency: string;
+  paidAt: string;
+  periodStart: string | null;
+  periodEnd: string | null;
+  plan: string;
+  billingCycle: string | null;
+  method: string;
+  reference: string | null;
+  notes: string | null;
+  recordedByUserId: string | null;
+  createdAt: string;
 };
 
 export type Company = {
@@ -33,6 +71,8 @@ export type Company = {
   defaultLanguage: "pt" | "en";
   createdAt: string;
   subscription?: Subscription | null;
+  usage?: CompanyUsage | null;
+  totalPaidMzn?: number;
 };
 
 export type CompanyModuleKey = "dashboard" | "measurements" | "budgets" | "catalog" | "suppliers" | "purchasing" | "schedule" | "site_diary" | "financial" | "quick_calculations" | "practice";
@@ -68,12 +108,44 @@ export type CompanyUpdateInput = Partial<{
   workingHoursPerDay: number;
 }>;
 
+export type SubscriptionUpdateInput = {
+  status?: "trial" | "activo" | "suspenso";
+  plan?: string;
+  expiresAt?: string | null;
+  billingCycle?: "monthly" | "annual" | "custom" | "trial" | null;
+  notes?: string | null;
+  payment?: {
+    amount: number;
+    currency?: "MZN" | "USD";
+    method?: "transferencia" | "mpesa" | "cash" | "cartao" | "outro";
+    reference?: string;
+    notes?: string;
+    paidAt?: string;
+    periodStart?: string;
+    periodEnd?: string;
+  };
+};
+
+export type PaymentCreateInput = {
+  amount: number;
+  currency?: "MZN" | "USD";
+  method?: "transferencia" | "mpesa" | "cash" | "cartao" | "outro";
+  reference?: string;
+  notes?: string;
+  paidAt?: string;
+  periodStart?: string;
+  periodEnd?: string;
+  plan?: string;
+  billingCycle?: "monthly" | "annual" | "custom" | "trial";
+  extendExpires?: boolean;
+};
+
 export const companiesApi = {
   list: () => request<Company[]>("/companies"),
   create: (data: { name: string; adminName: string; adminEmail: string; adminPassword: string; defaultCurrency?: string }) =>
     request<{ company: Company }>("/companies", { method: "POST", body: JSON.stringify(data) }),
-  updateSubscription: (companyId: string, data: { status?: "trial" | "activo" | "suspenso"; plan?: string }) =>
-    request<Subscription>(`/companies/${companyId}/subscription`, { method: "PUT", body: JSON.stringify(data) }),
+  updateSubscription: (companyId: string, data: SubscriptionUpdateInput) =>
+    request<Subscription & { payment?: PlatformPayment | null }>(`/companies/${companyId}/subscription`, { method: "PUT", body: JSON.stringify(data) }),
   updateAdminSettings: (companyId: string, data: Partial<Pick<Company, "name" | "defaultCurrency" | "enabledModules" | "brandName" | "primaryColor" | "accentColor" | "defaultLanguage">>) =>
     request<Company>(`/admin/companies/${companyId}`, { method: "PATCH", body: JSON.stringify(data) }),
   listAdminUsers: (companyId?: string) => request<AdminCompanyUser[]>(`/admin/users${companyId ? `?companyId=${companyId}` : ""}`),
@@ -82,6 +154,24 @@ export const companiesApi = {
   updateAdminUser: (userId: string, data: Partial<Pick<AdminCompanyUser, "name" | "role" | "isActive" | "preferredLanguage">>) =>
     request<AdminCompanyUser>(`/admin/users/${userId}`, { method: "PATCH", body: JSON.stringify(data) }),
   resetAdminUserPassword: (userId: string, password: string) => request<{ ok: true }>(`/admin/users/${userId}/reset-password`, { method: "POST", body: JSON.stringify({ password }) }),
+  listPayments: (companyId: string) => request<PlatformPayment[]>(`/admin/companies/${companyId}/payments`),
+  createPayment: (companyId: string, data: PaymentCreateInput) =>
+    request<PlatformPayment>(`/admin/companies/${companyId}/payments`, { method: "POST", body: JSON.stringify(data) }),
+  getUsage: (companyId: string) => request<CompanyUsage>(`/admin/companies/${companyId}/usage`),
+  downloadBackup: async (companyId: string, fileNameHint?: string) => {
+    const res = await fetch(`/api/admin/companies/${companyId}/backup`, { credentials: "include" });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new ApiError(res.status, body.error ?? `Erro ${res.status}`);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileNameHint ? `sigo-backup-${fileNameHint}.json` : `sigo-backup-${companyId}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  },
 
   me: () => request<{ company: Company; subscription: Subscription | null }>("/companies/me"),
   updateMe: (data: CompanyUpdateInput) => request<Company>("/companies/me", { method: "PUT", body: JSON.stringify(data) }),

@@ -5,15 +5,27 @@ import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { db } from "../db/index.js";
-import { companies, users, subscriptions, projects, sessions } from "../db/schema.js";
+import { companies, users, subscriptions, projects, sessions, platformPayments } from "../db/schema.js";
 import { requireRole, requireCompanyUser, requireAuth } from "../auth/middleware.js";
 import { hashPassword } from "../auth/password.js";
 import { getSessionUser, setSessionActingCompany } from "../auth/session.js";
 import { env } from "../env.js";
-import { COMPANY_MODULE_KEYS, CURRENCIES, SUBSCRIPTION_STATUSES, SUBSCRIPTION_PLAN_KEYS, resolveRoleTemplate, isCompanyUserRole } from "@sigo/shared";
+import { COMPANY_MODULE_KEYS, CURRENCIES, SUBSCRIPTION_STATUSES, SUBSCRIPTION_PLAN_KEYS, resolveRoleTemplate, isCompanyUserRole, getPlanDefinition } from "@sigo/shared";
 import { detectImageExtension } from "../services/imageValidation.js";
 import { syncSigoPricesForCompany } from "../services/sigoPrices.js";
 import { recordAuditEvent } from "../services/auditTrail.js";
+import {
+  buildCompanyBackup,
+  getCompaniesUsageMap,
+  getCompanyUsage,
+  getPaymentsTotalByCompany,
+  listCompanyPayments,
+} from "../services/companyAdmin.js";
+
+const dateOnly = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const isoDateTime = z.string().min(10);
+const BILLING_CYCLES = ["monthly", "annual", "custom", "trial"] as const;
+const PAYMENT_METHODS = ["transferencia", "mpesa", "cash", "cartao", "outro"] as const;
 
 const createCompanySchema = z.object({
   name: z.string().min(1),
@@ -64,10 +76,23 @@ async function getLatestSubscription(companyId: string) {
 export async function companyRoutes(app: FastifyInstance) {
   // ---------- Gestão da plataforma (super_admin) ----------
   app.get("/api/companies", { preHandler: requireRole("super_admin") }, async () => {
-    const rows = await db.select().from(companies);
-    return Promise.all(
-      rows.map(async (c) => ({ ...c, subscription: await getLatestSubscription(c.id) }))
-    );
+    const rows = await db.select().from(companies).orderBy(companies.name);
+    const ids = rows.map((c) => c.id);
+    const subs = await Promise.all(ids.map(async (id) => [id, await getLatestSubscription(id)] as const));
+    const planByCompany = new Map(subs.map(([id, sub]) => [id, sub?.plan ?? "free"]));
+    const [usageMap, paidMap] = await Promise.all([
+      getCompaniesUsageMap(ids, planByCompany),
+      getPaymentsTotalByCompany(ids),
+    ]);
+    return rows.map((c) => {
+      const subscription = subs.find(([id]) => id === c.id)?.[1] ?? null;
+      return {
+        ...c,
+        subscription,
+        usage: usageMap.get(c.id) ?? null,
+        totalPaidMzn: paidMap.get(c.id) ?? 0,
+      };
+    });
   });
 
   app.get("/api/companies/:id", { preHandler: requireRole("super_admin") }, async (request, reply) => {
@@ -185,11 +210,15 @@ export async function companyRoutes(app: FastifyInstance) {
       })
       .returning();
 
-    // Nova empresa criada pelo super_admin começa em trial do plano Profissional (secção 37 do
-    // documento comercial) — a contagem automática de 14 dias e a passagem a Free no fim ainda
-    // não estão implementadas (precisa de um campo de data de expiração do trial, para adicionar
-    // depois); por agora o super_admin muda manualmente o estado quando o trial terminar.
-    await db.insert(subscriptions).values({ companyId: company.id, plan: "profissional", status: "trial" });
+    // Nova empresa começa em trial Profissional com validade de 14 dias.
+    const trialEnds = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+    await db.insert(subscriptions).values({
+      companyId: company.id,
+      plan: "profissional",
+      status: "trial",
+      billingCycle: "trial",
+      expiresAt: trialEnds,
+    });
     await syncSigoPricesForCompany(company.id);
 
     return reply.code(201).send({
@@ -198,12 +227,30 @@ export async function companyRoutes(app: FastifyInstance) {
     });
   });
 
-  // Activar/suspender/mudar de plano manualmente — não há gateway de pagamento em v1, a
-  // factura é feita fora do sistema e o super_admin regista aqui o resultado.
+  // Activar/suspender/mudar de plano — factura fora do sistema; o super_admin regista aqui
+  // validade, ciclo e eventualmente o pagamento recebido.
   app.put("/api/companies/:id/subscription", { preHandler: requireRole("super_admin") }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const parsed = z
-      .object({ status: z.enum(SUBSCRIPTION_STATUSES).optional(), plan: z.enum(SUBSCRIPTION_PLAN_KEYS as [string, ...string[]]).optional() })
+      .object({
+        status: z.enum(SUBSCRIPTION_STATUSES).optional(),
+        plan: z.enum(SUBSCRIPTION_PLAN_KEYS as [string, ...string[]]).optional(),
+        expiresAt: isoDateTime.nullable().optional(),
+        billingCycle: z.enum(BILLING_CYCLES).nullable().optional(),
+        notes: z.string().max(2000).nullable().optional(),
+        payment: z
+          .object({
+            amount: z.number().positive(),
+            currency: z.enum(CURRENCIES).default("MZN"),
+            method: z.enum(PAYMENT_METHODS).default("transferencia"),
+            reference: z.string().max(120).optional(),
+            notes: z.string().max(1000).optional(),
+            paidAt: isoDateTime.optional(),
+            periodStart: dateOnly.optional(),
+            periodEnd: dateOnly.optional(),
+          })
+          .optional(),
+      })
       .safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
 
@@ -211,18 +258,62 @@ export async function companyRoutes(app: FastifyInstance) {
     if (!current) return reply.code(404).send({ error: "Empresa sem subscrição" });
 
     const nextStatus = parsed.data.status ?? current.status;
+    const nextPlan = parsed.data.plan ?? current.plan;
+    const nextExpires =
+      parsed.data.expiresAt === undefined
+        ? current.expiresAt
+        : parsed.data.expiresAt
+          ? new Date(parsed.data.expiresAt)
+          : null;
+    const nextCycle =
+      parsed.data.billingCycle === undefined ? current.billingCycle : parsed.data.billingCycle;
+    const nextNotes = parsed.data.notes === undefined ? current.notes : parsed.data.notes;
+
     const [row] = await db
       .update(subscriptions)
       .set({
         status: nextStatus,
-        plan: parsed.data.plan ?? current.plan,
-        activatedAt: nextStatus === "activo" ? new Date() : current.activatedAt,
-        activatedByUserId: nextStatus === "activo" ? request.currentUser!.id : current.activatedByUserId,
+        plan: nextPlan,
+        expiresAt: nextExpires,
+        billingCycle: nextCycle,
+        notes: nextNotes,
+        activatedAt: nextStatus === "activo" ? (current.activatedAt ?? new Date()) : current.activatedAt,
+        activatedByUserId: nextStatus === "activo" ? (current.activatedByUserId ?? request.currentUser!.id) : current.activatedByUserId,
       })
       .where(eq(subscriptions.id, current.id))
       .returning();
 
-    // Ao suspender, termina sessões activas da empresa para o bloqueio não depender do TTL.
+    let payment = null;
+    if (parsed.data.payment) {
+      const p = parsed.data.payment;
+      const [createdPayment] = await db
+        .insert(platformPayments)
+        .values({
+          companyId: id,
+          amount: String(p.amount),
+          currency: p.currency,
+          method: p.method,
+          reference: p.reference ?? null,
+          notes: p.notes ?? null,
+          paidAt: p.paidAt ? new Date(p.paidAt) : new Date(),
+          periodStart: p.periodStart ?? null,
+          periodEnd: p.periodEnd ?? null,
+          plan: nextPlan,
+          billingCycle: nextCycle,
+          recordedByUserId: request.currentUser!.id,
+        })
+        .returning();
+      payment = createdPayment;
+      if (p.periodEnd && !parsed.data.expiresAt) {
+        const [extended] = await db
+          .update(subscriptions)
+          .set({ expiresAt: new Date(`${p.periodEnd}T23:59:59.000Z`) })
+          .where(eq(subscriptions.id, current.id))
+          .returning();
+        Object.assign(row, extended);
+      }
+    }
+
     if (nextStatus === "suspenso" && nextStatus !== current.status) {
       const companyUsers = await db.select({ id: users.id }).from(users).where(eq(users.companyId, id));
       const userIds = companyUsers.map((u) => u.id);
@@ -231,14 +322,131 @@ export async function companyRoutes(app: FastifyInstance) {
       }
     }
 
-    return row;
+    await recordAuditEvent({
+      companyId: id,
+      actorUserId: request.currentUser!.id,
+      entityType: "subscription",
+      entityId: row.id,
+      action: "subscription.updated",
+      before: {
+        plan: current.plan,
+        status: current.status,
+        expiresAt: current.expiresAt,
+        billingCycle: current.billingCycle,
+      },
+      after: {
+        plan: row.plan,
+        status: row.status,
+        expiresAt: row.expiresAt,
+        billingCycle: row.billingCycle,
+        paymentId: payment?.id ?? null,
+      },
+    });
+
+    return { ...row, payment };
   });
 
+  app.get("/api/admin/companies/:id/payments", { preHandler: requireRole("super_admin") }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const [company] = await db.select({ id: companies.id }).from(companies).where(eq(companies.id, id)).limit(1);
+    if (!company) return reply.code(404).send({ error: "Empresa não encontrada" });
+    return listCompanyPayments(id);
+  });
+
+  app.post("/api/admin/companies/:id/payments", { preHandler: requireRole("super_admin") }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const parsed = z
+      .object({
+        amount: z.number().positive(),
+        currency: z.enum(CURRENCIES).default("MZN"),
+        method: z.enum(PAYMENT_METHODS).default("transferencia"),
+        reference: z.string().max(120).optional(),
+        notes: z.string().max(1000).optional(),
+        paidAt: isoDateTime.optional(),
+        periodStart: dateOnly.optional(),
+        periodEnd: dateOnly.optional(),
+        plan: z.enum(SUBSCRIPTION_PLAN_KEYS as [string, ...string[]]).optional(),
+        billingCycle: z.enum(BILLING_CYCLES).optional(),
+        extendExpires: z.boolean().optional(),
+      })
+      .safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+
+    const [company] = await db.select({ id: companies.id }).from(companies).where(eq(companies.id, id)).limit(1);
+    if (!company) return reply.code(404).send({ error: "Empresa não encontrada" });
+    const current = await getLatestSubscription(id);
+    if (!current) return reply.code(404).send({ error: "Empresa sem subscrição" });
+
+    const plan = parsed.data.plan ?? current.plan;
+    const cycle = parsed.data.billingCycle ?? current.billingCycle;
+    const [created] = await db
+      .insert(platformPayments)
+      .values({
+        companyId: id,
+        amount: String(parsed.data.amount),
+        currency: parsed.data.currency,
+        method: parsed.data.method,
+        reference: parsed.data.reference ?? null,
+        notes: parsed.data.notes ?? null,
+        paidAt: parsed.data.paidAt ? new Date(parsed.data.paidAt) : new Date(),
+        periodStart: parsed.data.periodStart ?? null,
+        periodEnd: parsed.data.periodEnd ?? null,
+        plan,
+        billingCycle: cycle,
+        recordedByUserId: request.currentUser!.id,
+      })
+      .returning();
+
+    if (parsed.data.extendExpires !== false && parsed.data.periodEnd) {
+      await db
+        .update(subscriptions)
+        .set({ expiresAt: new Date(`${parsed.data.periodEnd}T23:59:59.000Z`), status: current.status === "suspenso" ? current.status : "activo" })
+        .where(eq(subscriptions.id, current.id));
+    }
+
+    await recordAuditEvent({
+      companyId: id,
+      actorUserId: request.currentUser!.id,
+      entityType: "platform_payment",
+      entityId: created.id,
+      action: "payment.recorded",
+      after: { amount: created.amount, plan: created.plan, periodEnd: created.periodEnd },
+    });
+
+    return reply.code(201).send(created);
+  });
+
+  app.get("/api/admin/companies/:id/usage", { preHandler: requireRole("super_admin") }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const [company] = await db.select().from(companies).where(eq(companies.id, id)).limit(1);
+    if (!company) return reply.code(404).send({ error: "Empresa não encontrada" });
+    const sub = await getLatestSubscription(id);
+    return getCompanyUsage(id, sub?.plan ?? "free");
+  });
+
+  app.get("/api/admin/companies/:id/backup", { preHandler: requireRole("super_admin") }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const backup = await buildCompanyBackup(id);
+    if (!backup) return reply.code(404).send({ error: "Empresa não encontrada" });
+    await recordAuditEvent({
+      companyId: id,
+      actorUserId: request.currentUser!.id,
+      entityType: "company",
+      entityId: id,
+      action: "company.backup_exported",
+      metadata: { format: backup.format },
+    });
+    const slug = backup.company.name.replace(/[^\w\-]+/g, "_").slice(0, 40);
+    reply.header("Content-Type", "application/json; charset=utf-8");
+    reply.header("Content-Disposition", `attachment; filename="sigo-backup-${slug}-${new Date().toISOString().slice(0, 10)}.json"`);
+    return backup;
+  });
   // Estatísticas para o painel do super_admin (Fase 1, Etapa 5) — antes o painel só listava
   // empresas, sem nenhum resumo agregado da plataforma.
   app.get("/api/admin/stats", { preHandler: requireRole("super_admin") }, async () => {
     const allCompanies = await db.select().from(companies);
     const allSubscriptions = await db.select().from(subscriptions);
+    const allPayments = await db.select().from(platformPayments);
 
     const latestByCompany = new Map<string, (typeof allSubscriptions)[number]>();
     for (const s of allSubscriptions) {
@@ -249,7 +457,12 @@ export async function companyRoutes(app: FastifyInstance) {
     let activeCompanies = 0;
     let trialCompanies = 0;
     let suspendedCompanies = 0;
+    let estimatedMonthlyRevenueMzn = 0;
     const planCounts: Record<string, number> = {};
+    const now = Date.now();
+    const in30d = now + 30 * 24 * 60 * 60 * 1000;
+    const expiringSoon: Array<{ id: string; name: string; expiresAt: string; status: string; plan: string }> = [];
+
     for (const c of allCompanies) {
       const sub = latestByCompany.get(c.id);
       const status = sub?.status ?? "trial";
@@ -258,13 +471,67 @@ export async function companyRoutes(app: FastifyInstance) {
       else trialCompanies++;
       const plan = sub?.plan ?? "free";
       planCounts[plan] = (planCounts[plan] ?? 0) + 1;
+
+      if (status === "activo") {
+        const def = getPlanDefinition(plan);
+        if (sub?.billingCycle === "annual" && def?.annualPriceMzn != null) {
+          estimatedMonthlyRevenueMzn += def.annualPriceMzn / 12;
+        } else if (def?.monthlyPriceMzn != null) {
+          estimatedMonthlyRevenueMzn += def.monthlyPriceMzn;
+        }
+      }
+
+      if (sub?.expiresAt) {
+        const exp = sub.expiresAt.getTime();
+        if (exp >= now && exp <= in30d) {
+          expiringSoon.push({
+            id: c.id,
+            name: c.name,
+            expiresAt: sub.expiresAt.toISOString(),
+            status,
+            plan,
+          });
+        }
+      }
     }
+
+    expiringSoon.sort((a, b) => a.expiresAt.localeCompare(b.expiresAt));
+
+    const totalCollectedMzn = allPayments
+      .filter((p) => p.currency === "MZN")
+      .reduce((sum, p) => sum + Number(p.amount), 0);
+    const monthStart = new Date();
+    monthStart.setDate(1);
+    monthStart.setHours(0, 0, 0, 0);
+    const collectedThisMonthMzn = allPayments
+      .filter((p) => p.currency === "MZN" && p.paidAt >= monthStart)
+      .reduce((sum, p) => sum + Number(p.amount), 0);
+
+    const planByCompany = new Map([...latestByCompany.entries()].map(([id, sub]) => [id, sub.plan]));
+    const usageMap = await getCompaniesUsageMap(
+      allCompanies.map((c) => c.id),
+      planByCompany,
+    );
+    const nearLimit = allCompanies
+      .filter((c) => {
+        const u = usageMap.get(c.id);
+        return u && (u.usersNearLimit || u.projectsNearLimit);
+      })
+      .map((c) => {
+        const u = usageMap.get(c.id)!;
+        return {
+          id: c.id,
+          name: c.name,
+          users: u.users,
+          maxUsers: u.maxUsers,
+          projects: u.projects,
+          maxProjects: u.maxProjects,
+        };
+      });
 
     const [{ value: totalUsers }] = await db.select({ value: count() }).from(users);
     const [{ value: totalProjects }] = await db.select({ value: count() }).from(projects);
 
-    // Estado dos serviços — a própria API está claramente "no ar" (está a responder a este
-    // pedido); o plant-service precisa de um ping real porque corre num processo à parte.
     let plantServiceUp = false;
     let plantAi: unknown = null;
     try {
@@ -290,6 +557,11 @@ export async function companyRoutes(app: FastifyInstance) {
       totalUsers: Number(totalUsers),
       totalProjects: Number(totalProjects),
       planCounts,
+      estimatedMonthlyRevenueMzn: Math.round(estimatedMonthlyRevenueMzn),
+      totalCollectedMzn: Math.round(totalCollectedMzn),
+      collectedThisMonthMzn: Math.round(collectedThisMonthMzn),
+      expiringSoon,
+      nearLimit,
       services: { api: true, plantService: plantServiceUp, plantAi },
     };
   });

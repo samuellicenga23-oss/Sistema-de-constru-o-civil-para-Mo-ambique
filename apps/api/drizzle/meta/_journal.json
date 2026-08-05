@@ -365,6 +365,13 @@
       "when": 1785890000000,
       "tag": "0051_session_acting_company",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1785900000000,
+      "tag": "0052_platform_billing",
+      "breakpoints": true
     }
   ]
 }
