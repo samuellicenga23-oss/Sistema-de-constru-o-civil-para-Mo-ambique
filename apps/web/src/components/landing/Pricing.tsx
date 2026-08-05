@@ -15,39 +15,56 @@ export function Pricing() {
         <div className="mx-auto max-w-2xl text-center">
           <Eyebrow>Planos</Eyebrow>
           <h2 className="mt-3 font-display text-[32px] font-bold leading-tight tracking-[-0.025em] text-ink sm:text-[42px]">
-            Preços claros, em meticais
+            Um SIGO completo.
+            <span className="mt-1.5 block font-semibold text-ink-400">
+              Pague pela escala da sua operação.
+            </span>
           </h2>
           <p className="mt-4 text-[16px] leading-relaxed text-ink-400">
-            Subscrição anual com IVA de 16%. O valor mensal mostrado é o equivalente para comparação.
-            A activação é acompanhada pela equipa SIGO.
+            Individual, equipa ou empresa — o fluxo da obra está em todos os planos.
+            Os preços estão em meticais, com IVA incluído. No anual poupa 15% no valor mensal.
           </p>
-          <div className="mt-6 inline-flex rounded-xl border border-slate-200 bg-surface p-1">
-            <button
-              type="button"
-              onClick={() => setBillingView("mensal")}
-              className={`rounded-lg px-4 py-2 text-sm font-display font-bold transition ${
-                billingView === "mensal" ? "bg-ink text-white" : "text-ink-400"
+          <div className="mt-7 flex flex-col items-center gap-3">
+            <div className="inline-flex rounded-xl border border-slate-200 bg-surface p-1">
+              <button
+                type="button"
+                onClick={() => setBillingView("mensal")}
+                className={`rounded-lg px-4 py-2 text-sm font-display font-bold transition ${
+                  billingView === "mensal" ? "bg-ink text-white" : "text-ink-400 hover:text-ink"
+                }`}
+              >
+                Mensal
+              </button>
+              <button
+                type="button"
+                onClick={() => setBillingView("anual")}
+                className={`rounded-lg px-4 py-2 text-sm font-display font-bold transition ${
+                  billingView === "anual" ? "bg-ink text-white" : "text-ink-400 hover:text-ink"
+                }`}
+              >
+                Anual
+              </button>
+            </div>
+            <p
+              className={`text-[12.5px] font-semibold transition ${
+                billingView === "anual" ? "text-teal-700" : "text-ink-400"
               }`}
             >
-              Por mês
-            </button>
-            <button
-              type="button"
-              onClick={() => setBillingView("anual")}
-              className={`rounded-lg px-4 py-2 text-sm font-display font-bold transition ${
-                billingView === "anual" ? "bg-ink text-white" : "text-ink-400"
-              }`}
-            >
-              Por ano
-            </button>
+              {billingView === "anual"
+                ? "15% de desconto no mensal · facturação anual"
+                : "Mude para anual e poupe 15% no valor mensal"}
+            </p>
           </div>
         </div>
 
         <div className="mt-12 grid items-start gap-5 lg:grid-cols-3">
           {COMMERCIAL_PLANS.map((plan) => {
-            const totals = calculateVatTotals(plan.annualPrice);
-            const monthlyEquivalent = Math.round(totals.total / 12);
+            const monthlyWithVat = calculateVatTotals(plan.monthlyPrice).total;
+            const annualWithVat = calculateVatTotals(plan.annualPrice).total;
+            // Anual = 15% sobre o mensal (preço de catálogo); mostrar o mensal já descontado.
+            const monthlyWithAnnualDiscount = monthlyWithVat * 0.85;
             const savingsPct = Math.round((1 - plan.annualPrice / plan.regularAnnualPrice) * 100);
+            const displayAmount = billingView === "mensal" ? monthlyWithVat : monthlyWithAnnualDiscount;
             return (
               <div
                 key={plan.slug}
@@ -66,16 +83,14 @@ export function Pricing() {
                 <p className="mt-1.5 min-h-[42px] text-[13.5px] leading-snug text-ink-400">{plan.description}</p>
                 <p className="mt-5 flex items-baseline gap-1.5">
                   <span className="font-display text-[34px] font-bold leading-none tracking-tight text-ink">
-                    {billingView === "mensal"
-                      ? formatMzn(monthlyEquivalent).replace(" MZN", "").replace(",00", "")
-                      : formatMzn(totals.total).replace(" MZN", "").replace(",00", "")}
+                    {formatMzn(displayAmount).replace(" MZN", "").replace(",00", "")}
                   </span>
                   <span className="text-[13px] font-semibold text-ink-400">MZN</span>
                 </p>
                 <p className="mt-1 text-[12.5px] text-ink-400">
                   {billingView === "mensal"
-                    ? `/mês equivalente · facturado ${formatMzn(totals.total)}/ano · poupa ${savingsPct}%`
-                    : `/ano com IVA · equivale a ${formatMzn(monthlyEquivalent)}/mês`}
+                    ? `/mês com IVA`
+                    : `/mês com ${savingsPct}% desconto · facturado ${formatMzn(annualWithVat)}/ano`}
                 </p>
                 <p className="mt-3 text-[12px] font-semibold text-brand-orange">{plan.limits}</p>
 
