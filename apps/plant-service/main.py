@@ -278,6 +278,45 @@ async def parse(
         return response
 
 
+class MeasurementMapRequest(BaseModel):
+    rows: list[dict]
+    catalog: list[dict]
+
+
+@app.post("/assist/measurement-map")
+def assist_measurement_map(
+    body: MeasurementMapRequest,
+    x_internal_token: str | None = Header(default=None, alias="X-Internal-Token"),
+):
+    if PLANT_SERVICE_TOKEN and x_internal_token != PLANT_SERVICE_TOKEN:
+        raise HTTPException(401, "Não autorizado")
+    from measurement_map_ai import map_measurement_rows
+
+    return map_measurement_rows(body.rows, body.catalog)
+
+
+@app.post("/assist/boq-extract")
+async def assist_boq_extract(
+    file: UploadFile = File(...),
+    x_internal_token: str | None = Header(default=None, alias="X-Internal-Token"),
+):
+    """Extrai itens de um mapa de quantidades em PDF (texto + IA se necessário)."""
+    if PLANT_SERVICE_TOKEN and x_internal_token != PLANT_SERVICE_TOKEN:
+        raise HTTPException(401, "Não autorizado")
+    filename = (file.filename or "").lower()
+    if file.content_type not in ("application/pdf", "application/octet-stream") and not filename.endswith(".pdf"):
+        raise HTTPException(400, "Só é suportado PDF de mapa de quantidades")
+    file_bytes = await file.read()
+    if len(file_bytes) > 20 * 1024 * 1024:
+        raise HTTPException(400, "PDF demasiado grande (máx. 20 MB)")
+    from boq_pdf_extract import extract_boq_from_pdf
+
+    result = await asyncio.to_thread(extract_boq_from_pdf, file_bytes)
+    if result.get("error") and not result.get("rows"):
+        raise HTTPException(400, result["error"])
+    return result
+
+
 @app.post("/parse-stream")
 async def parse_stream(
     file: UploadFile = File(...),

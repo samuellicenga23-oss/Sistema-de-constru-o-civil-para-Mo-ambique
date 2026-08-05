@@ -232,10 +232,10 @@ export async function projectRoutes(app: FastifyInstance) {
       })
       .returning();
 
-    // Cada projecto novo nasce com um Mapa de Quantidades já estruturado (capítulos e
-    // trabalhos padrão com preços do catálogo) — o utilizador só preenche quantidades
-    // por medições, em vez de construir o mapa do zero.
+    // Cada projecto novo nasce com um Mapa de Quantidades já estruturado — excepto no modo
+    // importar, onde o Excel define a estrutura (evitar mapa SIGO vazio + itens do Excel por baixo).
     const isMeasurementProject = project.projectType === "medicao";
+    const isImportMode = project.measurementMode === "importar";
     const [document] = await db
       .insert(budgetDocuments)
       .values({
@@ -254,11 +254,20 @@ export async function projectRoutes(app: FastifyInstance) {
         profitMarginRate: profitMarginRate.toString(),
       })
       .returning();
-    await generateStandardBoq(document.id, companyId, project.zoneId, "Edifício Principal", !isMeasurementProject);
+    if (isImportMode) {
+      await db.insert(budgetSections).values({
+        documentId: document.id,
+        name: "Edifício Principal",
+        sortOrder: 0,
+        templateKey: "import_excel_v1",
+      });
+    } else {
+      await generateStandardBoq(document.id, companyId, project.zoneId, "Edifício Principal", !isMeasurementProject);
+    }
     for (const specification of materialSpecifications) {
       await linkMaterialSpecification(project.id, companyId, specification);
     }
-    if (!isMeasurementProject) {
+    if (!isMeasurementProject && !isImportMode) {
       await applyProjectSpecificationsToDocument(document.id, project.id);
     }
 

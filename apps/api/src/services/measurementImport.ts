@@ -1,34 +1,92 @@
 import ExcelJS from "exceljs";
-import { eq, and, inArray, isNull, or, max } from "drizzle-orm";
+import { eq, and, inArray, isNull, max } from "drizzle-orm";
+import { z } from "zod";
 import { db } from "../db/index.js";
-import { budgetSections, lineItems, measurementLines, costCompositions } from "../db/schema.js";
-import { STANDARD_CHAPTERS } from "./boqTemplate.js";
-import { computeCompositionUnitCost } from "./costEngine.js";
+import { budgetSections, lineItems, measurementLines, workItemTemplates } from "../db/schema.js";
+import { loadWorkChapterLibrary, type TemplateChapter } from "./boqTemplate.js";
 import { getZoneIdForSection } from "./accessControl.js";
-import type { Unit } from "@sigo/shared";
+import { normalizeUnit, type Unit } from "@sigo/shared";
+import { env } from "../env.js";
+import { resolveOrCreateCompositionForImport, previewCompositionForImport, type ImportResourcesCache, type ResolvedImportComposition } from "./importComposition.js";
 
-const VALID_UNITS = new Set(["m", "m2", "m3", "ml", "kg", "un", "vg", "h"]);
+// Importação de Excel de medições — parse robusto (merge cells + unidades), pré-visualização
+// com match híbrido e aplicação confirmada pelo utilizador.
 
-function normalizeUnit(value: string, fallback: string): Unit {
-  const u = value.trim().toLowerCase();
-  if (VALID_UNITS.has(u)) return u as Unit;
-  if (VALID_UNITS.has(fallback)) return fallback as Unit;
-  return "un";
-}
+const MAX_IMPORT_ROWS = 5_000;
+const MAX_WORKSHEETS = 30;
+const MAX_CODE_LEN = 30;
+const MAX_CHAPTER_CODE_LEN = 10;
+const MAX_QUANTITY = 1_000_000_000;
+const AI_CONFIDENCE_FLOOR = 0.75;
+const DESC_MATCH_FLOOR = 0.85;
+const MIN_DESC_LEN_FOR_FUZZY = 8;
 
-// Importação de Excel de medições — actualiza quantidades dos itens existentes pelo código e,
-// opcionalmente, cria capítulos/itens novos quando o código ainda não existe no documento.
+export type ParsedExcelRow = {
+  rowKey: string;
+  sheet: string;
+  rowNumber: number;
+  code: string;
+  quantity: number;
+  description: string;
+  unitRaw: string;
+  unit: Unit;
+  scope: string;
+  unitPrice: number | null;
+};
+
+export type ImportMatchAction = "map" | "create" | "ignore";
+
+export type ImportPreviewRow = ParsedExcelRow & {
+  action: ImportMatchAction;
+  targetCode: string | null;
+  targetItemId: string | null;
+  targetDescription: string | null;
+  matchMethod: "code" | "description" | "ai" | "none";
+  confidence: number;
+  note: string | null;
+  compositionName: string | null;
+  compositionId: string | null;
+  priceSource: "file" | "composition" | "none";
+};
+
+export type MeasurementImportPreview = {
+  rows: ImportPreviewRow[];
+  catalog: Array<{ code: string; description: string; unit: Unit; itemId: string | null; chapterCode: string }>;
+  aiUsed: boolean;
+  aiError: string | null;
+  rowsRead: number;
+};
+
+export type ImportApplyDecision = {
+  rowKey: string;
+  action: ImportMatchAction;
+  targetCode?: string | null;
+  targetItemId?: string | null;
+};
 
 export type MeasurementImportResult = {
   itemsUpdated: number;
   itemsCreated: number;
   rowsRead: number;
+  templateItemsSaved: number;
+  compositionsCreated: number;
+  compositionsLinked: number;
   unmatched: { sheet: string; rowNumber: number; code: string; quantity: number; reason: string }[];
 };
 
 export type MeasurementImportOptions = {
   createMissing?: boolean;
+  saveToCompanyTemplate?: boolean;
 };
+
+export const importApplyDecisionSchema = z.object({
+  rowKey: z.string().trim().min(1).max(200),
+  action: z.enum(["map", "create", "ignore"]),
+  targetCode: z.string().trim().min(1).max(MAX_CODE_LEN).nullable().optional(),
+  targetItemId: z.string().uuid().nullable().optional(),
+});
+
+export const importApplyDecisionsSchema = z.array(importApplyDecisionSchema).min(1).max(MAX_IMPORT_ROWS);
 
 function normalizeText(value: unknown): string {
   return String(value ?? "")
@@ -38,51 +96,183 @@ function normalizeText(value: unknown): string {
     .replace(/\p{Diacritic}/gu, "");
 }
 
-const CODE_HEADERS = ["item", "codigo", "cod"];
-const QTY_HEADERS = ["quant", "qtd"];
-const DESC_HEADERS = ["descricao", "designacao", "desc"];
-const UNIT_HEADERS = ["un", "unidade"];
+const CODE_HEADERS = ["item", "codigo", "cod", "ref", "referencia", "nr", "n"];
+const QTY_HEADERS = ["quant", "qtd", "qty", "quantidade"];
+const DESC_HEADERS = ["descricao", "designacao", "desc", "trabalho", "especificacao", "designation"];
+const UNIT_HEADERS = ["unidade", "und", "unit", "um", "un"];
+const PRICE_HEADERS = ["preco unitario", "preco unit", "p. unit", "punit", "unitario", "unit price"];
+const TOTAL_PRICE_HEADERS = ["preco total", "valor total", "total (usd)", "total (mzn)", "total usd", "total mzn"];
 const SUBTOTAL_DISCIPLINE = /^subtotal\s*-\s*(.+)$/i;
+const SUMMARY_SHEET_RE = /^(resumo|summary|indice|índice|capa)$/i;
 
-type SheetRow = {
-  sheet: string;
-  rowNumber: number;
-  code: string;
-  quantity: number;
-  description: string;
-  unit: string;
-  scope: string;
-};
+/** Normaliza códigos de cliente (1,1.1 → 1.1.1). */
+export function normalizeItemCode(raw: string): string {
+  return String(raw ?? "")
+    .trim()
+    .replace(/,/g, ".")
+    .replace(/\s+/g, "")
+    .slice(0, MAX_CODE_LEN);
+}
 
-const TEMPLATE_ITEM_BY_CODE = new Map(STANDARD_CHAPTERS.flatMap((c) => c.items.map((i) => [i.code, i])));
-const TEMPLATE_CHAPTER_BY_CODE = new Map(STANDARD_CHAPTERS.map((c) => [c.code, c]));
+function cellText(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value === "object" && value !== null && "text" in (value as object)) {
+    return String((value as { text?: unknown }).text ?? "").trim();
+  }
+  if (typeof value === "object" && value !== null && "result" in (value as object)) {
+    return String((value as { result?: unknown }).result ?? "").trim();
+  }
+  if (value && typeof value === "object" && Array.isArray((value as { richText?: unknown[] }).richText)) {
+    return ((value as { richText: Array<{ text?: string }> }).richText ?? []).map((t) => t.text ?? "").join("").trim();
+  }
+  return String(value).trim();
+}
 
-function readSheetRows(sheet: ExcelJS.Worksheet): SheetRow[] {
+/** Parse quantidades PT/EU (1.234,56) e US (1,234.56). */
+export function parseQuantity(value: unknown): number {
+  if (typeof value === "number") return value;
+  if (value && typeof value === "object" && "result" in (value as object)) {
+    const r = (value as { result?: unknown }).result;
+    if (typeof r === "number") return r;
+    return parseQuantity(r);
+  }
+  const raw = cellText(value).replace(/\s/g, "").replace(/[^\d,.\-]/g, "");
+  if (!raw || raw === "-" || raw === "." || raw === ",") return Number.NaN;
+
+  const hasComma = raw.includes(",");
+  const hasDot = raw.includes(".");
+  let normalized = raw;
+  if (hasComma && hasDot) {
+    // O último separador é o decimal.
+    if (raw.lastIndexOf(",") > raw.lastIndexOf(".")) {
+      normalized = raw.replace(/\./g, "").replace(",", ".");
+    } else {
+      normalized = raw.replace(/,/g, "");
+    }
+  } else if (hasComma) {
+    const parts = raw.split(",");
+    normalized = parts.length === 2 && parts[1].length <= 3 ? parts.join(".") : raw.replace(/,/g, "");
+  } else if (hasDot) {
+    const parts = raw.split(".");
+    if (parts.length > 2) normalized = raw.replace(/\./g, "");
+    else if (parts.length === 2 && parts[1].length === 3 && parts[0].length <= 3) {
+      // Ambíguo 1.234 — tratar como milhares se a parte decimal tem 3 dígitos e inteiro curto
+      normalized = raw.replace(/\./g, "");
+    }
+  }
+
+  return Number(normalized);
+}
+
+function isValidImportQuantity(qty: number): boolean {
+  return Number.isFinite(qty) && qty > 0 && qty <= MAX_QUANTITY;
+}
+
+/** Expande merges: cada célula da área recebe o valor da célula mestre. */
+function buildMergedValueMap(sheet: ExcelJS.Worksheet): Map<string, unknown> {
+  const map = new Map<string, unknown>();
+  const merges = (sheet.model as { merges?: string[] } | undefined)?.merges ?? [];
+  for (const range of merges) {
+    try {
+      const [start, end] = String(range).split(":");
+      if (!start || !end) continue;
+      const topLeft = sheet.getCell(start);
+      const master = topLeft.value;
+      const startCell = sheet.getCell(start);
+      const endCell = sheet.getCell(end);
+      const r1 = Number(startCell.row);
+      const r2 = Number(endCell.row);
+      const c1 = Number(startCell.col);
+      const c2 = Number(endCell.col);
+      for (let r = Math.min(r1, r2); r <= Math.max(r1, r2); r++) {
+        for (let c = Math.min(c1, c2); c <= Math.max(c1, c2); c++) {
+          map.set(`${r}:${c}`, master);
+        }
+      }
+    } catch {
+      // ignore malformed merge ranges
+    }
+  }
+  return map;
+}
+
+function getCellValue(sheet: ExcelJS.Worksheet, row: number, col: number, merges: Map<string, unknown>): unknown {
+  const key = `${row}:${col}`;
+  if (merges.has(key)) return merges.get(key);
+  return sheet.getRow(row).getCell(col).value;
+}
+
+function looksLikeCode(code: string): boolean {
+  if (!code || code.length > MAX_CODE_LEN) return false;
+  if (!/\d/.test(code)) return false;
+  if (/^(subtotal|total|soma|capitulo|capítulo)/i.test(code)) return false;
+  return true;
+}
+
+function chapterCodeOf(itemCode: string): string {
+  const parts = itemCode.split(/[.\-\s]/).filter(Boolean);
+  const code = parts[0] || itemCode;
+  return code.slice(0, MAX_CHAPTER_CODE_LEN);
+}
+
+function headerMatches(value: string, headers: string[], mode: "exactOrSpace" | "prefix"): boolean {
+  return headers.some((h) => {
+    if (mode === "exactOrSpace") return value === h || value.startsWith(h + " ");
+    // Unidades: evitar matching de "un" em "unidade" via startsWith solto em palavras longas
+    if (h.length <= 2) return value === h || value.startsWith(h + " ") || value.startsWith(h + ".");
+    return value === h || value.startsWith(h);
+  });
+}
+
+export function readSheetRows(sheet: ExcelJS.Worksheet): ParsedExcelRow[] {
+  if (SUMMARY_SHEET_RE.test(sheet.name.trim())) return [];
+
+  const merges = buildMergedValueMap(sheet);
   let headerRow = -1;
   let codeCol = -1;
   let qtyCol = -1;
   let descCol = -1;
   let unitCol = -1;
+  let priceCol = -1;
+  let totalCol = -1;
 
-  for (let r = 1; r <= Math.min(20, sheet.rowCount); r++) {
-    const row = sheet.getRow(r);
+  const maxScan = Math.min(40, sheet.rowCount || 40);
+  for (let r = 1; r <= maxScan; r++) {
     let foundCode = -1;
     let foundQty = -1;
     let foundDesc = -1;
     let foundUnit = -1;
-    row.eachCell({ includeEmpty: false }, (cell, colNumber) => {
-      const value = normalizeText(cell.value);
-      if (foundCode === -1 && CODE_HEADERS.some((h) => value === h)) foundCode = colNumber;
-      if (foundQty === -1 && QTY_HEADERS.some((h) => value.startsWith(h))) foundQty = colNumber;
-      if (foundDesc === -1 && DESC_HEADERS.some((h) => value.startsWith(h))) foundDesc = colNumber;
-      if (foundUnit === -1 && UNIT_HEADERS.some((h) => value === h)) foundUnit = colNumber;
-    });
+    let foundPrice = -1;
+    let foundTotal = -1;
+
+    const scanRow = (rowIndex: number) => {
+      sheet.getRow(rowIndex).eachCell({ includeEmpty: false }, (_cell, colNumber) => {
+        const value = normalizeText(getCellValue(sheet, rowIndex, colNumber, merges));
+        if (foundCode === -1 && headerMatches(value, CODE_HEADERS, "exactOrSpace")) foundCode = colNumber;
+        if (foundQty === -1 && headerMatches(value, QTY_HEADERS, "prefix")) foundQty = colNumber;
+        if (foundDesc === -1 && headerMatches(value, DESC_HEADERS, "prefix")) foundDesc = colNumber;
+        if (foundUnit === -1 && headerMatches(value, UNIT_HEADERS, "prefix")) foundUnit = colNumber;
+        if (foundPrice === -1 && PRICE_HEADERS.some((h) => value === h || value.startsWith(h))) foundPrice = colNumber;
+        if (foundTotal === -1 && TOTAL_PRICE_HEADERS.some((h) => value === h || value.startsWith(h))) foundTotal = colNumber;
+        // Cabeçalho genérico "preço" / "valor" — só se ainda não houver coluna de unitário
+        if (foundPrice === -1 && (value === "preco" || value === "valor") && foundTotal !== colNumber) {
+          foundPrice = colNumber;
+        }
+      });
+    };
+
+    scanRow(r);
+    // Cabeçalhos partidos (ex.: Preço / Unitário na linha seguinte)
+    if (r < maxScan) scanRow(r + 1);
+
     if (foundCode !== -1 && foundQty !== -1) {
       headerRow = r;
       codeCol = foundCode;
       qtyCol = foundQty;
       descCol = foundDesc;
       unitCol = foundUnit;
+      priceCol = foundPrice;
+      totalCol = foundTotal;
       break;
     }
   }
@@ -90,11 +280,9 @@ function readSheetRows(sheet: ExcelJS.Worksheet): SheetRow[] {
 
   const disciplineMarkers: { rowNumber: number; discipline: string }[] = [];
   for (let r = headerRow + 1; r <= sheet.rowCount; r++) {
-    const row = sheet.getRow(r);
-    for (let c = 1; c <= 6; c++) {
-      const value = row.getCell(c).value;
-      if (typeof value !== "string") continue;
-      const m = value.trim().match(SUBTOTAL_DISCIPLINE);
+    for (let c = 1; c <= 8; c++) {
+      const value = cellText(getCellValue(sheet, r, c, merges));
+      const m = value.match(SUBTOTAL_DISCIPLINE);
       if (m) {
         disciplineMarkers.push({ rowNumber: r, discipline: m[1].trim() });
         break;
@@ -107,66 +295,472 @@ function readSheetRows(sheet: ExcelJS.Worksheet): SheetRow[] {
     return next?.discipline ?? "";
   }
 
-  const rows: SheetRow[] = [];
-  for (let r = headerRow + 1; r <= sheet.rowCount; r++) {
-    const row = sheet.getRow(r);
-    const codeCell = row.getCell(codeCol).value;
-    const qtyCell = row.getCell(qtyCol).value;
-    const code = codeCell !== null && codeCell !== undefined ? String(codeCell).trim() : "";
-    const quantity = typeof qtyCell === "number" ? qtyCell : Number(qtyCell);
-    if (!code || !code.includes(".") || !Number.isFinite(quantity)) continue;
+  const rows: ParsedExcelRow[] = [];
+  // Se o cabeçalho está partido em 2 linhas, começar após a segunda
+  let dataStart = headerRow + 1;
+  const maybeSecondHeader = normalizeText(getCellValue(sheet, headerRow + 1, codeCol, merges));
+  if (
+    headerMatches(maybeSecondHeader, CODE_HEADERS, "exactOrSpace") ||
+    headerMatches(maybeSecondHeader, QTY_HEADERS, "prefix") ||
+    PRICE_HEADERS.some((h) => maybeSecondHeader === h || maybeSecondHeader.startsWith(h)) ||
+    maybeSecondHeader === "unitario" ||
+    maybeSecondHeader === "total"
+  ) {
+    dataStart = headerRow + 2;
+  }
 
-    const descCell = descCol > 0 ? row.getCell(descCol).value : null;
-    const unitCell = unitCol > 0 ? row.getCell(unitCol).value : null;
+  for (let r = dataStart; r <= sheet.rowCount; r++) {
+    const rawCode = cellText(getCellValue(sheet, r, codeCol, merges));
+    const code = normalizeItemCode(rawCode);
+    const quantity = parseQuantity(getCellValue(sheet, r, qtyCol, merges));
+    if (!looksLikeCode(code) || !isValidImportQuantity(quantity)) continue;
+
+    const description = descCol > 0 ? cellText(getCellValue(sheet, r, descCol, merges)).slice(0, 2000) : "";
+    if (/^(sub[\s\-]?total|notas?:|soma|total)\b/i.test(description)) continue;
+    const unitRaw = unitCol > 0 ? cellText(getCellValue(sheet, r, unitCol, merges)).slice(0, 40) : "";
+    let priceRaw = priceCol > 0 ? parseQuantity(getCellValue(sheet, r, priceCol, merges)) : Number.NaN;
+    // Se o unitário veio vazio mas há total e quantidade, deriva o preço.
+    if (!Number.isFinite(priceRaw) || priceRaw <= 0) {
+      const totalRaw = totalCol > 0 ? parseQuantity(getCellValue(sheet, r, totalCol, merges)) : Number.NaN;
+      if (Number.isFinite(totalRaw) && totalRaw > 0 && quantity > 0) {
+        priceRaw = totalRaw / quantity;
+      }
+    }
+    const unitPrice = Number.isFinite(priceRaw) && priceRaw > 0 ? priceRaw : null;
     rows.push({
-      sheet: sheet.name,
+      rowKey: `${sheet.name.trim()}::${r}::${code}`,
+      sheet: sheet.name.trim(),
       rowNumber: r,
       code,
       quantity,
-      description: descCell != null ? String(descCell).trim() : "",
-      unit: unitCell != null ? String(unitCell).trim().toLowerCase() : "",
+      description,
+      unitRaw,
+      unit: normalizeUnit(unitRaw, "un"),
       scope: scopeFor(r),
+      unitPrice,
     });
   }
   return rows;
 }
 
-async function nextSortOrder(sectionId: string, parentId: string | null): Promise<number> {
-  const [row] = await db
+export async function parseMeasurementsExcel(buffer: Buffer): Promise<ParsedExcelRow[]> {
+  if (buffer.length > 12 * 1024 * 1024) {
+    throw new Error("O ficheiro Excel excede o limite de 12 MB.");
+  }
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer as any);
+  if (workbook.worksheets.length === 0) throw new Error("O ficheiro Excel não tem nenhuma folha.");
+  if (workbook.worksheets.length > MAX_WORKSHEETS) {
+    throw new Error(`O ficheiro tem demasiadas folhas (máx. ${MAX_WORKSHEETS}).`);
+  }
+  const rows = workbook.worksheets.flatMap(readSheetRows);
+  if (rows.length === 0) {
+    throw new Error(
+      'Não foi possível encontrar colunas de código e quantidade — confirme cabeçalhos como "Item"/"Código" e "Quant." nas primeiras linhas.',
+    );
+  }
+  if (rows.length > MAX_IMPORT_ROWS) {
+    throw new Error(`O Excel tem demasiadas linhas de medição (máx. ${MAX_IMPORT_ROWS}).`);
+  }
+  return rows;
+}
+
+async function parseMeasurementsPdf(buffer: Buffer): Promise<ParsedExcelRow[]> {
+  if (buffer.length > 20 * 1024 * 1024) {
+    throw new Error("O PDF excede o limite de 20 MB.");
+  }
+  const headers: Record<string, string> = {};
+  if (env.plantServiceToken) headers["X-Internal-Token"] = env.plantServiceToken;
+  const form = new FormData();
+  form.append("file", new Blob([new Uint8Array(buffer)], { type: "application/pdf" }), "mapa.pdf");
+  const res = await fetch(`${env.plantServiceUrl}/assist/boq-extract`, {
+    method: "POST",
+    headers,
+    body: form,
+    signal: AbortSignal.timeout(120_000),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error((body as { error?: string }).error || `Falha ao ler PDF de mapa (${res.status})`);
+  }
+  const body = (await res.json()) as {
+    rows?: Array<{
+      rowKey?: string;
+      sheet?: string;
+      rowNumber?: number;
+      code?: string;
+      quantity?: number;
+      description?: string;
+      unitRaw?: string;
+      unit?: string;
+      scope?: string;
+      unitPrice?: number | null;
+    }>;
+    error?: string | null;
+  };
+  const rows = (body.rows ?? [])
+    .map((row, index) => {
+      const code = normalizeItemCode(row.code ?? "");
+      const quantity = Number(row.quantity);
+      if (!looksLikeCode(code) || !isValidImportQuantity(quantity)) return null;
+      const unitRaw = String(row.unitRaw || row.unit || "un");
+      return {
+        rowKey: row.rowKey || `pdf::${index + 1}::${code}`,
+        sheet: String(row.sheet || "PDF").slice(0, 120),
+        rowNumber: Number(row.rowNumber) || index + 1,
+        code,
+        quantity,
+        description: String(row.description || "").slice(0, 2000),
+        unitRaw,
+        unit: normalizeUnit(unitRaw, "un"),
+        scope: String(row.scope || ""),
+        unitPrice: row.unitPrice != null && Number.isFinite(Number(row.unitPrice)) ? Number(row.unitPrice) : null,
+      } satisfies ParsedExcelRow;
+    })
+    .filter((r): r is ParsedExcelRow => r != null);
+
+  if (!rows.length) {
+    throw new Error(body.error || "Não foi possível extrair itens do PDF de mapa de quantidades.");
+  }
+  if (rows.length > MAX_IMPORT_ROWS) {
+    throw new Error(`O PDF tem demasiadas linhas de medição (máx. ${MAX_IMPORT_ROWS}).`);
+  }
+  return rows;
+}
+
+/** Detecta Excel vs PDF pelo conteúdo (ZIP/xlsx vs %PDF). */
+export async function parseMeasurementsFile(buffer: Buffer, filename = ""): Promise<ParsedExcelRow[]> {
+  const lower = filename.toLowerCase();
+  const isPdf =
+    lower.endsWith(".pdf") ||
+    buffer.subarray(0, 4).toString("utf8") === "%PDF";
+  if (isPdf) return parseMeasurementsPdf(buffer);
+  return parseMeasurementsExcel(buffer);
+}
+
+function flattenLibrary(library: TemplateChapter[]) {
+  return library.flatMap((ch) =>
+    ch.items.map((item) => ({
+      code: item.code,
+      description: item.description,
+      unit: item.unit as Unit,
+      chapterCode: ch.code,
+      composition: item.composition,
+      compositionId: item.compositionId ?? null,
+    })),
+  );
+}
+
+function scoreDescription(a: string, b: string): number {
+  const na = normalizeText(a);
+  const nb = normalizeText(b);
+  if (!na || !nb) return 0;
+  if (na === nb) return 1;
+  // Substring só se ambos forem suficientemente longos (evita "Betão" → tudo)
+  if (na.length >= MIN_DESC_LEN_FOR_FUZZY && nb.length >= MIN_DESC_LEN_FOR_FUZZY) {
+    if (na.includes(nb) || nb.includes(na)) return 0.88;
+  }
+  const ta = new Set(na.split(/\s+/).filter((t) => t.length > 2));
+  const tb = new Set(nb.split(/\s+/).filter((t) => t.length > 2));
+  if (!ta.size || !tb.size) return 0;
+  let inter = 0;
+  for (const t of ta) if (tb.has(t)) inter++;
+  return inter / Math.max(ta.size, tb.size);
+}
+
+function sanitizePromptField(value: string, max = 160): string {
+  return value.replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
+}
+
+async function suggestAiMappings(
+  rows: ParsedExcelRow[],
+  catalog: Array<{ code: string; description: string }>,
+): Promise<{ suggestions: Map<string, { code: string; confidence: number }>; error: string | null }> {
+  const unmatched = rows.filter((r) => !catalog.some((c) => c.code === r.code));
+  if (!unmatched.length) return { suggestions: new Map(), error: null };
+
+  try {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (env.plantServiceToken) headers["X-Internal-Token"] = env.plantServiceToken;
+    const res = await fetch(`${env.plantServiceUrl}/assist/measurement-map`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        rows: unmatched.slice(0, 80).map((r) => ({
+          rowKey: r.rowKey,
+          code: sanitizePromptField(r.code, 40),
+          description: sanitizePromptField(r.description),
+          unit: r.unit,
+        })),
+        catalog: catalog.slice(0, 200).map((c) => ({
+          code: sanitizePromptField(c.code, 40),
+          description: sanitizePromptField(c.description),
+        })),
+      }),
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (!res.ok) {
+      return { suggestions: new Map(), error: `plant-service ${res.status}` };
+    }
+    const body = (await res.json()) as {
+      suggestions?: Array<{ rowKey: string; code: string; confidence?: number }>;
+      error?: string;
+    };
+    if (body.error) return { suggestions: new Map(), error: body.error };
+    const map = new Map<string, { code: string; confidence: number }>();
+    for (const s of body.suggestions ?? []) {
+      const confidence = s.confidence ?? 0;
+      if (!s.rowKey || !s.code || confidence < AI_CONFIDENCE_FLOOR) continue;
+      map.set(s.rowKey, { code: s.code, confidence });
+    }
+    return { suggestions: map, error: null };
+  } catch (err) {
+    return { suggestions: new Map(), error: err instanceof Error ? err.message : "ia_indisponivel" };
+  }
+}
+
+export async function previewMeasurementsImport(
+  documentId: string,
+  buffer: Buffer,
+  companyId: string,
+  filename = "",
+): Promise<MeasurementImportPreview> {
+  const parsed = await parseMeasurementsFile(buffer, filename);
+  const sections = await db.select().from(budgetSections).where(eq(budgetSections.documentId, documentId));
+  if (!sections.length) throw new Error("O documento não tem secções.");
+
+  const sectionIds = sections.map((s) => s.id);
+  const docItems = await db
+    .select()
+    .from(lineItems)
+    .where(and(inArray(lineItems.sectionId, sectionIds), eq(lineItems.kind, "item")));
+
+  const library = await loadWorkChapterLibrary(companyId);
+  const libItems = flattenLibrary(library);
+  const compositionByCode = new Map(
+    libItems.map((item) => [
+      item.code,
+      { name: item.composition ?? null, id: item.compositionId ?? null },
+    ]),
+  );
+
+  const catalogMap = new Map<
+    string,
+    {
+      code: string;
+      description: string;
+      unit: Unit;
+      itemId: string | null;
+      chapterCode: string;
+      compositionName: string | null;
+      compositionId: string | null;
+    }
+  >();
+  for (const item of libItems) {
+    catalogMap.set(item.code, {
+      code: item.code,
+      description: item.description,
+      unit: item.unit,
+      itemId: null,
+      chapterCode: item.chapterCode,
+      compositionName: item.composition ?? null,
+      compositionId: item.compositionId ?? null,
+    });
+  }
+  for (const item of docItems) {
+    if (!item.code) continue;
+    const fromLib = compositionByCode.get(item.code);
+    catalogMap.set(item.code, {
+      code: item.code,
+      description: item.description,
+      unit: (item.unit as Unit) ?? "un",
+      itemId: item.id,
+      chapterCode: chapterCodeOf(item.code),
+      compositionName: fromLib?.name ?? null,
+      compositionId: item.compositionId ?? fromLib?.id ?? null,
+    });
+  }
+  const catalog = [...catalogMap.values()];
+
+  const byCode = new Map(catalog.map((c) => [c.code, c]));
+
+  function enrichMatch(
+    row: ParsedExcelRow,
+    target: {
+      code: string;
+      description: string;
+      itemId: string | null;
+      compositionName: string | null;
+      compositionId: string | null;
+    },
+    matchMethod: ImportPreviewRow["matchMethod"],
+    confidence: number,
+    note: string | null,
+  ): ImportPreviewRow {
+    const compositionName = target.compositionName;
+    const compositionId = target.compositionId;
+    const filePrice = row.unitPrice != null && row.unitPrice > 0;
+    let priceSource: ImportPreviewRow["priceSource"] = "none";
+    let noteOut = note;
+    if (filePrice) priceSource = "file";
+    else if (compositionName || compositionId) {
+      priceSource = "composition";
+      noteOut = note
+        ? `${note} · Preço via composição SIGO`
+        : "Preço será calculado pela composição SIGO (o ficheiro não traz preço unitário)";
+    }
+    return {
+      ...row,
+      action: "map",
+      targetCode: target.code,
+      targetItemId: target.itemId,
+      targetDescription: target.description,
+      matchMethod,
+      confidence,
+      note: noteOut,
+      compositionName,
+      compositionId,
+      priceSource,
+    };
+  }
+
+  const rows: ImportPreviewRow[] = [];
+
+  for (const row of parsed) {
+    const exact = byCode.get(row.code);
+    if (exact) {
+      rows.push(enrichMatch(row, exact, "code", 1, null));
+      continue;
+    }
+
+    let best: (typeof catalog)[number] & { score: number } | null = null;
+    for (const c of catalog) {
+      const score = scoreDescription(row.description, c.description);
+      if (score >= DESC_MATCH_FLOOR && (!best || score > best.score)) best = { ...c, score };
+    }
+    if (best) {
+      rows.push(enrichMatch(row, best, "description", best.score, "Match por descrição — confirme antes de aplicar"));
+      continue;
+    }
+
+    rows.push({
+      ...row,
+      action: "create",
+      targetCode: row.code,
+      targetItemId: null,
+      targetDescription: row.description || null,
+      matchMethod: "none",
+      confidence: 0,
+      note: row.unitPrice
+        ? "Será criado com composição (preço do ficheiro se existir)"
+        : "Será criado com composição SIGO nova ou existente — preço calculado automaticamente",
+      compositionName: null,
+      compositionId: null,
+      priceSource: row.unitPrice ? "file" : "composition",
+    });
+  }
+
+  // Enriquecer linhas "create" com composição existente similar (preview) ou nome previsto
+  for (const row of rows) {
+    if (row.matchMethod !== "none" && row.compositionName) continue;
+    const previewComp = await previewCompositionForImport(companyId, {
+      code: row.targetCode || row.code,
+      description: row.description || row.code,
+      unit: row.unit,
+      preferredCompositionName: row.compositionName,
+      preferredCompositionId: row.compositionId,
+    });
+    if (row.matchMethod === "none") {
+      row.compositionName = previewComp.compositionName;
+      row.compositionId = previewComp.compositionId;
+      row.priceSource = row.unitPrice ? "file" : previewComp.matched ? "composition" : "composition";
+      row.note = previewComp.matched
+        ? `Composição existente: ${previewComp.compositionName}`
+        : `Será criada composição: ${previewComp.compositionName}`;
+    } else if (!row.compositionName && previewComp.matched) {
+      row.compositionName = previewComp.compositionName;
+      row.compositionId = previewComp.compositionId;
+      if (row.priceSource === "none") row.priceSource = "composition";
+    }
+  }
+
+  const { suggestions, error: aiError } = await suggestAiMappings(
+    rows.filter((r) => r.matchMethod === "none"),
+    catalog,
+  );
+  let aiUsed = false;
+  if (suggestions.size) {
+    aiUsed = true;
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      if (row.matchMethod !== "none") continue;
+      const suggestion = suggestions.get(row.rowKey);
+      if (!suggestion) continue;
+      const target = byCode.get(suggestion.code);
+      if (!target) continue;
+      const enriched = enrichMatch(
+        row,
+        target,
+        "ai",
+        suggestion.confidence,
+        "Sugestão da IA — confirme antes de aplicar",
+      );
+      enriched.unit = normalizeUnit(row.unitRaw, target.unit);
+      rows[i] = enriched;
+    }
+  }
+
+  return { rows, catalog, aiUsed, aiError, rowsRead: parsed.length };
+}
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+async function nextSortOrder(tx: Tx, sectionId: string, parentId: string | null): Promise<number> {
+  const [row] = await tx
     .select({ value: max(lineItems.sortOrder) })
     .from(lineItems)
     .where(and(eq(lineItems.sectionId, sectionId), parentId ? eq(lineItems.parentId, parentId) : isNull(lineItems.parentId)));
   return (row?.value ?? -1) + 1;
 }
 
-async function findCompositionIdByName(name: string, companyId: string): Promise<string | null> {
-  const rows = await db
-    .select({ id: costCompositions.id, companyId: costCompositions.companyId })
-    .from(costCompositions)
-    .where(and(eq(costCompositions.name, name), or(isNull(costCompositions.companyId), eq(costCompositions.companyId, companyId))));
-  const own = rows.find((r) => r.companyId === companyId);
-  const global = rows.find((r) => r.companyId === null);
-  return own?.id ?? global?.id ?? null;
+type LibraryIndex = {
+  itemByCode: Map<string, ReturnType<typeof flattenLibrary>[number]>;
+  chapterByCode: Map<string, TemplateChapter>;
+};
+
+async function loadLibraryIndex(companyId: string): Promise<LibraryIndex> {
+  const library = await loadWorkChapterLibrary(companyId);
+  return {
+    itemByCode: new Map(flattenLibrary(library).map((i) => [i.code, i])),
+    chapterByCode: new Map(library.map((c) => [c.code, c])),
+  };
 }
 
-async function ensureChapter(sectionId: string, chapterCode: string): Promise<string | null> {
-  const [existing] = await db
+async function ensureChapter(
+  tx: Tx,
+  sectionId: string,
+  chapterCode: string,
+  index: LibraryIndex,
+  fallbackName?: string,
+): Promise<string | null> {
+  const safeChapter = chapterCode.slice(0, MAX_CHAPTER_CODE_LEN);
+  const [existing] = await tx
     .select()
     .from(lineItems)
-    .where(and(eq(lineItems.sectionId, sectionId), eq(lineItems.code, chapterCode), eq(lineItems.kind, "capitulo")))
+    .where(and(eq(lineItems.sectionId, sectionId), eq(lineItems.code, safeChapter), eq(lineItems.kind, "capitulo")))
     .limit(1);
   if (existing) return existing.id;
 
-  const template = TEMPLATE_CHAPTER_BY_CODE.get(chapterCode);
-  const [created] = await db
+  const template = index.chapterByCode.get(safeChapter);
+  const [created] = await tx
     .insert(lineItems)
     .values({
       sectionId,
       parentId: null,
       kind: "capitulo",
-      code: chapterCode,
-      description: template?.name ?? `Capítulo ${chapterCode}`,
-      sortOrder: await nextSortOrder(sectionId, null),
+      code: safeChapter,
+      description: template?.name ?? fallbackName ?? `Capítulo ${safeChapter}`,
+      sortOrder: await nextSortOrder(tx, sectionId, null),
       origin: "manual",
     })
     .returning();
@@ -174,50 +768,62 @@ async function ensureChapter(sectionId: string, chapterCode: string): Promise<st
 }
 
 async function createLineItemFromImport(
+  tx: Tx,
   sectionId: string,
   code: string,
   description: string,
   unit: string,
   companyId: string,
-): Promise<string> {
-  const template = TEMPLATE_ITEM_BY_CODE.get(code);
-  const chapterCode = code.split(".")[0];
-  const chapterId = await ensureChapter(sectionId, chapterCode);
+  index: LibraryIndex,
+  compositionCache: Map<string, ResolvedImportComposition>,
+  resourcesCache: ImportResourcesCache,
+): Promise<{ itemId: string; compositionId: string; unitPrice: number; compositionCreated: boolean }> {
+  const safeCode = code.slice(0, MAX_CODE_LEN);
+  const template = index.itemByCode.get(safeCode);
+  const chapterCode = chapterCodeOf(safeCode);
+  const chapterId = await ensureChapter(tx, sectionId, chapterCode, index);
+  const zoneId = await getZoneIdForSection(sectionId);
 
-  let compositionId: string | null = null;
-  let unitPrice: string | null = null;
-  let origin: "manual" | "composicao" = "manual";
-  const compositionName = template?.composition;
-  if (compositionName) {
-    compositionId = await findCompositionIdByName(compositionName, companyId);
-    if (compositionId) {
-      const zoneId = await getZoneIdForSection(sectionId);
-      const breakdown = await computeCompositionUnitCost(compositionId, companyId, zoneId);
-      unitPrice = breakdown.unitCost.toString();
-      origin = "composicao";
-    }
-  }
+  const resolved = await resolveOrCreateCompositionForImport(
+    tx,
+    companyId,
+    {
+      code: safeCode,
+      description: description || template?.description || safeCode,
+      unit: normalizeUnit(unit, template?.unit ?? "un"),
+      preferredCompositionName: template?.composition ?? null,
+      preferredCompositionId: template?.compositionId ?? null,
+    },
+    zoneId,
+    compositionCache,
+    resourcesCache,
+  );
 
-  const [item] = await db
+  const [item] = await tx
     .insert(lineItems)
     .values({
       sectionId,
       parentId: chapterId,
       kind: "item",
-      code,
-      description: description || template?.description || `Item ${code}`,
+      code: safeCode,
+      description: (description || template?.description || `Item ${safeCode}`).slice(0, 2000),
       unit: normalizeUnit(unit, template?.unit ?? "un"),
-      compositionId,
-      unitPrice,
-      sortOrder: await nextSortOrder(sectionId, chapterId),
-      origin,
+      compositionId: resolved.compositionId,
+      unitPrice: resolved.unitPrice.toFixed(2),
+      sortOrder: await nextSortOrder(tx, sectionId, chapterId),
+      origin: "composicao",
     })
     .returning();
-  return item.id;
+  return {
+    itemId: item.id,
+    compositionId: resolved.compositionId,
+    unitPrice: resolved.unitPrice,
+    compositionCreated: resolved.created,
+  };
 }
 
 function resolveSectionId(
-  row: SheetRow,
+  row: { scope: string; sheet: string },
   sections: typeof budgetSections.$inferSelect[],
   sectionByNormalizedName: Map<string, string>,
 ): string | null {
@@ -225,21 +831,390 @@ function resolveSectionId(
   if (fromScope) return fromScope;
   const fromSheet = sectionByNormalizedName.get(normalizeText(row.sheet));
   if (fromSheet) return fromSheet;
+  // Só assume a primeira secção quando o documento tem exactamente uma.
   if (sections.length === 1) return sections[0].id;
   return null;
 }
 
-async function applyQuantityToItem(itemId: string, row: SheetRow) {
-  await db.delete(measurementLines).where(eq(measurementLines.lineItemId, itemId));
-  await db.insert(measurementLines).values({
+async function ensureSectionsForSheets(
+  documentId: string,
+  sheets: string[],
+  existing: typeof budgetSections.$inferSelect[],
+): Promise<typeof budgetSections.$inferSelect[]> {
+  const sections = [...existing];
+  const byName = new Map(sections.map((s) => [normalizeText(s.name), s]));
+  let sortOrder = sections.reduce((maxOrder, s) => Math.max(maxOrder, s.sortOrder ?? 0), -1) + 1;
+  const uniqueSheets = [...new Set(sheets.map((s) => s.trim()).filter(Boolean))];
+
+  // Se há várias folhas e só uma secção genérica vazia (import), renomeia a primeira.
+  if (uniqueSheets.length > 1 && sections.length === 1) {
+    const only = sections[0];
+    const itemCount = await db
+      .select({ id: lineItems.id })
+      .from(lineItems)
+      .where(eq(lineItems.sectionId, only.id))
+      .limit(1);
+    if (!itemCount.length) {
+      const [updated] = await db
+        .update(budgetSections)
+        .set({ name: uniqueSheets[0].slice(0, 200) })
+        .where(eq(budgetSections.id, only.id))
+        .returning();
+      sections[0] = updated;
+      byName.clear();
+      byName.set(normalizeText(updated.name), updated);
+    }
+  }
+
+  for (const sheet of uniqueSheets) {
+    const key = normalizeText(sheet);
+    if (byName.has(key)) continue;
+    // Folhas PDF paginadas ("PDF p.1") partilham uma secção "PDF"
+    if (/^pdf(\s*p\.?\s*\d+)?$/i.test(sheet.trim())) {
+      const pdfKey = normalizeText("PDF");
+      if (byName.has(pdfKey)) continue;
+      const [created] = await db
+        .insert(budgetSections)
+        .values({ documentId, name: "PDF", sortOrder: sortOrder++, templateKey: "import_pdf_v1" })
+        .returning();
+      sections.push(created);
+      byName.set(pdfKey, created);
+      continue;
+    }
+    const [created] = await db
+      .insert(budgetSections)
+      .values({
+        documentId,
+        name: sheet.slice(0, 200),
+        sortOrder: sortOrder++,
+        templateKey: "import_sheet_v1",
+      })
+      .returning();
+    sections.push(created);
+    byName.set(key, created);
+  }
+  return sections;
+}
+
+async function applyQuantityAndComposition(
+  tx: Tx,
+  itemId: string,
+  row: ParsedExcelRow,
+  companyId: string,
+  sectionId: string,
+  preferred: { compositionName?: string | null; compositionId?: string | null },
+  compositionCache: Map<string, ResolvedImportComposition>,
+  resourcesCache: ImportResourcesCache,
+): Promise<{ compositionCreated: boolean; compositionLinked: boolean }> {
+  await tx.delete(measurementLines).where(eq(measurementLines.lineItemId, itemId));
+  await tx.insert(measurementLines).values({
     lineItemId: itemId,
-    description: `Medição importada do Excel (folha "${row.sheet}", linha ${row.rowNumber})`,
+    description: `Medição importada (folha "${row.sheet}", linha ${row.rowNumber})`,
     count: row.quantity.toFixed(2),
     sortOrder: 0,
   });
-  await db.update(lineItems).set({ quantity: row.quantity.toFixed(2), origin: "manual" }).where(eq(lineItems.id, itemId));
+
+  const zoneId = await getZoneIdForSection(sectionId);
+  const resolved = await resolveOrCreateCompositionForImport(
+    tx,
+    companyId,
+    {
+      code: row.code,
+      description: row.description || row.code,
+      unit: row.unit,
+      preferredCompositionName: preferred.compositionName ?? null,
+      preferredCompositionId: preferred.compositionId ?? null,
+    },
+    zoneId,
+    compositionCache,
+    resourcesCache,
+  );
+
+  // Preço do ficheiro ganha se existir; senão usa o da composição.
+  const unitPrice =
+    row.unitPrice != null && Number.isFinite(row.unitPrice) && row.unitPrice > 0
+      ? row.unitPrice
+      : resolved.unitPrice;
+
+  await tx
+    .update(lineItems)
+    .set({
+      quantity: row.quantity.toFixed(2),
+      compositionId: resolved.compositionId,
+      unitPrice: unitPrice.toFixed(2),
+      origin: "composicao",
+    })
+    .where(eq(lineItems.id, itemId));
+
+  return { compositionCreated: resolved.created, compositionLinked: true };
 }
 
+export async function saveItemsToCompanyTemplate(
+  companyId: string,
+  items: Array<{
+    code: string;
+    description: string;
+    unit: Unit;
+    chapterName?: string;
+    compositionId?: string | null;
+    compositionName?: string | null;
+  }>,
+  options: { overwriteExisting?: boolean } = {},
+): Promise<number> {
+  const overwriteExisting = options.overwriteExisting === true;
+  let saved = 0;
+  for (const item of items) {
+    const safeCode = item.code.slice(0, MAX_CODE_LEN);
+    const chapterCode = chapterCodeOf(safeCode);
+    const templateKey = `company:${companyId}:${chapterCode}:${safeCode}`;
+    const [existing] = await db.select().from(workItemTemplates).where(eq(workItemTemplates.templateKey, templateKey)).limit(1);
+    if (existing) {
+      if (!overwriteExisting) continue;
+      await db
+        .update(workItemTemplates)
+        .set({
+          description: item.description || existing.description,
+          unit: item.unit,
+          chapterName: item.chapterName || existing.chapterName,
+          compositionId: item.compositionId ?? existing.compositionId,
+          compositionName: item.compositionName ?? existing.compositionName,
+          isActive: true,
+        })
+        .where(eq(workItemTemplates.id, existing.id));
+    } else {
+      await db.insert(workItemTemplates).values({
+        companyId,
+        templateKey,
+        chapterName: item.chapterName || `Capítulo ${chapterCode}`,
+        chapterCode,
+        itemCode: safeCode,
+        description: item.description || `Item ${safeCode}`,
+        unit: item.unit,
+        compositionId: item.compositionId ?? null,
+        compositionName: item.compositionName ?? null,
+        discipline: "outro",
+        detectionTags: [],
+        requiresTagMatch: false,
+        chapterSortOrder: Number(chapterCode) || 100,
+        sortOrder: saved,
+        version: 1,
+        isActive: true,
+      });
+    }
+    saved++;
+  }
+  return saved;
+}
+
+function validateDecisionsAgainstRows(parsed: ParsedExcelRow[], decisions: ImportApplyDecision[]) {
+  if (!decisions.length) {
+    throw new Error("É necessário confirmar as decisões de importação para cada linha.");
+  }
+  const parsedKeys = new Set(parsed.map((r) => r.rowKey));
+  const decisionKeys = new Set<string>();
+  for (const d of decisions) {
+    if (!parsedKeys.has(d.rowKey)) {
+      throw new Error(`Decisão inválida: linha desconhecida (${d.rowKey}).`);
+    }
+    if (decisionKeys.has(d.rowKey)) {
+      throw new Error(`Decisão duplicada para a linha ${d.rowKey}.`);
+    }
+    decisionKeys.add(d.rowKey);
+    if (d.action === "map" && !(d.targetCode || "").trim()) {
+      throw new Error(`Linha ${d.rowKey}: mapeamento exige código destino.`);
+    }
+    if (d.action === "create" && (d.targetCode || "").trim().length > MAX_CODE_LEN) {
+      throw new Error(`Linha ${d.rowKey}: código destino demasiado longo.`);
+    }
+  }
+  for (const key of parsedKeys) {
+    if (!decisionKeys.has(key)) {
+      throw new Error("Faltam decisões para algumas linhas do Excel. Reabra a pré-visualização.");
+    }
+  }
+}
+
+export async function applyMeasurementsImport(
+  documentId: string,
+  buffer: Buffer,
+  companyId: string,
+  decisions: ImportApplyDecision[],
+  options: { saveToCompanyTemplate?: boolean; filename?: string } = {},
+): Promise<MeasurementImportResult> {
+  const parsed = await parseMeasurementsFile(buffer, options.filename ?? "");
+  validateDecisionsAgainstRows(parsed, decisions);
+  const decisionByKey = new Map(decisions.map((d) => [d.rowKey, d]));
+
+  let sections = await db.select().from(budgetSections).where(eq(budgetSections.documentId, documentId));
+  if (!sections.length) throw new Error("O documento não tem secções.");
+  sections = await ensureSectionsForSheets(
+    documentId,
+    parsed.map((r) => r.sheet),
+    sections,
+  );
+  const sectionByNormalizedName = new Map(sections.map((s) => [normalizeText(s.name), s.id]));
+  // Mapear "PDF p.N" → secção PDF
+  const pdfSection = sectionByNormalizedName.get(normalizeText("PDF"));
+  if (pdfSection) {
+    for (const s of sections) {
+      if (/^pdf\s*p\.?\s*\d+$/i.test(s.name)) sectionByNormalizedName.set(normalizeText(s.name), s.id);
+    }
+    for (const row of parsed) {
+      if (/^pdf(\s*p\.?\s*\d+)?$/i.test(row.sheet)) {
+        sectionByNormalizedName.set(normalizeText(row.sheet), pdfSection);
+      }
+    }
+  }
+  const sectionIds = sections.map((s) => s.id);
+  const index = await loadLibraryIndex(companyId);
+
+  const docItems = await db.select().from(lineItems).where(and(inArray(lineItems.sectionId, sectionIds), eq(lineItems.kind, "item")));
+
+  type DocItem = (typeof docItems)[number];
+  const itemsByCode = new Map(docItems.filter((i) => i.code).map((i) => [i.code!, i]));
+  const itemsById = new Map(docItems.map((i) => [i.id, i]));
+
+  const unmatched: MeasurementImportResult["unmatched"] = [];
+  const resolved: { row: ParsedExcelRow; itemId: string; created: boolean; sectionId: string; targetCode: string }[] = [];
+  const createdForTemplate: Array<{ code: string; description: string; unit: Unit; compositionId?: string | null; compositionName?: string | null }> = [];
+  const saveToTemplate = options.saveToCompanyTemplate === true;
+  let compositionsCreated = 0;
+  let compositionsLinked = 0;
+
+  await db.transaction(async (tx) => {
+    const liveByCode = new Map(itemsByCode);
+    const liveById = new Map(itemsById);
+    const compositionCache = new Map<string, ResolvedImportComposition>();
+    const resourcesCache: ImportResourcesCache = { current: null };
+
+    for (const row of parsed) {
+      const decision = decisionByKey.get(row.rowKey);
+      if (!decision) {
+        throw new Error(`Falta decisão para a linha ${row.rowKey}.`);
+      }
+      if (decision.action === "ignore") continue;
+
+      if (!isValidImportQuantity(row.quantity)) {
+        unmatched.push({
+          sheet: row.sheet,
+          rowNumber: row.rowNumber,
+          code: row.code,
+          quantity: row.quantity,
+          reason: "quantidade inválida",
+        });
+        continue;
+      }
+
+      const sectionId = resolveSectionId(row, sections, sectionByNormalizedName);
+      if (!sectionId) {
+        unmatched.push({
+          sheet: row.sheet,
+          rowNumber: row.rowNumber,
+          code: row.code,
+          quantity: row.quantity,
+          reason: "secção não identificada (documento com várias secções — use o nome da folha/âmbito)",
+        });
+        continue;
+      }
+
+      const targetCode =
+        decision.action === "map"
+          ? (decision.targetCode || row.code).trim().slice(0, MAX_CODE_LEN)
+          : (decision.targetCode || row.code).trim().slice(0, MAX_CODE_LEN);
+
+      let item: DocItem | undefined;
+      if (decision.action === "map" && decision.targetItemId) {
+        const byId = liveById.get(decision.targetItemId);
+        if (byId && byId.code === targetCode) item = byId;
+      }
+      if (!item) item = liveByCode.get(targetCode);
+
+      if (!item) {
+        const created = await createLineItemFromImport(
+          tx,
+          sectionId,
+          targetCode,
+          row.description,
+          row.unit,
+          companyId,
+          index,
+          compositionCache,
+          resourcesCache,
+        );
+        item = { id: created.itemId, code: targetCode, origin: "composicao", compositionId: created.compositionId } as DocItem;
+        liveByCode.set(targetCode, item);
+        liveById.set(created.itemId, item);
+        resolved.push({ row, itemId: created.itemId, created: true, sectionId, targetCode });
+        createdForTemplate.push({
+          code: targetCode,
+          description: row.description || targetCode,
+          unit: row.unit,
+          compositionId: created.compositionId,
+        });
+        if (created.compositionCreated) compositionsCreated++;
+      } else {
+        resolved.push({ row, itemId: item.id, created: false, sectionId, targetCode });
+      }
+    }
+
+    const rowsByItemId = new Map<string, typeof resolved>();
+    for (const r of resolved) {
+      const list = rowsByItemId.get(r.itemId) ?? [];
+      list.push(r);
+      rowsByItemId.set(r.itemId, list);
+    }
+
+    for (const [itemId, group] of rowsByItemId) {
+      const totalQty = group.reduce((sum, g) => sum + g.row.quantity, 0);
+      if (!isValidImportQuantity(totalQty)) {
+        throw new Error(`Quantidade agregada inválida para o item ${itemId}.`);
+      }
+      const primary = { ...group[0].row, quantity: totalQty, code: group[0].targetCode };
+      const template = index.itemByCode.get(group[0].targetCode);
+      const result = await applyQuantityAndComposition(
+        tx,
+        itemId,
+        primary,
+        companyId,
+        group[0].sectionId,
+        {
+          compositionName: template?.composition ?? null,
+          compositionId: template?.compositionId ?? null,
+        },
+        compositionCache,
+        resourcesCache,
+      );
+      // Só conta criação na fase de apply para itens já existentes (novos já contaram acima).
+      if (!group.some((g) => g.created) && result.compositionCreated) compositionsCreated++;
+      if (result.compositionLinked) compositionsLinked++;
+    }
+  });
+
+  let templateItemsSaved = 0;
+  if (saveToTemplate && createdForTemplate.length) {
+    templateItemsSaved = await saveItemsToCompanyTemplate(companyId, createdForTemplate, { overwriteExisting: false });
+  }
+
+  const uniqueIds = new Set(resolved.map((r) => r.itemId));
+  let itemsUpdated = 0;
+  let createdUnique = 0;
+  for (const id of uniqueIds) {
+    if (resolved.some((r) => r.itemId === id && r.created)) createdUnique++;
+    else itemsUpdated++;
+  }
+
+  return {
+    itemsUpdated,
+    itemsCreated: createdUnique,
+    rowsRead: parsed.length,
+    templateItemsSaved,
+    compositionsCreated,
+    compositionsLinked,
+    unmatched,
+  };
+}
+
+/** @deprecated Preferir preview + apply. Mantido só para testes internos; não auto-aplica IA. */
 export async function importMeasurementsFromExcel(
   documentId: string,
   buffer: Buffer,
@@ -247,113 +1222,23 @@ export async function importMeasurementsFromExcel(
   options: MeasurementImportOptions = {},
 ): Promise<MeasurementImportResult> {
   const createMissing = options.createMissing !== false;
-
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(buffer as any);
-  if (workbook.worksheets.length === 0) throw new Error("O ficheiro Excel não tem nenhuma folha.");
-
-  const rows = workbook.worksheets.flatMap(readSheetRows);
-  if (rows.length === 0) {
-    throw new Error(
-      'Não foi possível encontrar as colunas "Item"/"Código" e "Quant." em nenhuma folha do ficheiro — confirme que o Excel tem estes cabeçalhos numa das primeiras 20 linhas de alguma folha.',
-    );
-  }
-
-  const sections = await db.select().from(budgetSections).where(eq(budgetSections.documentId, documentId));
-  if (sections.length === 0) throw new Error("O documento não tem secções — adicione pelo menos uma secção antes de importar.");
-
-  const sectionIds = sections.map((s) => s.id);
-  const codes = Array.from(new Set(rows.map((r) => r.code)));
-  const items = await db
-    .select()
-    .from(lineItems)
-    .where(and(inArray(lineItems.sectionId, sectionIds), inArray(lineItems.code, codes)));
-
-  const sectionByNormalizedName = new Map(sections.map((s) => [normalizeText(s.name), s.id]));
-  const itemsBySection = new Map<string, typeof items>();
-  for (const item of items) {
-    const list = itemsBySection.get(item.sectionId) ?? [];
-    list.push(item);
-    itemsBySection.set(item.sectionId, list);
-  }
-  const itemsByCodeAcrossSections = new Map<string, typeof items>();
-  for (const item of items) {
-    const list = itemsByCodeAcrossSections.get(item.code!) ?? [];
-    list.push(item);
-    itemsByCodeAcrossSections.set(item.code!, list);
-  }
-
-  const unmatched: MeasurementImportResult["unmatched"] = [];
-  const resolved: { row: SheetRow; itemId: string; created: boolean }[] = [];
-
-  for (const row of rows) {
-    const sectionId = resolveSectionId(row, sections, sectionByNormalizedName);
-    if (!sectionId) {
-      unmatched.push({
-        ...row,
-        reason: "secção não identificada — renomeie a folha do Excel para o nome exacto da secção do documento",
-      });
-      continue;
+  const preview = await previewMeasurementsImport(documentId, buffer, companyId);
+  const decisions: ImportApplyDecision[] = preview.rows.map((row) => {
+    // Legado seguro: só mapeia por código exacto; descrição/IA → ignore ou create explícito
+    if (row.matchMethod === "code") {
+      return {
+        rowKey: row.rowKey,
+        action: "map",
+        targetCode: row.targetCode,
+        targetItemId: row.targetItemId,
+      };
     }
-
-    const inSection = (itemsBySection.get(sectionId) ?? []).filter((i) => i.code === row.code);
-    if (inSection.length === 1) {
-      resolved.push({ row, itemId: inSection[0].id, created: false });
-      continue;
+    if (createMissing && row.matchMethod === "none") {
+      return { rowKey: row.rowKey, action: "create", targetCode: row.code };
     }
-    if (inSection.length > 1) {
-      unmatched.push({ ...row, reason: `código "${row.code}" duplicado na mesma secção` });
-      continue;
-    }
-
-    if (createMissing) {
-      const itemId = await createLineItemFromImport(sectionId, row.code, row.description, row.unit, companyId);
-      const createdItem = { id: itemId, sectionId, code: row.code } as (typeof items)[number];
-      const list = itemsBySection.get(sectionId) ?? [];
-      list.push(createdItem);
-      itemsBySection.set(sectionId, list);
-      resolved.push({ row, itemId, created: true });
-      continue;
-    }
-
-    const globalMatches = itemsByCodeAcrossSections.get(row.code) ?? [];
-    if (globalMatches.length === 0) {
-      unmatched.push({ ...row, reason: "sem item correspondente neste Mapa de Quantidades" });
-    } else if (globalMatches.length > 1) {
-      unmatched.push({
-        ...row,
-        reason: `código existe em ${globalMatches.length} secções — renomeie a folha do Excel para a secção correcta`,
-      });
-    } else {
-      resolved.push({ row, itemId: globalMatches[0].id, created: false });
-    }
-  }
-
-  const rowsByItemId = new Map<string, { row: SheetRow; itemId: string; created: boolean }[]>();
-  for (const r of resolved) {
-    const list = rowsByItemId.get(r.itemId) ?? [];
-    list.push(r);
-    rowsByItemId.set(r.itemId, list);
-  }
-
-  let itemsUpdated = 0;
-  let itemsCreated = 0;
-  for (const [itemId, group] of rowsByItemId) {
-    if (group.length > 1) {
-      const locations = group.map((g) => `folha "${g.row.sheet}" linha ${g.row.rowNumber} (${g.row.quantity})`).join("; ");
-      for (const g of group) {
-        unmatched.push({
-          ...g.row,
-          reason: `o código "${g.row.code}" aparece em mais do que um sítio a apontar para o mesmo item (${locations})`,
-        });
-      }
-      continue;
-    }
-    const { row, created } = group[0];
-    await applyQuantityToItem(itemId, row);
-    if (created) itemsCreated++;
-    else itemsUpdated++;
-  }
-
-  return { itemsUpdated, itemsCreated, rowsRead: rows.length, unmatched };
+    return { rowKey: row.rowKey, action: "ignore" };
+  });
+  return applyMeasurementsImport(documentId, buffer, companyId, decisions, {
+    saveToCompanyTemplate: options.saveToCompanyTemplate === true,
+  });
 }

@@ -233,11 +233,32 @@ export const boqApi = {
   bulkUpdateSpecifications: (items: Array<{ id: string; technicalSpecification: string | null }>) =>
     request<{ updated: number }>(`/line-items/bulk-specifications`, { method: "POST", body: JSON.stringify({ items }) }),
 
-  importMeasurements: async (documentId: string, file: File, createMissing = true) => {
+  previewMeasurementImport: async (documentId: string, file: File) => {
     const form = new FormData();
     form.append("file", file);
-    const qs = createMissing ? "" : "?createMissing=false";
-    const res = await fetch(`/api/budget-documents/${documentId}/import-measurements${qs}`, {
+    const res = await fetch(`/api/budget-documents/${documentId}/import-measurements/preview`, {
+      method: "POST",
+      credentials: "include",
+      body: form,
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new ApiError(res.status, body.error ?? `Erro ${res.status}`);
+    }
+    return res.json() as Promise<MeasurementImportPreview>;
+  },
+
+  applyMeasurementImport: async (
+    documentId: string,
+    file: File,
+    decisions: ImportApplyDecision[],
+    saveToCompanyTemplate = false,
+  ) => {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("decisions", JSON.stringify(decisions));
+    form.append("saveToCompanyTemplate", saveToCompanyTemplate ? "true" : "false");
+    const res = await fetch(`/api/budget-documents/${documentId}/import-measurements/apply`, {
       method: "POST",
       credentials: "include",
       body: form,
@@ -254,7 +275,54 @@ export type MeasurementImportResult = {
   itemsUpdated: number;
   itemsCreated: number;
   rowsRead: number;
+  templateItemsSaved?: number;
+  compositionsCreated?: number;
+  compositionsLinked?: number;
   unmatched: { sheet: string; rowNumber: number; code: string; quantity: number; reason: string }[];
+};
+
+export type ImportApplyDecision = {
+  rowKey: string;
+  action: "map" | "create" | "ignore";
+  targetCode?: string | null;
+  targetItemId?: string | null;
+};
+
+export type MeasurementImportPreview = {
+  rows: Array<{
+    rowKey: string;
+    sheet: string;
+    rowNumber: number;
+    code: string;
+    quantity: number;
+    description: string;
+    unitRaw: string;
+    unit: string;
+    scope: string;
+    unitPrice: number | null;
+    action: "map" | "create" | "ignore";
+    targetCode: string | null;
+    targetItemId: string | null;
+    targetDescription: string | null;
+    matchMethod: "code" | "description" | "ai" | "none";
+    confidence: number;
+    note: string | null;
+    compositionName: string | null;
+    compositionId: string | null;
+    priceSource: "file" | "composition" | "none";
+  }>;
+  catalog: Array<{
+    code: string;
+    description: string;
+    unit: string;
+    itemId: string | null;
+    chapterCode: string;
+    compositionName?: string | null;
+    compositionId?: string | null;
+  }>;
+  aiUsed: boolean;
+  aiError: string | null;
+  rowsRead: number;
 };
 
 export type ProjectWorkflowStatus = {

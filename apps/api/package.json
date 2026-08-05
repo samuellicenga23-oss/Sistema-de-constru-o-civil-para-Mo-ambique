@@ -11,6 +11,7 @@
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed": "tsx src/db/seed.ts",
     "db:seed-compositions": "tsx src/db/seedCompositions.ts",
+    "db:seed-sample-boq-library": "tsx src/db/seedSampleBoqLibrary.ts",
     "db:sync-sigo-prices": "tsx src/db/syncSigoPrices.ts",
     "db:refresh-reference-catalog": "tsx src/db/refreshReferenceCatalog.ts",
     "db:sync-standard-document": "tsx src/db/syncStandardDocument.ts",

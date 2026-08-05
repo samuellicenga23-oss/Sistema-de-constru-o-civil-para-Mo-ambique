@@ -1,11 +1,12 @@
 import { useEffect, useState, type FormEvent, type MouseEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { boqApi, type Project } from "../api/boq";
+import { boqApi, type MeasurementImportPreview, type Project } from "../api/boq";
 import { catalogApi, type PriceZone } from "../api/catalog";
 import { plantsApi, type PlantUploadDiscipline } from "../api/plants";
 import Layout from "../components/Layout";
 import Modal from "../components/Modal";
 import ConfirmDialog from "../components/ConfirmDialog";
+import MeasurementImportReviewModal from "../components/MeasurementImportReviewModal";
 import LoadingState from "../components/LoadingState";
 import EmptyState from "../components/EmptyState";
 import AlertBanner from "../components/AlertBanner";
@@ -31,6 +32,8 @@ export default function ProjectsPage() {
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [createProgress, setCreateProgress] = useState("");
+  const [pendingImport, setPendingImport] = useState<{ documentId: string; file: File; preview: MeasurementImportPreview } | null>(null);
+  const [applyingImport, setApplyingImport] = useState(false);
   const [analysisProgress, setAnalysisProgress] = useState<{
     percent: number;
     filePercent: number;
@@ -114,7 +117,7 @@ export default function ProjectsPage() {
     const completeFile = workspace === "medicoes" && startMode === "plantas" ? (form.elements.namedItem("completeProjectFile") as HTMLInputElement | null)?.files?.[0] : undefined;
     const architectureFile = workspace === "medicoes" && startMode === "plantas" ? (form.elements.namedItem("architectureFile") as HTMLInputElement | null)?.files?.[0] : undefined;
     const structuralFile = workspace === "medicoes" && startMode === "plantas" ? (form.elements.namedItem("structuralFile") as HTMLInputElement | null)?.files?.[0] : undefined;
-    const measurementsFile = workspace === "orcamentos" && startMode === "importar" ? (form.elements.namedItem("measurementsFile") as HTMLInputElement | null)?.files?.[0] : undefined;
+    const measurementsFile = startMode === "importar" ? (form.elements.namedItem("measurementsFile") as HTMLInputElement | null)?.files?.[0] : undefined;
     setError(null);
     if (completeFile && (architectureFile || structuralFile)) {
       setError("Escolha o projecto completo ou os ficheiros separados — não é necessário enviar os dois formatos ao mesmo tempo.");
@@ -159,9 +162,10 @@ export default function ProjectsPage() {
       }
 
       if (startMode === "importar" && measurementsFile && created.defaultDocumentId) {
-        setCreateProgress("A importar medições...");
-        await boqApi.importMeasurements(created.defaultDocumentId, measurementsFile);
-        navigate(`/documentos/${created.defaultDocumentId}`);
+        setCreateProgress("A analisar Excel...");
+        const preview = await boqApi.previewMeasurementImport(created.defaultDocumentId, measurementsFile);
+        setShowForm(false);
+        setPendingImport({ documentId: created.defaultDocumentId, file: measurementsFile, preview });
       } else if (startMode === "manual" && created.defaultDocumentId) {
         navigate(workspace === "medicoes" ? `/documentos/${created.defaultDocumentId}?assistente=1` : `/documentos/${created.defaultDocumentId}`);
       } else navigate(`/projectos/${created.id}#plantas-do-projecto`);
@@ -176,6 +180,22 @@ export default function ProjectsPage() {
       setCreating(false);
       setCreateProgress("");
       setAnalysisProgress(null);
+    }
+  }
+
+  async function applyPendingImport(decisions: Parameters<typeof boqApi.applyMeasurementImport>[2], saveToCompanyTemplate: boolean) {
+    if (!pendingImport) return;
+    setApplyingImport(true);
+    setError(null);
+    try {
+      await boqApi.applyMeasurementImport(pendingImport.documentId, pendingImport.file, decisions, saveToCompanyTemplate);
+      const documentId = pendingImport.documentId;
+      setPendingImport(null);
+      navigate(`/documentos/${documentId}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao aplicar medições");
+    } finally {
+      setApplyingImport(false);
     }
   }
 
@@ -231,15 +251,16 @@ export default function ProjectsPage() {
               </div>
               <div className="sm:col-span-2">
                 <label className="label">{workspace === "medicoes" ? "Como deseja medir?" : "Origem das quantidades"}</label>
-                <div className="grid gap-2 sm:grid-cols-2">
+                <div className="grid gap-2 sm:grid-cols-3">
                   {(workspace === "medicoes"
                     ? ([
                         ["plantas", "Ler plantas", "PDF técnico"],
                         ["manual", "Medir manualmente", "Sem plantas"],
+                        ["importar", "Importar mapa", "Excel ou PDF"],
                       ] as const)
                     : ([
                         ["manual", "Criar orçamento", "Introduzir quantidades"],
-                        ["importar", "Importar medições", "Excel externo"],
+                        ["importar", "Importar mapa", "Excel ou PDF"],
                       ] as const)
                   ).map(([value, label, hint]) => (
                     <button
@@ -290,9 +311,9 @@ export default function ProjectsPage() {
               )}
               {startMode === "importar" && (
                 <div className="sm:col-span-2 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                  <label className="label">Medições em Excel *</label>
-                  <input type="file" name="measurementsFile" accept=".xlsx,.xls" disabled={creating} className="input py-1.5 file:mr-2 file:rounded-md file:border-0 file:bg-white file:px-2 file:py-1 file:text-xs" />
-                  <p className="mt-1.5 text-xs text-slate-500">O sistema associa as quantidades aos códigos do Mapa de Quantidades.</p>
+                  <label className="label">Mapa de quantidades (Excel ou PDF) *</label>
+                  <input type="file" name="measurementsFile" accept=".xlsx,.xls,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" disabled={creating} className="input py-1.5 file:mr-2 file:rounded-md file:border-0 file:bg-white file:px-2 file:py-1 file:text-xs" />
+                  <p className="mt-1.5 text-xs text-slate-500">Revê o mapeamento (código, descrição ou IA) antes de aplicar. Aceita Excel de obra ou PDF de mapa de quantidades.</p>
                 </div>
               )}
               <details className="sm:col-span-2 rounded-lg border border-slate-200 bg-white">
@@ -411,6 +432,20 @@ export default function ProjectsPage() {
           busy={deleting}
           onCancel={() => setPendingDelete(null)}
           onConfirm={confirmDelete}
+        />
+      )}
+
+      {pendingImport && (
+        <MeasurementImportReviewModal
+          preview={pendingImport.preview}
+          applying={applyingImport}
+          onClose={() => {
+            if (applyingImport) return;
+            const documentId = pendingImport.documentId;
+            setPendingImport(null);
+            navigate(`/documentos/${documentId}`);
+          }}
+          onApply={applyPendingImport}
         />
       )}
     </Layout>

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { boqApi, type BudgetDocumentSummary, type BudgetRepriceResult, type LineItemNode, type MeasurementImportResult, type Project, type ProjectMaterialSpecification } from "../api/boq";
+import { boqApi, type BudgetDocumentSummary, type BudgetRepriceResult, type LineItemNode, type MeasurementImportPreview, type MeasurementImportResult, type Project, type ProjectMaterialSpecification } from "../api/boq";
 import { catalogApi, type CostComposition } from "../api/catalog";
 import { measurementApi, type MeasurementDashboard } from "../api/measurement";
 import { plantsApi, type Plant, type ExtractedOpening, type ExtractedRoom } from "../api/plants";
@@ -8,6 +8,7 @@ import LineItemRow, { AddChildForm, BoqHeaderRow, BoqTableHead } from "../compon
 import QuickEstimateWizard from "../components/QuickEstimateWizard";
 import CalculationReportView from "../components/CalculationReportView";
 import MaterialsByPhaseModal from "../components/MaterialsByPhaseModal";
+import MeasurementImportReviewModal from "../components/MeasurementImportReviewModal";
 import ConfirmDialog from "../components/ConfirmDialog";
 import ModalPortal from "../components/ModalPortal";
 import Layout from "../components/Layout";
@@ -73,6 +74,9 @@ export default function BudgetDocumentPage() {
   const [architectureOpenings, setArchitectureOpenings] = useState<ExtractedOpening[]>([]);
   const [importingMeasurements, setImportingMeasurements] = useState(false);
   const [importResult, setImportResult] = useState<MeasurementImportResult | null>(null);
+  const [importPreview, setImportPreview] = useState<MeasurementImportPreview | null>(null);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [applyingImport, setApplyingImport] = useState(false);
   const [showRepriceConfirm, setShowRepriceConfirm] = useState(false);
   const [repricing, setRepricing] = useState(false);
   const [repriceResult, setRepriceResult] = useState<BudgetRepriceResult | null>(null);
@@ -264,14 +268,31 @@ export default function BudgetDocumentPage() {
     setImportResult(null);
     setImportingMeasurements(true);
     try {
-      const result = await boqApi.importMeasurements(documentId, file);
-      setImportResult(result);
+      const preview = await boqApi.previewMeasurementImport(documentId, file);
+      setImportFile(file);
+      setImportPreview(preview);
       fileInput.value = "";
-      await reload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro ao importar medições");
+      setError(err instanceof Error ? err.message : "Erro ao ler medições");
     } finally {
       setImportingMeasurements(false);
+    }
+  }
+
+  async function applyImportReview(decisions: Parameters<typeof boqApi.applyMeasurementImport>[2], saveToCompanyTemplate: boolean) {
+    if (!documentId || !importFile) return;
+    setApplyingImport(true);
+    setError(null);
+    try {
+      const result = await boqApi.applyMeasurementImport(documentId, importFile, decisions, saveToCompanyTemplate);
+      setImportResult(result);
+      setImportPreview(null);
+      setImportFile(null);
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao aplicar medições");
+    } finally {
+      setApplyingImport(false);
     }
   }
 
@@ -715,7 +736,7 @@ export default function BudgetDocumentPage() {
                     <input
                       type="file"
                       name="measurementsFile"
-                      accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                      accept=".xlsx,.xls,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                       required
                       className="input py-1.5 file:mr-3 file:rounded-md file:border-0 file:bg-brand-100 file:text-brand-800 file:px-2.5 file:py-1 file:text-xs file:font-medium"
                     />
@@ -725,13 +746,15 @@ export default function BudgetDocumentPage() {
                   </div>
                   <button type="submit" disabled={importingMeasurements} className="btn btn-primary shrink-0">
                     <IconDownload className="w-3.5 h-3.5" />
-                    {importingMeasurements ? "A importar..." : "Importar Excel"}
+                    {importingMeasurements ? "A importar..." : "Importar mapa"}
                   </button>
                 </form>
                 {importResult && (
                   <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm">
                     <p className="font-medium text-emerald-800">
-                      {importResult.itemsUpdated} actualizado(s), {importResult.itemsCreated} criado(s) — {importResult.rowsRead} linha(s) lidas.
+                      {importResult.itemsUpdated} actualizado(s), {importResult.itemsCreated} criado(s) — {importResult.rowsRead} linha(s) lidas
+                      {(importResult.compositionsLinked ?? 0) > 0 ? ` · ${importResult.compositionsLinked} composição(ões)` : ""}
+                      {(importResult.compositionsCreated ?? 0) > 0 ? ` (${importResult.compositionsCreated} nova(s))` : ""}.
                     </p>
                     {importResult.unmatched.length > 0 && (
                       <p className="mt-1 text-xs text-amber-800">{importResult.unmatched.length} linha(s) não corresponderam a itens do mapa — confira códigos e nomes das secções.</p>
@@ -1004,14 +1027,14 @@ export default function BudgetDocumentPage() {
             <SectionHeader title="Importar medições" description="Actualize quantidades ou crie itens a partir de um Excel" />
             <div className="p-5">
             <p className="text-xs text-gray-500 mb-3 max-w-3xl">
-              O Excel deve conter «Item»/«Código» e «Quant.». Itens novos são criados automaticamente quando o código ainda não existe.
+              O Excel pode ter células unidas e unidades variadas (un, UM, unidade, m²…). Depois do upload revê o mapeamento antes de aplicar.
             </p>
             <form onSubmit={handleImportMeasurements} className="flex gap-2 items-end flex-wrap">
               <div className="flex-1 min-w-[180px]">
                 <input
                   type="file"
                   name="measurementsFile"
-                  accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                  accept=".xlsx,.xls,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                   required
                   className="input py-1.5 file:mr-3 file:rounded-md file:border-0 file:bg-brand-100 file:text-brand-800 file:px-2.5 file:py-1 file:text-xs file:font-medium"
                 />
@@ -1024,7 +1047,9 @@ export default function BudgetDocumentPage() {
             {importResult && (
               <div className="mt-3 rounded-lg bg-green-50 border border-green-200 p-3 text-sm">
                 <p className="font-medium text-green-800">
-                  {importResult.itemsUpdated} actualizado(s), {importResult.itemsCreated} criado(s) — {importResult.rowsRead} linha(s) do Excel processadas.
+                  {importResult.itemsUpdated} actualizado(s), {importResult.itemsCreated} criado(s) — {importResult.rowsRead} linha(s) processadas
+                  {(importResult.compositionsLinked ?? 0) > 0 ? ` · ${importResult.compositionsLinked} composição(ões)` : ""}
+                  {(importResult.compositionsCreated ?? 0) > 0 ? ` (${importResult.compositionsCreated} nova(s))` : ""}.
                 </p>
                 {importResult.unmatched.length > 0 && (
                   <>
@@ -1227,6 +1252,19 @@ export default function BudgetDocumentPage() {
             </div>
           </div>
         </ModalPortal>
+      )}
+
+      {importPreview && importFile && (
+        <MeasurementImportReviewModal
+          preview={importPreview}
+          applying={applyingImport}
+          onClose={() => {
+            if (applyingImport) return;
+            setImportPreview(null);
+            setImportFile(null);
+          }}
+          onApply={applyImportReview}
+        />
       )}
 
       {dialog}

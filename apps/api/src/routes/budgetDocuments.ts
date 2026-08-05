@@ -17,7 +17,11 @@ import {
 } from "../services/accessControl.js";
 import { generateStandardBoq } from "../services/boqTemplate.js";
 import { applyProjectSpecificationsToDocument } from "../services/specEnrichment.js";
-import { importMeasurementsFromExcel } from "../services/measurementImport.js";
+import {
+  previewMeasurementsImport,
+  applyMeasurementsImport,
+  importApplyDecisionsSchema,
+} from "../services/measurementImport.js";
 import { documentLockedMessage, evaluateDocumentReadiness } from "../services/documentRules.js";
 import { recordAuditEvent } from "../services/auditTrail.js";
 import { CURRENCIES, DEFAULT_IVA_RATE, UNITS, LINE_ITEM_KINDS, fixedSigo } from "@sigo/shared";
@@ -665,10 +669,8 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
-  // Importação de um Excel de medições já feitas (ex: por um técnico de obra) — lê as
-  // quantidades pelo código do item e aplica-as directamente aos itens-padrão já existentes,
-  // sem duplicar nada nem passar pelo Assistente de Medições.
-  app.post("/api/budget-documents/:id/import-measurements", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
+  // Importação de medições Excel — preview (sem gravar) + apply com decisões confirmadas.
+  app.post("/api/budget-documents/:id/import-measurements/preview", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const companyId = companyIdOf(request);
     const document = await assertDocumentOwned(id, companyId);
@@ -677,15 +679,75 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
 
     const data = await request.file();
     if (!data) return reply.code(400).send({ error: "Ficheiro em falta" });
+    const filename = (data.filename || "").toLowerCase();
+    if (filename && !/\.(xlsx|xls|pdf)$/i.test(filename)) {
+      return reply.code(400).send({ error: "Só são aceites Excel (.xlsx / .xls) ou PDF de mapa de quantidades." });
+    }
     const buffer = await data.toBuffer();
+    try {
+      return await previewMeasurementsImport(id, buffer, companyId, data.filename || "");
+    } catch (err) {
+      return reply.code(400).send({ error: err instanceof Error ? err.message : "Erro ao ler medições" });
+    }
+  });
+
+  app.post("/api/budget-documents/:id/import-measurements/apply", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const companyId = companyIdOf(request);
+    const document = await assertDocumentOwned(id, companyId);
+    if (!document) return reply.code(404).send({ error: "Documento não encontrado" });
+    if (document.status !== "rascunho") return reply.code(409).send({ error: documentLockedMessage(document.status) });
+
+    let buffer: Buffer | null = null;
+    let filename = "";
+    let decisionsRaw = "";
+    let saveToCompanyTemplate = false;
+    const parts = request.parts();
+    for await (const part of parts) {
+      if (part.type === "file" && part.fieldname === "file") {
+        filename = part.filename || "";
+        const lower = filename.toLowerCase();
+        if (lower && !/\.(xlsx|xls|pdf)$/i.test(lower)) {
+          return reply.code(400).send({ error: "Só são aceites Excel (.xlsx / .xls) ou PDF de mapa de quantidades." });
+        }
+        buffer = await part.toBuffer();
+      } else if (part.type === "field" && part.fieldname === "decisions") {
+        decisionsRaw = String(part.value ?? "");
+      } else if (part.type === "field" && part.fieldname === "saveToCompanyTemplate") {
+        saveToCompanyTemplate = String(part.value) === "true";
+      }
+    }
+    if (!buffer) return reply.code(400).send({ error: "Ficheiro em falta" });
+    if (!decisionsRaw.trim()) {
+      return reply.code(400).send({ error: "É necessário confirmar as decisões de importação." });
+    }
+
+    let parsedJson: unknown;
+    try {
+      parsedJson = JSON.parse(decisionsRaw);
+    } catch {
+      return reply.code(400).send({ error: "Decisões de importação inválidas" });
+    }
+    const validated = importApplyDecisionsSchema.safeParse(parsedJson);
+    if (!validated.success) {
+      return reply.code(400).send({ error: "Decisões de importação inválidas", details: validated.error.flatten() });
+    }
 
     try {
-      const createMissing = (request.query as { createMissing?: string }).createMissing !== "false";
-      const result = await importMeasurementsFromExcel(id, buffer, companyId, { createMissing });
-      return result;
+      return await applyMeasurementsImport(id, buffer, companyId, validated.data, {
+        saveToCompanyTemplate,
+        filename,
+      });
     } catch (err) {
-      return reply.code(400).send({ error: err instanceof Error ? err.message : "Erro ao importar medições" });
+      return reply.code(400).send({ error: err instanceof Error ? err.message : "Erro ao aplicar medições" });
     }
+  });
+
+  // Endpoint legado desactivado — forçar fluxo preview/apply com revisão humana.
+  app.post("/api/budget-documents/:id/import-measurements", { preHandler: requireRole(...WRITE_ROLES) }, async (_request, reply) => {
+    return reply.code(410).send({
+      error: "Este endpoint foi desactivado. Use /import-measurements/preview e /import-measurements/apply.",
+    });
   });
 
   // ---------- Secções ----------

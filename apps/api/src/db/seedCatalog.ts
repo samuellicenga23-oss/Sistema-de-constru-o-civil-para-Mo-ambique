@@ -47,8 +47,9 @@ const MATERIALS = [
   { name: "Brita 3/4", unit: "m3" as const, baseUnitCost: 920, importFactor: 1, purchasePackage: { label: "Camião 22m³", qty: 22 } },
   { name: "Saibro", unit: "m3" as const, baseUnitCost: 500, importFactor: 1, purchasePackage: { label: "Camião 22m³", qty: 22 } },
   { name: "Aço A400", unit: "kg" as const, baseUnitCost: 87, importFactor: 1.05 },
-  { name: "Bloco de cimento 20x20x40", unit: "un" as const, baseUnitCost: 40, importFactor: 1, purchasePackage: { label: "Palete (100 un)", qty: 100 } },
-  { name: "Bloco de cimento 15x20x40", unit: "un" as const, baseUnitCost: 34, importFactor: 1, purchasePackage: { label: "Palete (100 un)", qty: 100 } },
+  // Retalho Maputo/Matola 2026 (~31–32 / ~25); preço posto obra ligeiramente acima.
+  { name: "Bloco de cimento 20x20x40", unit: "un" as const, baseUnitCost: 33, importFactor: 1, purchasePackage: { label: "Palete (100 un)", qty: 100 } },
+  { name: "Bloco de cimento 15x20x40", unit: "un" as const, baseUnitCost: 26, importFactor: 1, purchasePackage: { label: "Palete (100 un)", qty: 100 } },
 ];
 
 // Zonas de preço comuns na área da Grande Maputo — o custo de materiais varia sobretudo pelo

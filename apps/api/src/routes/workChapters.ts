@@ -5,9 +5,11 @@ import { db } from "../db/index.js";
 import { costCompositions, workItemTemplates } from "../db/schema.js";
 import { requireRole } from "../auth/middleware.js";
 import { loadWorkChapterLibrary } from "../services/boqTemplate.js";
-import { UNITS } from "@sigo/shared";
+import { parseMeasurementsExcel, saveItemsToCompanyTemplate } from "../services/measurementImport.js";
+import { UNITS, normalizeUnit } from "@sigo/shared";
 
 const ROLES = ["super_admin", "admin_empresa", "orcamentista"] as const;
+const TEMPLATE_IMPORT_ROLES = ["admin_empresa"] as const;
 const disciplineSchema = z.enum(["all", "arquitectura", "estrutura", "hidrossanitario", "electricidade", "outro"]);
 const chapterSchema = z.object({
   code: z.string().trim().min(1).max(10),
@@ -115,5 +117,35 @@ export async function workChapterRoutes(app: FastifyInstance) {
     if (!own.length) return reply.code(409).send({ error: "Este capítulo é global. Edite-o para criar uma versão própria da empresa." });
     await db.delete(workItemTemplates).where(and(ownFilter, eq(workItemTemplates.chapterCode, code)));
     return { ok: true };
+  });
+
+  // Importa estrutura de itens a partir de um Excel para o template da empresa (admin only).
+  app.post("/api/catalog/work-chapters/import-from-excel", { preHandler: requireRole(...TEMPLATE_IMPORT_ROLES) }, async (request, reply) => {
+    const companyId = targetCompanyId(request);
+    if (!companyId) return reply.code(400).send({ error: "O super_admin deve editar o catálogo global directamente." });
+    const data = await request.file();
+    if (!data) return reply.code(400).send({ error: "Ficheiro em falta" });
+    const filename = (data.filename || "").toLowerCase();
+    if (filename && !filename.endsWith(".xlsx") && !filename.endsWith(".xls")) {
+      return reply.code(400).send({ error: "Só são aceites ficheiros Excel (.xlsx / .xls)." });
+    }
+    try {
+      const rows = await parseMeasurementsExcel(await data.toBuffer());
+      const unique = new Map<string, { code: string; description: string; unit: (typeof UNITS)[number] }>();
+      for (const row of rows) {
+        if (!unique.has(row.code)) {
+          unique.set(row.code, {
+            code: row.code,
+            description: row.description || row.code,
+            unit: normalizeUnit(row.unitRaw, row.unit),
+          });
+        }
+      }
+      // Não sobrescreve itens já existentes no template da empresa.
+      const saved = await saveItemsToCompanyTemplate(companyId, [...unique.values()], { overwriteExisting: false });
+      return { saved, rowsRead: rows.length, library: await loadWorkChapterLibrary(companyId) };
+    } catch (err) {
+      return reply.code(400).send({ error: err instanceof Error ? err.message : "Erro ao importar template" });
+    }
   });
 }
