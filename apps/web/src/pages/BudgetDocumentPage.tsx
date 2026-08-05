@@ -30,6 +30,38 @@ function money(value: number, currency: string) {
   return `${value.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`;
 }
 
+function ImportCreatedCompositionsNotice({ result }: { result: MeasurementImportResult }) {
+  const created = result.createdCompositions ?? [];
+  if (!created.length && !(result.compositionsCreated ?? 0)) return null;
+  return (
+    <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950">
+      <p className="font-medium">
+        {(result.compositionsCreated ?? created.length)} composição(ões) nova(s) criada(s) automaticamente — verifique no Catálogo
+        os rendimentos, insumos e preços antes de usar estes valores em orçamento.
+      </p>
+      {created.length > 0 && (
+        <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto">
+          {created.map((comp) => (
+            <li key={comp.id}>
+              <Link to={`/catalogo/composicoes/${comp.id}`} className="font-medium text-amber-950 underline underline-offset-2 hover:text-brand-800">
+                {comp.name}
+              </Link>
+              {comp.itemCodes.length > 0 ? (
+                <span className="text-amber-800"> · item(ns) {comp.itemCodes.join(", ")}</span>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="mt-2">
+        <Link to="/catalogo" className="font-medium underline underline-offset-2 hover:text-brand-800">
+          Abrir Catálogo de Preços
+        </Link>
+      </p>
+    </div>
+  );
+}
+
 function countCompositionItems(items: LineItemNode[]): number {
   return items.reduce(
     (total, item) => total + (item.compositionId ? 1 : 0) + countCompositionItems(item.children),
@@ -820,6 +852,7 @@ export default function BudgetDocumentPage() {
                       {(importResult.compositionsLinked ?? 0) > 0 ? ` · ${importResult.compositionsLinked} composição(ões)` : ""}
                       {(importResult.compositionsCreated ?? 0) > 0 ? ` (${importResult.compositionsCreated} nova(s))` : ""}.
                     </p>
+                    <ImportCreatedCompositionsNotice result={importResult} />
                     {importResult.unmatched.length > 0 && (
                       <p className="mt-1 text-xs text-amber-800">{importResult.unmatched.length} linha(s) não corresponderam a itens do mapa — confira códigos e nomes das secções.</p>
                     )}
@@ -1115,6 +1148,7 @@ export default function BudgetDocumentPage() {
                   {(importResult.compositionsLinked ?? 0) > 0 ? ` · ${importResult.compositionsLinked} composição(ões)` : ""}
                   {(importResult.compositionsCreated ?? 0) > 0 ? ` (${importResult.compositionsCreated} nova(s))` : ""}.
                 </p>
+                <ImportCreatedCompositionsNotice result={importResult} />
                 {importResult.unmatched.length > 0 && (
                   <>
                     <p className="text-amber-700 mt-2 font-medium">

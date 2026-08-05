@@ -104,7 +104,12 @@ export default function MeasurementImportReviewModal({
         )}
         {summary.withFilePrice === 0 && (
           <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
-            Este mapa não traz preços unitários. Ao aplicar, cada item será ligado a uma composição SIGO existente ou será criada uma composição nova da empresa — e o preço unitário será calculado automaticamente.
+            Este mapa não traz preços unitários. Ao aplicar, cada item será ligado a uma composição SIGO existente ou será criada uma composição nova da empresa — e o preço unitário será calculado automaticamente. As composições novas ficam listadas no fim para as verificar no Catálogo.
+          </p>
+        )}
+        {rows.some((r) => r.action !== "ignore" && r.note?.includes("Será criada composição")) && (
+          <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+            Há linhas com composição nova. Depois de aplicar, abra cada composição no Catálogo e confirme rendimentos, insumos e preços.
           </p>
         )}
 
@@ -179,7 +184,14 @@ export default function MeasurementImportReviewModal({
                         </datalist>
                         {row.targetDescription && <span className="mt-1 block text-[11px] text-slate-500">{row.targetDescription}</span>}
                         {row.compositionName && (
-                          <span className="mt-1 block text-[11px] text-brand-800">Comp.: {row.compositionName}</span>
+                          <span
+                            className={`mt-1 block text-[11px] ${
+                              row.note?.includes("Será criada composição") ? "font-medium text-amber-800" : "text-brand-800"
+                            }`}
+                          >
+                            {row.note?.includes("Será criada composição") ? "Nova comp. (verificar): " : "Comp.: "}
+                            {row.compositionName}
+                          </span>
                         )}
                       </>
                     )}

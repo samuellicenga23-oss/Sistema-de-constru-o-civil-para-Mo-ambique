@@ -317,6 +317,12 @@ export type MeasurementImportJob = {
   updatedAt: number;
 };
 
+export type CreatedImportComposition = {
+  id: string;
+  name: string;
+  itemCodes: string[];
+};
+
 export type MeasurementImportResult = {
   itemsUpdated: number;
   itemsCreated: number;
@@ -324,6 +330,7 @@ export type MeasurementImportResult = {
   templateItemsSaved?: number;
   compositionsCreated?: number;
   compositionsLinked?: number;
+  createdCompositions?: CreatedImportComposition[];
   unmatched: { sheet: string; rowNumber: number; code: string; quantity: number; reason: string }[];
 };
 

@@ -246,30 +246,34 @@ export async function getCompositionMaterialQuantities(
 //
 // `requestingCompanyId`: ver o comentário em getCompositionMaterialQuantities — é sempre a
 // empresa que pediu o cálculo, nunca o dono da composição.
+/** Cliente Drizzle (db ou transação) — necessário para ver composições criadas na mesma TX. */
+type CostQueryClient = Pick<typeof db, "select">;
+
 export async function computeCompositionUnitCost(
   compositionId: string,
   requestingCompanyId: string | null,
-  zoneId?: string | null
+  zoneId?: string | null,
+  client: CostQueryClient = db,
 ): Promise<CompositionCostBreakdown> {
-  const [composition] = await db.select().from(costCompositions).where(eq(costCompositions.id, compositionId)).limit(1);
+  const [composition] = await client.select().from(costCompositions).where(eq(costCompositions.id, compositionId)).limit(1);
   if (!composition) throw new Error("Composição de custo não encontrada");
   const scope = requestingCompanyId;
 
   const [zone] = zoneId
-    ? await db.select().from(priceZones).where(and(eq(priceZones.id, zoneId), companyScope(priceZones.companyId, requestingCompanyId))).limit(1)
+    ? await client.select().from(priceZones).where(and(eq(priceZones.id, zoneId), companyScope(priceZones.companyId, requestingCompanyId))).limit(1)
     : [undefined];
   const labourZoneFactor = 1 + Number(zone?.labourAdjustmentPct ?? 0) / 100;
   const equipmentZoneFactor = 1 + Number(zone?.equipmentAdjustmentPct ?? 0) / 100;
   const materialZoneFactor = (1 + Number(zone?.materialAdjustmentPct ?? 0) / 100)
     * (1 + Number(zone?.defaultTransportPct ?? 0) / 100);
 
-  const labourLinesRaw = await db
+  const labourLinesRaw = await client
     .select({ qtyPerUnit: compositionLabourLines.qtyPerUnit, name: labourCategories.name, hourlyRate: labourCategories.hourlyRate })
     .from(compositionLabourLines)
     .innerJoin(labourCategories, eq(compositionLabourLines.labourCategoryId, labourCategories.id))
     .where(eq(compositionLabourLines.compositionId, compositionId));
 
-  const materialLinesRaw = await db
+  const materialLinesRaw = await client
     .select({
       qtyPerUnit: compositionMaterialLines.qtyPerUnit,
       wastePct: compositionMaterialLines.wastePct,
@@ -282,7 +286,7 @@ export async function computeCompositionUnitCost(
     .innerJoin(materials, eq(compositionMaterialLines.materialId, materials.id))
     .where(eq(compositionMaterialLines.compositionId, compositionId));
 
-  const equipmentLinesRaw = await db
+  const equipmentLinesRaw = await client
     .select({ qtyPerUnit: compositionEquipmentLines.qtyPerUnit, name: equipment.name, hourlyCost: equipment.hourlyCost })
     .from(compositionEquipmentLines)
     .innerJoin(equipment, eq(compositionEquipmentLines.equipmentId, equipment.id))
@@ -294,7 +298,7 @@ export async function computeCompositionUnitCost(
   const materialNames = Array.from(new Set(materialLinesRaw.map((l) => l.name)));
   const resolvedMaterials = materialNames.length
     ? await resolveByName(
-        await db
+        await client
           .select({ id: materials.id, name: materials.name, companyId: materials.companyId, baseUnitCost: materials.baseUnitCost, importFactor: materials.importFactor, includesVat: materials.includesVat })
           .from(materials)
           .where(and(inArray(materials.name, materialNames), companyScope(materials.companyId, scope)))
@@ -304,7 +308,7 @@ export async function computeCompositionUnitCost(
   let zoneCostByMaterialId = new Map<string, { unitCost: number; includesVat: boolean }>();
   if (zoneId && zone && resolvedMaterials.size) {
     const materialIds = Array.from(resolvedMaterials.values(), (m) => m.id);
-    const zonePrices = await db
+    const zonePrices = await client
       .select({ materialId: materialZonePrices.materialId, unitCost: materialZonePrices.unitCost, includesVat: materialZonePrices.includesVat })
       .from(materialZonePrices)
       .where(and(eq(materialZonePrices.zoneId, zoneId), inArray(materialZonePrices.materialId, materialIds)));
@@ -314,7 +318,7 @@ export async function computeCompositionUnitCost(
   const labourNames = Array.from(new Set(labourLinesRaw.map((l) => l.name)));
   const resolvedLabour = labourNames.length
     ? await resolveByName(
-        await db
+        await client
           .select({ id: labourCategories.id, name: labourCategories.name, companyId: labourCategories.companyId, hourlyRate: labourCategories.hourlyRate })
           .from(labourCategories)
           .where(and(inArray(labourCategories.name, labourNames), companyScope(labourCategories.companyId, scope)))
@@ -324,7 +328,7 @@ export async function computeCompositionUnitCost(
   const equipmentNames = Array.from(new Set(equipmentLinesRaw.map((l) => l.name)));
   const resolvedEquipment = equipmentNames.length
     ? await resolveByName(
-        await db
+        await client
           .select({ id: equipment.id, name: equipment.name, companyId: equipment.companyId, hourlyCost: equipment.hourlyCost })
           .from(equipment)
           .where(and(inArray(equipment.name, equipmentNames), companyScope(equipment.companyId, scope)))

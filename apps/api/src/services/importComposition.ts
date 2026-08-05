@@ -529,7 +529,8 @@ export async function resolveOrCreateCompositionForImport(
     created = true;
   }
 
-  const breakdown = await computeCompositionUnitCost(compositionId, companyId, zoneId);
+  // Usar `tx` para o motor ver composições acabadas de criar na mesma transação.
+  const breakdown = await computeCompositionUnitCost(compositionId, companyId, zoneId, tx);
   const resolved: ResolvedImportComposition = {
     compositionId,
     compositionName,

@@ -69,6 +69,12 @@ export type ImportApplyDecision = {
   targetItemId?: string | null;
 };
 
+export type CreatedImportComposition = {
+  id: string;
+  name: string;
+  itemCodes: string[];
+};
+
 export type MeasurementImportResult = {
   itemsUpdated: number;
   itemsCreated: number;
@@ -76,6 +82,8 @@ export type MeasurementImportResult = {
   templateItemsSaved: number;
   compositionsCreated: number;
   compositionsLinked: number;
+  /** Composições geradas nesta importação — o utilizador deve rever rendimentos e insumos. */
+  createdCompositions: CreatedImportComposition[];
   unmatched: { sheet: string; rowNumber: number; code: string; quantity: number; reason: string }[];
 };
 
@@ -642,7 +650,7 @@ export async function previewMeasurementsImport(
       row.priceSource = row.unitPrice ? "file" : "composition";
       row.note = previewComp.matched
         ? `Composição existente: ${previewComp.compositionName}`
-        : `Será criada composição: ${previewComp.compositionName}`;
+        : `Será criada composição nova: ${previewComp.compositionName} — verifique rendimentos e insumos no Catálogo após aplicar`;
     } else if (!row.compositionName && previewComp.matched) {
       row.compositionName = previewComp.compositionName;
       row.compositionId = previewComp.compositionId;
@@ -718,7 +726,13 @@ async function createLineItemFromImport(
   index: LibraryIndex,
   compositionCache: Map<string, ResolvedImportComposition>,
   resourcesCache: ImportResourcesCache,
-): Promise<{ itemId: string; compositionId: string; unitPrice: number; compositionCreated: boolean }> {
+): Promise<{
+  itemId: string;
+  compositionId: string;
+  compositionName: string;
+  unitPrice: number;
+  compositionCreated: boolean;
+}> {
   const safeCode = code.slice(0, MAX_CODE_LEN);
   const template = index.itemByCode.get(safeCode);
   const chapterCode = chapterCodeOf(safeCode);
@@ -758,6 +772,7 @@ async function createLineItemFromImport(
   return {
     itemId: item.id,
     compositionId: resolved.compositionId,
+    compositionName: resolved.compositionName,
     unitPrice: resolved.unitPrice,
     compositionCreated: resolved.created,
   };
@@ -846,7 +861,12 @@ async function applyQuantityAndComposition(
   preferred: { compositionName?: string | null; compositionId?: string | null },
   compositionCache: Map<string, ResolvedImportComposition>,
   resourcesCache: ImportResourcesCache,
-): Promise<{ compositionCreated: boolean; compositionLinked: boolean }> {
+): Promise<{
+  compositionCreated: boolean;
+  compositionLinked: boolean;
+  compositionId: string;
+  compositionName: string;
+}> {
   await tx.delete(measurementLines).where(eq(measurementLines.lineItemId, itemId));
   await tx.insert(measurementLines).values({
     lineItemId: itemId,
@@ -887,7 +907,12 @@ async function applyQuantityAndComposition(
     })
     .where(eq(lineItems.id, itemId));
 
-  return { compositionCreated: resolved.created, compositionLinked: true };
+  return {
+    compositionCreated: resolved.created,
+    compositionLinked: true,
+    compositionId: resolved.compositionId,
+    compositionName: resolved.compositionName,
+  };
 }
 
 export async function saveItemsToCompanyTemplate(
@@ -1019,8 +1044,17 @@ export async function applyMeasurementsImport(
   const resolved: { row: ParsedExcelRow; itemId: string; created: boolean; sectionId: string; targetCode: string }[] = [];
   const createdForTemplate: Array<{ code: string; description: string; unit: Unit; compositionId?: string | null; compositionName?: string | null }> = [];
   const saveToTemplate = options.saveToCompanyTemplate === true;
-  let compositionsCreated = 0;
   let compositionsLinked = 0;
+  const createdCompositionsById = new Map<string, CreatedImportComposition>();
+
+  function trackCreatedComposition(id: string, name: string, itemCode: string) {
+    const existing = createdCompositionsById.get(id);
+    if (existing) {
+      if (!existing.itemCodes.includes(itemCode)) existing.itemCodes.push(itemCode);
+      return;
+    }
+    createdCompositionsById.set(id, { id, name, itemCodes: [itemCode] });
+  }
 
   await db.transaction(async (tx) => {
     const liveByCode = new Map(itemsByCode);
@@ -1091,8 +1125,11 @@ export async function applyMeasurementsImport(
           description: row.description || targetCode,
           unit: row.unit,
           compositionId: created.compositionId,
+          compositionName: created.compositionName,
         });
-        if (created.compositionCreated) compositionsCreated++;
+        if (created.compositionCreated) {
+          trackCreatedComposition(created.compositionId, created.compositionName, targetCode);
+        }
       } else {
         resolved.push({ row, itemId: item.id, created: false, sectionId, targetCode });
       }
@@ -1125,8 +1162,10 @@ export async function applyMeasurementsImport(
         compositionCache,
         resourcesCache,
       );
-      // Só conta criação na fase de apply para itens já existentes (novos já contaram acima).
-      if (!group.some((g) => g.created) && result.compositionCreated) compositionsCreated++;
+      // Itens novos já registaram a composição acima; aqui só itens existentes.
+      if (!group.some((g) => g.created) && result.compositionCreated) {
+        trackCreatedComposition(result.compositionId, result.compositionName, group[0].targetCode);
+      }
       if (result.compositionLinked) compositionsLinked++;
     }
   });
@@ -1144,13 +1183,18 @@ export async function applyMeasurementsImport(
     else itemsUpdated++;
   }
 
+  const createdCompositions = Array.from(createdCompositionsById.values()).sort((a, b) =>
+    a.name.localeCompare(b.name, "pt"),
+  );
+
   return {
     itemsUpdated,
     itemsCreated: createdUnique,
     rowsRead: parsed.length,
     templateItemsSaved,
-    compositionsCreated,
+    compositionsCreated: createdCompositions.length,
     compositionsLinked,
+    createdCompositions,
     unmatched,
   };
 }
