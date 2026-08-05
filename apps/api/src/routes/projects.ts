@@ -197,17 +197,14 @@ export async function projectRoutes(app: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     const companyId = request.currentUser!.companyId!;
 
-    // Limite de projectos do plano actual — o sistema não distingue projectos "activos" de
-    // arquivados ainda, por isso o limite aplica-se ao total de projectos da empresa.
-    const [sub] = await db.select().from(subscriptions).where(eq(subscriptions.companyId, companyId)).orderBy(desc(subscriptions.createdAt)).limit(1);
-    const plan = getPlanDefinition(sub?.plan ?? "free");
-    if (plan?.maxProjects != null) {
-      const [{ value: currentProjects }] = await db.select({ value: count() }).from(projects).where(eq(projects.companyId, companyId));
-      if (currentProjects >= plan.maxProjects) {
-        return reply.code(403).send({
-          error: `O plano "${plan.label}" permite até ${plan.maxProjects} projecto(s). Contacte o suporte para actualizar de plano.`,
-        });
-      }
+    const { assertActiveProjectSlot } = await import("../services/subscriptionEntitlements.js");
+    const projectLimit = await assertActiveProjectSlot(companyId);
+    if (projectLimit) {
+      return reply.code(403).send({
+        error: projectLimit.error,
+        code: projectLimit.code,
+        upgradeHint: projectLimit.upgradeHint,
+      });
     }
 
     const {
@@ -387,6 +384,35 @@ export async function projectRoutes(app: FastifyInstance) {
         indirectCostsRate: indirectCostsRate !== undefined ? indirectCostsRate.toString() : undefined,
         profitMarginRate: profitMarginRate !== undefined ? profitMarginRate.toString() : undefined,
       })
+      .where(and(eq(projects.id, id), eq(projects.companyId, companyId)))
+      .returning();
+    if (!row) return reply.code(404).send({ error: "Projecto não encontrado" });
+    return row;
+  });
+
+  app.post("/api/projects/:id/archive", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const companyId = request.currentUser!.companyId!;
+    const [row] = await db
+      .update(projects)
+      .set({ archivedAt: new Date() })
+      .where(and(eq(projects.id, id), eq(projects.companyId, companyId)))
+      .returning();
+    if (!row) return reply.code(404).send({ error: "Projecto não encontrado" });
+    return row;
+  });
+
+  app.post("/api/projects/:id/unarchive", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const companyId = request.currentUser!.companyId!;
+    const { assertActiveProjectSlot } = await import("../services/subscriptionEntitlements.js");
+    const limit = await assertActiveProjectSlot(companyId);
+    if (limit) {
+      return reply.code(403).send({ error: limit.error, code: limit.code, upgradeHint: limit.upgradeHint });
+    }
+    const [row] = await db
+      .update(projects)
+      .set({ archivedAt: null })
       .where(and(eq(projects.id, id), eq(projects.companyId, companyId)))
       .returning();
     if (!row) return reply.code(404).send({ error: "Projecto não encontrado" });

@@ -34,30 +34,63 @@ function ImportCreatedCompositionsNotice({ result }: { result: MeasurementImport
   const created = result.createdCompositions ?? [];
   if (!created.length && !(result.compositionsCreated ?? 0)) return null;
   return (
-    <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950">
-      <p className="font-medium">
-        {(result.compositionsCreated ?? created.length)} composição(ões) nova(s) criada(s) automaticamente — verifique no Catálogo
-        os rendimentos, insumos e preços antes de usar estes valores em orçamento.
+    <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-950">
+      <p className="font-semibold text-amber-950">
+        {(result.compositionsCreated ?? created.length)} composição(ões) nova(s) — verifique no Catálogo
+      </p>
+      <p className="mt-1 text-amber-900/90">
+        Confirme rendimentos, insumos e preços antes de usar estes valores em orçamento.
       </p>
       {created.length > 0 && (
-        <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto">
+        <ul className="mt-2.5 max-h-40 space-y-1.5 overflow-y-auto">
           {created.map((comp) => (
-            <li key={comp.id}>
-              <Link to={`/catalogo/composicoes/${comp.id}`} className="font-medium text-amber-950 underline underline-offset-2 hover:text-brand-800">
+            <li key={comp.id} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+              <Link to={`/catalogo/composicoes/${comp.id}`} className="font-medium text-brand-800 hover:underline">
                 {comp.name}
               </Link>
               {comp.itemCodes.length > 0 ? (
-                <span className="text-amber-800"> · item(ns) {comp.itemCodes.join(", ")}</span>
+                <span className="text-amber-800/80">item(ns) {comp.itemCodes.join(", ")}</span>
               ) : null}
             </li>
           ))}
         </ul>
       )}
-      <p className="mt-2">
-        <Link to="/catalogo" className="font-medium underline underline-offset-2 hover:text-brand-800">
-          Abrir Catálogo de Preços
-        </Link>
-      </p>
+      <Link to="/catalogo" className="mt-3 inline-flex text-xs font-semibold text-brand-800 hover:underline">
+        Abrir Catálogo de Preços →
+      </Link>
+    </div>
+  );
+}
+
+function MeasurementImportResultCard({
+  result,
+  onDismiss,
+}: {
+  result: MeasurementImportResult;
+  onDismiss?: () => void;
+}) {
+  return (
+    <div className="mt-4 space-y-3">
+      <AlertBanner tone="success" onDismiss={onDismiss}>
+        <p className="font-medium">
+          {result.itemsUpdated} actualizado(s), {result.itemsCreated} criado(s) — {result.rowsRead} linha(s) processadas
+          {(result.compositionsLinked ?? 0) > 0 ? ` · ${result.compositionsLinked} composição(ões)` : ""}
+          {(result.compositionsCreated ?? 0) > 0 ? ` (${result.compositionsCreated} nova(s))` : ""}.
+        </p>
+      </AlertBanner>
+      <ImportCreatedCompositionsNotice result={result} />
+      {result.unmatched.length > 0 && (
+        <AlertBanner tone="warning">
+          <p className="font-medium">{result.unmatched.length} linha(s) não foram aplicadas</p>
+          <ul className="mt-1.5 max-h-32 space-y-0.5 overflow-y-auto text-xs">
+            {result.unmatched.map((u, i) => (
+              <li key={`${u.sheet}-${u.rowNumber}-${i}`}>
+                Folha &quot;{u.sheet}&quot;, linha {u.rowNumber}: código &quot;{u.code}&quot;, quantidade {u.quantity} — {u.reason}.
+              </li>
+            ))}
+          </ul>
+        </AlertBanner>
+      )}
     </div>
   );
 }
@@ -820,43 +853,42 @@ export default function BudgetDocumentPage() {
           {error && <AlertBanner tone="error" onDismiss={() => setError(null)}>{error}</AlertBanner>}
 
           {isMeasurementDocument && !isReadOnly && (
-            <section className="card overflow-hidden border-l-4 border-l-emerald-500">
-              <SectionHeader
-                title="Importar medições do Excel"
-                description="Actualize quantidades ou crie itens novos a partir do Excel — colunas Item/Código e Quant. (Descrição e Un. opcionais)."
-              />
+            <section className="card overflow-hidden border-l-4 border-l-brand-500">
+              <div className="flex flex-col gap-4 px-4 py-4 sm:flex-row sm:items-start sm:justify-between sm:px-5">
+                <div className="flex min-w-0 items-start gap-3">
+                  <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-700">
+                    <IconDownload className="h-4 w-4" />
+                  </span>
+                  <div className="min-w-0">
+                    <h2 className="text-sm font-semibold text-slate-900">Importar medições</h2>
+                    <p className="mt-1 max-w-2xl text-xs leading-relaxed text-slate-500">
+                      Actualize quantidades ou crie itens a partir de Excel/PDF — colunas Item/Código e Quant. (Descrição e Un. opcionais).
+                    </p>
+                  </div>
+                </div>
+              </div>
               <div className="border-t border-slate-100 px-4 py-4 sm:px-5">
                 <form onSubmit={handleImportMeasurements} className="flex flex-col gap-3 sm:flex-row sm:items-end">
                   <div className="min-w-0 flex-1">
+                    <label className="label">Mapa de quantidades (Excel ou PDF)</label>
                     <input
                       type="file"
                       name="measurementsFile"
                       accept=".xlsx,.xls,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                       required
-                      className="input py-1.5 file:mr-3 file:rounded-md file:border-0 file:bg-brand-100 file:text-brand-800 file:px-2.5 file:py-1 file:text-xs file:font-medium"
+                      className="input py-1.5 file:mr-3 file:rounded-md file:border-0 file:bg-brand-50 file:px-2.5 file:py-1 file:text-xs file:font-medium file:text-brand-800"
                     />
-                    <p className="mt-2 text-xs text-slate-500">
-                      Dica: exporte o modelo em «Exportar Excel» no menu ⋮. Códigos inexistentes criam capítulo e item automaticamente (com descrição do mapa padrão, se disponível).
+                    <p className="mt-2 text-xs leading-5 text-slate-500">
+                      O ficheiro é analisado em segundo plano. Depois reveja o mapeamento antes de aplicar. Modelo: «Exportar Excel» no menu ⋮.
                     </p>
                   </div>
                   <button type="submit" disabled={importingMeasurements} className="btn btn-primary shrink-0">
-                    <IconDownload className="w-3.5 h-3.5" />
-                    {importingMeasurements ? "A enviar..." : "Importar mapa"}
+                    <IconDownload className="h-3.5 w-3.5" />
+                    {importingMeasurements ? "A enviar…" : "Importar mapa"}
                   </button>
                 </form>
-                <p className="mt-2 text-xs text-slate-500">O ficheiro é analisado em segundo plano — pode continuar a trabalhar e rever o mapeamento quando estiver pronto.</p>
                 {importResult && (
-                  <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm">
-                    <p className="font-medium text-emerald-800">
-                      {importResult.itemsUpdated} actualizado(s), {importResult.itemsCreated} criado(s) — {importResult.rowsRead} linha(s) lidas
-                      {(importResult.compositionsLinked ?? 0) > 0 ? ` · ${importResult.compositionsLinked} composição(ões)` : ""}
-                      {(importResult.compositionsCreated ?? 0) > 0 ? ` (${importResult.compositionsCreated} nova(s))` : ""}.
-                    </p>
-                    <ImportCreatedCompositionsNotice result={importResult} />
-                    {importResult.unmatched.length > 0 && (
-                      <p className="mt-1 text-xs text-amber-800">{importResult.unmatched.length} linha(s) não corresponderam a itens do mapa — confira códigos e nomes das secções.</p>
-                    )}
-                  </div>
+                  <MeasurementImportResultCard result={importResult} onDismiss={() => setImportResult(null)} />
                 )}
               </div>
             </section>
@@ -1121,50 +1153,30 @@ export default function BudgetDocumentPage() {
           </section>
 
           <section className="border-t border-slate-200">
-            <SectionHeader title="Importar medições" description="Actualize quantidades ou crie itens a partir de um Excel" />
-            <div className="p-5">
-            <p className="text-xs text-gray-500 mb-3 max-w-3xl">
-              O Excel pode ter células unidas e unidades variadas (un, UM, unidade, m²…). Depois do upload revê o mapeamento antes de aplicar.
-            </p>
-            <form onSubmit={handleImportMeasurements} className="flex gap-2 items-end flex-wrap">
-              <div className="flex-1 min-w-[180px]">
-                <input
-                  type="file"
-                  name="measurementsFile"
-                  accept=".xlsx,.xls,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                  required
-                  className="input py-1.5 file:mr-3 file:rounded-md file:border-0 file:bg-brand-100 file:text-brand-800 file:px-2.5 file:py-1 file:text-xs file:font-medium"
-                />
-              </div>
-              <button type="submit" disabled={importingMeasurements} className="btn btn-primary">
-                <IconDownload className="w-3.5 h-3.5" />
-                {importingMeasurements ? "A enviar..." : "Importar"}
-              </button>
-            </form>
-            {importResult && (
-              <div className="mt-3 rounded-lg bg-green-50 border border-green-200 p-3 text-sm">
-                <p className="font-medium text-green-800">
-                  {importResult.itemsUpdated} actualizado(s), {importResult.itemsCreated} criado(s) — {importResult.rowsRead} linha(s) processadas
-                  {(importResult.compositionsLinked ?? 0) > 0 ? ` · ${importResult.compositionsLinked} composição(ões)` : ""}
-                  {(importResult.compositionsCreated ?? 0) > 0 ? ` (${importResult.compositionsCreated} nova(s))` : ""}.
-                </p>
-                <ImportCreatedCompositionsNotice result={importResult} />
-                {importResult.unmatched.length > 0 && (
-                  <>
-                    <p className="text-amber-700 mt-2 font-medium">
-                      {importResult.unmatched.length} linha(s) não foram aplicadas:
-                    </p>
-                    <ul className="text-xs text-amber-800 mt-1 space-y-0.5 max-h-32 overflow-y-auto">
-                      {importResult.unmatched.map((u, i) => (
-                        <li key={`${u.sheet}-${u.rowNumber}-${i}`}>
-                          Folha "{u.sheet}", linha {u.rowNumber}: código "{u.code}", quantidade {u.quantity} — {u.reason}.
-                        </li>
-                      ))}
-                    </ul>
-                  </>
-                )}
-              </div>
-            )}
+            <SectionHeader
+              title="Importar medições"
+              description="Actualize quantidades ou crie itens a partir de Excel/PDF. Depois do upload, reveja o mapeamento antes de aplicar."
+            />
+            <div className="px-4 py-4 sm:px-5">
+              <form onSubmit={handleImportMeasurements} className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                <div className="min-w-0 flex-1">
+                  <label className="label">Mapa de quantidades (Excel ou PDF)</label>
+                  <input
+                    type="file"
+                    name="measurementsFile"
+                    accept=".xlsx,.xls,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    required
+                    className="input py-1.5 file:mr-3 file:rounded-md file:border-0 file:bg-brand-50 file:px-2.5 file:py-1 file:text-xs file:font-medium file:text-brand-800"
+                  />
+                </div>
+                <button type="submit" disabled={importingMeasurements} className="btn btn-primary shrink-0">
+                  <IconDownload className="h-3.5 w-3.5" />
+                  {importingMeasurements ? "A enviar…" : "Importar mapa"}
+                </button>
+              </form>
+              {importResult && (
+                <MeasurementImportResultCard result={importResult} onDismiss={() => setImportResult(null)} />
+              )}
             </div>
           </section>
           </details>}

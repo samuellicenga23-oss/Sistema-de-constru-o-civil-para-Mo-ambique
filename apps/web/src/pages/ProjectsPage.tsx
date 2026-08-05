@@ -299,9 +299,20 @@ export default function ProjectsPage() {
               )}
               {startMode === "importar" && (
                 <div className="sm:col-span-2 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                  <label className="label">Mapa de quantidades (Excel ou PDF) *</label>
-                  <input type="file" name="measurementsFile" accept=".xlsx,.xls,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" disabled={creating} className="input py-1.5 file:mr-2 file:rounded-md file:border-0 file:bg-white file:px-2 file:py-1 file:text-xs" />
-                  <p className="mt-1.5 text-xs text-slate-500">O mapa é analisado em segundo plano. Depois revê o mapeamento (código ou descrição) antes de aplicar. Aceita Excel ou PDF.</p>
+                  <div className="mb-3">
+                    <p className="text-sm font-semibold text-slate-900">Importar mapa de quantidades</p>
+                    <p className="mt-0.5 text-xs leading-5 text-slate-500">
+                      Análise em segundo plano; depois reveja o mapeamento (código ou descrição) antes de aplicar.
+                    </p>
+                  </div>
+                  <label className="label">Ficheiro Excel ou PDF *</label>
+                  <input
+                    type="file"
+                    name="measurementsFile"
+                    accept=".xlsx,.xls,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    disabled={creating}
+                    className="input py-1.5 file:mr-2 file:rounded-md file:border-0 file:bg-brand-50 file:px-2 file:py-1 file:text-xs file:font-medium file:text-brand-800"
+                  />
                 </div>
               )}
               <details className="sm:col-span-2 rounded-lg border border-slate-200 bg-white">

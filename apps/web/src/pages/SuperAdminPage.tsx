@@ -159,7 +159,7 @@ export default function SuperAdminPage() {
     enabledModules: [] as CompanyModuleKey[],
   });
   const [subForm, setSubForm] = useState({
-    plan: "profissional",
+    plan: "individual",
     status: "trial" as "trial" | "activo" | "suspenso",
     billingCycle: "monthly" as "monthly" | "annual" | "custom" | "trial",
     expiresAt: "",

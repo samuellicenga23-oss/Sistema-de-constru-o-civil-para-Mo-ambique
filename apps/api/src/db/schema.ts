@@ -348,8 +348,29 @@ export const projects = pgTable("projects", {
   siteCostsRate: numeric("site_costs_rate", { precision: 5, scale: 4 }).notNull().default("0"),
   indirectCostsRate: numeric("indirect_costs_rate", { precision: 5, scale: 4 }).notNull().default("0"),
   profitMarginRate: numeric("profit_margin_rate", { precision: 5, scale: 4 }).notNull().default("0"),
+  /** Obra arquivada não conta para o limite de obras activas do plano. */
+  archivedAt: timestamp("archived_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
+
+export const usageEvents = pgTable(
+  "usage_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    kind: varchar("kind", { length: 40 }).notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    companyKindCreatedIdx: index("usage_events_company_kind_created_idx").on(
+      table.companyId,
+      table.kind,
+      table.createdAt,
+    ),
+  }),
+);
 
 export const projectMaterialSpecifications = pgTable(
   "project_material_specifications",

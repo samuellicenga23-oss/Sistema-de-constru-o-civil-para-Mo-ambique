@@ -5,6 +5,7 @@ import type { CompanyModuleKey } from "@sigo/shared";
 import { db } from "../db/index.js";
 import { subscriptions } from "../db/schema.js";
 import { getSessionUser, type SessionUser } from "./session.js";
+import { assertCanWrite } from "../services/subscriptionEntitlements.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -58,7 +59,7 @@ export async function requireAuth(request: FastifyRequest, reply: FastifyReply) 
   // Super-admin (incl. em impersonação) pode continuar a entrar para suporte.
   if (!isPlatformSuperAdmin(user) && user.companyId) {
     const [sub] = await db
-      .select({ status: subscriptions.status })
+      .select({ status: subscriptions.status, expiresAt: subscriptions.expiresAt, plan: subscriptions.plan })
       .from(subscriptions)
       .where(eq(subscriptions.companyId, user.companyId))
       .orderBy(desc(subscriptions.createdAt))
@@ -68,6 +69,23 @@ export async function requireAuth(request: FastifyRequest, reply: FastifyReply) 
         error: "A subscrição da empresa está suspensa. Contacte o suporte.",
         code: "SUBSCRIPTION_SUSPENDED",
       });
+    }
+    // Trial/plano expirado: leitura permitida; escrita bloqueada (excepto auth/perfil).
+    const method = (request.method ?? "GET").toUpperCase();
+    const url = request.raw.url ?? "";
+    const isWrite = method !== "GET" && method !== "HEAD" && method !== "OPTIONS";
+    const writeAllowedWhenExpired =
+      url.startsWith("/api/auth/") ||
+      url.startsWith("/api/companies/exit-impersonation");
+    if (isWrite && !writeAllowedWhenExpired && sub) {
+      const block = await assertCanWrite(user.companyId);
+      if (block?.code === "SUBSCRIPTION_EXPIRED") {
+        return reply.code(402).send({
+          error: block.error,
+          code: block.code,
+          upgradeHint: block.upgradeHint,
+        });
+      }
     }
   }
   request.currentUser = user;

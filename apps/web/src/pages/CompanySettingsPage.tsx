@@ -345,7 +345,26 @@ export default function CompanySettingsPage() {
 
         {tab === "utilizadores" && (
           canEdit ? (
-            <TeamAccessPanel maxUsers={plan?.maxUsers ?? null} onCountChange={setUserCount} />
+            plan?.limits.maxUsers === 1 && !plan.capabilities.teamManagement ? (
+              <section className="card card-pad space-y-3">
+                <p className="text-sm text-slate-800">
+                  O plano <strong>{plan.label}</strong> inclui 1 utilizador — o sistema completo para uma pessoa.
+                </p>
+                <p className="text-xs text-slate-500">
+                  Para engenheiro, orçamentista, fiscal e financeiro com contas separadas, active o plano Profissional (5 utilizadores).
+                </p>
+                <a
+                  href={`https://wa.me/${SIGO_WHATSAPP_NUMBER}?text=${encodeURIComponent("Olá — quero passar ao plano Profissional para trabalhar em equipa no SIGO.")}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="btn btn-primary btn-sm w-fit"
+                >
+                  Activar Profissional
+                </a>
+              </section>
+            ) : (
+              <TeamAccessPanel maxUsers={plan?.maxUsers ?? null} onCountChange={setUserCount} />
+            )
           ) : (
             <section className="card card-pad"><p className="muted">Só um administrador pode gerir a equipa.</p></section>
           )

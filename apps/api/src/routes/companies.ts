@@ -112,9 +112,15 @@ export async function companyRoutes(app: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     const [before] = await db.select().from(companies).where(eq(companies.id, id)).limit(1);
     if (!before) return reply.code(404).send({ error: "Empresa não encontrada" });
-    const [updated] = await db.update(companies).set(parsed.data).where(eq(companies.id, id)).returning();
+    const sub = await getLatestSubscription(id);
+    const patch = { ...parsed.data };
+    if (patch.enabledModules) {
+      const { clampCompanyModules } = await import("../services/subscriptionEntitlements.js");
+      patch.enabledModules = clampCompanyModules(patch.enabledModules, sub?.plan ?? "individual");
+    }
+    const [updated] = await db.update(companies).set(patch).where(eq(companies.id, id)).returning();
     await recordAuditEvent({ companyId: id, actorUserId: request.currentUser!.id, entityType: "company", entityId: id, action: "platform_settings_updated", before: { name: before.name, enabledModules: before.enabledModules }, after: { name: updated.name, enabledModules: updated.enabledModules } });
-    return { ...updated, subscription: await getLatestSubscription(id) };
+    return { ...updated, subscription: sub };
   });
 
   app.get("/api/admin/users", { preHandler: requireRole("super_admin") }, async (request) => {
@@ -210,11 +216,14 @@ export async function companyRoutes(app: FastifyInstance) {
       })
       .returning();
 
-    // Nova empresa começa em trial Profissional com validade de 14 dias.
+    // Trial 14 dias no plano Individual — entitlements de trial (limites baixos) vêm de resolveEntitlements.
     const trialEnds = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+    const { clampCompanyModules } = await import("../services/subscriptionEntitlements.js");
+    const trialModules = clampCompanyModules(undefined, "individual");
+    await db.update(companies).set({ enabledModules: trialModules }).where(eq(companies.id, company.id));
     await db.insert(subscriptions).values({
       companyId: company.id,
-      plan: "profissional",
+      plan: "individual",
       status: "trial",
       billingCycle: "trial",
       expiresAt: trialEnds,
@@ -234,7 +243,7 @@ export async function companyRoutes(app: FastifyInstance) {
     const parsed = z
       .object({
         status: z.enum(SUBSCRIPTION_STATUSES).optional(),
-        plan: z.enum(SUBSCRIPTION_PLAN_KEYS as [string, ...string[]]).optional(),
+        plan: z.enum(SUBSCRIPTION_PLAN_KEYS as unknown as [string, ...string[]]).optional(),
         expiresAt: isoDateTime.nullable().optional(),
         billingCycle: z.enum(BILLING_CYCLES).nullable().optional(),
         notes: z.string().max(2000).nullable().optional(),
@@ -282,6 +291,18 @@ export async function companyRoutes(app: FastifyInstance) {
       })
       .where(eq(subscriptions.id, current.id))
       .returning();
+
+    // Ao mudar de plano, módulos da empresa nunca excedem o permitido pelo plano.
+    if (parsed.data.plan && parsed.data.plan !== current.plan) {
+      const { clampCompanyModules } = await import("../services/subscriptionEntitlements.js");
+      const [company] = await db.select({ enabledModules: companies.enabledModules }).from(companies).where(eq(companies.id, id)).limit(1);
+      if (company) {
+        await db
+          .update(companies)
+          .set({ enabledModules: clampCompanyModules(company.enabledModules, nextPlan) })
+          .where(eq(companies.id, id));
+      }
+    }
 
     let payment = null;
     if (parsed.data.payment) {
@@ -365,7 +386,7 @@ export async function companyRoutes(app: FastifyInstance) {
         paidAt: isoDateTime.optional(),
         periodStart: dateOnly.optional(),
         periodEnd: dateOnly.optional(),
-        plan: z.enum(SUBSCRIPTION_PLAN_KEYS as [string, ...string[]]).optional(),
+        plan: z.enum(SUBSCRIPTION_PLAN_KEYS as unknown as [string, ...string[]]).optional(),
         billingCycle: z.enum(BILLING_CYCLES).optional(),
         extendExpires: z.boolean().optional(),
       })
@@ -421,7 +442,7 @@ export async function companyRoutes(app: FastifyInstance) {
     const [company] = await db.select().from(companies).where(eq(companies.id, id)).limit(1);
     if (!company) return reply.code(404).send({ error: "Empresa não encontrada" });
     const sub = await getLatestSubscription(id);
-    return getCompanyUsage(id, sub?.plan ?? "free");
+    return getCompanyUsage(id, sub?.plan ?? "individual", sub);
   });
 
   app.get("/api/admin/companies/:id/backup", { preHandler: requireRole("super_admin") }, async (request, reply) => {
@@ -671,8 +692,19 @@ export async function companyRoutes(app: FastifyInstance) {
     return row;
   });
 
+  app.get("/api/companies/me/entitlements", { preHandler: requireCompanyUser }, async (request) => {
+    const companyId = request.currentUser!.companyId!;
+    const { buildSubscriptionSummary } = await import("../services/subscriptionEntitlements.js");
+    const summary = await buildSubscriptionSummary(companyId);
+    if (!summary) return { planKey: "individual", expired: false, isTrial: false, usage: null };
+    return summary;
+  });
+
   app.post("/api/companies/me/logo", { preHandler: requireRole("admin_empresa") }, async (request, reply) => {
     const companyId = request.currentUser!.companyId!;
+    const { assertCompanyBranding } = await import("../services/subscriptionEntitlements.js");
+    const branding = await assertCompanyBranding(companyId);
+    if (branding) return reply.code(403).send({ error: branding.error, code: branding.code });
     const data = await request.file();
     if (!data) return reply.code(400).send({ error: "Ficheiro em falta" });
 

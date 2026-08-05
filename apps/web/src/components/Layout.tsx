@@ -8,6 +8,7 @@ import InstallAppButton from "./InstallAppButton";
 import OfflineBanner from "./OfflineBanner";
 import PlantProcessingCenter from "./PlantProcessingCenter";
 import ImportProcessingCenter from "./ImportProcessingCenter";
+import SubscriptionBanner from "./SubscriptionBanner";
 import { IconHome, IconFolder, IconTag, IconBuilding, IconLogout, IconSettings, IconRuler, IconUsers, IconMenu, IconClose, IconClipboard } from "./icons";
 import { LogoFull, LogoIcon } from "./Logo";
 import { useLanguage } from "../i18n";
@@ -188,9 +189,9 @@ export default function Layout({
   }
 
   return (
-    <div className="flex min-h-screen bg-surface">
+    <div className="flex h-dvh min-h-0 overflow-hidden bg-surface">
       <aside
-        className={`hidden shrink-0 flex-col border-r border-slate-200 bg-surface-sidebar text-slate-700 transition-[width] duration-200 md:flex ${
+        className={`hidden h-full min-h-0 shrink-0 flex-col border-r border-slate-200 bg-surface-sidebar text-slate-700 transition-[width] duration-200 md:flex ${
           sidebarCollapsed ? "w-[4.75rem]" : "w-72"
         }`}
       >
@@ -227,7 +228,7 @@ export default function Layout({
         </nav>
       </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {user?.actingCompanyId && (
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-300 bg-amber-50 px-4 py-2.5 text-sm text-amber-950 md:px-8">
             <p>
@@ -322,7 +323,7 @@ export default function Layout({
           </div>
         )}
 
-        <header className="sticky top-0 z-10 border-b border-slate-200/90 bg-white/90 backdrop-blur-md">
+        <header className="z-10 shrink-0 border-b border-slate-200/90 bg-white/90 backdrop-blur-md">
           <div className="mx-auto flex w-full max-w-[1500px] flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between md:px-8 md:py-4 xl:px-10">
             <div className="flex min-w-0 max-w-full items-start gap-3">
               {back && (
@@ -345,11 +346,12 @@ export default function Layout({
           </div>
         </header>
 
+        <SubscriptionBanner />
         <OfflineBanner />
         <PlantProcessingCenter />
         <ImportProcessingCenter />
 
-        <main className="min-w-0 flex-1 overflow-x-hidden p-3 pb-24 sm:p-5 md:p-8 md:pb-8 xl:p-10 page-enter">
+        <main className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-3 pb-24 sm:p-5 md:p-8 md:pb-8 xl:p-10 page-enter">
           <div className="mx-auto w-full max-w-[1500px]">{children}</div>
         </main>
 

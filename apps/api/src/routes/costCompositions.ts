@@ -190,6 +190,11 @@ export async function costCompositionRoutes(app: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     const { labourLines, materialLines, equipmentLines, ...data } = parsed.data;
     const companyId = targetCompanyId(request);
+    if (companyId) {
+      const { assertCustomCompositionSlot } = await import("../services/subscriptionEntitlements.js");
+      const block = await assertCustomCompositionSlot(companyId);
+      if (block) return reply.code(403).send({ error: block.error, code: block.code });
+    }
 
     const [composition] = await db.insert(costCompositions).values({
       ...data,

@@ -166,15 +166,20 @@ export async function userRoutes(app: FastifyInstance) {
       return reply.code(409).send({ error: "Já existe um utilizador com este email" });
     }
 
-    const [sub] = await db.select().from(subscriptions).where(eq(subscriptions.companyId, companyId)).orderBy(desc(subscriptions.createdAt)).limit(1);
-    const plan = getPlanDefinition(sub?.plan ?? "free");
-    if (plan?.maxUsers != null) {
-      const [{ value: currentUsers }] = await db.select({ value: count() }).from(users).where(eq(users.companyId, companyId));
-      if (currentUsers >= plan.maxUsers) {
-        return reply.code(403).send({
-          error: `O plano "${plan.label}" permite até ${plan.maxUsers} utilizador(es). Contacte o suporte para actualizar de plano.`,
-        });
-      }
+    const { getCompanyEntitlements } = await import("../services/subscriptionEntitlements.js");
+    const entitlements = await getCompanyEntitlements(companyId);
+    const [{ value: currentUsers }] = await db.select({ value: count() }).from(users).where(eq(users.companyId, companyId));
+    if (entitlements && !entitlements.teamManagement && currentUsers >= 1) {
+      return reply.code(403).send({
+        error: "O plano Individual permite 1 utilizador. Para trabalhar em equipa, escolha Profissional.",
+        code: "PLAN_TEAM_REQUIRED",
+      });
+    }
+    if (entitlements?.maxUsers != null && currentUsers >= entitlements.maxUsers) {
+      return reply.code(403).send({
+        error: `O plano "${entitlements.planLabel}" permite até ${entitlements.maxUsers} utilizador(es). Actualize o plano para adicionar a equipa.`,
+        code: "PLAN_USER_LIMIT",
+      });
     }
 
     const passwordHash = await hashPassword(password);

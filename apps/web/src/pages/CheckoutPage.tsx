@@ -36,6 +36,7 @@ export default function CheckoutPage() {
     [billingCycle, plan?.annualPrice, plan?.monthlyPrice],
   );
 
+  if (planSlug === "fundamento") return <Navigate to="/checkout/individual" replace />;
   if (!plan) return <Navigate to="/#planos" replace />;
 
   function update(field: keyof CheckoutForm, value: string) {

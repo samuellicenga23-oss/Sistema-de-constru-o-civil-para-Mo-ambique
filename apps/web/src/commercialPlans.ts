@@ -1,8 +1,15 @@
+import {
+  SUBSCRIPTION_PLANS,
+  calculateVatTotals,
+  getPlanDefinition,
+  type PublicSubscriptionPlanKey,
+} from "@sigo/shared";
+
 export const SIGO_WHATSAPP_NUMBER = "258866384194";
 export const SIGO_CONTACT_EMAIL = "licsenga.samuel@mechanical.co.mz";
 
 export type CommercialPlan = {
-  slug: "fundamento" | "profissional" | "empresa";
+  slug: PublicSubscriptionPlanKey;
   name: string;
   monthlyPrice: number;
   annualPrice: number;
@@ -14,52 +21,39 @@ export type CommercialPlan = {
   featured?: boolean;
 };
 
-export const COMMERCIAL_PLANS: CommercialPlan[] = [
-  {
-    slug: "fundamento",
-    name: "Fundamento",
-    monthlyPrice: 4_900,
-    annualPrice: 49_980,
-    regularAnnualPrice: 58_800,
-    description: "Organize custos, documentos e os primeiros projectos num único lugar.",
-    audience: "Pequenas empresas e equipas em digitalização",
-    limits: "3 obras activas · 5 utilizadores",
-    features: ["Orçamentos e composições", "Preços por fornecedor e zona", "Documentos e relatórios PDF", "Cálculos rápidos com custos"],
-  },
-  {
-    slug: "profissional",
-    name: "Profissional",
-    monthlyPrice: 12_900,
-    annualPrice: 131_580,
-    regularAnnualPrice: 154_800,
-    description: "Ligue planeamento, compras, estaleiro, medição e controlo financeiro.",
-    audience: "Construtoras com várias frentes de trabalho",
-    limits: "15 obras activas · 20 utilizadores",
-    features: ["Tudo do Fundamento", "Cronograma Gantt e subactividades", "Diário e Autos de Medição", "Compras, stock e financeiro", "Acompanhamento de implementação"],
-    featured: true,
-  },
-  {
-    slug: "empresa",
-    name: "Empresa",
-    monthlyPrice: 29_900,
-    annualPrice: 304_980,
-    regularAnnualPrice: 358_800,
-    description: "Governação, capacidade e acompanhamento para operações com várias equipas.",
-    audience: "Empresas com operação consolidada",
-    limits: "50 obras activas · utilizadores ilimitados",
-    features: ["Tudo do Profissional", "Perfis e acessos avançados", "Migração inicial de dados", "Formação da equipa", "Suporte prioritário"],
-  },
-];
+/** Landing / checkout — mesma fonte que a API (`packages/shared/src/plans.ts`). Enterprise fica “sob consulta”. */
+export const COMMERCIAL_PLANS: CommercialPlan[] = SUBSCRIPTION_PLANS.filter(
+  (plan) => plan.key !== "enterprise" && plan.monthlyPriceMzn != null && plan.annualPriceMzn != null,
+).map((plan) => ({
+  slug: plan.key,
+  name: plan.label,
+  monthlyPrice: plan.monthlyPriceMzn!,
+  annualPrice: plan.annualPriceMzn!,
+  regularAnnualPrice: plan.regularAnnualPriceMzn ?? plan.monthlyPriceMzn! * 12,
+  description: plan.description,
+  audience: plan.audience,
+  limits: [
+    plan.limits.maxUsers == null ? "Utilizadores conforme contrato" : `${plan.limits.maxUsers} utilizador${plan.limits.maxUsers === 1 ? "" : "es"}`,
+    plan.limits.maxActiveProjects == null
+      ? "Obras ilimitadas"
+      : `${plan.limits.maxActiveProjects} obras activas`,
+  ].join(" · "),
+  features: [...plan.features],
+  featured: Boolean(plan.featured),
+}));
 
 export function findCommercialPlan(slug: string | undefined) {
   return COMMERCIAL_PLANS.find((plan) => plan.slug === slug) ?? null;
 }
 
-/** Plano interno SIGO activado pelo super_admin quando o cliente escolhe um plano comercial. */
+/** Plano interno activado pelo super_admin = slug comercial (já unificado). */
 export const COMMERCIAL_TO_INTERNAL_PLAN = {
-  fundamento: "individual",
+  individual: "individual",
   profissional: "profissional",
   empresa: "empresa",
+  enterprise: "enterprise",
+  /** legado landing */
+  fundamento: "individual",
 } as const;
 
 export function formatMzn(value: number) {
@@ -68,3 +62,9 @@ export function formatMzn(value: number) {
     maximumFractionDigits: 2,
   })} MZN`;
 }
+
+export function formatPlanPriceWithVat(netAmount: number) {
+  return formatMzn(calculateVatTotals(netAmount).total);
+}
+
+export { getPlanDefinition };

@@ -300,6 +300,8 @@ export async function plantRoutes(app: FastifyInstance) {
     if (!buffer.subarray(0, 5).equals(Buffer.from("%PDF-", "ascii"))) {
       return reply.code(400).send({ error: "Ficheiro inválido — só são aceites PDFs" });
     }
+    const { assertPlantAnalysisQuota, recordUsage } = await import("../services/subscriptionEntitlements.js");
+    // A quota só conta análises novas (cache da mesma empresa não consome limite).
     const fileHash = createHash("sha256").update(buffer).digest("hex");
     const detectionContext = await getPlantDetectionContext(companyId);
     // O mesmo conjunto de plantas é frequentemente reenviado ao corrigir a disciplina ou ao
@@ -374,6 +376,13 @@ export async function plantRoutes(app: FastifyInstance) {
       await syncProjectPlantMeasurements(projectId);
       return reply.code(201).send(reused);
     }
+
+    const plantQuota = await assertPlantAnalysisQuota(companyId);
+    if (plantQuota) {
+      await db.delete(plants).where(eq(plants.id, plant.id));
+      return reply.code(403).send({ error: plantQuota.error, code: plantQuota.code, upgradeHint: plantQuota.upgradeHint });
+    }
+    await recordUsage(companyId, "plant_analysis");
 
     // O upload responde assim que o ficheiro fica gravado — a leitura do PDF corre em segundo
     // plano e o progresso é consultado via GET /api/plants/:id/status (já usado pelo frontend

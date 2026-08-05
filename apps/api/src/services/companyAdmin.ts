@@ -1,5 +1,5 @@
-import { and, count, desc, eq, inArray, sql } from "drizzle-orm";
-import { getPlanDefinition } from "@sigo/shared";
+import { and, count, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { getPlanDefinition, resolveEntitlements } from "@sigo/shared";
 import { db } from "../db/index.js";
 import {
   budgetDocuments,
@@ -30,7 +30,16 @@ export type CompanyUsage = {
   lastLoginAt: string | null;
 };
 
-export async function getCompanyUsage(companyId: string, planKey: string): Promise<CompanyUsage> {
+export async function getCompanyUsage(
+  companyId: string,
+  planKey: string,
+  subscription?: { status?: string | null; expiresAt?: Date | string | null } | null,
+): Promise<CompanyUsage> {
+  const entitlements = resolveEntitlements({
+    plan: planKey,
+    status: subscription?.status ?? "activo",
+    expiresAt: subscription?.expiresAt ?? null,
+  });
   const plan = getPlanDefinition(planKey);
   const [
     [{ value: userCount }],
@@ -45,7 +54,7 @@ export async function getCompanyUsage(companyId: string, planKey: string): Promi
   ] = await Promise.all([
     db.select({ value: count() }).from(users).where(eq(users.companyId, companyId)),
     db.select({ value: count() }).from(users).where(and(eq(users.companyId, companyId), eq(users.isActive, true))),
-    db.select({ value: count() }).from(projects).where(eq(projects.companyId, companyId)),
+    db.select({ value: count() }).from(projects).where(and(eq(projects.companyId, companyId), isNull(projects.archivedAt))),
     db
       .select({ value: count() })
       .from(budgetDocuments)
@@ -69,8 +78,8 @@ export async function getCompanyUsage(companyId: string, planKey: string): Promi
 
   const usersN = Number(userCount);
   const projectsN = Number(projectCount);
-  const maxUsers = plan?.maxUsers ?? null;
-  const maxProjects = plan?.maxProjects ?? null;
+  const maxUsers = entitlements.maxUsers ?? plan.maxUsers ?? null;
+  const maxProjects = entitlements.maxActiveProjects ?? plan.maxProjects ?? null;
 
   return {
     users: usersN,
@@ -106,7 +115,7 @@ export async function getCompaniesUsageMap(companyIds: string[], planByCompany: 
     db
       .select({ companyId: projects.companyId, value: count() })
       .from(projects)
-      .where(inArray(projects.companyId, companyIds))
+      .where(and(inArray(projects.companyId, companyIds), isNull(projects.archivedAt)))
       .groupBy(projects.companyId),
     db
       .select({
@@ -198,7 +207,7 @@ export async function buildCompanyBackup(companyId: string) {
     db.select().from(practiceEngagements).where(eq(practiceEngagements.companyId, companyId)),
   ]);
 
-  const usage = await getCompanyUsage(companyId, subRows[0]?.plan ?? "free");
+  const usage = await getCompanyUsage(companyId, subRows[0]?.plan ?? "individual", subRows[0] ?? null);
 
   return {
     exportedAt: new Date().toISOString(),

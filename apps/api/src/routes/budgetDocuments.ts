@@ -689,12 +689,18 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: "Só são aceites Excel (.xlsx / .xls) ou PDF de mapa de quantidades." });
     }
     const buffer = await data.toBuffer();
+    const { assertSmartImportQuota, recordUsage } = await import("../services/subscriptionEntitlements.js");
+    const quota = await assertSmartImportQuota(companyId);
+    if (quota) {
+      return reply.code(403).send({ error: quota.error, code: quota.code, upgradeHint: quota.upgradeHint });
+    }
     const job = enqueueMeasurementImportJob({
       companyId,
       documentId: id,
       buffer,
       filename,
     });
+    await recordUsage(companyId, "smart_import");
     return reply.code(202).send(job);
   });
 

@@ -18,6 +18,10 @@ type DecisionState = ImportApplyDecision & {
   priceSource: "file" | "composition" | "none";
 };
 
+function willCreateComposition(note: string | null | undefined) {
+  return Boolean(note?.includes("Será criada composição"));
+}
+
 export default function MeasurementImportReviewModal({
   preview,
   onClose,
@@ -64,7 +68,8 @@ export default function MeasurementImportReviewModal({
     const ignore = rows.filter((r) => r.action === "ignore").length;
     const withFilePrice = rows.filter((r) => r.unitPrice != null && r.unitPrice > 0).length;
     const withComposition = rows.filter((r) => r.compositionName).length;
-    return { map, create, ignore, withFilePrice, withComposition };
+    const newCompositions = rows.filter((r) => r.action !== "ignore" && willCreateComposition(r.note)).length;
+    return { map, create, ignore, withFilePrice, withComposition, newCompositions };
   }, [rows]);
 
   function updateRow(rowKey: string, patch: Partial<DecisionState>) {
@@ -72,7 +77,6 @@ export default function MeasurementImportReviewModal({
       current.map((row) => {
         if (row.rowKey !== rowKey) return row;
         const next = { ...row, ...patch };
-        // Se o código destino muda, re-resolver o itemId a partir do catálogo (evita overwrite stale).
         if (patch.targetCode !== undefined) {
           const match = preview.catalog.find((c) => c.code === patch.targetCode);
           next.targetItemId = match?.itemId ?? null;
@@ -94,126 +98,134 @@ export default function MeasurementImportReviewModal({
   return (
     <Modal
       title="Rever importação de medições"
-      subtitle={`${preview.rowsRead} linha(s) · ${summary.map} mapear · ${summary.create} criar · ${summary.ignore} ignorar · ${summary.withFilePrice} c/ preço ficheiro · ${summary.withComposition} c/ composição`}
+      subtitle={`${preview.rowsRead} linha(s) lidas do ficheiro — confirme o destino de cada item antes de aplicar.`}
       onClose={onClose}
       maxWidth="max-w-5xl"
     >
       <div className="space-y-4">
+        <div className="flex flex-wrap gap-2">
+          <span className="badge badge-brand">{summary.map} mapear</span>
+          <span className="badge badge-gray">{summary.create} criar</span>
+          <span className="badge badge-gray">{summary.ignore} ignorar</span>
+          {summary.withFilePrice > 0 && <span className="badge badge-gray">{summary.withFilePrice} c/ preço ficheiro</span>}
+          {summary.withComposition > 0 && <span className="badge badge-brand">{summary.withComposition} c/ composição</span>}
+          {summary.newCompositions > 0 && <span className="badge badge-gray">{summary.newCompositions} composição nova</span>}
+        </div>
+
         {applyError && (
-          <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">{applyError}</p>
+          <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{applyError}</p>
         )}
         {summary.withFilePrice === 0 && (
-          <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
-            Este mapa não traz preços unitários. Ao aplicar, cada item será ligado a uma composição SIGO existente ou será criada uma composição nova da empresa — e o preço unitário será calculado automaticamente. As composições novas ficam listadas no fim para as verificar no Catálogo.
+          <p className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-700">
+            Este mapa não traz preços unitários. Ao aplicar, cada item será ligado a uma composição SIGO existente ou será criada uma composição nova da empresa — e o preço unitário será calculado automaticamente.
           </p>
         )}
-        {rows.some((r) => r.action !== "ignore" && r.note?.includes("Será criada composição")) && (
-          <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
-            Há linhas com composição nova. Depois de aplicar, abra cada composição no Catálogo e confirme rendimentos, insumos e preços.
+        {summary.newCompositions > 0 && (
+          <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-950">
+            Há {summary.newCompositions} linha(s) com composição nova. Depois de aplicar, abra cada composição no Catálogo e confirme rendimentos, insumos e preços.
           </p>
         )}
 
-        <label className="flex items-center gap-2 text-sm text-slate-700">
-          <input type="checkbox" checked={saveToCompanyTemplate} onChange={(e) => setSaveToCompanyTemplate(e.target.checked)} />
+        <label className="flex items-center gap-2.5 rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700">
+          <input type="checkbox" checked={saveToCompanyTemplate} onChange={(e) => setSaveToCompanyTemplate(e.target.checked)} className="rounded border-slate-300" />
           Guardar itens novos no template da empresa
         </label>
 
         <div className="max-h-[55vh] overflow-auto rounded-xl border border-slate-200">
           <table className="min-w-full text-left text-sm">
-            <thead className="sticky top-0 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+            <thead className="sticky top-0 z-[1] border-b border-slate-200 bg-slate-50 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
               <tr>
-                <th className="px-3 py-2">Excel/PDF</th>
-                <th className="px-3 py-2">Qtd</th>
-                <th className="px-3 py-2">Un</th>
-                <th className="px-3 py-2">Preço</th>
-                <th className="px-3 py-2">Acção</th>
-                <th className="px-3 py-2">Destino / composição</th>
-                <th className="px-3 py-2">Match</th>
+                <th className="px-3 py-2.5">Excel/PDF</th>
+                <th className="px-3 py-2.5">Qtd</th>
+                <th className="px-3 py-2.5">Un</th>
+                <th className="px-3 py-2.5">Preço</th>
+                <th className="px-3 py-2.5">Acção</th>
+                <th className="px-3 py-2.5">Destino / composição</th>
+                <th className="px-3 py-2.5">Match</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
-              {rows.map((row) => (
-                <tr key={row.rowKey} className="align-top">
-                  <td className="px-3 py-2">
-                    <strong className="block text-slate-950">{row.code}</strong>
-                    <span className="block text-xs text-slate-500">{row.description || "—"}</span>
-                    <span className="block text-[11px] text-slate-400">
-                      {row.sheet} · L{row.rowNumber}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2 tabular-nums">{row.quantity}</td>
-                  <td className="px-3 py-2">{row.unit}</td>
-                  <td className="px-3 py-2 text-xs">
-                    {row.unitPrice != null && row.unitPrice > 0 ? (
-                      <span className="tabular-nums text-slate-900">{row.unitPrice.toLocaleString("pt-PT", { maximumFractionDigits: 2 })}</span>
-                    ) : row.priceSource === "composition" ? (
-                      <span className="text-brand-800">via composição</span>
-                    ) : (
-                      <span className="text-slate-400">—</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2">
-                    <select
-                      value={row.action}
-                      onChange={(e) => updateRow(row.rowKey, { action: e.target.value as DecisionState["action"] })}
-                      className="input text-sm"
-                    >
-                      <option value="map">Mapear</option>
-                      <option value="create">Criar</option>
-                      <option value="ignore">Ignorar</option>
-                    </select>
-                  </td>
-                  <td className="px-3 py-2 min-w-[12rem]">
-                    {row.action === "ignore" ? (
-                      <span className="text-xs text-slate-400">—</span>
-                    ) : (
-                      <>
-                        <input
-                          value={row.targetCode ?? ""}
-                          onChange={(e) => updateRow(row.rowKey, { targetCode: e.target.value })}
-                          className="input text-sm"
-                          list={`catalog-${row.rowKey}`}
-                          placeholder="Código destino"
-                        />
-                        <datalist id={`catalog-${row.rowKey}`}>
-                          {preview.catalog.map((item) => (
-                            <option key={item.code} value={item.code}>
-                              {item.description}
-                            </option>
-                          ))}
-                        </datalist>
-                        {row.targetDescription && <span className="mt-1 block text-[11px] text-slate-500">{row.targetDescription}</span>}
-                        {row.compositionName && (
-                          <span
-                            className={`mt-1 block text-[11px] ${
-                              row.note?.includes("Será criada composição") ? "font-medium text-amber-800" : "text-brand-800"
-                            }`}
-                          >
-                            {row.note?.includes("Será criada composição") ? "Nova comp. (verificar): " : "Comp.: "}
-                            {row.compositionName}
-                          </span>
-                        )}
-                      </>
-                    )}
-                  </td>
-                  <td className="px-3 py-2 text-xs text-slate-500">
-                    {row.matchMethod === "code"
-                      ? "código"
-                      : row.matchMethod === "description"
-                        ? "descrição"
-                        : row.matchMethod === "ai"
-                          ? "sugerido"
-                          : "novo"}
-                    {row.confidence > 0 ? ` · ${Math.round(row.confidence * 100)}%` : ""}
-                    {row.note ? <span className="mt-1 block text-amber-700">{row.note}</span> : null}
-                  </td>
-                </tr>
-              ))}
+            <tbody className="divide-y divide-slate-100 bg-white">
+              {rows.map((row) => {
+                const creatingComp = willCreateComposition(row.note);
+                return (
+                  <tr key={row.rowKey} className={`align-top ${creatingComp && row.action !== "ignore" ? "bg-amber-50/40" : ""}`}>
+                    <td className="px-3 py-2.5">
+                      <strong className="block text-slate-950">{row.code}</strong>
+                      <span className="mt-0.5 block text-xs text-slate-500">{row.description || "—"}</span>
+                      <span className="mt-0.5 block text-[11px] text-slate-400">
+                        {row.sheet} · L{row.rowNumber}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2.5 tabular-nums text-slate-900">{row.quantity}</td>
+                    <td className="px-3 py-2.5 text-slate-700">{row.unit}</td>
+                    <td className="px-3 py-2.5 text-xs">
+                      {row.unitPrice != null && row.unitPrice > 0 ? (
+                        <span className="tabular-nums text-slate-900">{row.unitPrice.toLocaleString("pt-PT", { maximumFractionDigits: 2 })}</span>
+                      ) : row.priceSource === "composition" || creatingComp ? (
+                        <span className="text-brand-800">via composição</span>
+                      ) : (
+                        <span className="text-slate-400">—</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <select
+                        value={row.action}
+                        onChange={(e) => updateRow(row.rowKey, { action: e.target.value as DecisionState["action"] })}
+                        className="input text-sm"
+                      >
+                        <option value="map">Mapear</option>
+                        <option value="create">Criar</option>
+                        <option value="ignore">Ignorar</option>
+                      </select>
+                    </td>
+                    <td className="min-w-[12rem] px-3 py-2.5">
+                      {row.action === "ignore" ? (
+                        <span className="text-xs text-slate-400">—</span>
+                      ) : (
+                        <>
+                          <input
+                            value={row.targetCode ?? ""}
+                            onChange={(e) => updateRow(row.rowKey, { targetCode: e.target.value })}
+                            className="input text-sm"
+                            list={`catalog-${row.rowKey}`}
+                            placeholder="Código destino"
+                          />
+                          <datalist id={`catalog-${row.rowKey}`}>
+                            {preview.catalog.map((item) => (
+                              <option key={item.code} value={item.code}>
+                                {item.description}
+                              </option>
+                            ))}
+                          </datalist>
+                          {row.targetDescription && <span className="mt-1 block text-[11px] text-slate-500">{row.targetDescription}</span>}
+                          {row.compositionName && (
+                            <span className={`mt-1 block text-[11px] ${creatingComp ? "font-medium text-amber-800" : "text-brand-800"}`}>
+                              {creatingComp ? "Nova comp. (verificar): " : "Comp.: "}
+                              {row.compositionName}
+                            </span>
+                          )}
+                        </>
+                      )}
+                    </td>
+                    <td className="px-3 py-2.5 text-xs text-slate-500">
+                      {row.matchMethod === "code"
+                        ? "código"
+                        : row.matchMethod === "description"
+                          ? "descrição"
+                          : row.matchMethod === "ai"
+                            ? "sugerido"
+                            : "novo"}
+                      {row.confidence > 0 ? ` · ${Math.round(row.confidence * 100)}%` : ""}
+                      {row.note ? <span className="mt-1 block text-amber-700">{row.note}</span> : null}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
 
-        <div className="flex justify-end gap-2">
+        <div className="flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-4">
           <button type="button" onClick={onClose} className="btn btn-secondary" disabled={applying}>
             Cancelar
           </button>
