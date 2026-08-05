@@ -75,7 +75,7 @@ def resolve_rooms_cascade(
 
             rooms, _openings, meta = assist_with_ai(page_texts, [], [], architecture_pages)
             rooms = with_floor(_dedupe_rooms(rooms, page_priorities))
-            detail = f"{len(rooms)} via IA"
+            detail = f"{len(rooms)} via assistente"
             if meta.get("error"):
                 detail += f" ({meta['error']})"
             return rooms, detail
@@ -89,7 +89,7 @@ def resolve_rooms_cascade(
             (2, "etiquetas A:/área na cotada", level_cotada),
             (3, "etiquetas A: na mobilada", level_mobiliada),
             (4, "lista / memória descritiva", level_fallback),
-            (5, "assistente IA (Ollama)", level_ai),
+            (5, "assistente (Ollama)", level_ai),
         ],
         min_count=1,
     )
@@ -127,7 +127,7 @@ def resolve_openings_cascade(
                 architecture_pages,
             )
             items = merge_openings(openings, document_text)
-            detail = f"{len(items)} via IA"
+            detail = f"{len(items)} via assistente"
             if meta.get("error"):
                 detail += f" ({meta['error']})"
             return items, detail
@@ -139,7 +139,7 @@ def resolve_openings_cascade(
         [
             (1, "quadro / mapa de vãos", level_quadro),
             (2, "geometria espacial", level_spatial),
-            (3, "assistente IA (Ollama)", level_ai),
+            (3, "assistente (Ollama)", level_ai),
         ],
         min_count=1,
     )

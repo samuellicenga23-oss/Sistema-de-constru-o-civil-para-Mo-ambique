@@ -75,7 +75,7 @@ export default function BudgetDocumentPage() {
   const [importingMeasurements, setImportingMeasurements] = useState(false);
   const [importResult, setImportResult] = useState<MeasurementImportResult | null>(null);
   const [importPreview, setImportPreview] = useState<MeasurementImportPreview | null>(null);
-  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importJobId, setImportJobId] = useState<string | null>(null);
   const [applyingImport, setApplyingImport] = useState(false);
   const [showRepriceConfirm, setShowRepriceConfirm] = useState(false);
   const [repricing, setRepricing] = useState(false);
@@ -268,29 +268,92 @@ export default function BudgetDocumentPage() {
     setImportResult(null);
     setImportingMeasurements(true);
     try {
-      const preview = await boqApi.previewMeasurementImport(documentId, file);
-      setImportFile(file);
-      setImportPreview(preview);
+      const { beginImportProcessingTask } = await import("../services/importProcessingTracker");
+      const job = await boqApi.startMeasurementImportJob(documentId, file);
+      beginImportProcessingTask({
+        jobId: job.id,
+        documentId,
+        projectId: project?.id,
+        fileName: file.name,
+      });
       fileInput.value = "";
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro ao ler medições");
+      setError(err instanceof Error ? err.message : "Erro ao enviar mapa");
     } finally {
       setImportingMeasurements(false);
     }
   }
 
+  useEffect(() => {
+    function onImportReady(event: Event) {
+      const detail = (event as CustomEvent<{ jobId: string; documentId: string; preview: MeasurementImportPreview }>).detail;
+      if (!detail || detail.documentId !== documentId || !detail.preview) return;
+      setImportJobId(detail.jobId);
+      setImportPreview(detail.preview);
+      setError(null);
+    }
+    window.addEventListener("sigo:import-ready", onImportReady as EventListener);
+    return () => window.removeEventListener("sigo:import-ready", onImportReady as EventListener);
+  }, [documentId]);
+
+  useEffect(() => {
+    const jobId = searchParams.get("importJob");
+    if (!documentId || !jobId) return;
+    let active = true;
+    void (async () => {
+      try {
+        const { getImportTask, consumeImportReview, updateImportProcessingTask } = await import("../services/importProcessingTracker");
+        const cached = getImportTask(jobId);
+        let preview = cached?.preview ?? null;
+        if (!preview) {
+          const job = await boqApi.getMeasurementImportJob(documentId, jobId);
+          if (!active) return;
+          updateImportProcessingTask(job);
+          if (job.status === "erro") {
+            setError(job.errorMessage ?? "Erro ao analisar o mapa");
+            return;
+          }
+          preview = job.preview;
+        }
+        if (!active || !preview) return;
+        setImportJobId(jobId);
+        setImportPreview(preview);
+        consumeImportReview(jobId);
+      } catch (err) {
+        if (active) setError(err instanceof Error ? err.message : "Erro ao abrir revisão");
+      } finally {
+        if (!active) return;
+        const next = new URLSearchParams(window.location.search);
+        if (next.has("importJob")) {
+          next.delete("importJob");
+          setSearchParams(next, { replace: true });
+        }
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [documentId, searchParams, setSearchParams]);
+
   async function applyImportReview(decisions: Parameters<typeof boqApi.applyMeasurementImport>[2], saveToCompanyTemplate: boolean) {
-    if (!documentId || !importFile) return;
+    if (!documentId) throw new Error("Documento não encontrado.");
+    if (!importJobId) throw new Error("A análise expirou. Volte a carregar o mapa e aguarde a conclusão.");
+    const jobId = importJobId;
     setApplyingImport(true);
     setError(null);
     try {
-      const result = await boqApi.applyMeasurementImport(documentId, importFile, decisions, saveToCompanyTemplate);
+      const result = await boqApi.applyMeasurementImport(documentId, { jobId }, decisions, saveToCompanyTemplate);
       setImportResult(result);
       setImportPreview(null);
-      setImportFile(null);
+      setImportJobId(null);
+      const { dismissImportProcessingTask } = await import("../services/importProcessingTracker");
+      dismissImportProcessingTask(jobId);
       await reload();
+      return result;
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro ao aplicar medições");
+      const message = err instanceof Error ? err.message : "Erro ao aplicar medições";
+      setError(message);
+      throw err instanceof Error ? err : new Error(message);
     } finally {
       setApplyingImport(false);
     }
@@ -746,9 +809,10 @@ export default function BudgetDocumentPage() {
                   </div>
                   <button type="submit" disabled={importingMeasurements} className="btn btn-primary shrink-0">
                     <IconDownload className="w-3.5 h-3.5" />
-                    {importingMeasurements ? "A importar..." : "Importar mapa"}
+                    {importingMeasurements ? "A enviar..." : "Importar mapa"}
                   </button>
                 </form>
+                <p className="mt-2 text-xs text-slate-500">O ficheiro é analisado em segundo plano — pode continuar a trabalhar e rever o mapeamento quando estiver pronto.</p>
                 {importResult && (
                   <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm">
                     <p className="font-medium text-emerald-800">
@@ -1041,7 +1105,7 @@ export default function BudgetDocumentPage() {
               </div>
               <button type="submit" disabled={importingMeasurements} className="btn btn-primary">
                 <IconDownload className="w-3.5 h-3.5" />
-                {importingMeasurements ? "A importar..." : "Importar"}
+                {importingMeasurements ? "A enviar..." : "Importar"}
               </button>
             </form>
             {importResult && (
@@ -1254,14 +1318,14 @@ export default function BudgetDocumentPage() {
         </ModalPortal>
       )}
 
-      {importPreview && importFile && (
+      {importPreview && importJobId && (
         <MeasurementImportReviewModal
           preview={importPreview}
           applying={applyingImport}
           onClose={() => {
             if (applyingImport) return;
             setImportPreview(null);
-            setImportFile(null);
+            setImportJobId(null);
           }}
           onApply={applyImportReview}
         />

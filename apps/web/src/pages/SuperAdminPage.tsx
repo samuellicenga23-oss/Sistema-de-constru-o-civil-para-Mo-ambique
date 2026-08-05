@@ -590,7 +590,7 @@ export default function SuperAdminPage() {
                     </strong>
                   </div>
                   <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
-                    <p className="text-xs text-slate-500">Plant IA</p>
+                    <p className="text-xs text-slate-500">Assistente Ollama</p>
                     <strong className="text-slate-800">
                       {(() => {
                         const ai = stats.services.plantAi as { enabled?: boolean; reachable?: boolean; model?: string } | null | undefined;

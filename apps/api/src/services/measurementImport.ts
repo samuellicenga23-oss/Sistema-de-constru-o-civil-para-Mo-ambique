@@ -7,7 +7,13 @@ import { loadWorkChapterLibrary, type TemplateChapter } from "./boqTemplate.js";
 import { getZoneIdForSection } from "./accessControl.js";
 import { normalizeUnit, type Unit } from "@sigo/shared";
 import { env } from "../env.js";
-import { resolveOrCreateCompositionForImport, previewCompositionForImport, type ImportResourcesCache, type ResolvedImportComposition } from "./importComposition.js";
+import {
+  resolveOrCreateCompositionForImport,
+  previewCompositionForImport,
+  loadImportCompositionResources,
+  type ImportResourcesCache,
+  type ResolvedImportComposition,
+} from "./importComposition.js";
 
 // Importação de Excel de medições — parse robusto (merge cells + unidades), pré-visualização
 // com match híbrido e aplicação confirmada pelo utilizador.
@@ -17,7 +23,6 @@ const MAX_WORKSHEETS = 30;
 const MAX_CODE_LEN = 30;
 const MAX_CHAPTER_CODE_LEN = 10;
 const MAX_QUANTITY = 1_000_000_000;
-const AI_CONFIDENCE_FLOOR = 0.75;
 const DESC_MATCH_FLOOR = 0.85;
 const MIN_DESC_LEN_FOR_FUZZY = 8;
 
@@ -468,57 +473,6 @@ function scoreDescription(a: string, b: string): number {
   return inter / Math.max(ta.size, tb.size);
 }
 
-function sanitizePromptField(value: string, max = 160): string {
-  return value.replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
-}
-
-async function suggestAiMappings(
-  rows: ParsedExcelRow[],
-  catalog: Array<{ code: string; description: string }>,
-): Promise<{ suggestions: Map<string, { code: string; confidence: number }>; error: string | null }> {
-  const unmatched = rows.filter((r) => !catalog.some((c) => c.code === r.code));
-  if (!unmatched.length) return { suggestions: new Map(), error: null };
-
-  try {
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (env.plantServiceToken) headers["X-Internal-Token"] = env.plantServiceToken;
-    const res = await fetch(`${env.plantServiceUrl}/assist/measurement-map`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        rows: unmatched.slice(0, 80).map((r) => ({
-          rowKey: r.rowKey,
-          code: sanitizePromptField(r.code, 40),
-          description: sanitizePromptField(r.description),
-          unit: r.unit,
-        })),
-        catalog: catalog.slice(0, 200).map((c) => ({
-          code: sanitizePromptField(c.code, 40),
-          description: sanitizePromptField(c.description),
-        })),
-      }),
-      signal: AbortSignal.timeout(60_000),
-    });
-    if (!res.ok) {
-      return { suggestions: new Map(), error: `plant-service ${res.status}` };
-    }
-    const body = (await res.json()) as {
-      suggestions?: Array<{ rowKey: string; code: string; confidence?: number }>;
-      error?: string;
-    };
-    if (body.error) return { suggestions: new Map(), error: body.error };
-    const map = new Map<string, { code: string; confidence: number }>();
-    for (const s of body.suggestions ?? []) {
-      const confidence = s.confidence ?? 0;
-      if (!s.rowKey || !s.code || confidence < AI_CONFIDENCE_FLOOR) continue;
-      map.set(s.rowKey, { code: s.code, confidence });
-    }
-    return { suggestions: map, error: null };
-  } catch (err) {
-    return { suggestions: new Map(), error: err instanceof Error ? err.message : "ia_indisponivel" };
-  }
-}
-
 export async function previewMeasurementsImport(
   documentId: string,
   buffer: Buffer,
@@ -660,20 +614,32 @@ export async function previewMeasurementsImport(
     });
   }
 
-  // Enriquecer linhas "create" com composição existente similar (preview) ou nome previsto
+  // Enriquecer com composições — um único carregamento do catálogo (evita N queries).
+  const compositionResources = await loadImportCompositionResources(companyId);
+  const compositionPreviewCache = new Map<string, Awaited<ReturnType<typeof previewCompositionForImport>>>();
+
   for (const row of rows) {
     if (row.matchMethod !== "none" && row.compositionName) continue;
-    const previewComp = await previewCompositionForImport(companyId, {
-      code: row.targetCode || row.code,
-      description: row.description || row.code,
-      unit: row.unit,
-      preferredCompositionName: row.compositionName,
-      preferredCompositionId: row.compositionId,
-    });
+    const cacheKey = `${row.targetCode || row.code}|${normalizeText(row.description).slice(0, 80)}|${row.unit}`;
+    let previewComp = compositionPreviewCache.get(cacheKey);
+    if (!previewComp) {
+      previewComp = await previewCompositionForImport(
+        companyId,
+        {
+          code: row.targetCode || row.code,
+          description: row.description || row.code,
+          unit: row.unit,
+          preferredCompositionName: row.compositionName,
+          preferredCompositionId: row.compositionId,
+        },
+        compositionResources,
+      );
+      compositionPreviewCache.set(cacheKey, previewComp);
+    }
     if (row.matchMethod === "none") {
       row.compositionName = previewComp.compositionName;
       row.compositionId = previewComp.compositionId;
-      row.priceSource = row.unitPrice ? "file" : previewComp.matched ? "composition" : "composition";
+      row.priceSource = row.unitPrice ? "file" : "composition";
       row.note = previewComp.matched
         ? `Composição existente: ${previewComp.compositionName}`
         : `Será criada composição: ${previewComp.compositionName}`;
@@ -684,33 +650,8 @@ export async function previewMeasurementsImport(
     }
   }
 
-  const { suggestions, error: aiError } = await suggestAiMappings(
-    rows.filter((r) => r.matchMethod === "none"),
-    catalog,
-  );
-  let aiUsed = false;
-  if (suggestions.size) {
-    aiUsed = true;
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i];
-      if (row.matchMethod !== "none") continue;
-      const suggestion = suggestions.get(row.rowKey);
-      if (!suggestion) continue;
-      const target = byCode.get(suggestion.code);
-      if (!target) continue;
-      const enriched = enrichMatch(
-        row,
-        target,
-        "ai",
-        suggestion.confidence,
-        "Sugestão da IA — confirme antes de aplicar",
-      );
-      enriched.unit = normalizeUnit(row.unitRaw, target.unit);
-      rows[i] = enriched;
-    }
-  }
-
-  return { rows, catalog, aiUsed, aiError, rowsRead: parsed.length };
+  // Match por código/descrição/SIGO apenas — sem chamada externa (mais rápido e estável).
+  return { rows, catalog, aiUsed: false, aiError: null, rowsRead: parsed.length };
 }
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];

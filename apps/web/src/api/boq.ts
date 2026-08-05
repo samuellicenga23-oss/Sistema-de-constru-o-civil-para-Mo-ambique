@@ -248,17 +248,11 @@ export const boqApi = {
     return res.json() as Promise<MeasurementImportPreview>;
   },
 
-  applyMeasurementImport: async (
-    documentId: string,
-    file: File,
-    decisions: ImportApplyDecision[],
-    saveToCompanyTemplate = false,
-  ) => {
+  /** Envia o mapa e analisa em segundo plano (como as plantas). */
+  startMeasurementImportJob: async (documentId: string, file: File) => {
     const form = new FormData();
     form.append("file", file);
-    form.append("decisions", JSON.stringify(decisions));
-    form.append("saveToCompanyTemplate", saveToCompanyTemplate ? "true" : "false");
-    const res = await fetch(`/api/budget-documents/${documentId}/import-measurements/apply`, {
+    const res = await fetch(`/api/budget-documents/${documentId}/import-measurements/jobs`, {
       method: "POST",
       credentials: "include",
       body: form,
@@ -267,8 +261,60 @@ export const boqApi = {
       const body = await res.json().catch(() => ({}));
       throw new ApiError(res.status, body.error ?? `Erro ${res.status}`);
     }
-    return res.json() as Promise<MeasurementImportResult>;
+    return res.json() as Promise<MeasurementImportJob>;
   },
+
+  getMeasurementImportJob: (documentId: string, jobId: string) =>
+    request<MeasurementImportJob>(`/budget-documents/${documentId}/import-measurements/jobs/${jobId}`),
+
+  applyMeasurementImport: async (
+    documentId: string,
+    fileOrJob: File | { jobId: string },
+    decisions: ImportApplyDecision[],
+    saveToCompanyTemplate = false,
+  ) => {
+    const form = new FormData();
+    if (fileOrJob instanceof File) form.append("file", fileOrJob);
+    else form.append("jobId", fileOrJob.jobId);
+    form.append("decisions", JSON.stringify(decisions));
+    form.append("saveToCompanyTemplate", saveToCompanyTemplate ? "true" : "false");
+    const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const timer = controller ? window.setTimeout(() => controller.abort(), 180_000) : null;
+    try {
+      const res = await fetch(`/api/budget-documents/${documentId}/import-measurements/apply`, {
+        method: "POST",
+        credentials: "include",
+        body: form,
+        signal: controller?.signal,
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new ApiError(res.status, body.error ?? `Erro ${res.status}`);
+      }
+      return res.json() as Promise<MeasurementImportResult>;
+    } catch (error) {
+      if (error instanceof DOMException && (error.name === "AbortError" || error.name === "TimeoutError")) {
+        throw new ApiError(408, "A aplicação demorou demasiado. Tente novamente — o mapa já está analisado.");
+      }
+      throw error;
+    } finally {
+      if (timer != null) window.clearTimeout(timer);
+    }
+  },
+};
+
+export type MeasurementImportJob = {
+  id: string;
+  companyId: string;
+  documentId: string;
+  fileName: string;
+  status: "pendente" | "processando" | "concluido" | "erro";
+  progress: number;
+  stage: string;
+  errorMessage: string | null;
+  preview: MeasurementImportPreview | null;
+  createdAt: number;
+  updatedAt: number;
 };
 
 export type MeasurementImportResult = {

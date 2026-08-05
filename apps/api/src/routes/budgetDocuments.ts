@@ -22,6 +22,11 @@ import {
   applyMeasurementsImport,
   importApplyDecisionsSchema,
 } from "../services/measurementImport.js";
+import {
+  applyMeasurementImportJob,
+  enqueueMeasurementImportJob,
+  getMeasurementImportJob,
+} from "../services/measurementImportJobs.js";
 import { documentLockedMessage, evaluateDocumentReadiness } from "../services/documentRules.js";
 import { recordAuditEvent } from "../services/auditTrail.js";
 import { CURRENCIES, DEFAULT_IVA_RATE, UNITS, LINE_ITEM_KINDS, fixedSigo } from "@sigo/shared";
@@ -669,7 +674,40 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
-  // Importação de medições Excel — preview (sem gravar) + apply com decisões confirmadas.
+  // Importação de medições — job em segundo plano (como plantas) + preview síncrono legado + apply.
+  app.post("/api/budget-documents/:id/import-measurements/jobs", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const companyId = companyIdOf(request);
+    const document = await assertDocumentOwned(id, companyId);
+    if (!document) return reply.code(404).send({ error: "Documento não encontrado" });
+    if (document.status !== "rascunho") return reply.code(409).send({ error: documentLockedMessage(document.status) });
+
+    const data = await request.file();
+    if (!data) return reply.code(400).send({ error: "Ficheiro em falta" });
+    const filename = data.filename || "mapa";
+    if (filename && !/\.(xlsx|xls|pdf)$/i.test(filename)) {
+      return reply.code(400).send({ error: "Só são aceites Excel (.xlsx / .xls) ou PDF de mapa de quantidades." });
+    }
+    const buffer = await data.toBuffer();
+    const job = enqueueMeasurementImportJob({
+      companyId,
+      documentId: id,
+      buffer,
+      filename,
+    });
+    return reply.code(202).send(job);
+  });
+
+  app.get("/api/budget-documents/:id/import-measurements/jobs/:jobId", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
+    const { id, jobId } = request.params as { id: string; jobId: string };
+    const companyId = companyIdOf(request);
+    const document = await assertDocumentOwned(id, companyId);
+    if (!document) return reply.code(404).send({ error: "Documento não encontrado" });
+    const job = getMeasurementImportJob(jobId, companyId, id);
+    if (!job) return reply.code(404).send({ error: "Trabalho de importação não encontrado ou expirado" });
+    return job;
+  });
+
   app.post("/api/budget-documents/:id/import-measurements/preview", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const companyId = companyIdOf(request);
@@ -700,6 +738,7 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
 
     let buffer: Buffer | null = null;
     let filename = "";
+    let jobId = "";
     let decisionsRaw = "";
     let saveToCompanyTemplate = false;
     const parts = request.parts();
@@ -711,13 +750,14 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
           return reply.code(400).send({ error: "Só são aceites Excel (.xlsx / .xls) ou PDF de mapa de quantidades." });
         }
         buffer = await part.toBuffer();
+      } else if (part.type === "field" && part.fieldname === "jobId") {
+        jobId = String(part.value ?? "");
       } else if (part.type === "field" && part.fieldname === "decisions") {
         decisionsRaw = String(part.value ?? "");
       } else if (part.type === "field" && part.fieldname === "saveToCompanyTemplate") {
         saveToCompanyTemplate = String(part.value) === "true";
       }
     }
-    if (!buffer) return reply.code(400).send({ error: "Ficheiro em falta" });
     if (!decisionsRaw.trim()) {
       return reply.code(400).send({ error: "É necessário confirmar as decisões de importação." });
     }
@@ -734,6 +774,10 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
     }
 
     try {
+      if (jobId) {
+        return await applyMeasurementImportJob(jobId, companyId, id, validated.data, { saveToCompanyTemplate });
+      }
+      if (!buffer) return reply.code(400).send({ error: "Ficheiro ou jobId em falta" });
       return await applyMeasurementsImport(id, buffer, companyId, validated.data, {
         saveToCompanyTemplate,
         filename,

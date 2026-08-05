@@ -541,12 +541,17 @@ export async function resolveOrCreateCompositionForImport(
   return resolved;
 }
 
-/** Variante fora de transação (preview). */
-export async function previewCompositionForImport(
-  companyId: string,
+export type ImportCompositionResources = Awaited<ReturnType<typeof loadScopedResources>>;
+
+/** Carrega catálogo de composições/insumos uma vez (para preview em lote). */
+export async function loadImportCompositionResources(companyId: string): Promise<ImportCompositionResources> {
+  return loadScopedResources(db as unknown as Tx, companyId);
+}
+
+function previewCompositionAgainstResources(
   target: ImportCompositionTarget,
-): Promise<{ compositionName: string | null; compositionId: string | null; matched: boolean }> {
-  const resources = await loadScopedResources(db as unknown as Tx, companyId);
+  resources: ImportCompositionResources,
+): { compositionName: string | null; compositionId: string | null; matched: boolean } {
   const mapped = mapDescriptionToSigoComposition(target.description, target.unit);
   const matched = pickBestComposition(resources.compositions, {
     ...target,
@@ -561,4 +566,14 @@ export async function previewCompositionForImport(
     compositionId: null,
     matched: false,
   };
+}
+
+/** Variante fora de transação (preview). */
+export async function previewCompositionForImport(
+  companyId: string,
+  target: ImportCompositionTarget,
+  resources?: ImportCompositionResources,
+): Promise<{ compositionName: string | null; compositionId: string | null; matched: boolean }> {
+  const scoped = resources ?? (await loadImportCompositionResources(companyId));
+  return previewCompositionAgainstResources(target, scoped);
 }

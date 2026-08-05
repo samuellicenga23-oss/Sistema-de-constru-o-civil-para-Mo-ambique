@@ -31,8 +31,10 @@ export default function MeasurementImportReviewModal({
 }) {
   const [saveToCompanyTemplate, setSaveToCompanyTemplate] = useState(false);
   const [rows, setRows] = useState<DecisionState[]>([]);
+  const [applyError, setApplyError] = useState<string | null>(null);
 
   useEffect(() => {
+    setApplyError(null);
     setRows(
       preview.rows.map((row) => ({
         rowKey: row.rowKey,
@@ -92,15 +94,13 @@ export default function MeasurementImportReviewModal({
   return (
     <Modal
       title="Rever importação de medições"
-      subtitle={`${preview.rowsRead} linha(s) · ${summary.map} mapear · ${summary.create} criar · ${summary.ignore} ignorar · ${summary.withFilePrice} c/ preço ficheiro · ${summary.withComposition} c/ composição${preview.aiUsed ? " · IA usada" : ""}`}
+      subtitle={`${preview.rowsRead} linha(s) · ${summary.map} mapear · ${summary.create} criar · ${summary.ignore} ignorar · ${summary.withFilePrice} c/ preço ficheiro · ${summary.withComposition} c/ composição`}
       onClose={onClose}
       maxWidth="max-w-5xl"
     >
       <div className="space-y-4">
-        {preview.aiError && (
-          <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-            A IA não esteve disponível ({preview.aiError}). O match por código/descrição continua activo.
-          </p>
+        {applyError && (
+          <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">{applyError}</p>
         )}
         {summary.withFilePrice === 0 && (
           <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
@@ -185,7 +185,13 @@ export default function MeasurementImportReviewModal({
                     )}
                   </td>
                   <td className="px-3 py-2 text-xs text-slate-500">
-                    {row.matchMethod}
+                    {row.matchMethod === "code"
+                      ? "código"
+                      : row.matchMethod === "description"
+                        ? "descrição"
+                        : row.matchMethod === "ai"
+                          ? "sugerido"
+                          : "novo"}
                     {row.confidence > 0 ? ` · ${Math.round(row.confidence * 100)}%` : ""}
                     {row.note ? <span className="mt-1 block text-amber-700">{row.note}</span> : null}
                   </td>
@@ -201,14 +207,17 @@ export default function MeasurementImportReviewModal({
           </button>
           <button
             type="button"
-            disabled={applying}
+            disabled={applying || rows.length === 0}
             className="btn btn-primary"
-            onClick={() =>
+            onClick={() => {
+              setApplyError(null);
               void onApply(
                 rows.map(({ rowKey, action, targetCode, targetItemId }) => ({ rowKey, action, targetCode, targetItemId })),
                 saveToCompanyTemplate,
-              )
-            }
+              ).catch((err: unknown) => {
+                setApplyError(err instanceof Error ? err.message : "Não foi possível aplicar a importação.");
+              });
+            }}
           >
             {applying ? "A aplicar…" : "Aplicar importação"}
           </button>
