@@ -6,8 +6,9 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { db } from "../db/index.js";
 import { companies, users, subscriptions, projects, sessions } from "../db/schema.js";
-import { requireRole, requireCompanyUser } from "../auth/middleware.js";
+import { requireRole, requireCompanyUser, requireAuth } from "../auth/middleware.js";
 import { hashPassword } from "../auth/password.js";
+import { getSessionUser, setSessionActingCompany } from "../auth/session.js";
 import { env } from "../env.js";
 import { COMPANY_MODULE_KEYS, CURRENCIES, SUBSCRIPTION_STATUSES, SUBSCRIPTION_PLAN_KEYS, resolveRoleTemplate, isCompanyUserRole } from "@sigo/shared";
 import { detectImageExtension } from "../services/imageValidation.js";
@@ -291,6 +292,67 @@ export async function companyRoutes(app: FastifyInstance) {
       planCounts,
       services: { api: true, plantService: plantServiceUp, plantAi },
     };
+  });
+
+  // Super-admin entra no espaço de uma empresa (sessão com acting_company_id).
+  app.post("/api/admin/companies/:id/enter", { preHandler: requireRole("super_admin") }, async (request, reply) => {
+    const { id: companyId } = request.params as { id: string };
+    const sessionId = request.cookies?.sid;
+    if (!sessionId) return reply.code(401).send({ error: "Não autenticado" });
+
+    const [company] = await db
+      .select({ id: companies.id, name: companies.name, brandName: companies.brandName })
+      .from(companies)
+      .where(eq(companies.id, companyId))
+      .limit(1);
+    if (!company) return reply.code(404).send({ error: "Empresa não encontrada" });
+
+    await setSessionActingCompany(sessionId, company.id);
+    await recordAuditEvent({
+      companyId: company.id,
+      actorUserId: request.currentUser!.id,
+      entityType: "company",
+      entityId: company.id,
+      action: "impersonation.enter",
+      metadata: {
+        actorEmail: request.currentUser!.email,
+        companyName: company.brandName || company.name,
+      },
+    });
+
+    const refreshed = await getSessionUser(sessionId);
+    if (!refreshed) return reply.code(401).send({ error: "Sessão inválida ou expirada" });
+    return refreshed;
+  });
+
+  app.post("/api/admin/impersonation/exit", { preHandler: requireAuth }, async (request, reply) => {
+    const user = request.currentUser!;
+    if (user.platformRole !== "super_admin" && user.role !== "super_admin") {
+      return reply.code(403).send({ error: "Sem permissão para esta acção" });
+    }
+    const sessionId = request.cookies?.sid;
+    if (!sessionId) return reply.code(401).send({ error: "Não autenticado" });
+
+    const previousCompanyId = user.actingCompanyId ?? user.companyId;
+    await setSessionActingCompany(sessionId, null);
+
+    if (previousCompanyId) {
+      await recordAuditEvent({
+        companyId: previousCompanyId,
+        actorUserId: user.id,
+        entityType: "company",
+        entityId: previousCompanyId,
+        action: "impersonation.exit",
+        metadata: {
+          actorEmail: user.email,
+          companyName: user.actingCompanyName ?? null,
+        },
+      });
+    }
+
+    const refreshed = await getSessionUser(sessionId);
+    if (!refreshed) return reply.code(401).send({ error: "Sessão inválida ou expirada" });
+    return refreshed;
   });
 
   // ---------- Definições da própria empresa (admin_empresa) ----------

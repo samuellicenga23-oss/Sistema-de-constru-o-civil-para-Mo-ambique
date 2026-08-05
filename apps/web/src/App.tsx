@@ -40,7 +40,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   // Antes só o menu escondia páginas que o perfil não devia usar — a rota em si continuava
   // acessível escrevendo o URL directamente. Agora bloqueia aqui também (o backend já recusava
   // as chamadas de escrita/leitura correspondentes, isto só evita mostrar um ecrã vazio/quebrado).
-  if (!canAccessPath(user.role, location.pathname)) {
+  if (!canAccessPath(user, location.pathname)) {
     return (
       <div className="min-h-screen flex items-center justify-center px-4">
         <div className="card card-pad max-w-sm text-center">
@@ -50,7 +50,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
       </div>
     );
   }
-  if (user.role !== "super_admin" && !isModuleEnabled(location.pathname, user.enabledModules)) {
+  if (user.role !== "super_admin" && location.pathname !== "/admin" && !isModuleEnabled(location.pathname, user.enabledModules)) {
     return <Navigate to={user.enabledModules.includes("dashboard") ? "/painel" : "/perfil"} replace />;
   }
   return <>{children}</>;

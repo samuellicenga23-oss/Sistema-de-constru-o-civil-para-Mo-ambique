@@ -15,6 +15,7 @@ import {
   listSessionsForUser,
   deleteSessionForUser,
   deleteOtherSessionsForUser,
+  getSessionUser,
 } from "../auth/session.js";
 import { requireAuth } from "../auth/middleware.js";
 import { detectImageExtension } from "../services/imageValidation.js";
@@ -269,22 +270,13 @@ export async function authRoutes(app: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     if (Object.keys(parsed.data).length === 0) return request.currentUser;
 
-    const [updated] = await db.update(users).set(parsed.data).where(eq(users.id, request.currentUser!.id)).returning();
-    return {
-      id: updated.id,
-      companyId: updated.companyId,
-      name: updated.name,
-      email: updated.email,
-      role: updated.role,
-      avatarUrl: updated.avatarUrl,
-      lastLoginAt: updated.lastLoginAt,
-      isActive: updated.isActive,
-      mustChangePassword: updated.mustChangePassword,
-      preferredLanguage: updated.preferredLanguage,
-      enabledModules: request.currentUser!.enabledModules,
-      permissions: request.currentUser!.permissions,
-      createdAt: updated.createdAt,
-    };
+    await db.update(users).set(parsed.data).where(eq(users.id, request.currentUser!.id));
+    const sessionId = request.cookies?.sid;
+    if (sessionId) {
+      const refreshed = await getSessionUser(sessionId);
+      if (refreshed) return refreshed;
+    }
+    return request.currentUser;
   });
 
   app.post("/api/auth/me/avatar", { preHandler: requireAuth }, async (request, reply) => {

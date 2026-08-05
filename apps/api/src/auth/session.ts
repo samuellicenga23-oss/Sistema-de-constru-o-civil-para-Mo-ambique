@@ -17,6 +17,10 @@ export type SessionUser = {
   name: string;
   email: string;
   role: UserRole;
+  /** Papel real na plataforma quando `role` está efectivo (ex.: impersonação). */
+  platformRole?: UserRole | null;
+  actingCompanyId?: string | null;
+  actingCompanyName?: string | null;
   avatarUrl: string | null;
   lastLoginAt: Date | null;
   isActive: boolean;
@@ -38,6 +42,10 @@ export async function createSession(userId: string, meta: SessionMeta = {}): Pro
   return session;
 }
 
+export async function setSessionActingCompany(sessionId: string, companyId: string | null): Promise<void> {
+  await db.update(sessions).set({ actingCompanyId: companyId }).where(eq(sessions.id, sessionId));
+}
+
 export async function getSessionUser(sessionId: string): Promise<SessionUser | null> {
   const rows = await db
     .select({
@@ -55,6 +63,7 @@ export async function getSessionUser(sessionId: string): Promise<SessionUser | n
       rolePermissions: companies.rolePermissions,
       enabledModules: companies.enabledModules,
       createdAt: users.createdAt,
+      actingCompanyId: sessions.actingCompanyId,
     })
     .from(sessions)
     .innerJoin(users, eq(sessions.userId, users.id))
@@ -63,6 +72,44 @@ export async function getSessionUser(sessionId: string): Promise<SessionUser | n
     .limit(1);
   const row = rows[0];
   if (!row) return null;
+
+  // Super-admin a actuar numa empresa: perfil efectivo de admin_empresa + módulos dessa empresa.
+  if (row.role === "super_admin" && row.actingCompanyId) {
+    const [acting] = await db
+      .select({
+        id: companies.id,
+        name: companies.name,
+        brandName: companies.brandName,
+        enabledModules: companies.enabledModules,
+        rolePermissions: companies.rolePermissions,
+      })
+      .from(companies)
+      .where(eq(companies.id, row.actingCompanyId))
+      .limit(1);
+    if (acting) {
+      return {
+        id: row.id,
+        companyId: acting.id,
+        name: row.name,
+        email: row.email,
+        role: "admin_empresa",
+        platformRole: "super_admin",
+        actingCompanyId: acting.id,
+        actingCompanyName: acting.brandName || acting.name,
+        avatarUrl: row.avatarUrl,
+        lastLoginAt: row.lastLoginAt,
+        isActive: row.isActive,
+        mustChangePassword: row.mustChangePassword,
+        preferredLanguage: row.preferredLanguage,
+        enabledModules: acting.enabledModules ?? [...COMPANY_MODULE_KEYS],
+        permissions: resolveRoleTemplate("admin_empresa", acting.rolePermissions),
+        createdAt: row.createdAt,
+      };
+    }
+    // Empresa apagada ou id inválido — limpa o contexto de impersonação.
+    await setSessionActingCompany(sessionId, null);
+  }
+
   const permissions =
     row.permissions?.length > 0
       ? row.permissions
@@ -75,6 +122,9 @@ export async function getSessionUser(sessionId: string): Promise<SessionUser | n
     name: row.name,
     email: row.email,
     role: row.role,
+    platformRole: null,
+    actingCompanyId: null,
+    actingCompanyName: null,
     avatarUrl: row.avatarUrl,
     lastLoginAt: row.lastLoginAt,
     isActive: row.isActive,

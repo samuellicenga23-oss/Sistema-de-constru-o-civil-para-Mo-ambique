@@ -12,10 +12,11 @@ const ADMIN_EMPRESA_ONLY = new Set(["/empresa"]);
 
 const SITE_MODULES: CompanyModuleKey[] = ["site_diary", "schedule", "purchasing", "financial"];
 
-export function canAccessPath(role: Role, pathname: string): boolean {
-  if (role === "super_admin") return SUPER_ADMIN_ALLOWED.has(pathname);
-  if (ADMIN_EMPRESA_ONLY.has(pathname)) return role === "admin_empresa";
-  if (pathname === "/admin") return false;
+export function canAccessPath(user: Pick<CurrentUser, "role" | "platformRole">, pathname: string): boolean {
+  if (user.role === "super_admin") return SUPER_ADMIN_ALLOWED.has(pathname);
+  // Em impersonação o papel efectivo é admin_empresa, mas o acesso ao Centro de Controlo mantém-se.
+  if (pathname === "/admin") return user.platformRole === "super_admin";
+  if (ADMIN_EMPRESA_ONLY.has(pathname)) return user.role === "admin_empresa";
   return true;
 }
 
@@ -61,14 +62,14 @@ export function isModuleEnabled(pathname: string, enabledModules: CompanyModuleK
 }
 
 /** Verifica uma permissão estável do catálogo SIGO (ex.: `equipa.gerir`). */
-export function can(user: Pick<CurrentUser, "role" | "permissions"> | null | undefined, permissionId: string): boolean {
+export function can(user: Pick<CurrentUser, "role" | "platformRole" | "permissions"> | null | undefined, permissionId: string): boolean {
   if (!user) return false;
-  if (user.role === "super_admin") return true;
+  if (user.role === "super_admin" || user.platformRole === "super_admin") return true;
   return Boolean(user.permissions?.includes(permissionId));
 }
 
 export function canAny(
-  user: Pick<CurrentUser, "role" | "permissions"> | null | undefined,
+  user: Pick<CurrentUser, "role" | "platformRole" | "permissions"> | null | undefined,
   permissionIds: string[],
 ): boolean {
   return permissionIds.some((id) => can(user, id));
@@ -86,10 +87,10 @@ export const GESTAO_PERMISSIONS = [
   "financeiro.lancar",
 ] as const;
 
-export function canSeeGestao(user: Pick<CurrentUser, "role" | "permissions"> | null | undefined): boolean {
+export function canSeeGestao(user: Pick<CurrentUser, "role" | "platformRole" | "permissions"> | null | undefined): boolean {
   return canAny(user, [...GESTAO_PERMISSIONS]);
 }
 
-export function canSeeEscritorio(user: Pick<CurrentUser, "role" | "permissions"> | null | undefined): boolean {
+export function canSeeEscritorio(user: Pick<CurrentUser, "role" | "platformRole" | "permissions"> | null | undefined): boolean {
   return can(user, "escritorio.ver") || can(user, "escritorio.gerir");
 }

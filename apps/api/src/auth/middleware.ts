@@ -29,6 +29,14 @@ function requiredModule(url: string): CompanyModuleKey | null {
   return MODULE_ROUTES.find((entry) => entry.match.test(url))?.module ?? null;
 }
 
+function isPlatformSuperAdmin(user: SessionUser): boolean {
+  return user.role === "super_admin" || user.platformRole === "super_admin";
+}
+
+function roleMatches(user: SessionUser, roles: UserRole[]): boolean {
+  return roles.includes(user.role) || Boolean(user.platformRole && roles.includes(user.platformRole));
+}
+
 async function requireEnabledModule(request: FastifyRequest, reply: FastifyReply) {
   if (!request.currentUser?.companyId) return;
   const module = requiredModule(request.raw.url ?? "");
@@ -47,7 +55,8 @@ export async function requireAuth(request: FastifyRequest, reply: FastifyReply) 
     return reply.code(401).send({ error: "Sessão inválida ou expirada" });
   }
   // Subscrição suspensa bloqueia a API (não só o login). Logout não usa requireAuth.
-  if (user.role !== "super_admin" && user.companyId) {
+  // Super-admin (incl. em impersonação) pode continuar a entrar para suporte.
+  if (!isPlatformSuperAdmin(user) && user.companyId) {
     const [sub] = await db
       .select({ status: subscriptions.status })
       .from(subscriptions)
@@ -70,7 +79,7 @@ export function requireRole(...roles: UserRole[]) {
     if (reply.sent) return;
     await requireEnabledModule(request, reply);
     if (reply.sent) return;
-    if (!request.currentUser || !roles.includes(request.currentUser.role)) {
+    if (!request.currentUser || !roleMatches(request.currentUser, roles)) {
       return reply.code(403).send({ error: "Sem permissão para esta acção" });
     }
   };
@@ -85,7 +94,7 @@ export function requirePermission(...permissionIds: string[]) {
     if (reply.sent) return;
     const user = request.currentUser;
     if (!user) return reply.code(403).send({ error: "Sem permissão para esta acção" });
-    if (user.role === "super_admin") return;
+    if (isPlatformSuperAdmin(user)) return;
     if (!permissionIds.some((id) => user.permissions.includes(id))) {
       return reply.code(403).send({ error: "Sem permissão para esta acção" });
     }

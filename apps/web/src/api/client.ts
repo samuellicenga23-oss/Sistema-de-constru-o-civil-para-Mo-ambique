@@ -7,6 +7,10 @@ export type CurrentUser = {
   name: string;
   email: string;
   role: "super_admin" | "admin_empresa" | "orcamentista" | "engenheiro_fiscal" | "visualizador";
+  /** Papel real na plataforma quando se actua como empresa (impersonação). */
+  platformRole?: "super_admin" | "admin_empresa" | "orcamentista" | "engenheiro_fiscal" | "visualizador" | null;
+  actingCompanyId?: string | null;
+  actingCompanyName?: string | null;
   avatarUrl: string | null;
   lastLoginAt: string | null;
   isActive: boolean;

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { companiesApi, type AdminCompanyUser, type Company, type CompanyModuleKey } from "../api/companies";
 import { dashboardApi, type AdminStats } from "../api/dashboard";
@@ -35,7 +36,8 @@ function StatCard({ label, value, tone = "text-slate-950" }: { label: string; va
 }
 
 export default function SuperAdminPage() {
-  const { user } = useAuth();
+  const { user, setUser } = useAuth();
+  const navigate = useNavigate();
   const { language } = useLanguage();
   const en = language === "en";
   const [view, setView] = useState<AdminView>("overview");
@@ -47,6 +49,7 @@ export default function SuperAdminPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [enteringCompanyId, setEnteringCompanyId] = useState<string | null>(null);
   const [showCreateCompany, setShowCreateCompany] = useState(false);
   const [showCreateUser, setShowCreateUser] = useState(false);
   const [resetUser, setResetUser] = useState<AdminCompanyUser | null>(null);
@@ -98,6 +101,21 @@ export default function SuperAdminPage() {
     setError(null); try { await companiesApi.updateSubscription(companyId, data); await reload(); } catch (err) { setError(err instanceof Error ? err.message : "Erro ao actualizar subscrição"); }
   }
 
+  async function enterCompany(companyId: string) {
+    setError(null);
+    setEnteringCompanyId(companyId);
+    try {
+      const next = await companiesApi.enterCompany(companyId);
+      setUser(next);
+      notify(en ? "Entered company workspace." : "Entrou no espaço da empresa.");
+      navigate("/painel");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : en ? "Could not enter company." : "Não foi possível entrar na empresa.");
+    } finally {
+      setEnteringCompanyId(null);
+    }
+  }
+
   async function updateUser(member: AdminCompanyUser, data: Partial<Pick<AdminCompanyUser, "role" | "isActive" | "preferredLanguage">>) {
     setError(null); try { await companiesApi.updateAdminUser(member.id, data); await reload(); } catch (err) { setError(err instanceof Error ? err.message : "Erro ao actualizar utilizador"); }
   }
@@ -124,7 +142,7 @@ export default function SuperAdminPage() {
     });
   }
 
-  if (user?.role !== "super_admin") return <div className="grid min-h-screen place-items-center text-slate-500">Sem acesso.</div>;
+  if (user?.role !== "super_admin" && user?.platformRole !== "super_admin") return <div className="grid min-h-screen place-items-center text-slate-500">Sem acesso.</div>;
 
   const views: Array<{ key: AdminView; label: string; icon: typeof IconHome }> = [
     { key: "overview", label: en ? "Overview" : "Visão geral", icon: IconHome },
@@ -184,7 +202,12 @@ export default function SuperAdminPage() {
               <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><strong className="text-base text-slate-950">{company.name}</strong><span className={`badge ${STATUS_BADGE[company.subscription?.status ?? "trial"]}`}>{STATUS_LABELS[company.subscription?.status ?? "trial"]}</span></div><p className="mt-1 text-xs text-slate-500">{company.province ?? "Moçambique"} · {company.defaultCurrency} · {company.enabledModules.length}/{MODULES.length} {en ? "modules" : "módulos"}</p></div>
               <select value={company.subscription?.plan ?? "free"} onChange={(event) => updateSubscription(company.id, { plan: event.target.value })} className="input"><>{SUBSCRIPTION_PLANS.map((plan) => <option key={plan.key} value={plan.key}>{plan.label}</option>)}</></select>
               <select value={company.subscription?.status ?? "trial"} onChange={(event) => updateSubscription(company.id, { status: event.target.value as "trial" | "activo" | "suspenso" })} className="input"><option value="trial">Trial</option><option value="activo">{en ? "Active" : "Activo"}</option><option value="suspenso">{en ? "Suspended" : "Suspenso"}</option></select>
-              <button type="button" onClick={() => { setSelectedCompanyId(company.id); setView("configuration"); }} className="btn btn-secondary btn-sm">{en ? "Manage" : "Gerir"}</button>
+              <div className="flex flex-wrap justify-end gap-2">
+                <button type="button" onClick={() => void enterCompany(company.id)} disabled={enteringCompanyId === company.id} className="btn btn-primary btn-sm">
+                  {enteringCompanyId === company.id ? (en ? "Entering…" : "A entrar…") : (en ? "Enter" : "Entrar")}
+                </button>
+                <button type="button" onClick={() => { setSelectedCompanyId(company.id); setView("configuration"); }} className="btn btn-secondary btn-sm">{en ? "Manage" : "Gerir"}</button>
+              </div>
             </article>)}</div>
           </section>
         </>}

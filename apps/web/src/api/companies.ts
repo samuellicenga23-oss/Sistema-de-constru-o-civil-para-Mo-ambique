@@ -1,4 +1,5 @@
 import { request, ApiError } from "./http";
+import type { CurrentUser } from "./client";
 
 export type Subscription = {
   id: string;
@@ -84,6 +85,8 @@ export const companiesApi = {
 
   me: () => request<{ company: Company; subscription: Subscription | null }>("/companies/me"),
   updateMe: (data: CompanyUpdateInput) => request<Company>("/companies/me", { method: "PUT", body: JSON.stringify(data) }),
+  enterCompany: (companyId: string) => request<CurrentUser>(`/admin/companies/${companyId}/enter`, { method: "POST" }),
+  exitImpersonation: () => request<CurrentUser>("/admin/impersonation/exit", { method: "POST" }),
   uploadLogo: async (file: File) => {
     const form = new FormData();
     form.append("file", file);

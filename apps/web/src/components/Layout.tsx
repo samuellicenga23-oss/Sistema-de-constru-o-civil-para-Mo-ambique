@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { companiesApi } from "../api/companies";
 import UserMenu from "./UserMenu";
@@ -45,13 +45,15 @@ export default function Layout({
   back?: { label?: string; fallbackTo: string };
   children: ReactNode;
 }) {
-  const { user, logout } = useAuth();
-  const { t } = useLanguage();
+  const { user, logout, setUser } = useAuth();
+  const { t, language } = useLanguage();
   const location = useLocation();
+  const navigate = useNavigate();
   const [companyName, setCompanyName] = useState<string | null>(null);
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [exitingImpersonation, setExitingImpersonation] = useState(false);
 
   useEffect(() => {
     setDrawerOpen(false);
@@ -106,6 +108,9 @@ export default function Layout({
           ...(user?.role === "admin_empresa"
             ? [{ to: "/empresa", label: t("companySettings"), shortLabel: "Empresa", icon: IconBuilding, section: "admin" as const }]
             : []),
+          ...(user?.platformRole === "super_admin"
+            ? [{ to: "/admin", label: t("platformPanel"), shortLabel: "Plataforma", icon: IconSettings, section: "admin" as const }]
+            : []),
         ] as NavItem[]).filter((item) => {
           if (item.module && !user?.enabledModules.includes(item.module)) return false;
           if (item.siteModules) {
@@ -122,6 +127,19 @@ export default function Layout({
           return true;
         });
 
+  async function exitImpersonation() {
+    if (exitingImpersonation) return;
+    setExitingImpersonation(true);
+    try {
+      const next = await companiesApi.exitImpersonation();
+      setUser(next);
+      navigate("/admin");
+    } catch {
+      // Mantém o banner; o utilizador pode tentar de novo.
+    } finally {
+      setExitingImpersonation(false);
+    }
+  }
   function isActive(item: NavItem) {
     if (item.exact) return location.pathname === item.to;
     return location.pathname === item.to || location.pathname.startsWith(item.to + "/");
@@ -209,6 +227,30 @@ export default function Layout({
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
+        {user?.actingCompanyId && (
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-300 bg-amber-50 px-4 py-2.5 text-sm text-amber-950 md:px-8">
+            <p>
+              {language === "en" ? "Viewing as" : "A ver como"}{" "}
+              <strong>{user.actingCompanyName ?? companyName ?? "…"}</strong>
+              {" — "}
+              {language === "en" ? "platform support mode" : "modo de suporte da plataforma"}
+            </p>
+            <button
+              type="button"
+              onClick={() => void exitImpersonation()}
+              disabled={exitingImpersonation}
+              className="btn btn-secondary btn-sm shrink-0 border-amber-400 bg-white"
+            >
+              {exitingImpersonation
+                ? language === "en"
+                  ? "Leaving…"
+                  : "A sair…"
+                : language === "en"
+                  ? "Exit company"
+                  : "Sair da empresa"}
+            </button>
+          </div>
+        )}
         <div className="flex items-center justify-between bg-[#172033] px-3 py-2.5 text-white shadow-sm md:hidden">
           <button
             type="button"

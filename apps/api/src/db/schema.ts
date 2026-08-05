@@ -115,6 +115,8 @@ export const sessions = pgTable("sessions", {
   // pode ser forjado) mas já é o suficiente para reconhecer "o meu telemóvel" vs "outra coisa".
   userAgent: text("user_agent"),
   ipAddress: varchar("ip_address", { length: 64 }),
+  // Super-admin a "entrar" numa empresa sem ser membro — limpa ao sair ou ao apagar a empresa.
+  actingCompanyId: uuid("acting_company_id").references(() => companies.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

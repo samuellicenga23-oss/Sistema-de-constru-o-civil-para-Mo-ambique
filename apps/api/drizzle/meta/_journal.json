@@ -358,6 +358,13 @@
       "when": 1785880000000,
       "tag": "0050_practice_schedule_addenda",
       "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1785890000000,
+      "tag": "0051_session_acting_company",
+      "breakpoints": true
     }
   ]
 }
