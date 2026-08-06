@@ -361,13 +361,18 @@ export function clampCompanyModules(
 export async function buildSubscriptionSummary(companyId: string) {
   const ent = await getCompanyEntitlements(companyId);
   if (!ent) return null;
-  const [activeProjects, smartImportsUsed, plantAnalysesUsed, customCompositions, credits] = await Promise.all([
+  const [activeProjects, smartImportsUsed, plantAnalysesUsed, customCompositions] = await Promise.all([
     countActiveProjects(companyId),
     countUsageThisMonth(companyId, "smart_import"),
     countPlantAnalysesThisMonth(companyId),
     countCustomCompositions(companyId),
-    getCreditBalances(companyId),
   ]);
+  let credits = { smartImportCredits: 0, plantAnalysisCredits: 0 };
+  try {
+    credits = await getCreditBalances(companyId);
+  } catch {
+    // Migração ainda não aplicada ou tabela indisponível — não bloquear a página de créditos.
+  }
   return {
     ...ent,
     usage: {

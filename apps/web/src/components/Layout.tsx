@@ -8,6 +8,7 @@ import InstallAppButton from "./InstallAppButton";
 import OfflineBanner from "./OfflineBanner";
 import PlantProcessingCenter from "./PlantProcessingCenter";
 import ImportProcessingCenter from "./ImportProcessingCenter";
+import ReadyForReviewBanner from "./ReadyForReviewBanner";
 import SubscriptionBanner from "./SubscriptionBanner";
 import { IconHome, IconFolder, IconTag, IconBuilding, IconLogout, IconSettings, IconRuler, IconUsers, IconMenu, IconClose, IconClipboard } from "./icons";
 import { LogoFull, LogoIcon } from "./Logo";
@@ -350,6 +351,7 @@ export default function Layout({
         </header>
 
         <SubscriptionBanner />
+        <ReadyForReviewBanner />
         <OfflineBanner />
         <PlantProcessingCenter />
         <ImportProcessingCenter />

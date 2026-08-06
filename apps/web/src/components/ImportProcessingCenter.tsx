@@ -1,5 +1,5 @@
 import { useEffect, useSyncExternalStore } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { boqApi } from "../api/boq";
 import {
   consumeImportReview,
@@ -37,37 +37,35 @@ export default function ImportProcessingCenter() {
     };
   }, [tasks.map((item) => `${item.jobId}:${item.state}`).join("|")]);
 
-  useEffect(() => {
-    if (!task || task.state !== "completed" || !task.openReview || !task.preview) return;
-    const timer = window.setTimeout(() => {
+  if (!task) return null;
+
+  function openReview() {
+    if (!task) return;
+    if (task.preview) {
       consumeImportReview(task.jobId);
       window.dispatchEvent(
         new CustomEvent("sigo:import-ready", {
           detail: { jobId: task.jobId, documentId: task.documentId, preview: task.preview },
         }),
       );
-      navigate(`/documentos/${task.documentId}?importJob=${task.jobId}`);
-    }, 250);
-    return () => window.clearTimeout(timer);
-  }, [task?.jobId, task?.state, task?.openReview, task?.preview, navigate]);
-
-  if (!task) return null;
-
-  function openReview() {
-    if (!task?.preview) return;
-    consumeImportReview(task.jobId);
-    window.dispatchEvent(
-      new CustomEvent("sigo:import-ready", {
-        detail: { jobId: task.jobId, documentId: task.documentId, preview: task.preview },
-      }),
-    );
-    navigate(`/documentos/${task.documentId}?importJob=${task.jobId}`);
+    }
+    if (finished || failed) dismissImportProcessingTask(task.jobId);
+    navigate(`/documentos/${task.documentId}${task.preview ? `?importJob=${task.jobId}` : ""}`);
   }
 
   return (
     <aside
-      className="fixed bottom-[8.5rem] right-3 z-50 w-[min(25rem,calc(100vw-1.5rem))] rounded-xl border border-slate-200 bg-white p-4 shadow-xl md:bottom-28 md:right-5"
+      className="fixed bottom-[8.5rem] right-3 z-50 w-[min(25rem,calc(100vw-1.5rem))] cursor-pointer rounded-xl border border-slate-200 bg-white p-4 shadow-xl md:bottom-28 md:right-5"
       aria-live="polite"
+      role="status"
+      onClick={openReview}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          openReview();
+        }
+      }}
+      tabIndex={0}
     >
       <div className="flex items-start gap-3">
         <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-brand-50 text-brand-700">
@@ -79,11 +77,19 @@ export default function ImportProcessingCenter() {
             {failed
               ? (task.errorMessage ?? "Não foi possível analisar o mapa")
               : finished
-                ? "Análise concluída — reveja o mapeamento"
+                ? "Análise concluída — pronta para revisão"
                 : task.stage || "A processar em segundo plano"}
           </p>
         </div>
-        <button type="button" onClick={() => dismissImportProcessingTask(task.jobId)} className="icon-btn h-8 w-8" aria-label="Fechar aviso">
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            dismissImportProcessingTask(task.jobId);
+          }}
+          className="icon-btn h-8 w-8"
+          aria-label="Fechar aviso"
+        >
           <IconClose className="h-4 w-4" />
         </button>
       </div>
@@ -92,18 +98,12 @@ export default function ImportProcessingCenter() {
           <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-100">
             <div className="h-full rounded-full bg-brand-600 transition-[width] duration-300" style={{ width: `${task.progress}%` }} />
           </div>
-          <span className="text-xs font-semibold tabular-nums text-slate-700">{task.progress}%</span>
+          <span className="text-xs tabular-nums font-semibold text-slate-700">{task.progress}%</span>
         </div>
       )}
-      {finished ? (
-        <button type="button" onClick={openReview} className="btn btn-primary btn-sm mt-3 w-full justify-center">
-          Rever importação
-        </button>
-      ) : (
-        <Link to={`/documentos/${task.documentId}`} className="mt-3 inline-flex text-xs font-semibold text-brand-700 hover:underline">
-          Ver documento
-        </Link>
-      )}
+      <span className="mt-3 inline-flex text-xs font-semibold text-brand-700">
+        {finished ? "Clique para rever →" : "Clique para ver documento →"}
+      </span>
     </aside>
   );
 }

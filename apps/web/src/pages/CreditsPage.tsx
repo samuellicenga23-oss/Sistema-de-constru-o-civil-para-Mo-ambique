@@ -92,8 +92,14 @@ export default function CreditsPage() {
 
   useEffect(() => {
     request<EntitlementsSummary>("/companies/me/entitlements")
-      .then(setEnt)
-      .catch((err) => setError(err instanceof Error ? err.message : "Não foi possível carregar o plano."));
+      .then((data) => {
+        setEnt(data);
+        setError(null);
+      })
+      .catch((err) => {
+        // Ainda mostra packs comerciais mesmo se o resumo de uso falhar.
+        setError(err instanceof Error ? err.message : "Não foi possível carregar o uso do plano.");
+      });
   }, []);
 
   const highlightImports = foco === "importacoes";
