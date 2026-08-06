@@ -200,7 +200,11 @@ export default function MeasurementImportReviewModal({
           note: source.compositionName
             ? `Composição alinhada ao código ${source.code}: ${source.compositionName}`
             : row.note,
-          priceSource: row.unitPrice && row.unitPrice > 0 ? "file" : source.compositionName ? "composition" : "none",
+          priceSource: (row.unitPrice && row.unitPrice > 0
+            ? "file"
+            : source.compositionName
+              ? "composition"
+              : "none") as DecisionState["priceSource"],
         };
       });
       if (changed === 0) return current;
