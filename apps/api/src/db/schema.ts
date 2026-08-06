@@ -372,6 +372,14 @@ export const projects = pgTable("projects", {
   profitMarginRate: numeric("profit_margin_rate", { precision: 5, scale: 4 }).notNull().default("0"),
   /** Obra arquivada não conta para o limite de obras activas do plano. */
   archivedAt: timestamp("archived_at"),
+  /**
+   * Soft-delete / lixo da plataforma: metadados e características ficam;
+   * ficheiros pesados (PDFs, fotos) são purgados. Só o super_admin restaura ou apaga de vez.
+   */
+  trashedAt: timestamp("trashed_at"),
+  trashReason: varchar("trash_reason", { length: 120 }),
+  trashedByUserId: uuid("trashed_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  filesPurgedAt: timestamp("files_purged_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

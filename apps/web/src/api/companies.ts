@@ -213,10 +213,63 @@ export const companiesApi = {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = fileNameHint ? `sigo-backup-${fileNameHint}.json` : `sigo-backup-${companyId}.json`;
+    const disposition = res.headers.get("Content-Disposition") ?? "";
+    const match = disposition.match(/filename="?([^"]+)"?/i);
+    a.download = match?.[1] ?? (fileNameHint ? `sigo-backup-full-${fileNameHint}.zip` : `sigo-backup-full-${companyId}.zip`);
     a.click();
     URL.revokeObjectURL(url);
   },
+
+  getStorage: () =>
+    request<{
+      uploadsRoot: string;
+      totalBytes: number;
+      byCategory: Record<string, number>;
+      companies: Array<{
+        companyId: string;
+        companyName: string;
+        bytes: number;
+        byCategory: Record<string, number>;
+        activeProjects: number;
+        trashedProjects: number;
+      }>;
+      orphanBytes: number;
+      trashCount: number;
+      eligibleForTrashCount: number;
+      idleDays: number;
+    }>("/admin/storage"),
+
+  listTrash: () =>
+    request<
+      Array<{
+        id: string;
+        name: string;
+        client: string | null;
+        companyId: string;
+        companyName: string;
+        trashedAt: string;
+        trashReason: string | null;
+        filesPurgedAt: string | null;
+        archivedAt: string | null;
+        createdAt: string;
+        plantCount: number;
+      }>
+    >("/admin/trash"),
+
+  restoreTrash: (projectId: string) => request<{ ok: true }>(`/admin/trash/${projectId}/restore`, { method: "POST" }),
+
+  permanentlyDeleteTrash: (projectId: string) =>
+    request<{ ok: true; deletedFiles: number }>(`/admin/trash/${projectId}`, { method: "DELETE" }),
+
+  runTrashCleanup: () =>
+    request<{
+      eligible: number;
+      trashed: number;
+      filesDeleted: number;
+      bytesFreed: number;
+      idleDays: number;
+      errors: Array<{ projectId: string; error: string }>;
+    }>("/admin/trash/run-cleanup", { method: "POST" }),
 
   me: () => request<{ company: Company; subscription: Subscription | null }>("/companies/me"),
   updateMe: (data: CompanyUpdateInput) => request<Company>("/companies/me", { method: "PUT", body: JSON.stringify(data) }),

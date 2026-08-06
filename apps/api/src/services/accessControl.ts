@@ -7,7 +7,11 @@ import { projects, budgetDocuments, budgetSections, lineItems, measurementCertif
 // para garantir isolamento multi-tenant.
 
 export async function assertProjectOwned(projectId: string, companyId: string) {
-  const [project] = await db.select().from(projects).where(and(eq(projects.id, projectId), eq(projects.companyId, companyId))).limit(1);
+  const [project] = await db
+    .select()
+    .from(projects)
+    .where(and(eq(projects.id, projectId), eq(projects.companyId, companyId), isNull(projects.trashedAt)))
+    .limit(1);
   return project ?? null;
 }
 
@@ -16,7 +20,7 @@ export async function assertDocumentOwned(documentId: string, companyId: string)
     .select({ document: budgetDocuments })
     .from(budgetDocuments)
     .innerJoin(projects, eq(budgetDocuments.projectId, projects.id))
-    .where(and(eq(budgetDocuments.id, documentId), eq(projects.companyId, companyId)))
+    .where(and(eq(budgetDocuments.id, documentId), eq(projects.companyId, companyId), isNull(projects.trashedAt)))
     .limit(1);
   return row?.document ?? null;
 }
@@ -27,7 +31,7 @@ export async function assertSectionOwned(sectionId: string, companyId: string) {
     .from(budgetSections)
     .innerJoin(budgetDocuments, eq(budgetSections.documentId, budgetDocuments.id))
     .innerJoin(projects, eq(budgetDocuments.projectId, projects.id))
-    .where(and(eq(budgetSections.id, sectionId), eq(projects.companyId, companyId)))
+    .where(and(eq(budgetSections.id, sectionId), eq(projects.companyId, companyId), isNull(projects.trashedAt)))
     .limit(1);
   return row?.section ?? null;
 }
@@ -37,7 +41,7 @@ export async function assertCertificateOwned(certificateId: string, companyId: s
     .select({ certificate: measurementCertificates })
     .from(measurementCertificates)
     .innerJoin(projects, eq(measurementCertificates.projectId, projects.id))
-    .where(and(eq(measurementCertificates.id, certificateId), eq(projects.companyId, companyId)))
+    .where(and(eq(measurementCertificates.id, certificateId), eq(projects.companyId, companyId), isNull(projects.trashedAt)))
     .limit(1);
   return row?.certificate ?? null;
 }
@@ -47,7 +51,7 @@ export async function assertPlantOwned(plantId: string, companyId: string) {
     .select({ plant: plants })
     .from(plants)
     .innerJoin(projects, eq(plants.projectId, projects.id))
-    .where(and(eq(plants.id, plantId), eq(projects.companyId, companyId)))
+    .where(and(eq(plants.id, plantId), eq(projects.companyId, companyId), isNull(projects.trashedAt)))
     .limit(1);
   return row?.plant ?? null;
 }

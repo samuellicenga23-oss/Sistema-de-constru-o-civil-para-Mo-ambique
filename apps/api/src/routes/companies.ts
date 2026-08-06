@@ -539,21 +539,94 @@ export async function companyRoutes(app: FastifyInstance) {
 
   app.get("/api/admin/companies/:id/backup", { preHandler: requireRole("super_admin") }, async (request, reply) => {
     const { id } = request.params as { id: string };
-    const backup = await buildCompanyBackup(id);
-    if (!backup) return reply.code(404).send({ error: "Empresa não encontrada" });
+    const query = request.query as { format?: string };
+    // Formato legado JSON (leve) — ?format=json
+    if (query.format === "json") {
+      const backup = await buildCompanyBackup(id);
+      if (!backup) return reply.code(404).send({ error: "Empresa não encontrada" });
+      await recordAuditEvent({
+        companyId: id,
+        actorUserId: request.currentUser!.id,
+        entityType: "company",
+        entityId: id,
+        action: "company.backup_exported",
+        metadata: { format: backup.format },
+      });
+      const slug = backup.company.name.replace(/[^\w\-]+/g, "_").slice(0, 40);
+      reply.header("Content-Type", "application/json; charset=utf-8");
+      reply.header("Content-Disposition", `attachment; filename="sigo-backup-${slug}-${new Date().toISOString().slice(0, 10)}.json"`);
+      return backup;
+    }
+
+    const { streamCompanyFullBackupZip } = await import("../services/companyFullBackup.js");
+    const zip = await streamCompanyFullBackupZip(id);
+    if (!zip) return reply.code(404).send({ error: "Empresa não encontrada" });
     await recordAuditEvent({
       companyId: id,
       actorUserId: request.currentUser!.id,
       entityType: "company",
       entityId: id,
-      action: "company.backup_exported",
-      metadata: { format: backup.format },
+      action: "company.full_backup_exported",
+      metadata: { format: "sigo-company-backup-v2", ...zip.totals },
     });
-    const slug = backup.company.name.replace(/[^\w\-]+/g, "_").slice(0, 40);
-    reply.header("Content-Type", "application/json; charset=utf-8");
-    reply.header("Content-Disposition", `attachment; filename="sigo-backup-${slug}-${new Date().toISOString().slice(0, 10)}.json"`);
-    return backup;
+    reply.header("Content-Type", "application/zip");
+    reply.header("Content-Disposition", `attachment; filename="${zip.filename}"`);
+    return reply.send(zip.stream);
   });
+
+  // ---------- Disco e lixo de projectos (super_admin) ----------
+  app.get("/api/admin/storage", { preHandler: requireRole("super_admin") }, async () => {
+    const { getStorageOverview } = await import("../services/projectStorage.js");
+    return getStorageOverview();
+  });
+
+  app.get("/api/admin/trash", { preHandler: requireRole("super_admin") }, async () => {
+    const { listTrashedProjects } = await import("../services/projectStorage.js");
+    return listTrashedProjects();
+  });
+
+  app.post("/api/admin/trash/:projectId/restore", { preHandler: requireRole("super_admin") }, async (request, reply) => {
+    const { projectId } = request.params as { projectId: string };
+    const { restoreTrashedProject } = await import("../services/projectStorage.js");
+    const result = await restoreTrashedProject(projectId);
+    if (!result.ok) return reply.code(409).send({ error: result.error });
+    const [project] = await db.select().from(projects).where(eq(projects.id, projectId)).limit(1);
+    if (project) {
+      await recordAuditEvent({
+        companyId: project.companyId,
+        actorUserId: request.currentUser!.id,
+        entityType: "project",
+        entityId: projectId,
+        action: "project.trash_restored",
+      });
+    }
+    return { ok: true };
+  });
+
+  app.delete("/api/admin/trash/:projectId", { preHandler: requireRole("super_admin") }, async (request, reply) => {
+    const { projectId } = request.params as { projectId: string };
+    const [project] = await db.select().from(projects).where(eq(projects.id, projectId)).limit(1);
+    if (!project?.trashedAt) return reply.code(409).send({ error: "Só é possível apagar definitivamente projectos no lixo" });
+    const companyId = project.companyId;
+    const { permanentlyDeleteProject } = await import("../services/projectStorage.js");
+    const result = await permanentlyDeleteProject(projectId);
+    if (!result.ok) return reply.code(409).send({ error: result.error });
+    await recordAuditEvent({
+      companyId,
+      actorUserId: request.currentUser!.id,
+      entityType: "project",
+      entityId: projectId,
+      action: "project.permanently_deleted",
+      metadata: { deletedFiles: result.deletedFiles },
+    });
+    return { ok: true, deletedFiles: result.deletedFiles };
+  });
+
+  app.post("/api/admin/trash/run-cleanup", { preHandler: requireRole("super_admin") }, async (request) => {
+    const { runWeeklyProjectTrashJob } = await import("../services/projectStorage.js");
+    return runWeeklyProjectTrashJob(request.log);
+  });
+
   // Estatísticas para o painel do super_admin (Fase 1, Etapa 5) — antes o painel só listava
   // empresas, sem nenhum resumo agregado da plataforma.
   app.get("/api/admin/stats", { preHandler: requireRole("super_admin") }, async () => {

@@ -14,13 +14,15 @@ import Layout from "../components/Layout";
 import Modal from "../components/Modal";
 import PageSearch from "../components/PageSearch";
 import AlertBanner from "../components/AlertBanner";
-import { IconBuilding, IconHome, IconPlus, IconSettings, IconUsers } from "../components/icons";
+import { IconBuilding, IconHardDrive, IconHome, IconPlus, IconSettings, IconUsers } from "../components/icons";
 import { SUBSCRIPTION_PLANS, getPlanDefinition, CREDIT_PACKS } from "@sigo/shared";
 import { useLanguage } from "../i18n";
 
-type AdminView = "overview" | "companies" | "users" | "configuration";
+type AdminView = "overview" | "companies" | "users" | "storage" | "configuration";
 type UserRole = AdminCompanyUser["role"];
 type DetailTab = "subscription" | "usage" | "payments" | "credits";
+type StorageOverview = Awaited<ReturnType<typeof companiesApi.getStorage>>;
+type TrashedProject = Awaited<ReturnType<typeof companiesApi.listTrash>>[number];
 
 const STATUS_LABELS: Record<string, string> = { trial: "Trial", activo: "Activo", suspenso: "Suspenso" };
 const STATUS_BADGE: Record<string, string> = { trial: "badge-yellow", activo: "badge-green", suspenso: "badge-red" };
@@ -72,6 +74,18 @@ function daysUntil(value?: string | null) {
   if (!value) return null;
   const diff = Math.ceil((new Date(value).getTime() - Date.now()) / (24 * 60 * 60 * 1000));
   return Number.isFinite(diff) ? diff : null;
+}
+
+function formatBytes(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let i = 0;
+  while (value >= 1024 && i < units.length - 1) {
+    value /= 1024;
+    i += 1;
+  }
+  return `${value.toFixed(value >= 10 || i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
 function toDateInput(value?: string | null) {
@@ -190,6 +204,10 @@ export default function SuperAdminPage() {
     periodEnd: addMonthsIso(1),
     notes: "",
   });
+  const [storage, setStorage] = useState<StorageOverview | null>(null);
+  const [trash, setTrash] = useState<TrashedProject[]>([]);
+  const [storageLoading, setStorageLoading] = useState(false);
+  const [cleanupRunning, setCleanupRunning] = useState(false);
 
   async function reload() {
     const [companyRows, userRows, statsData] = await Promise.all([
@@ -206,6 +224,22 @@ export default function SuperAdminPage() {
   useEffect(() => {
     reload().catch((err) => setError(err.message));
   }, []);
+
+  async function reloadStorage() {
+    setStorageLoading(true);
+    try {
+      const [storageData, trashData] = await Promise.all([companiesApi.getStorage(), companiesApi.listTrash()]);
+      setStorage(storageData);
+      setTrash(trashData);
+    } finally {
+      setStorageLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (view !== "storage") return;
+    reloadStorage().catch((err) => setError(err.message));
+  }, [view]);
 
   const selectedCompany = companies.find((company) => company.id === selectedCompanyId) ?? null;
   const detailCompany = companies.find((company) => company.id === detailCompanyId) ?? null;
@@ -444,7 +478,7 @@ export default function SuperAdminPage() {
     setSaving(true);
     try {
       await companiesApi.downloadBackup(company.id, company.name.replace(/[^\w\-]+/g, "_").slice(0, 40));
-      notify(en ? "Backup downloaded." : "Backup descarregado.");
+      notify(en ? "Full company backup downloaded (data + files)." : "Backup completo descarregado (dados + ficheiros).");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao gerar backup");
     } finally {
@@ -522,10 +556,57 @@ export default function SuperAdminPage() {
     return <div className="grid min-h-screen place-items-center text-slate-500">Sem acesso.</div>;
   }
 
+  async function handleRunCleanup() {
+    setCleanupRunning(true);
+    setError(null);
+    try {
+      const summary = await companiesApi.runTrashCleanup();
+      setSuccess(
+        en
+          ? `Cleanup done: ${summary.trashed} moved to trash (${formatBytes(summary.bytesFreed)} freed).`
+          : `Limpeza concluída: ${summary.trashed} no lixo (${formatBytes(summary.bytesFreed)} libertados).`,
+      );
+      await reloadStorage();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCleanupRunning(false);
+    }
+  }
+
+  async function handleRestoreTrash(projectId: string) {
+    setError(null);
+    try {
+      await companiesApi.restoreTrash(projectId);
+      setSuccess(en ? "Project restored (files stay purged)." : "Projecto restaurado (ficheiros continuam purgados).");
+      await reloadStorage();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function handlePermanentDelete(project: TrashedProject) {
+    const ok = window.confirm(
+      en
+        ? `Permanently delete “${project.name}” from ${project.companyName}? This cannot be undone.`
+        : `Apagar definitivamente “${project.name}” de ${project.companyName}? Esta acção não pode ser anulada.`,
+    );
+    if (!ok) return;
+    setError(null);
+    try {
+      await companiesApi.permanentlyDeleteTrash(project.id);
+      setSuccess(en ? "Project permanently deleted." : "Projecto apagado definitivamente.");
+      await reloadStorage();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   const views: Array<{ key: AdminView; label: string; icon: typeof IconHome }> = [
     { key: "overview", label: en ? "Overview" : "Visão geral", icon: IconHome },
     { key: "companies", label: en ? "Companies" : "Empresas", icon: IconBuilding },
     { key: "users", label: en ? "Users" : "Utilizadores", icon: IconUsers },
+    { key: "storage", label: en ? "Disk & trash" : "Disco e lixo", icon: IconHardDrive },
     { key: "configuration", label: en ? "Modules & branding" : "Módulos e identidade", icon: IconSettings },
   ];
 
@@ -712,6 +793,139 @@ export default function SuperAdminPage() {
                 )}
               </section>
             </div>
+          </>
+        )}
+
+        {view === "storage" && (
+          <>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="section-title">{en ? "Platform disk usage" : "Uso de disco da plataforma"}</h2>
+                <p className="muted mt-1">
+                  {en
+                    ? `Read projects idle ${storage?.idleDays ?? 7}+ days move to trash weekly; Super Admin decides permanent delete.`
+                    : `Projectos lidos há ${storage?.idleDays ?? 7}+ dias vão para o lixo semanalmente; o Super Admin decide o apagamento definitivo.`}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" className="btn btn-secondary btn-sm" disabled={storageLoading} onClick={() => reloadStorage().catch((err) => setError(err.message))}>
+                  {storageLoading ? (en ? "Loading…" : "A carregar…") : en ? "Refresh" : "Actualizar"}
+                </button>
+                <button type="button" className="btn btn-primary btn-sm" disabled={cleanupRunning} onClick={() => void handleRunCleanup()}>
+                  {cleanupRunning ? (en ? "Running…" : "A correr…") : en ? "Run cleanup now" : "Correr limpeza agora"}
+                </button>
+              </div>
+            </div>
+
+            {storage && (
+              <>
+                <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                  <StatCard label={en ? "Total on disk" : "Total no disco"} value={formatBytes(storage.totalBytes)} hint={storage.uploadsRoot} />
+                  <StatCard label={en ? "In trash" : "No lixo"} value={storage.trashCount} tone="text-amber-700" />
+                  <StatCard
+                    label={en ? "Eligible for cleanup" : "Elegíveis para limpeza"}
+                    value={storage.eligibleForTrashCount}
+                    hint={en ? `${storage.idleDays} days idle` : `${storage.idleDays} dias sem actividade`}
+                  />
+                  <StatCard label={en ? "Untracked files" : "Ficheiros sem dono"} value={formatBytes(storage.orphanBytes)} />
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {Object.entries(storage.byCategory)
+                    .filter(([, bytes]) => bytes > 0)
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([key, bytes]) => (
+                      <div key={key} className="card p-4">
+                        <span className="text-xs uppercase tracking-wide text-slate-500">{key.replaceAll("_", " ")}</span>
+                        <strong className="mt-1 block text-lg tabular-nums text-slate-950">{formatBytes(bytes)}</strong>
+                      </div>
+                    ))}
+                </div>
+
+                <section className="card overflow-hidden">
+                  <div className="border-b border-slate-100 px-4 py-3">
+                    <h3 className="font-semibold text-slate-900">{en ? "By company" : "Por empresa"}</h3>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full text-sm">
+                      <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+                        <tr>
+                          <th className="px-4 py-2">{en ? "Company" : "Empresa"}</th>
+                          <th className="px-4 py-2">{en ? "Disk" : "Disco"}</th>
+                          <th className="px-4 py-2">{en ? "Active" : "Activos"}</th>
+                          <th className="px-4 py-2">{en ? "Trash" : "Lixo"}</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {storage.companies
+                          .filter((row) => row.bytes > 0 || row.trashedProjects > 0)
+                          .map((row) => (
+                            <tr key={row.companyId}>
+                              <td className="px-4 py-2 font-medium text-slate-900">{row.companyName}</td>
+                              <td className="px-4 py-2 tabular-nums">{formatBytes(row.bytes)}</td>
+                              <td className="px-4 py-2 tabular-nums">{row.activeProjects}</td>
+                              <td className="px-4 py-2 tabular-nums">{row.trashedProjects}</td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              </>
+            )}
+
+            <section className="card overflow-hidden">
+              <div className="border-b border-slate-100 px-4 py-3">
+                <h3 className="font-semibold text-slate-900">{en ? "Trash" : "Lixo"}</h3>
+                <p className="mt-1 text-xs text-slate-500">
+                  {en
+                    ? "Metadata kept; plant PDFs and diary photos already purged. Restore does not bring files back."
+                    : "Características mantidas; PDFs e fotos já foram purgados. Restaurar não recupera os ficheiros."}
+                </p>
+              </div>
+              {trash.length === 0 ? (
+                <p className="px-4 py-6 text-sm text-slate-500">{en ? "Trash is empty." : "O lixo está vazio."}</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+                      <tr>
+                        <th className="px-4 py-2">{en ? "Project" : "Projecto"}</th>
+                        <th className="px-4 py-2">{en ? "Company" : "Empresa"}</th>
+                        <th className="px-4 py-2">{en ? "Trashed" : "No lixo"}</th>
+                        <th className="px-4 py-2">{en ? "Reason" : "Motivo"}</th>
+                        <th className="px-4 py-2" />
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {trash.map((row) => (
+                        <tr key={row.id}>
+                          <td className="px-4 py-2">
+                            <strong className="text-slate-900">{row.name}</strong>
+                            <p className="text-xs text-slate-500">
+                              {row.client || "—"} · {row.plantCount} {en ? "plants" : "plantas"}
+                            </p>
+                          </td>
+                          <td className="px-4 py-2">{row.companyName}</td>
+                          <td className="px-4 py-2 whitespace-nowrap">{fmtDate(row.trashedAt)}</td>
+                          <td className="px-4 py-2 text-xs text-slate-500">{row.trashReason ?? "—"}</td>
+                          <td className="px-4 py-2">
+                            <div className="flex flex-wrap justify-end gap-2">
+                              <button type="button" className="btn btn-secondary btn-sm" onClick={() => void handleRestoreTrash(row.id)}>
+                                {en ? "Restore" : "Restaurar"}
+                              </button>
+                              <button type="button" className="btn btn-sm bg-red-600 text-white hover:bg-red-700" onClick={() => void handlePermanentDelete(row)}>
+                                {en ? "Delete forever" : "Apagar de vez"}
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
           </>
         )}
 
@@ -985,7 +1199,7 @@ export default function SuperAdminPage() {
               ))}
               <div className="ml-auto flex flex-wrap gap-2">
                 <button type="button" onClick={() => void downloadBackup(detailCompany)} disabled={saving} className="btn btn-secondary btn-sm">
-                  {en ? "Download backup" : "Descarregar backup"}
+                  {en ? "Full backup (ZIP)" : "Backup completo (ZIP)"}
                 </button>
                 <button
                   type="button"

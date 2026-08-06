@@ -26,6 +26,7 @@
     "@fastify/rate-limit": "^11.1.0",
     "@fastify/static": "^10.1.2",
     "@sigo/shared": "*",
+    "archiver": "^5.3.2",
     "bcryptjs": "^2.4.3",
     "dotenv": "^16.4.5",
     "drizzle-orm": "^0.45.2",
@@ -36,6 +37,7 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@types/archiver": "^5.3.4",
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "^22.9.0",
     "drizzle-kit": "^0.31.10",

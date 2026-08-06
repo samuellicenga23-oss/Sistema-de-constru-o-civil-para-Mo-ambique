@@ -163,21 +163,34 @@ export async function projectRoutes(app: FastifyInstance) {
         .where(
           and(
             eq(projects.companyId, companyId),
+            isNull(projects.trashedAt),
             eq(budgetDocuments.documentType, "orcamento"),
             eq(budgetDocuments.status, "aprovado"),
           ),
         );
       const ids = [...new Set(approved.map((row) => row.projectId))];
       if (!ids.length) return [];
-      return db.select().from(projects).where(inArray(projects.id, ids)).orderBy(projects.name);
+      return db
+        .select()
+        .from(projects)
+        .where(and(inArray(projects.id, ids), isNull(projects.trashedAt)))
+        .orderBy(projects.name);
     }
-    return db.select().from(projects).where(eq(projects.companyId, companyId)).orderBy(projects.createdAt);
+    return db
+      .select()
+      .from(projects)
+      .where(and(eq(projects.companyId, companyId), isNull(projects.trashedAt)))
+      .orderBy(projects.createdAt);
   });
 
   app.get("/api/projects/:id", { preHandler: requireCompanyUser }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const companyId = request.currentUser!.companyId!;
-    const [project] = await db.select().from(projects).where(and(eq(projects.id, id), eq(projects.companyId, companyId))).limit(1);
+    const [project] = await db
+      .select()
+      .from(projects)
+      .where(and(eq(projects.id, id), eq(projects.companyId, companyId), isNull(projects.trashedAt)))
+      .limit(1);
     if (!project) return reply.code(404).send({ error: "Projecto não encontrado" });
     return project;
   });
@@ -397,7 +410,7 @@ export async function projectRoutes(app: FastifyInstance) {
     const [row] = await db
       .update(projects)
       .set({ archivedAt: new Date() })
-      .where(and(eq(projects.id, id), eq(projects.companyId, companyId)))
+      .where(and(eq(projects.id, id), eq(projects.companyId, companyId), isNull(projects.trashedAt)))
       .returning();
     if (!row) return reply.code(404).send({ error: "Projecto não encontrado" });
     return row;
@@ -414,7 +427,7 @@ export async function projectRoutes(app: FastifyInstance) {
     const [row] = await db
       .update(projects)
       .set({ archivedAt: null })
-      .where(and(eq(projects.id, id), eq(projects.companyId, companyId)))
+      .where(and(eq(projects.id, id), eq(projects.companyId, companyId), isNull(projects.trashedAt)))
       .returning();
     if (!row) return reply.code(404).send({ error: "Projecto não encontrado" });
     return row;
@@ -423,7 +436,19 @@ export async function projectRoutes(app: FastifyInstance) {
   app.delete("/api/projects/:id", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const companyId = request.currentUser!.companyId!;
-    await db.delete(projects).where(and(eq(projects.id, id), eq(projects.companyId, companyId)));
-    return { ok: true };
+    const [project] = await db
+      .select()
+      .from(projects)
+      .where(and(eq(projects.id, id), eq(projects.companyId, companyId), isNull(projects.trashedAt)))
+      .limit(1);
+    if (!project) return reply.code(404).send({ error: "Projecto não encontrado" });
+    const { softTrashProject } = await import("../services/projectStorage.js");
+    const result = await softTrashProject({
+      projectId: id,
+      reason: "apagado_pela_empresa",
+      trashedByUserId: request.currentUser!.id,
+    });
+    if (!result.ok) return reply.code(409).send({ error: result.error });
+    return { ok: true, movedToTrash: true, deletedFiles: result.deletedFiles };
   });
 }

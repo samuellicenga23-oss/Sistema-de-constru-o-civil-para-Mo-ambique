@@ -64,7 +64,7 @@ export async function countActiveProjects(companyId: string): Promise<number> {
   const [{ value }] = await db
     .select({ value: count() })
     .from(projects)
-    .where(and(eq(projects.companyId, companyId), isNull(projects.archivedAt)));
+    .where(and(eq(projects.companyId, companyId), isNull(projects.archivedAt), isNull(projects.trashedAt)));
   return value;
 }
 

@@ -233,3 +233,14 @@ export function IconMap(p: IconProps) {
     </Svg>
   );
 }
+
+export function IconHardDrive(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="M3 12h18" />
+      <path d="M7 16h.01" />
+      <path d="M11 16h2" />
+    </Svg>
+  );
+}
