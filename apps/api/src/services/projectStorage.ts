@@ -228,7 +228,8 @@ export async function permanentlyDeleteProject(projectId: string): Promise<{ ok:
 
 /** Projectos com todas as plantas concluídas e sem actividade há N dias. */
 export async function findProjectsEligibleForWeeklyTrash(idleDays = PROJECT_TRASH_IDLE_DAYS) {
-  const cutoff = new Date(Date.now() - idleDays * 24 * 60 * 60 * 1000);
+  // postgres.js não aceita Date em sql`` — passar ISO string.
+  const cutoffIso = new Date(Date.now() - idleDays * 24 * 60 * 60 * 1000).toISOString();
   const rows = await db
     .select({
       id: projects.id,
@@ -246,7 +247,7 @@ export async function findProjectsEligibleForWeeklyTrash(idleDays = PROJECT_TRAS
       and(
         sql`count(${plants.id}) > 0`,
         sql`count(*) filter (where ${plants.processingStatus} <> 'concluido') = 0`,
-        sql`max(${plants.processingUpdatedAt}) <= ${cutoff}`,
+        sql`max(${plants.processingUpdatedAt}) <= ${cutoffIso}::timestamptz`,
       ),
     );
 
