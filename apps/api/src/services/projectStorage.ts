@@ -42,8 +42,10 @@ export type StorageOverview = {
   uploadsRoot: string;
   totalBytes: number;
   byCategory: Record<StorageCategory, number>;
+  folders: Array<{ name: string; bytes: number; fileCount: number }>;
   companies: CompanyStorageRow[];
   orphanBytes: number;
+  attributedBytes: number;
   trashCount: number;
   eligibleForTrashCount: number;
   idleDays: number;
@@ -346,6 +348,33 @@ async function walkDirBytes(dir: string): Promise<number> {
   return total;
 }
 
+async function walkDirStats(dir: string): Promise<{ bytes: number; fileCount: number }> {
+  let bytes = 0;
+  let fileCount = 0;
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch {
+    return { bytes: 0, fileCount: 0 };
+  }
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      const nested = await walkDirStats(full);
+      bytes += nested.bytes;
+      fileCount += nested.fileCount;
+    } else if (entry.isFile()) {
+      try {
+        bytes += (await stat(full)).size;
+        fileCount += 1;
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  return { bytes, fileCount };
+}
+
 export async function getStorageOverview(): Promise<StorageOverview> {
   const byCategory = emptyCategories();
   const companyMap = new Map<string, CompanyStorageRow>();
@@ -435,8 +464,8 @@ export async function getStorageOverview(): Promise<StorageOverview> {
   }
 
   const totalOnDisk = await walkDirBytes(env.uploadsDir);
-  const attributed = Object.values(byCategory).reduce((a, b) => a + b, 0);
-  const orphanBytes = Math.max(0, totalOnDisk - attributed);
+  const attributedBytes = Object.values(byCategory).reduce((a, b) => a + b, 0);
+  const orphanBytes = Math.max(0, totalOnDisk - attributedBytes);
 
   // Orphans in plants/ (ficheiros sem linha na BD)
   try {
@@ -453,6 +482,22 @@ export async function getStorageOverview(): Promise<StorageOverview> {
     /* pasta pode não existir */
   }
 
+  // Pastas reais em disco (como no servidor)
+  const folders: Array<{ name: string; bytes: number; fileCount: number }> = [];
+  try {
+    const rootEntries = await readdir(env.uploadsDir, { withFileTypes: true });
+    for (const entry of rootEntries) {
+      if (!entry.isDirectory()) continue;
+      const stats = await walkDirStats(path.join(env.uploadsDir, entry.name));
+      if (stats.bytes > 0 || stats.fileCount > 0) {
+        folders.push({ name: entry.name, bytes: stats.bytes, fileCount: stats.fileCount });
+      }
+    }
+  } catch {
+    /* uploads pode não existir */
+  }
+  folders.sort((a, b) => b.bytes - a.bytes);
+
   const eligible = await findProjectsEligibleForWeeklyTrash();
   const [{ value: trashCount }] = await db
     .select({ value: sql<number>`count(*)::int` })
@@ -465,8 +510,10 @@ export async function getStorageOverview(): Promise<StorageOverview> {
     uploadsRoot: path.resolve(env.uploadsDir),
     totalBytes: totalOnDisk,
     byCategory,
+    folders,
     companies: companyRows,
     orphanBytes,
+    attributedBytes,
     trashCount: Number(trashCount ?? 0),
     eligibleForTrashCount: eligible.length,
     idleDays: PROJECT_TRASH_IDLE_DAYS,

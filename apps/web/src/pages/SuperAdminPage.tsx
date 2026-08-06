@@ -88,6 +88,25 @@ function formatBytes(bytes: number) {
   return `${value.toFixed(value >= 10 || i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
+const STORAGE_CATEGORY_META: Record<string, { pt: string; en: string; tone: string }> = {
+  plants: { pt: "Plantas (PDF)", en: "Plant PDFs", tone: "bg-sky-500" },
+  site_diary: { pt: "Diário de obra", en: "Site diary", tone: "bg-emerald-500" },
+  import_jobs: { pt: "Imports de mapas", en: "Map imports", tone: "bg-violet-500" },
+  invoice_receipts: { pt: "Comprovativos", en: "Receipt proofs", tone: "bg-amber-500" },
+  logos: { pt: "Logótipos", en: "Logos", tone: "bg-rose-500" },
+  avatars: { pt: "Avatares", en: "Avatars", tone: "bg-slate-500" },
+  other: { pt: "Outros / órfãos", en: "Other / orphans", tone: "bg-orange-500" },
+};
+
+const FOLDER_LABELS: Record<string, { pt: string; en: string }> = {
+  plants: { pt: "Plantas", en: "Plants" },
+  "site-diary": { pt: "Diário de obra", en: "Site diary" },
+  "import-jobs": { pt: "Imports", en: "Imports" },
+  "invoice-receipts": { pt: "Comprovativos", en: "Receipts" },
+  logos: { pt: "Logótipos", en: "Logos" },
+  avatars: { pt: "Avatares", en: "Avatars" },
+};
+
 function toDateInput(value?: string | null) {
   if (!value) return "";
   return value.slice(0, 10);
@@ -821,37 +840,117 @@ export default function SuperAdminPage() {
               <>
                 <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
                   <StatCard label={en ? "Total on disk" : "Total no disco"} value={formatBytes(storage.totalBytes)} hint={storage.uploadsRoot} />
-                  <StatCard label={en ? "In trash" : "No lixo"} value={storage.trashCount} tone="text-amber-700" />
+                  <StatCard label={en ? "Attributed to companies" : "Atribuído a empresas"} value={formatBytes(storage.attributedBytes ?? 0)} />
                   <StatCard
                     label={en ? "Eligible for cleanup" : "Elegíveis para limpeza"}
                     value={storage.eligibleForTrashCount}
-                    hint={en ? `${storage.idleDays} days idle` : `${storage.idleDays} dias sem actividade`}
+                    hint={en ? `${storage.idleDays} days idle · ${storage.trashCount} in trash` : `${storage.idleDays} dias idle · ${storage.trashCount} no lixo`}
                   />
-                  <StatCard label={en ? "Untracked files" : "Ficheiros sem dono"} value={formatBytes(storage.orphanBytes)} />
+                  <StatCard label={en ? "Untracked / orphans" : "Sem dono / órfãos"} value={formatBytes(storage.orphanBytes)} tone="text-amber-700" />
                 </div>
 
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {Object.entries(storage.byCategory)
-                    .filter(([, bytes]) => bytes > 0)
-                    .sort((a, b) => b[1] - a[1])
-                    .map(([key, bytes]) => (
-                      <div key={key} className="card p-4">
-                        <span className="text-xs uppercase tracking-wide text-slate-500">{key.replaceAll("_", " ")}</span>
-                        <strong className="mt-1 block text-lg tabular-nums text-slate-950">{formatBytes(bytes)}</strong>
-                      </div>
-                    ))}
-                </div>
+                <section className="card p-5">
+                  <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
+                    <div>
+                      <h3 className="font-semibold text-slate-900">{en ? "Folders on disk" : "Pastas no disco"}</h3>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {en ? "Real upload directories on the server" : "Pastas reais de uploads no servidor"}
+                      </p>
+                    </div>
+                    <span className="text-sm font-semibold tabular-nums text-slate-700">{formatBytes(storage.totalBytes)}</span>
+                  </div>
+
+                  {storage.totalBytes > 0 && (
+                    <div className="mb-5 flex h-3 overflow-hidden rounded-full bg-slate-100">
+                      {(storage.folders?.length ? storage.folders : []).map((folder, index) => {
+                        const pct = Math.max(0.4, (folder.bytes / storage.totalBytes) * 100);
+                        const tones = ["bg-sky-500", "bg-emerald-500", "bg-violet-500", "bg-amber-500", "bg-rose-500", "bg-slate-500", "bg-orange-500"];
+                        return (
+                          <div
+                            key={folder.name}
+                            className={`${tones[index % tones.length]} h-full`}
+                            style={{ width: `${pct}%` }}
+                            title={`${folder.name}: ${formatBytes(folder.bytes)}`}
+                          />
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  <div className="space-y-3">
+                    {(storage.folders ?? []).length === 0 ? (
+                      <p className="text-sm text-slate-500">{en ? "No upload folders found." : "Nenhuma pasta de uploads encontrada."}</p>
+                    ) : (
+                      (storage.folders ?? []).map((folder) => {
+                        const label = FOLDER_LABELS[folder.name];
+                        const pct = storage.totalBytes > 0 ? Math.round((folder.bytes / storage.totalBytes) * 100) : 0;
+                        return (
+                          <div key={folder.name}>
+                            <div className="mb-1 flex items-center justify-between gap-3 text-sm">
+                              <div className="min-w-0">
+                                <span className="font-medium text-slate-900">{label ? (en ? label.en : label.pt) : folder.name}</span>
+                                <span className="ml-2 text-xs text-slate-400">/{folder.name}</span>
+                              </div>
+                              <div className="shrink-0 text-right">
+                                <span className="font-semibold tabular-nums text-slate-900">{formatBytes(folder.bytes)}</span>
+                                <span className="ml-2 text-xs tabular-nums text-slate-500">
+                                  {folder.fileCount} {en ? "files" : "ficheiros"} · {pct}%
+                                </span>
+                              </div>
+                            </div>
+                            <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                              <div className="h-full rounded-full bg-brand-600" style={{ width: `${Math.max(pct, pct > 0 ? 2 : 0)}%` }} />
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </section>
+
+                <section className="card p-5">
+                  <h3 className="font-semibold text-slate-900">{en ? "By file type (linked to companies)" : "Por tipo de ficheiro (ligado a empresas)"}</h3>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {en ? "Only files still referenced in the database" : "Só ficheiros ainda referenciados na base de dados"}
+                  </p>
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {Object.entries(storage.byCategory)
+                      .filter(([, bytes]) => bytes > 0)
+                      .sort((a, b) => b[1] - a[1])
+                      .map(([key, bytes]) => {
+                        const meta = STORAGE_CATEGORY_META[key] ?? { pt: key, en: key, tone: "bg-slate-400" };
+                        const pct = storage.totalBytes > 0 ? Math.round((bytes / storage.totalBytes) * 100) : 0;
+                        return (
+                          <div key={key} className="rounded-xl border border-slate-200 p-4">
+                            <div className="flex items-center gap-2">
+                              <span className={`h-2.5 w-2.5 rounded-full ${meta.tone}`} />
+                              <span className="text-xs font-medium text-slate-600">{en ? meta.en : meta.pt}</span>
+                            </div>
+                            <strong className="mt-2 block text-xl tabular-nums text-slate-950">{formatBytes(bytes)}</strong>
+                            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
+                              <div className={`h-full rounded-full ${meta.tone}`} style={{ width: `${Math.max(pct, 2)}%` }} />
+                            </div>
+                            <span className="mt-1 block text-[11px] tabular-nums text-slate-400">{pct}% {en ? "of disk" : "do disco"}</span>
+                          </div>
+                        );
+                      })}
+                  </div>
+                </section>
 
                 <section className="card overflow-hidden">
                   <div className="border-b border-slate-100 px-4 py-3">
                     <h3 className="font-semibold text-slate-900">{en ? "By company" : "Por empresa"}</h3>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {en ? "Disk share and breakdown by file type" : "Quota de disco e distribuição por tipo de ficheiro"}
+                    </p>
                   </div>
                   <div className="overflow-x-auto">
                     <table className="min-w-full text-sm">
                       <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                         <tr>
                           <th className="px-4 py-2">{en ? "Company" : "Empresa"}</th>
-                          <th className="px-4 py-2">{en ? "Disk" : "Disco"}</th>
+                          <th className="px-4 py-2 min-w-[12rem]">{en ? "Disk share" : "Quota de disco"}</th>
+                          <th className="px-4 py-2">{en ? "Size" : "Tamanho"}</th>
                           <th className="px-4 py-2">{en ? "Active" : "Activos"}</th>
                           <th className="px-4 py-2">{en ? "Trash" : "Lixo"}</th>
                         </tr>
@@ -859,14 +958,61 @@ export default function SuperAdminPage() {
                       <tbody className="divide-y divide-slate-100">
                         {storage.companies
                           .filter((row) => row.bytes > 0 || row.trashedProjects > 0)
-                          .map((row) => (
-                            <tr key={row.companyId}>
-                              <td className="px-4 py-2 font-medium text-slate-900">{row.companyName}</td>
-                              <td className="px-4 py-2 tabular-nums">{formatBytes(row.bytes)}</td>
-                              <td className="px-4 py-2 tabular-nums">{row.activeProjects}</td>
-                              <td className="px-4 py-2 tabular-nums">{row.trashedProjects}</td>
-                            </tr>
-                          ))}
+                          .map((row) => {
+                            const pct = storage.totalBytes > 0 ? Math.round((row.bytes / storage.totalBytes) * 100) : 0;
+                            const parts = Object.entries(row.byCategory ?? {})
+                              .filter(([, v]) => v > 0)
+                              .sort((a, b) => b[1] - a[1]);
+                            return (
+                              <tr key={row.companyId}>
+                                <td className="px-4 py-3">
+                                  <strong className="text-slate-900">{row.companyName}</strong>
+                                  {parts.length > 0 && (
+                                    <p className="mt-1 text-[11px] text-slate-500">
+                                      {parts
+                                        .slice(0, 3)
+                                        .map(([key, bytes]) => {
+                                          const meta = STORAGE_CATEGORY_META[key];
+                                          return `${meta ? (en ? meta.en : meta.pt) : key} ${formatBytes(bytes)}`;
+                                        })
+                                        .join(" · ")}
+                                    </p>
+                                  )}
+                                </td>
+                                <td className="px-4 py-3">
+                                  <div className="flex h-2 overflow-hidden rounded-full bg-slate-100">
+                                    {parts.length === 0 ? (
+                                      <div className="h-full bg-slate-300" style={{ width: `${Math.max(pct, pct > 0 ? 2 : 0)}%` }} />
+                                    ) : (
+                                      parts.map(([key, bytes]) => {
+                                        const partPct = row.bytes > 0 ? (bytes / row.bytes) * 100 : 0;
+                                        const meta = STORAGE_CATEGORY_META[key];
+                                        return (
+                                          <div
+                                            key={key}
+                                            className={`h-full ${meta?.tone ?? "bg-slate-400"}`}
+                                            style={{ width: `${Math.max(partPct, 1)}%` }}
+                                            title={`${key}: ${formatBytes(bytes)}`}
+                                          />
+                                        );
+                                      })
+                                    )}
+                                  </div>
+                                  <span className="mt-1 block text-[11px] tabular-nums text-slate-400">{pct}% {en ? "of platform" : "da plataforma"}</span>
+                                </td>
+                                <td className="px-4 py-3 font-medium tabular-nums text-slate-900">{formatBytes(row.bytes)}</td>
+                                <td className="px-4 py-3 tabular-nums">{row.activeProjects}</td>
+                                <td className="px-4 py-3 tabular-nums">{row.trashedProjects}</td>
+                              </tr>
+                            );
+                          })}
+                        {storage.companies.filter((row) => row.bytes > 0 || row.trashedProjects > 0).length === 0 && (
+                          <tr>
+                            <td colSpan={5} className="px-4 py-6 text-sm text-slate-500">
+                              {en ? "No company storage recorded yet." : "Ainda sem armazenamento por empresa."}
+                            </td>
+                          </tr>
+                        )}
                       </tbody>
                     </table>
                   </div>

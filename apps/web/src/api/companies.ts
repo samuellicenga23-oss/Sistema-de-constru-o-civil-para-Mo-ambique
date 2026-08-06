@@ -225,6 +225,7 @@ export const companiesApi = {
       uploadsRoot: string;
       totalBytes: number;
       byCategory: Record<string, number>;
+      folders: Array<{ name: string; bytes: number; fileCount: number }>;
       companies: Array<{
         companyId: string;
         companyName: string;
@@ -234,6 +235,7 @@ export const companiesApi = {
         trashedProjects: number;
       }>;
       orphanBytes: number;
+      attributedBytes: number;
       trashCount: number;
       eligibleForTrashCount: number;
       idleDays: number;
