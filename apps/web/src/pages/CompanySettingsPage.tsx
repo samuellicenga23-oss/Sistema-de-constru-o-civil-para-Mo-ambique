@@ -330,12 +330,13 @@ export default function CompanySettingsPage() {
             </div>
             <p className="text-xs text-slate-500">A activação e alteração de plano é feita pela equipa SIGO (facturação fora do sistema). Contacte o suporte para upgrade ou mais capacidade.</p>
             <div className="flex flex-wrap gap-2">
+              <Link to="/creditos" className="btn btn-primary btn-sm">Créditos e planos</Link>
               <Link to="/#planos" className="btn btn-secondary btn-sm">Ver planos públicos</Link>
               <a
                 href={`https://wa.me/${SIGO_WHATSAPP_NUMBER}?text=${encodeURIComponent("Olá, gostaria de alterar o plano ou aumentar a capacidade da minha empresa no SIGO.")}`}
                 target="_blank"
                 rel="noreferrer"
-                className="btn btn-primary btn-sm"
+                className="btn btn-secondary btn-sm"
               >
                 Pedir upgrade
               </a>

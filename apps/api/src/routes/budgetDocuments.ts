@@ -692,7 +692,7 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
     const { assertSmartImportQuota, recordUsage } = await import("../services/subscriptionEntitlements.js");
     const quota = await assertSmartImportQuota(companyId);
     if (quota) {
-      return reply.code(403).send({ error: quota.error, code: quota.code, upgradeHint: quota.upgradeHint });
+      return reply.code(403).send({ error: quota.error, code: quota.code, upgradeHint: quota.upgradeHint, actionPath: quota.actionPath });
     }
     const job = enqueueMeasurementImportJob({
       companyId,

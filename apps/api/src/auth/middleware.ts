@@ -84,6 +84,7 @@ export async function requireAuth(request: FastifyRequest, reply: FastifyReply) 
           error: block.error,
           code: block.code,
           upgradeHint: block.upgradeHint,
+          actionPath: block.actionPath,
         });
       }
     }

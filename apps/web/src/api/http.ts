@@ -1,5 +1,11 @@
 export class ApiError extends Error {
-  constructor(public status: number, message: string, public code?: string) {
+  constructor(
+    public status: number,
+    message: string,
+    public code?: string,
+    public upgradeHint?: string,
+    public actionPath?: string,
+  ) {
     super(message);
   }
 }
@@ -34,7 +40,9 @@ export async function request<T>(path: string, options?: RequestInit & { timeout
   }
 
   if (!res.ok) {
-    const body = await res.json().catch(() => ({} as { error?: unknown; code?: unknown }));
+    const body = await res.json().catch(
+      () => ({} as { error?: unknown; code?: unknown; upgradeHint?: unknown; actionPath?: unknown }),
+    );
     const raw = body.error;
     const message =
       typeof raw === "string"
@@ -43,7 +51,13 @@ export async function request<T>(path: string, options?: RequestInit & { timeout
           ? // Zod flatten / object errors — evita "[object Object]" na UI
             JSON.stringify(raw)
           : `Erro ${res.status}`;
-    throw new ApiError(res.status, message, typeof body.code === "string" ? body.code : undefined);
+    throw new ApiError(
+      res.status,
+      message,
+      typeof body.code === "string" ? body.code : undefined,
+      typeof body.upgradeHint === "string" ? body.upgradeHint : undefined,
+      typeof body.actionPath === "string" ? body.actionPath : undefined,
+    );
   }
   return res.json();
 }

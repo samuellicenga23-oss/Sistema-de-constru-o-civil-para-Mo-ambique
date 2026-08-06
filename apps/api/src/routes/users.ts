@@ -173,12 +173,16 @@ export async function userRoutes(app: FastifyInstance) {
       return reply.code(403).send({
         error: "O plano Individual permite 1 utilizador. Para trabalhar em equipa, escolha Profissional.",
         code: "PLAN_TEAM_REQUIRED",
+        upgradeHint: "Activar Profissional",
+        actionPath: "/creditos?foco=plano",
       });
     }
     if (entitlements?.maxUsers != null && currentUsers >= entitlements.maxUsers) {
       return reply.code(403).send({
         error: `O plano "${entitlements.planLabel}" permite até ${entitlements.maxUsers} utilizador(es). Actualize o plano para adicionar a equipa.`,
         code: "PLAN_USER_LIMIT",
+        upgradeHint: "Comparar planos",
+        actionPath: "/creditos?foco=plano",
       });
     }
 

@@ -38,6 +38,39 @@ export function mentionsSteel(d: string): boolean {
   );
 }
 
+/**
+ * Serralharia / estrutura metálica fabricada (torres, treliças, cantoneiras…) —
+ * distinto do aço de armadura em betão.
+ */
+export function isMetalStructureWork(d: string): boolean {
+  return (
+    /torre\s+trelic|trelicad|estrutura\s+metalic|estrutura\s+em\s+aco|pylone|poste\s+metalic/.test(d) ||
+    /cantoneira|perfil\s+(ipn|upe|hea|heb|ipe)|chapa\s+perfurad|soldadur/.test(d) ||
+    (/torre|mastros?|trelic/.test(d) && /metal|aco|galvan|cantoneira|serralh/.test(d)) ||
+    (/montagem|fornecimento/.test(d) && /galvaniz|cantoneira|trelic|estrutura\s+metal/.test(d))
+  );
+}
+
+/** Trabalho cujo produto principal é betão (não apenas menção incidental a fundação/ancoragem). */
+export function isPrimarilyConcreteWork(d: string): boolean {
+  if (isMetalStructureWork(d)) return false;
+  if (mentionsSteel(d) && !/betao|betão|b15|b20|b25|b30|laje|viga|pilar|sapata/.test(d)) return false;
+  // Menção só a ancoragem/fundação de betão dentro de outro item ≠ trabalho de betão.
+  const incidentalFoundation =
+    /ancorag|fixac(ao|oes)\s+(de\s+)?betao|base\s+de\s+betao|sapata\s+de\s+ancor/.test(d) &&
+    !/^(betao|betão|b25|b20|b15|b30|viga|pilar|sapata|laje|cinta|murete)/.test(d.trim()) &&
+    !/\b(betao|betão)\s+(b\d+|estrutural|armado|bombeado|magro|limpeza)\b/.test(d) &&
+    !/\b(execuc|betonag|vazamento|laje\s+de|viga\s+de|pilar(es)?\s+de)\b/.test(d);
+  if (incidentalFoundation && (isMetalStructureWork(d) || /torre|trelic|cantoneira|galvan|serralh|metalic/.test(d))) {
+    return false;
+  }
+  return (
+    /\bbetao\b|\bbetão\b|\bb15\b|\bb20\b|\bb25\b|\bb30\b/.test(d) ||
+    /^(vigas?|pilares?|sapatas?|lajes?|cintas?|muretes?)(\s|$)/.test(d.trim()) ||
+    /\b(viga|pilar|sapata|laje|cinta|murete)s?\b/.test(d) && /estrutur|armado|pavimento|fundac/.test(d)
+  );
+}
+
 const RULES: Rule[] = [
   // ---- Eléctrica (antes de "caixa" genérica) ----
   {
@@ -250,10 +283,18 @@ const RULES: Rule[] = [
     compositionName: "Saibro regularizado e compactado (pavimento exterior)",
   },
 
+  // ---- Serralharia / estruturas metálicas (ANTES do betão — evita "fundação de betão" incidental) ----
+  {
+    name: "torre / estrutura metálica treliçada",
+    test: (d) => isMetalStructureWork(d),
+    compositionName: "Estrutura metálica treliçada / torre montada",
+    confidence: 0.95,
+  },
+
   // ---- Betão / aço / cofragem ----
   {
     name: "aço aplicado",
-    test: (d, unit) => mentionsSteel(d) && (unit === "kg" || /var[oõ]|armac|armadura|a400/.test(d)),
+    test: (d, unit) => mentionsSteel(d) && !isMetalStructureWork(d) && (unit === "kg" || /var[oõ]|armac|armadura|a400/.test(d)),
     compositionName: "Aço A400 aplicado (corte, dobragem e amarração)",
   },
   {
@@ -285,44 +326,49 @@ const RULES: Rule[] = [
   {
     name: "elementos estruturais curtos",
     test: (d) =>
-      /^(vigas?(\s+de\s+pavimento)?|pilares?|sapatas?(\s+isoladas?)?|lajes?(\s+de\s+pavimento)?|cintas?|muretes?)$/.test(
+      !isMetalStructureWork(d) &&
+      (/^(vigas?(\s+de\s+pavimento)?|pilares?|sapatas?(\s+isoladas?)?|lajes?(\s+de\s+pavimento)?|cintas?|muretes?)$/.test(
         d.trim(),
       ) ||
-      /vigas?\s+estruturai|linteis?|vergas?|peitor[ií]s?.*lajes?|sapatas?\s+isoladas?/.test(d),
+        /vigas?\s+estruturai|linteis?|vergas?|peitor[ií]s?.*lajes?|sapatas?\s+isoladas?/.test(d)),
     compositionName: "Betão B25 (estrutural)",
   },
   {
     name: "betão B15 limpeza",
-    test: (d) => /b15|betao\s+de\s+limpeza|magro/.test(d),
+    test: (d) => !isMetalStructureWork(d) && /b15|betao\s+de\s+limpeza|magro/.test(d),
     compositionName: "Betão B15 (betão de limpeza)",
   },
   {
     name: "betão B20",
-    test: (d) => /\bb20\b/.test(d),
+    test: (d) => !isMetalStructureWork(d) && /\bb20\b/.test(d),
     compositionName: "Betão B20 (estrutural leve)",
   },
   {
     name: "betão B30",
-    test: (d) => /\bb30\b/.test(d),
+    test: (d) => !isMetalStructureWork(d) && /\bb30\b/.test(d),
     compositionName: "Betão B30 (alta resistência)",
   },
   {
     name: "betão bombeado",
-    test: (d) => /bombeado|bomba\s+de\s+betao/.test(d),
+    test: (d) => !isMetalStructureWork(d) && /bombeado|bomba\s+de\s+betao/.test(d),
     compositionName: "Betão B25 bombeado",
   },
   {
     name: "viga / pilar / fundação armada",
-    test: (d) =>
-      /\b(viga|pilares?|sapata|cintas?|murete)s?\b/.test(d) ||
-      /laje\s+de\s+pavimento|pronta\s+para\s+receber\s+laje|mistura\s*1\s*:\s*2\s*:\s*3/.test(d) ||
-      (/fundac/.test(d) && /arm|varao|betao|betão|cimento|b25|b20/.test(d)) ||
-      (/betao|betão/.test(d) && /estrutural|armado/.test(d)),
+    test: (d) => {
+      if (isMetalStructureWork(d) || !isPrimarilyConcreteWork(d)) return false;
+      return (
+        /\b(viga|pilares?|sapata|cintas?|murete)s?\b/.test(d) ||
+        /laje\s+de\s+pavimento|pronta\s+para\s+receber\s+laje|mistura\s*1\s*:\s*2\s*:\s*3/.test(d) ||
+        (/fundac/.test(d) && /\b(betao|betão|b25|b20|b15|b30|ciment)\b/.test(d) && /\b(viga|pilar|sapata|laje|cinta|murete|vazamento|betonag|execuc)\b/.test(d)) ||
+        (/\b(betao|betão)\b/.test(d) && /estrutural|armado/.test(d))
+      );
+    },
     compositionName: "Betão B25 (estrutural)",
   },
   {
     name: "betão genérico",
-    test: (d) => /\bbetao\b|\bbetão\b|\bb25\b/.test(d),
+    test: (d) => !isMetalStructureWork(d) && isPrimarilyConcreteWork(d) && /\bbetao\b|\bbetão\b|\bb25\b/.test(d),
     compositionName: "Betão B25 (estrutural)",
   },
   {

@@ -158,6 +158,51 @@ export const companiesApi = {
   createPayment: (companyId: string, data: PaymentCreateInput) =>
     request<PlatformPayment>(`/admin/companies/${companyId}/payments`, { method: "POST", body: JSON.stringify(data) }),
   getUsage: (companyId: string) => request<CompanyUsage>(`/admin/companies/${companyId}/usage`),
+  getCredits: (companyId: string) =>
+    request<{
+      balances: { smartImportCredits: number; plantAnalysisCredits: number };
+      ledger: Array<{
+        id: string;
+        kind: string;
+        delta: number;
+        packId: string | null;
+        reason: string;
+        note: string | null;
+        amountMzn: string | null;
+        createdAt: string;
+      }>;
+      summary: {
+        planLabel?: string;
+        usage?: {
+          smartImportsUsed: number;
+          plantAnalysesUsed: number;
+          activeProjects: number;
+          customCompositions: number;
+        };
+        smartImportsPerMonth?: number | null;
+        plantAnalysesPerMonth?: number | null;
+        maxActiveProjects?: number | null;
+        customCompositions?: number | null;
+        credits?: { smartImportCredits: number; plantAnalysisCredits: number };
+      } | null;
+    }>(`/admin/companies/${companyId}/credits`),
+  grantCredits: (
+    companyId: string,
+    data: {
+      packId?: string | null;
+      smartImports?: number;
+      plantAnalyses?: number;
+      note?: string | null;
+      amount?: number;
+      method?: PaymentCreateInput["method"];
+      reference?: string;
+      recordPayment?: boolean;
+    },
+  ) =>
+    request<{
+      balances: { smartImportCredits: number; plantAnalysisCredits: number };
+      payment: PlatformPayment | null;
+    }>(`/admin/companies/${companyId}/credits`, { method: "POST", body: JSON.stringify(data) }),
   downloadBackup: async (companyId: string, fileNameHint?: string) => {
     const res = await fetch(`/api/admin/companies/${companyId}/backup`, { credentials: "include" });
     if (!res.ok) {

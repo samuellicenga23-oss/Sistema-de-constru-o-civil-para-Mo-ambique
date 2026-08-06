@@ -15,12 +15,12 @@ import Modal from "../components/Modal";
 import PageSearch from "../components/PageSearch";
 import AlertBanner from "../components/AlertBanner";
 import { IconBuilding, IconHome, IconPlus, IconSettings, IconUsers } from "../components/icons";
-import { SUBSCRIPTION_PLANS, getPlanDefinition } from "@sigo/shared";
+import { SUBSCRIPTION_PLANS, getPlanDefinition, CREDIT_PACKS } from "@sigo/shared";
 import { useLanguage } from "../i18n";
 
 type AdminView = "overview" | "companies" | "users" | "configuration";
 type UserRole = AdminCompanyUser["role"];
-type DetailTab = "subscription" | "usage" | "payments";
+type DetailTab = "subscription" | "usage" | "payments" | "credits";
 
 const STATUS_LABELS: Record<string, string> = { trial: "Trial", activo: "Activo", suspenso: "Suspenso" };
 const STATUS_BADGE: Record<string, string> = { trial: "badge-yellow", activo: "badge-green", suspenso: "badge-red" };
@@ -139,6 +139,17 @@ export default function SuperAdminPage() {
   const [detailTab, setDetailTab] = useState<DetailTab>("subscription");
   const [payments, setPayments] = useState<PlatformPayment[]>([]);
   const [detailUsage, setDetailUsage] = useState<Company["usage"]>(null);
+  const [creditInfo, setCreditInfo] = useState<Awaited<ReturnType<typeof companiesApi.getCredits>> | null>(null);
+  const [creditForm, setCreditForm] = useState({
+    packId: "misto_15",
+    smartImports: "",
+    plantAnalyses: "",
+    note: "",
+    amount: "",
+    method: "transferencia" as "transferencia" | "mpesa" | "cash" | "cartao" | "outro",
+    reference: "",
+    recordPayment: true,
+  });
 
   const [companyForm, setCompanyForm] = useState({ name: "", adminName: "", adminEmail: "", adminPassword: "" });
   const [userForm, setUserForm] = useState<{ name: string; email: string; password: string; role: UserRole; preferredLanguage: "pt" | "en" }>({
@@ -241,6 +252,10 @@ export default function SuperAdminPage() {
       .getUsage(detailCompany.id)
       .then(setDetailUsage)
       .catch(() => {});
+    companiesApi
+      .getCredits(detailCompany.id)
+      .then(setCreditInfo)
+      .catch(() => setCreditInfo(null));
   }, [detailCompany?.id]);
 
   const normalizedQuery = query.trim().toLocaleLowerCase("pt");
@@ -374,6 +389,36 @@ export default function SuperAdminPage() {
       notify(en ? "Payment recorded." : "Pagamento registado.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao registar pagamento");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function grantCredits(event: FormEvent) {
+    event.preventDefault();
+    if (!detailCompany) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const pack = CREDIT_PACKS.find((p) => p.id === creditForm.packId);
+      const smartImports = creditForm.smartImports ? Number(creditForm.smartImports) : undefined;
+      const plantAnalyses = creditForm.plantAnalyses ? Number(creditForm.plantAnalyses) : undefined;
+      await companiesApi.grantCredits(detailCompany.id, {
+        packId: creditForm.packId || null,
+        smartImports,
+        plantAnalyses,
+        note: creditForm.note || null,
+        amount: creditForm.amount ? Number(creditForm.amount) : pack?.priceMzn,
+        method: creditForm.method,
+        reference: creditForm.reference || undefined,
+        recordPayment: creditForm.recordPayment,
+      });
+      setCreditInfo(await companiesApi.getCredits(detailCompany.id));
+      setPayments(await companiesApi.listPayments(detailCompany.id));
+      await reload();
+      notify(en ? "Credits granted." : "Créditos atribuídos.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao atribuir créditos");
     } finally {
       setSaving(false);
     }
@@ -925,6 +970,7 @@ export default function SuperAdminPage() {
                 [
                   ["subscription", en ? "Subscription" : "Subscrição"],
                   ["usage", en ? "Usage" : "Uso"],
+                  ["credits", en ? "Credits" : "Créditos"],
                   ["payments", en ? "Payments" : "Pagamentos"],
                 ] as const
               ).map(([key, label]) => (
@@ -1075,6 +1121,32 @@ export default function SuperAdminPage() {
                   <UsageBar label={en ? "Users" : "Utilizadores"} used={detailUsage.users} max={detailUsage.maxUsers} />
                   <UsageBar label={en ? "Projects" : "Projectos"} used={detailUsage.projects} max={detailUsage.maxProjects} />
                 </div>
+                {creditInfo?.summary?.usage && (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <UsageBar
+                      label={en ? "Smart imports (month)" : "Importações (mês)"}
+                      used={creditInfo.summary.usage.smartImportsUsed}
+                      max={creditInfo.summary.smartImportsPerMonth ?? null}
+                    />
+                    <UsageBar
+                      label={en ? "Plant analyses (month)" : "Plantas (mês)"}
+                      used={creditInfo.summary.usage.plantAnalysesUsed}
+                      max={creditInfo.summary.plantAnalysesPerMonth ?? null}
+                    />
+                    <UsageBar
+                      label={en ? "Custom compositions" : "Composições próprias"}
+                      used={creditInfo.summary.usage.customCompositions}
+                      max={creditInfo.summary.customCompositions ?? null}
+                    />
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm">
+                      <p className="text-xs text-slate-500">{en ? "Credit balance" : "Saldo de créditos"}</p>
+                      <p className="mt-1 font-semibold text-slate-950">
+                        {creditInfo.balances.smartImportCredits} imports · {creditInfo.balances.plantAnalysisCredits}{" "}
+                        {en ? "plants" : "plantas"}
+                      </p>
+                    </div>
+                  </div>
+                )}
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                   <StatCard label={en ? "Budgets" : "Orçamentos"} value={detailUsage.budgets} />
                   <StatCard label={en ? "Drawings" : "Plantas"} value={detailUsage.plants} />
@@ -1086,6 +1158,159 @@ export default function SuperAdminPage() {
                   {" · "}
                   {en ? "Engagements" : "Contratos comerciais"}: <strong>{detailUsage.practiceEngagements}</strong>
                 </p>
+              </div>
+            )}
+
+            {detailTab === "credits" && (
+              <div className="space-y-5">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <StatCard
+                    label={en ? "Import credits" : "Créditos importação"}
+                    value={creditInfo?.balances.smartImportCredits ?? 0}
+                  />
+                  <StatCard
+                    label={en ? "Plant credits" : "Créditos plantas"}
+                    value={creditInfo?.balances.plantAnalysisCredits ?? 0}
+                  />
+                </div>
+
+                <form onSubmit={grantCredits} className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <h3 className="text-sm font-semibold text-slate-800">
+                    {en ? "Grant credit pack" : "Atribuir pack de créditos"}
+                  </h3>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="sm:col-span-2">
+                      <label className="label">{en ? "Pack" : "Pack"}</label>
+                      <select
+                        value={creditForm.packId}
+                        onChange={(event) => {
+                          const packId = event.target.value;
+                          const pack = CREDIT_PACKS.find((p) => p.id === packId);
+                          setCreditForm({
+                            ...creditForm,
+                            packId,
+                            amount: pack ? String(pack.priceMzn) : creditForm.amount,
+                            smartImports: "",
+                            plantAnalyses: "",
+                          });
+                        }}
+                        className="input"
+                      >
+                        {CREDIT_PACKS.map((pack) => (
+                          <option key={pack.id} value={pack.id}>
+                            {pack.label} · {money(pack.priceMzn)}
+                          </option>
+                        ))}
+                        <option value="">{en ? "Custom quantities" : "Quantidades manuais"}</option>
+                      </select>
+                    </div>
+                    {!creditForm.packId && (
+                      <>
+                        <div>
+                          <label className="label">{en ? "Import credits" : "Créditos importação"}</label>
+                          <input
+                            type="number"
+                            min={0}
+                            value={creditForm.smartImports}
+                            onChange={(event) => setCreditForm({ ...creditForm, smartImports: event.target.value })}
+                            className="input"
+                          />
+                        </div>
+                        <div>
+                          <label className="label">{en ? "Plant credits" : "Créditos plantas"}</label>
+                          <input
+                            type="number"
+                            min={0}
+                            value={creditForm.plantAnalyses}
+                            onChange={(event) => setCreditForm({ ...creditForm, plantAnalyses: event.target.value })}
+                            className="input"
+                          />
+                        </div>
+                      </>
+                    )}
+                    <div>
+                      <label className="label">{en ? "Amount (MZN net)" : "Valor (MZN líquido)"}</label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={creditForm.amount}
+                        onChange={(event) => setCreditForm({ ...creditForm, amount: event.target.value })}
+                        className="input"
+                      />
+                    </div>
+                    <div>
+                      <label className="label">{en ? "Method" : "Método"}</label>
+                      <select
+                        value={creditForm.method}
+                        onChange={(event) =>
+                          setCreditForm({ ...creditForm, method: event.target.value as typeof creditForm.method })
+                        }
+                        className="input"
+                      >
+                        {Object.entries(METHOD_LABELS).map(([key, label]) => (
+                          <option key={key} value={key}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="label">{en ? "Reference" : "Referência"}</label>
+                      <input
+                        value={creditForm.reference}
+                        onChange={(event) => setCreditForm({ ...creditForm, reference: event.target.value })}
+                        className="input"
+                      />
+                    </div>
+                    <div>
+                      <label className="label">{en ? "Note" : "Nota"}</label>
+                      <input
+                        value={creditForm.note}
+                        onChange={(event) => setCreditForm({ ...creditForm, note: event.target.value })}
+                        className="input"
+                      />
+                    </div>
+                  </div>
+                  <label className="flex items-center gap-2 text-sm text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={creditForm.recordPayment}
+                      onChange={(event) => setCreditForm({ ...creditForm, recordPayment: event.target.checked })}
+                    />
+                    {en ? "Also record a payment" : "Registar também o pagamento"}
+                  </label>
+                  <button type="submit" disabled={saving} className="btn btn-primary">
+                    {saving ? (en ? "Saving…" : "A guardar…") : en ? "Grant credits" : "Atribuir créditos"}
+                  </button>
+                </form>
+
+                <div className="overflow-hidden rounded-xl border border-slate-200">
+                  <div className="border-b border-slate-100 bg-slate-50 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    {en ? "Credit ledger" : "Movimentos de créditos"}
+                  </div>
+                  {!creditInfo?.ledger?.length ? (
+                    <p className="p-4 text-sm text-slate-500">{en ? "No credit movements yet." : "Ainda sem movimentos."}</p>
+                  ) : (
+                    <div className="divide-y divide-slate-100">
+                      {creditInfo.ledger.map((entry) => (
+                        <div key={entry.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm">
+                          <div>
+                            <strong className={entry.delta >= 0 ? "text-emerald-700" : "text-rose-700"}>
+                              {entry.delta >= 0 ? "+" : ""}
+                              {entry.delta}
+                            </strong>{" "}
+                            <span className="text-slate-600">
+                              {entry.kind === "smart_import" ? (en ? "imports" : "importações") : en ? "plants" : "plantas"}
+                              {entry.packId ? ` · ${entry.packId}` : ""}
+                              {entry.note ? ` · ${entry.note}` : ""}
+                            </span>
+                          </div>
+                          <span className="text-xs text-slate-500">{fmtDate(entry.createdAt)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 

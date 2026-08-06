@@ -112,6 +112,12 @@ export function Pricing() {
             );
           })}
         </div>
+
+        <p className="mx-auto mt-10 max-w-3xl text-center text-[13px] leading-relaxed text-ink-400">
+          Precisa de mais importações ou plantas num mês pontual? No SIGO pode pedir{" "}
+          <strong className="font-semibold text-ink">packs de créditos</strong> sem mudar de plano. Utilizadores e obras
+          activas sobem com o plano.
+        </p>
       </div>
     </section>
   );

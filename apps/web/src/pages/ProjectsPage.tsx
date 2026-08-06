@@ -10,6 +10,8 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import LoadingState from "../components/LoadingState";
 import EmptyState from "../components/EmptyState";
 import AlertBanner from "../components/AlertBanner";
+import { PlanLimitCallout } from "../components/PlanLimitCallout";
+import { ApiError } from "../api/http";
 import { IconFolder, IconPlus, IconTrash } from "../components/icons";
 import { UNITS, type Unit } from "@sigo/shared";
 
@@ -28,6 +30,7 @@ export default function ProjectsPage() {
   const [startMode, setStartMode] = useState<ProjectStartMode>("plantas");
   const [materialSpecifications, setMaterialSpecifications] = useState<MaterialSpecificationDraft[]>([]);
   const [zoneId, setZoneId] = useState("");
+  const [limitError, setLimitError] = useState<unknown>(null);
   const [zones, setZones] = useState<PriceZone[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -177,8 +180,12 @@ export default function ProjectsPage() {
       if (createdProjectId) {
         const motivo = startMode === "importar" ? "excel" : startMode === "plantas" ? "planta" : "geral";
         navigate(`/projectos/${createdProjectId}?uploadErro=1&motivo=${motivo}`);
+      } else if (err instanceof ApiError && (err.code?.startsWith("PLAN_") || err.code === "SUBSCRIPTION_EXPIRED")) {
+        setLimitError(err);
+        setError(null);
       } else {
         setError(err instanceof Error ? err.message : "Erro ao criar projecto");
+        setLimitError(null);
       }
     } finally {
       setCreating(false);
@@ -202,6 +209,7 @@ export default function ProjectsPage() {
     >
       <div className="mx-auto w-full max-w-6xl space-y-5">
         {error && <AlertBanner tone="error" onDismiss={() => setError(null)}>{error}</AlertBanner>}
+        {limitError ? <PlanLimitCallout error={limitError} /> : null}
 
         {showForm && (
           <Modal

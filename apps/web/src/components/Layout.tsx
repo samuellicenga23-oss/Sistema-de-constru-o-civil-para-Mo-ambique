@@ -110,6 +110,9 @@ export default function Layout({
           ...(user?.role === "admin_empresa"
             ? [{ to: "/empresa", label: t("companySettings"), shortLabel: "Empresa", icon: IconBuilding, section: "admin" as const }]
             : []),
+          ...(user?.companyId
+            ? [{ to: "/creditos", label: "Créditos e planos", shortLabel: "Créditos", icon: IconTag, section: "admin" as const }]
+            : []),
           ...(user?.platformRole === "super_admin"
             ? [{ to: "/admin", label: t("platformPanel"), shortLabel: "Plataforma", icon: IconSettings, section: "admin" as const }]
             : []),

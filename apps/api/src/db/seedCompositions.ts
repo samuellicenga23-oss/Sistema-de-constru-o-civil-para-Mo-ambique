@@ -303,6 +303,19 @@ const COMPOSITIONS: CompositionSpec[] = [
   { name: "Porta interior de madeira montada", category: "Caixilharias e Serralharias", outputUnit: "un", labour: [["Carpinteiro B", 1.5], ["Servente", 0.5]], mats: [["Porta interior de madeira (kit completo)", 1.0]], equip: [] },
   { name: "Porta exterior metálica montada", category: "Caixilharias e Serralharias", outputUnit: "un", labour: [["Serralheiro", 2.0], ["Servente", 0.5]], mats: [["Porta exterior metálica (kit completo)", 1.0]], equip: [] },
   { name: "Guarda-corpos metálico montado", category: "Caixilharias e Serralharias", outputUnit: "ml", labour: [["Serralheiro", 0.8]], mats: [["Guarda-corpos metálico (fabricado)", 1.0]], equip: [] },
+  {
+    name: "Estrutura metálica treliçada / torre montada",
+    category: "Caixilharias e Serralharias",
+    outputUnit: "un",
+    labour: [["Serralheiro", 8.0], ["Servente", 4.0]],
+    mats: [
+      ["Perfil metálico IPN (estrutura)", 120],
+      ["Parafuso e bucha", 2.5],
+      ["Tinta ant ferrugem", 0.15],
+      ["Primário acrílico", 0.08],
+    ],
+    equip: [["Andaime (aluguer)", 1.0]],
+  },
 
   // ---- Coberturas ----
   { name: "Cobertura em chapa metálica ondulada", category: "Coberturas", outputUnit: "m2", labour: [["Carpinteiro B", 0.5], ["Servente", 0.5]], mats: [["Chapa metálica ondulada para cobertura", 1.1], ["Vigamento de madeira para cobertura", 0.6], ["Prego", 0.1]], equip: [] },

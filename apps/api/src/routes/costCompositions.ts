@@ -193,7 +193,7 @@ export async function costCompositionRoutes(app: FastifyInstance) {
     if (companyId) {
       const { assertCustomCompositionSlot } = await import("../services/subscriptionEntitlements.js");
       const block = await assertCustomCompositionSlot(companyId);
-      if (block) return reply.code(403).send({ error: block.error, code: block.code });
+      if (block) return reply.code(403).send({ error: block.error, code: block.code, upgradeHint: block.upgradeHint, actionPath: block.actionPath });
     }
 
     const [composition] = await db.insert(costCompositions).values({

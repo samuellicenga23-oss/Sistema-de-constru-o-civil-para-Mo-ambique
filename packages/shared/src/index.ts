@@ -1,5 +1,6 @@
 export * from "./enums.js";
 export * from "./plans.js";
+export * from "./creditPacks.js";
 export * from "./units.js";
 export * from "./accessControl.js";
 export * from "./workingDays.js";

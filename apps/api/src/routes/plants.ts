@@ -329,6 +329,19 @@ export async function plantRoutes(app: FastifyInstance) {
     const filePath = path.join(uploadsDir, fileName);
     await writeFile(filePath, buffer);
 
+    // Quota antes de gravar a planta — o contador mensal inclui plantas já na BD.
+    if (!cachedPlant) {
+      const plantQuota = await assertPlantAnalysisQuota(companyId);
+      if (plantQuota) {
+        return reply.code(403).send({
+          error: plantQuota.error,
+          code: plantQuota.code,
+          upgradeHint: plantQuota.upgradeHint,
+          actionPath: plantQuota.actionPath,
+        });
+      }
+    }
+
     const [plant] = await db
       .insert(plants)
       .values({
@@ -377,11 +390,6 @@ export async function plantRoutes(app: FastifyInstance) {
       return reply.code(201).send(reused);
     }
 
-    const plantQuota = await assertPlantAnalysisQuota(companyId);
-    if (plantQuota) {
-      await db.delete(plants).where(eq(plants.id, plant.id));
-      return reply.code(403).send({ error: plantQuota.error, code: plantQuota.code, upgradeHint: plantQuota.upgradeHint });
-    }
     await recordUsage(companyId, "plant_analysis");
 
     // O upload responde assim que o ficheiro fica gravado — a leitura do PDF corre em segundo

@@ -372,6 +372,35 @@ export const usageEvents = pgTable(
   }),
 );
 
+/** Saldo de créditos extra (importações / plantas) — não renova mensalmente; consome-se ao usar. */
+export const subscriptionCreditBalances = pgTable("subscription_credit_balances", {
+  companyId: uuid("company_id")
+    .primaryKey()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  smartImportCredits: integer("smart_import_credits").notNull().default(0),
+  plantAnalysisCredits: integer("plant_analysis_credits").notNull().default(0),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const subscriptionCreditLedger = pgTable(
+  "subscription_credit_ledger",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    kind: varchar("kind", { length: 40 }).notNull(),
+    delta: integer("delta").notNull(),
+    packId: varchar("pack_id", { length: 40 }),
+    reason: varchar("reason", { length: 80 }).notNull(),
+    note: text("note"),
+    amountMzn: numeric("amount_mzn", { precision: 14, scale: 2 }),
+    recordedByUserId: uuid("recorded_by_user_id"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [index("subscription_credit_ledger_company_created_idx").on(table.companyId, table.createdAt)],
+);
+
 export const projectMaterialSpecifications = pgTable(
   "project_material_specifications",
   {

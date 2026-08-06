@@ -11,7 +11,12 @@ import {
   materials,
 } from "../db/schema.js";
 import { computeCompositionUnitCost } from "./costEngine.js";
-import { mapDescriptionToSigoComposition, mentionsSteel } from "./sigoCompositionMap.js";
+import {
+  mapDescriptionToSigoComposition,
+  mentionsSteel,
+  isMetalStructureWork,
+  isPrimarilyConcreteWork,
+} from "./sigoCompositionMap.js";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -87,6 +92,19 @@ function chapterTemplate(unit: string, description: string): ChapterTemplate {
       materials: [["Ferragens de porta (fechadura, dobradiças)", 1]],
     };
   }
+  // Torres / treliças / serralharia metálica — ANTES de betão (descrições citam ancoragem em betão).
+  if (isMetalStructureWork(d) || (/serralh|soldadur|cantoneira|trelic/.test(d) && /metal|aco|galvan/.test(d))) {
+    return {
+      labour: [["Serralheiro", 8.0], ["Servente", 4.0]],
+      materials: [
+        ["Perfil metálico IPN (estrutura)", 120],
+        ["Parafuso e bucha", 2.5],
+        ["Tinta ant ferrugem", 0.15],
+        ["Primário acrílico", 0.08],
+      ],
+      equipment: [["Andaime (aluguer)", 1.0]],
+    };
+  }
   if (/disjuntor|caixa\s+de\s+coluna|trifas/.test(d)) {
     return {
       labour: [["Electricista", 2.0]],
@@ -133,7 +151,7 @@ function chapterTemplate(unit: string, description: string): ChapterTemplate {
       materials: [[exterior ? "Tinta acrílica exterior" : "Tinta esmalte aquoso interior", exterior ? 0.02 : 0.018]],
     };
   }
-  if (mentionsSteel(d) || (u === "kg" && /ferro|var/.test(d))) {
+  if ((mentionsSteel(d) || (u === "kg" && /ferro|var/.test(d))) && !isMetalStructureWork(d)) {
     return {
       labour: [["Armador de Ferro", u === "kg" ? 0.1 : 0.4], ["Servente", u === "kg" ? 0.1 : 0.3]],
       materials: [["Aço A400", u === "kg" ? 1.05 : 15], ["Arame de amarração", u === "kg" ? 0.02 : 0.3]],
@@ -176,7 +194,7 @@ function chapterTemplate(unit: string, description: string): ChapterTemplate {
       materials: [["Mosaico cerâmico", 1.05], ["Cimento cola", 4], ["Cruzetas para juntas", 20]],
     };
   }
-  if (/betao|betão|b15|b20|b25|b30|viga|pilar|sapata|laje/.test(d)) {
+  if (!isMetalStructureWork(d) && /betao|betão|b15|b20|b25|b30|viga|pilar|sapata|laje/.test(d)) {
     return {
       labour: [["Pedreiro A", 2.5], ["Servente", 5.0]],
       materials: [
@@ -302,6 +320,18 @@ function isReferenceCategory(category: string | null | undefined): boolean {
   return normalizeText(category || "") === normalizeText("Biblioteca de referência");
 }
 
+/** Evita ligar torre metálica a Betão B25 (e o inverso) por fuzzy / menções incidentais. */
+function domainsIncompatible(description: string, compositionName: string): boolean {
+  const d = normalizeText(description);
+  const cn = normalizeText(compositionName);
+  const compIsConcrete = /\bbetao\b|\bbetão\b|\bb15\b|\bb20\b|\bb25\b|\bb30\b/.test(cn);
+  const compIsMetalStructure =
+    /estrutura metalic|trelic|torre montada|portao metalic|guarda-corpos metalic|grade de protec/.test(cn);
+  if (isMetalStructureWork(d) && compIsConcrete) return true;
+  if (isPrimarilyConcreteWork(d) && compIsMetalStructure) return true;
+  return false;
+}
+
 function pickBestComposition(
   compositions: Array<{
     id: string;
@@ -322,6 +352,8 @@ function pickBestComposition(
     if (exact) return { id: exact.id, name: exact.name, score: 1 };
     const anyExact = compositions.find((c) => normalizeText(c.name) === want);
     if (anyExact) return { id: anyExact.id, name: anyExact.name, score: 1 };
+    // Nome preferido/mapeado conhecido mas ausente no catálogo → criar, não fuzzy errado.
+    return null;
   }
 
   // Mapeamento SIGO por regras (preferir biblioteca clássica).
@@ -330,6 +362,8 @@ function pickBestComposition(
     const want = normalizeText(mapped.compositionName);
     const hit = compositions.find((c) => normalizeText(c.name) === want && !isReferenceCategory(c.category));
     if (hit) return { id: hit.id, name: hit.name, score: mapped.confidence };
+    // Regra SIGO com confiança alta sem composição no catálogo → criar em vez de fuzzy.
+    if (mapped.confidence >= 0.9) return null;
   }
 
   let best: {
@@ -342,6 +376,7 @@ function pickBestComposition(
   const unit = normalizeUnit(target.unit, "un");
   for (const c of compositions) {
     if (isReferenceCategory(c.category)) continue; // nunca fuzzy-match em stubs de referência
+    if (domainsIncompatible(target.description, c.name)) continue;
     let score = scoreText(target.description, c.name);
     if (c.outputUnit === unit) score += 0.05;
     const reference = false;

@@ -204,6 +204,7 @@ export async function projectRoutes(app: FastifyInstance) {
         error: projectLimit.error,
         code: projectLimit.code,
         upgradeHint: projectLimit.upgradeHint,
+        actionPath: projectLimit.actionPath,
       });
     }
 
@@ -408,7 +409,7 @@ export async function projectRoutes(app: FastifyInstance) {
     const { assertActiveProjectSlot } = await import("../services/subscriptionEntitlements.js");
     const limit = await assertActiveProjectSlot(companyId);
     if (limit) {
-      return reply.code(403).send({ error: limit.error, code: limit.code, upgradeHint: limit.upgradeHint });
+      return reply.code(403).send({ error: limit.error, code: limit.code, upgradeHint: limit.upgradeHint, actionPath: limit.actionPath });
     }
     const [row] = await db
       .update(projects)

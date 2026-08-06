@@ -24,23 +24,27 @@ export type CommercialPlan = {
 /** Landing / checkout — mesma fonte que a API (`packages/shared/src/plans.ts`). Enterprise fica “sob consulta”. */
 export const COMMERCIAL_PLANS: CommercialPlan[] = SUBSCRIPTION_PLANS.filter(
   (plan) => plan.key !== "enterprise" && plan.monthlyPriceMzn != null && plan.annualPriceMzn != null,
-).map((plan) => ({
-  slug: plan.key,
-  name: plan.label,
-  monthlyPrice: plan.monthlyPriceMzn!,
-  annualPrice: plan.annualPriceMzn!,
-  regularAnnualPrice: plan.regularAnnualPriceMzn ?? plan.monthlyPriceMzn! * 12,
-  description: plan.description,
-  audience: plan.audience,
-  limits: [
-    plan.limits.maxUsers == null ? "Utilizadores conforme contrato" : `${plan.limits.maxUsers} utilizador${plan.limits.maxUsers === 1 ? "" : "es"}`,
-    plan.limits.maxActiveProjects == null
-      ? "Obras ilimitadas"
-      : `${plan.limits.maxActiveProjects} obras activas`,
-  ].join(" · "),
-  features: [...plan.features],
-  featured: Boolean(plan.featured),
-}));
+).map((plan) => {
+  const lim = plan.limits;
+  const limitsParts = [
+    lim.maxUsers == null ? "Utilizadores conforme contrato" : `${lim.maxUsers} utilizador${lim.maxUsers === 1 ? "" : "es"}`,
+    lim.maxActiveProjects == null ? "Obras ilimitadas" : `${lim.maxActiveProjects} obras activas`,
+    lim.smartImportsPerMonth == null ? "Imports ilimitados" : `${lim.smartImportsPerMonth} imports/mês`,
+    lim.plantAnalysesPerMonth == null ? "Plantas ilimitadas" : `${lim.plantAnalysesPerMonth} plantas/mês`,
+  ];
+  return {
+    slug: plan.key,
+    name: plan.label,
+    monthlyPrice: plan.monthlyPriceMzn!,
+    annualPrice: plan.annualPriceMzn!,
+    regularAnnualPrice: plan.regularAnnualPriceMzn ?? plan.monthlyPriceMzn! * 12,
+    description: plan.description,
+    audience: plan.audience,
+    limits: limitsParts.join(" · "),
+    features: [...plan.features],
+    featured: Boolean(plan.featured),
+  };
+});
 
 export function findCommercialPlan(slug: string | undefined) {
   return COMMERCIAL_PLANS.find((plan) => plan.slug === slug) ?? null;

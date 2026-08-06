@@ -437,6 +437,98 @@ export async function companyRoutes(app: FastifyInstance) {
     return reply.code(201).send(created);
   });
 
+  app.get("/api/admin/companies/:id/credits", { preHandler: requireRole("super_admin") }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const [company] = await db.select().from(companies).where(eq(companies.id, id)).limit(1);
+    if (!company) return reply.code(404).send({ error: "Empresa não encontrada" });
+    const {
+      getCreditBalances,
+      listCreditLedger,
+      buildSubscriptionSummary,
+    } = await import("../services/subscriptionEntitlements.js");
+    const [balances, ledger, summary] = await Promise.all([
+      getCreditBalances(id),
+      listCreditLedger(id),
+      buildSubscriptionSummary(id),
+    ]);
+    return { balances, ledger, summary };
+  });
+
+  app.post("/api/admin/companies/:id/credits", { preHandler: requireRole("super_admin") }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const [company] = await db.select().from(companies).where(eq(companies.id, id)).limit(1);
+    if (!company) return reply.code(404).send({ error: "Empresa não encontrada" });
+
+    const bodySchema = z.object({
+      packId: z.string().optional().nullable(),
+      smartImports: z.number().int().min(0).optional(),
+      plantAnalyses: z.number().int().min(0).optional(),
+      note: z.string().max(500).optional().nullable(),
+      amount: z.number().positive().optional(),
+      method: z.enum(["transferencia", "mpesa", "cash", "cartao", "outro"]).optional(),
+      reference: z.string().max(120).optional(),
+      recordPayment: z.boolean().optional(),
+    });
+    const parsed = bodySchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+
+    const { getCreditPack } = await import("@sigo/shared");
+    const { grantCredits } = await import("../services/subscriptionEntitlements.js");
+    const pack = getCreditPack(parsed.data.packId);
+    const smartImports = parsed.data.smartImports ?? pack?.smartImports ?? 0;
+    const plantAnalyses = parsed.data.plantAnalyses ?? pack?.plantAnalyses ?? 0;
+    if (smartImports <= 0 && plantAnalyses <= 0) {
+      return reply.code(400).send({ error: "Indique um pack ou quantidades de créditos." });
+    }
+    const amountMzn = parsed.data.amount ?? pack?.priceMzn ?? null;
+
+    try {
+      const balances = await grantCredits({
+        companyId: id,
+        smartImports,
+        plantAnalyses,
+        packId: parsed.data.packId ?? null,
+        note: parsed.data.note ?? null,
+        amountMzn,
+        recordedByUserId: request.currentUser!.id,
+        reason: pack ? "pack_grant" : "admin_grant",
+      });
+
+      let payment = null;
+      if (parsed.data.recordPayment && amountMzn != null && amountMzn > 0) {
+        const sub = await getLatestSubscription(id);
+        const [created] = await db
+          .insert(platformPayments)
+          .values({
+            companyId: id,
+            amount: String(amountMzn),
+            currency: "MZN",
+            plan: sub?.plan ?? "individual",
+            billingCycle: "custom",
+            method: parsed.data.method ?? "transferencia",
+            reference: parsed.data.reference ?? parsed.data.packId ?? null,
+            notes: parsed.data.note ?? `Créditos: ${smartImports} imports · ${plantAnalyses} plantas`,
+            recordedByUserId: request.currentUser!.id,
+          })
+          .returning();
+        payment = created;
+      }
+
+      await recordAuditEvent({
+        companyId: id,
+        actorUserId: request.currentUser!.id,
+        entityType: "subscription_credits",
+        entityId: id,
+        action: "credits.granted",
+        after: { smartImports, plantAnalyses, packId: parsed.data.packId, balances },
+      });
+
+      return reply.code(201).send({ balances, payment });
+    } catch (err) {
+      return reply.code(400).send({ error: err instanceof Error ? err.message : "Não foi possível atribuir créditos" });
+    }
+  });
+
   app.get("/api/admin/companies/:id/usage", { preHandler: requireRole("super_admin") }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const [company] = await db.select().from(companies).where(eq(companies.id, id)).limit(1);
@@ -704,7 +796,7 @@ export async function companyRoutes(app: FastifyInstance) {
     const companyId = request.currentUser!.companyId!;
     const { assertCompanyBranding } = await import("../services/subscriptionEntitlements.js");
     const branding = await assertCompanyBranding(companyId);
-    if (branding) return reply.code(403).send({ error: branding.error, code: branding.code });
+    if (branding) return reply.code(403).send({ error: branding.error, code: branding.code, upgradeHint: branding.upgradeHint, actionPath: branding.actionPath });
     const data = await request.file();
     if (!data) return reply.code(400).send({ error: "Ficheiro em falta" });
 
