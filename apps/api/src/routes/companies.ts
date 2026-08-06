@@ -3,15 +3,18 @@ import { z } from "zod";
 import { and, eq, desc, count, inArray, gte, sum } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
+import { createReadStream } from "node:fs";
 import path from "node:path";
 import { db } from "../db/index.js";
-import { companies, users, subscriptions, projects, sessions, platformPayments } from "../db/schema.js";
+import { companies, users, subscriptions, projects, sessions, platformPayments, paymentProofs } from "../db/schema.js";
 import { requireRole, requireCompanyUser, requireAuth } from "../auth/middleware.js";
 import { hashPassword } from "../auth/password.js";
 import { getSessionUser, setSessionActingCompany } from "../auth/session.js";
 import { env } from "../env.js";
 import { COMPANY_MODULE_KEYS, CURRENCIES, SUBSCRIPTION_STATUSES, SUBSCRIPTION_PLAN_KEYS, resolveRoleTemplate, isCompanyUserRole, getPlanDefinition } from "@sigo/shared";
-import { detectImageExtension } from "../services/imageValidation.js";
+import { detectImageExtension, detectProofFileExtension } from "../services/imageValidation.js";
+import { sendEmail, emailLayout } from "../services/mailer.js";
+import { createTrialCompany } from "../services/companyOnboarding.js";
 import { syncSigoPricesForCompany } from "../services/sigoPrices.js";
 import { recordAuditEvent } from "../services/auditTrail.js";
 import {
@@ -25,7 +28,7 @@ import {
 const dateOnly = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const isoDateTime = z.string().min(10);
 const BILLING_CYCLES = ["monthly", "annual", "custom", "trial"] as const;
-const PAYMENT_METHODS = ["transferencia", "mpesa", "cash", "cartao", "outro"] as const;
+const PAYMENT_METHODS = ["transferencia", "mpesa", "emola", "cash", "cartao", "outro"] as const;
 
 const createCompanySchema = z.object({
   name: z.string().min(1),
@@ -71,6 +74,19 @@ async function getLatestSubscription(companyId: string) {
     .orderBy(desc(subscriptions.createdAt))
     .limit(1);
   return sub ?? null;
+}
+
+async function getCompanyAdminEmails(companyId: string): Promise<string[]> {
+  const rows = await db
+    .select({ email: users.email })
+    .from(users)
+    .where(and(eq(users.companyId, companyId), eq(users.role, "admin_empresa"), eq(users.isActive, true)));
+  return rows.map((r) => r.email);
+}
+
+async function getSuperAdminEmails(): Promise<string[]> {
+  const rows = await db.select({ email: users.email }).from(users).where(and(eq(users.role, "super_admin"), eq(users.isActive, true)));
+  return rows.map((r) => r.email);
 }
 
 export async function companyRoutes(app: FastifyInstance) {
@@ -150,7 +166,7 @@ export async function companyRoutes(app: FastifyInstance) {
     const permissions = isCompanyUserRole(parsed.data.role)
       ? resolveRoleTemplate(parsed.data.role, company.rolePermissions)
       : [];
-    const [created] = await db.insert(users).values({ companyId, name: parsed.data.name, email: parsed.data.email, passwordHash, role: parsed.data.role, preferredLanguage: parsed.data.preferredLanguage, mustChangePassword: true, permissions }).returning();
+    const [created] = await db.insert(users).values({ companyId, name: parsed.data.name, email: parsed.data.email, passwordHash, role: parsed.data.role, preferredLanguage: parsed.data.preferredLanguage, mustChangePassword: true, permissions, emailVerifiedAt: new Date() }).returning();
     await recordAuditEvent({ companyId, actorUserId: request.currentUser!.id, entityType: "user", entityId: created.id, action: "platform_user_created", after: { role: created.role, isActive: created.isActive } });
     return reply.code(201).send({ id: created.id, companyId, companyName: company.name, name: created.name, email: created.email, role: created.role, isActive: created.isActive, mustChangePassword: created.mustChangePassword, preferredLanguage: created.preferredLanguage, lastLoginAt: created.lastLoginAt, createdAt: created.createdAt });
   });
@@ -197,38 +213,18 @@ export async function companyRoutes(app: FastifyInstance) {
       return reply.code(409).send({ error: "Já existe um utilizador com este email" });
     }
 
-    const [company] = await db
-      .insert(companies)
-      .values({ name, nuit, address, defaultCurrency })
-      .returning();
-
     const passwordHash = await hashPassword(adminPassword);
-    const [admin] = await db
-      .insert(users)
-      .values({
-        companyId: company.id,
-        name: adminName,
-        email: adminEmail,
-        passwordHash,
-        role: "admin_empresa",
-        mustChangePassword: true,
-        permissions: resolveRoleTemplate("admin_empresa"),
-      })
-      .returning();
-
-    // Trial 14 dias no plano Individual — entitlements de trial (limites baixos) vêm de resolveEntitlements.
-    const trialEnds = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
-    const { clampCompanyModules } = await import("../services/subscriptionEntitlements.js");
-    const trialModules = clampCompanyModules(undefined, "individual");
-    await db.update(companies).set({ enabledModules: trialModules }).where(eq(companies.id, company.id));
-    await db.insert(subscriptions).values({
-      companyId: company.id,
-      plan: "individual",
-      status: "trial",
-      billingCycle: "trial",
-      expiresAt: trialEnds,
+    const { company, admin } = await createTrialCompany({
+      companyName: name,
+      nuit,
+      address,
+      defaultCurrency,
+      adminName,
+      adminEmail,
+      adminPasswordHash: passwordHash,
+      mustChangePassword: true,
+      emailVerifiedAt: new Date(),
     });
-    await syncSigoPricesForCompany(company.id);
 
     return reply.code(201).send({
       company,
@@ -437,6 +433,270 @@ export async function companyRoutes(app: FastifyInstance) {
     return reply.code(201).send(created);
   });
 
+  // ---------- Comprovativos de pagamento (sem gateway automático) ----------
+  // A empresa submete o comprovativo (transferência/M-Pesa/e-Mola) para o plano escolhido;
+  // fica "pendente" até o super_admin rever e aprovar — a aprovação regista o pagamento e
+  // activa/estende a subscrição pelos mesmos caminhos já usados no registo manual acima.
+
+  app.post("/api/companies/me/payment-proofs", { preHandler: requireRole("admin_empresa") }, async (request, reply) => {
+    const companyId = request.currentUser!.companyId!;
+    const data = await request.file();
+    if (!data) return reply.code(400).send({ error: "Ficheiro em falta" });
+    const fields = data.fields as Record<string, { value?: string } | undefined>;
+    const fieldValue = (name: string) => {
+      const field = fields[name];
+      return field && typeof field === "object" && "value" in field ? String(field.value) : undefined;
+    };
+    const parsed = z
+      .object({
+        plan: z.enum(SUBSCRIPTION_PLAN_KEYS as unknown as [string, ...string[]]),
+        billingCycle: z.enum(BILLING_CYCLES).optional(),
+        amount: z.coerce.number().positive(),
+        currency: z.enum(CURRENCIES).default("MZN"),
+        method: z.enum(PAYMENT_METHODS),
+        reference: z.string().max(120).optional(),
+        notes: z.string().max(1000).optional(),
+      })
+      .safeParse({
+        plan: fieldValue("plan"),
+        billingCycle: fieldValue("billingCycle") || undefined,
+        amount: fieldValue("amount"),
+        currency: fieldValue("currency") || "MZN",
+        method: fieldValue("method"),
+        reference: fieldValue("reference") || undefined,
+        notes: fieldValue("notes") || undefined,
+      });
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+
+    const buffer = await data.toBuffer();
+    const ext = detectProofFileExtension(buffer);
+    if (!ext) return reply.code(400).send({ error: "Ficheiro inválido — envie uma imagem (PNG/JPG/WEBP/GIF) ou PDF" });
+
+    const uploadsDir = path.join(env.uploadsDir, "payment-proofs");
+    await mkdir(uploadsDir, { recursive: true });
+    const fileName = `${randomUUID()}${ext}`;
+    await writeFile(path.join(uploadsDir, fileName), buffer);
+
+    const [created] = await db
+      .insert(paymentProofs)
+      .values({
+        companyId,
+        submittedByUserId: request.currentUser!.id,
+        plan: parsed.data.plan,
+        billingCycle: parsed.data.billingCycle ?? null,
+        amount: String(parsed.data.amount),
+        currency: parsed.data.currency,
+        method: parsed.data.method,
+        reference: parsed.data.reference ?? null,
+        notes: parsed.data.notes ?? null,
+        filePath: path.join("payment-proofs", fileName),
+        originalFileName: data.filename?.slice(0, 300) ?? null,
+      })
+      .returning();
+
+    await recordAuditEvent({
+      companyId,
+      actorUserId: request.currentUser!.id,
+      entityType: "payment_proof",
+      entityId: created.id,
+      action: "payment_proof.submitted",
+      after: { plan: created.plan, amount: created.amount, method: created.method },
+    });
+
+    const [company] = await db.select({ name: companies.name }).from(companies).where(eq(companies.id, companyId)).limit(1);
+    const superAdminEmails = await getSuperAdminEmails();
+    void sendEmail(
+      {
+        to: superAdminEmails,
+        subject: `SIGO — Novo comprovativo: ${company?.name ?? "empresa"}`,
+        html: emailLayout(
+          "Novo comprovativo de pagamento",
+          `<p><strong>${company?.name ?? "Empresa"}</strong> enviou um comprovativo para o plano <strong>${getPlanDefinition(created.plan).label}</strong> (${created.amount} ${created.currency}).</p>
+           <p>Reveja o ficheiro e aprove ou rejeite no painel do super admin.</p>`,
+          `${env.publicUrl}/admin`,
+          "Rever comprovativo",
+        ),
+      },
+      request.log,
+    );
+
+    return reply.code(201).send(created);
+  });
+
+  app.get("/api/companies/me/payment-proofs", { preHandler: requireRole("admin_empresa") }, async (request) => {
+    const companyId = request.currentUser!.companyId!;
+    return db.select().from(paymentProofs).where(eq(paymentProofs.companyId, companyId)).orderBy(desc(paymentProofs.createdAt));
+  });
+
+  app.get("/api/admin/payment-proofs", { preHandler: requireRole("super_admin") }, async (request) => {
+    const query = z.object({ status: z.enum(["pendente", "aprovado", "rejeitado"]).optional() }).safeParse(request.query);
+    const statusFilter = query.success ? query.data.status : undefined;
+    const rows = await db
+      .select({
+        proof: paymentProofs,
+        companyName: companies.name,
+      })
+      .from(paymentProofs)
+      .innerJoin(companies, eq(paymentProofs.companyId, companies.id))
+      .where(statusFilter ? eq(paymentProofs.status, statusFilter) : undefined)
+      .orderBy(desc(paymentProofs.createdAt));
+    return rows.map((r) => ({ ...r.proof, companyName: r.companyName }));
+  });
+
+  app.get("/api/admin/payment-proofs/:id/file", { preHandler: requireRole("super_admin") }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const [proof] = await db.select().from(paymentProofs).where(eq(paymentProofs.id, id)).limit(1);
+    if (!proof) return reply.code(404).send({ error: "Comprovativo não encontrado" });
+    const fullPath = path.join(env.uploadsDir, proof.filePath);
+    const ext = path.extname(fullPath).toLowerCase();
+    const contentType = ext === ".pdf" ? "application/pdf" : ext === ".png" ? "image/png" : ext === ".gif" ? "image/gif" : ext === ".webp" ? "image/webp" : "image/jpeg";
+    reply.header("Content-Type", contentType);
+    reply.header("Content-Disposition", `inline; filename="${proof.originalFileName ?? `comprovativo${ext}`}"`);
+    return reply.send(createReadStream(fullPath));
+  });
+
+  app.post("/api/admin/payment-proofs/:id/approve", { preHandler: requireRole("super_admin") }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const parsed = z
+      .object({
+        periodEnd: dateOnly.optional(),
+        notes: z.string().max(1000).optional(),
+      })
+      .safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+
+    const [proof] = await db.select().from(paymentProofs).where(eq(paymentProofs.id, id)).limit(1);
+    if (!proof) return reply.code(404).send({ error: "Comprovativo não encontrado" });
+    if (proof.status !== "pendente") return reply.code(409).send({ error: `Este comprovativo já foi ${proof.status}.` });
+
+    const current = await getLatestSubscription(proof.companyId);
+    if (!current) return reply.code(404).send({ error: "Empresa sem subscrição" });
+
+    const now = new Date();
+    const periodEnd = parsed.data.periodEnd
+      ? new Date(`${parsed.data.periodEnd}T23:59:59.000Z`)
+      : new Date(now.getFullYear(), now.getMonth() + (proof.billingCycle === "annual" ? 12 : 1), now.getDate(), 23, 59, 59);
+
+    const [payment, updatedProof] = await db.transaction(async (tx) => {
+      const [createdPayment] = await tx
+        .insert(platformPayments)
+        .values({
+          companyId: proof.companyId,
+          amount: proof.amount,
+          currency: proof.currency,
+          method: proof.method,
+          reference: proof.reference,
+          notes: parsed.data.notes ?? proof.notes,
+          paidAt: now,
+          periodEnd: periodEnd.toISOString().slice(0, 10),
+          plan: proof.plan,
+          billingCycle: proof.billingCycle,
+          recordedByUserId: request.currentUser!.id,
+        })
+        .returning();
+
+      await tx
+        .update(subscriptions)
+        .set({
+          status: "activo",
+          plan: proof.plan,
+          billingCycle: proof.billingCycle,
+          expiresAt: periodEnd,
+          activatedAt: current.activatedAt ?? now,
+          activatedByUserId: current.activatedByUserId ?? request.currentUser!.id,
+        })
+        .where(eq(subscriptions.id, current.id));
+
+      const { clampCompanyModules } = await import("../services/subscriptionEntitlements.js");
+      const [company] = await tx.select({ enabledModules: companies.enabledModules }).from(companies).where(eq(companies.id, proof.companyId)).limit(1);
+      if (company) {
+        await tx
+          .update(companies)
+          .set({ enabledModules: clampCompanyModules(company.enabledModules, proof.plan) })
+          .where(eq(companies.id, proof.companyId));
+      }
+
+      const [updated] = await tx
+        .update(paymentProofs)
+        .set({ status: "aprovado", reviewedByUserId: request.currentUser!.id, reviewedAt: now })
+        .where(eq(paymentProofs.id, id))
+        .returning();
+
+      return [createdPayment, updated];
+    });
+
+    await recordAuditEvent({
+      companyId: proof.companyId,
+      actorUserId: request.currentUser!.id,
+      entityType: "payment_proof",
+      entityId: id,
+      action: "payment_proof.approved",
+      after: { paymentId: payment.id, plan: proof.plan, expiresAt: periodEnd.toISOString() },
+    });
+
+    const adminEmails = await getCompanyAdminEmails(proof.companyId);
+    void sendEmail(
+      {
+        to: adminEmails,
+        subject: "SIGO — Pagamento confirmado, plano activo",
+        html: emailLayout(
+          "Pagamento confirmado",
+          `<p>Confirmámos o comprovativo enviado para o plano <strong>${getPlanDefinition(proof.plan).label}</strong>.</p>
+           <p>A subscrição está activa até <strong>${periodEnd.toLocaleDateString("pt-PT")}</strong>.</p>`,
+          `${env.publicUrl}/creditos`,
+          "Ver na plataforma",
+        ),
+      },
+      request.log,
+    );
+
+    return { proof: updatedProof, payment };
+  });
+
+  app.post("/api/admin/payment-proofs/:id/reject", { preHandler: requireRole("super_admin") }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const parsed = z.object({ reason: z.string().trim().min(1).max(500) }).safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+
+    const [proof] = await db.select().from(paymentProofs).where(eq(paymentProofs.id, id)).limit(1);
+    if (!proof) return reply.code(404).send({ error: "Comprovativo não encontrado" });
+    if (proof.status !== "pendente") return reply.code(409).send({ error: `Este comprovativo já foi ${proof.status}.` });
+
+    const [updated] = await db
+      .update(paymentProofs)
+      .set({ status: "rejeitado", reviewedByUserId: request.currentUser!.id, reviewedAt: new Date(), rejectionReason: parsed.data.reason })
+      .where(eq(paymentProofs.id, id))
+      .returning();
+
+    await recordAuditEvent({
+      companyId: proof.companyId,
+      actorUserId: request.currentUser!.id,
+      entityType: "payment_proof",
+      entityId: id,
+      action: "payment_proof.rejected",
+      after: { reason: parsed.data.reason },
+    });
+
+    const adminEmails = await getCompanyAdminEmails(proof.companyId);
+    void sendEmail(
+      {
+        to: adminEmails,
+        subject: "SIGO — Comprovativo não confirmado",
+        html: emailLayout(
+          "Comprovativo não confirmado",
+          `<p>Não foi possível confirmar o comprovativo enviado para o plano <strong>${getPlanDefinition(proof.plan).label}</strong>.</p>
+           <p><strong>Motivo:</strong> ${parsed.data.reason}</p>
+           <p>Pode enviar um novo comprovativo em «Créditos e planos».</p>`,
+          `${env.publicUrl}/creditos`,
+          "Enviar novo comprovativo",
+        ),
+      },
+      request.log,
+    );
+
+    return updated;
+  });
+
   app.get("/api/admin/companies/:id/credits", { preHandler: requireRole("super_admin") }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const [company] = await db.select().from(companies).where(eq(companies.id, id)).limit(1);
@@ -625,6 +885,33 @@ export async function companyRoutes(app: FastifyInstance) {
   app.post("/api/admin/trash/run-cleanup", { preHandler: requireRole("super_admin") }, async (request) => {
     const { runWeeklyProjectTrashJob } = await import("../services/projectStorage.js");
     return runWeeklyProjectTrashJob(request.log);
+  });
+
+  app.get("/api/admin/mail/status", { preHandler: requireRole("super_admin") }, async () => {
+    const { isMailEnabled } = await import("../services/mailer.js");
+    return { enabled: isMailEnabled() };
+  });
+
+  app.post("/api/admin/mail/test", { preHandler: requireRole("super_admin") }, async (request, reply) => {
+    const { isMailEnabled, sendEmail: send, emailLayout: layout } = await import("../services/mailer.js");
+    if (!isMailEnabled()) {
+      return reply.code(409).send({ error: "SMTP não configurado — defina SMTP_HOST, SMTP_USER e SMTP_PASS." });
+    }
+    const sent = await send(
+      {
+        to: request.currentUser!.email,
+        subject: "SIGO — Email de teste",
+        html: layout("Email de teste", "<p>Se está a ler isto, o envio de email do SIGO está a funcionar.</p>"),
+      },
+      request.log,
+    );
+    if (!sent) return reply.code(502).send({ error: "Falha ao enviar — verifique as credenciais SMTP." });
+    return { ok: true, sentTo: request.currentUser!.email };
+  });
+
+  app.post("/api/admin/subscriptions/run-expiry-reminders", { preHandler: requireRole("super_admin") }, async (request) => {
+    const { runSubscriptionExpiryReminders } = await import("../services/subscriptionReminders.js");
+    return runSubscriptionExpiryReminders(request.log);
   });
 
   // Estatísticas para o painel do super_admin (Fase 1, Etapa 5) — antes o painel só listava

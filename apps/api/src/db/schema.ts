@@ -104,6 +104,41 @@ export const platformPayments = pgTable(
   (table) => [index("platform_payments_company_id_idx").on(table.companyId)]
 );
 
+/**
+ * Comprovativos de pagamento submetidos pela própria empresa (transferência/M-Pesa/e-Mola sem
+ * gateway automático). Ficam "pendente" até o super_admin rever o ficheiro e aprovar — a
+ * aprovação cria o platform_payments correspondente e activa/estende a subscrição. Rejeitar
+ * não apaga o pedido, só o marca, para a empresa perceber o que se passou.
+ */
+export const paymentProofStatusEnum = pgEnum("payment_proof_status", ["pendente", "aprovado", "rejeitado"]);
+
+export const paymentProofs = pgTable(
+  "payment_proofs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+    submittedByUserId: uuid("submitted_by_user_id").notNull(),
+    plan: varchar("plan", { length: 50 }).notNull(),
+    billingCycle: varchar("billing_cycle", { length: 20 }),
+    amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
+    currency: currencyEnum("currency").notNull().default("MZN"),
+    method: varchar("method", { length: 40 }).notNull(),
+    reference: varchar("reference", { length: 120 }),
+    notes: text("notes"),
+    filePath: text("file_path").notNull(),
+    originalFileName: varchar("original_file_name", { length: 300 }),
+    status: paymentProofStatusEnum("status").notNull().default("pendente"),
+    reviewedByUserId: uuid("reviewed_by_user_id"),
+    reviewedAt: timestamp("reviewed_at"),
+    rejectionReason: text("rejection_reason"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    index("payment_proofs_company_id_idx").on(table.companyId),
+    index("payment_proofs_status_idx").on(table.status, table.createdAt),
+  ],
+);
+
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
   companyId: uuid("company_id").references(() => companies.id, { onDelete: "cascade" }),
@@ -129,6 +164,11 @@ export const users = pgTable("users", {
   /** Permissões efectivas deste utilizador (cópia do template da função na criação; ajuste fino próprio). */
   permissions: jsonb("permissions").$type<string[]>().notNull().default([]),
   createdAt: timestamp("created_at").notNull().defaultNow(),
+  // Contas criadas por um admin (fluxo antigo) ficam já verificadas — só o registo público
+  // (self-service) exige confirmar o email antes do primeiro login.
+  emailVerifiedAt: timestamp("email_verified_at"),
+  emailVerificationToken: varchar("email_verification_token", { length: 64 }),
+  emailVerificationExpiresAt: timestamp("email_verification_expires_at"),
 });
 
 export const sessions = pgTable("sessions", {

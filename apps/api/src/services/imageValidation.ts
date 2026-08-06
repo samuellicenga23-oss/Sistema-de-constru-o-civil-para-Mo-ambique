@@ -9,3 +9,9 @@ export function detectImageExtension(buffer: Buffer): string | null {
   if (buffer.length >= 4 && buffer.subarray(0, 4).toString("ascii") === "GIF8") return ".gif";
   return null;
 }
+
+/** Mesma lógica, mas também aceita PDF — para comprovativos de pagamento (banco costuma emitir PDF). */
+export function detectProofFileExtension(buffer: Buffer): string | null {
+  if (buffer.length >= 5 && buffer.subarray(0, 5).toString("ascii") === "%PDF-") return ".pdf";
+  return detectImageExtension(buffer);
+}

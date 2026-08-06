@@ -7,9 +7,22 @@ import {
   type CreditPack,
 } from "@sigo/shared";
 import { request } from "../api/http";
+import { companiesApi, type PaymentProof } from "../api/companies";
 import { SIGO_WHATSAPP_NUMBER, formatMzn, formatPlanPriceWithVat } from "../commercialPlans";
 import Layout from "../components/Layout";
 import AlertBanner from "../components/AlertBanner";
+import SubmitPaymentProofModal from "../components/SubmitPaymentProofModal";
+
+const PROOF_STATUS_LABEL: Record<PaymentProof["status"], string> = {
+  pendente: "A aguardar aprovação",
+  aprovado: "Aprovado",
+  rejeitado: "Rejeitado",
+};
+const PROOF_STATUS_CLASS: Record<PaymentProof["status"], string> = {
+  pendente: "badge-yellow",
+  aprovado: "badge-green",
+  rejeitado: "badge-red",
+};
 
 type EntitlementsSummary = {
   planKey: string;
@@ -89,6 +102,12 @@ export default function CreditsPage() {
   const foco = params.get("foco") ?? "";
   const [ent, setEnt] = useState<EntitlementsSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [proofs, setProofs] = useState<PaymentProof[]>([]);
+  const [activatingPlan, setActivatingPlan] = useState<{ key: string; label: string; monthly: number; annual: number } | null>(null);
+
+  function reloadProofs() {
+    companiesApi.listMyPaymentProofs().then(setProofs).catch(() => undefined);
+  }
 
   useEffect(() => {
     request<EntitlementsSummary>("/companies/me/entitlements")
@@ -100,6 +119,7 @@ export default function CreditsPage() {
         // Ainda mostra packs comerciais mesmo se o resumo de uso falhar.
         setError(err instanceof Error ? err.message : "Não foi possível carregar o uso do plano.");
       });
+    reloadProofs();
   }, []);
 
   const highlightImports = foco === "importacoes";
@@ -228,8 +248,15 @@ export default function CreditsPage() {
                     <li key={f}>· {f}</li>
                   ))}
                 </ul>
-                <a href={planWhatsApp(plan.label)} target="_blank" rel="noreferrer" className="btn btn-secondary mt-4 w-full btn-sm">
-                  Pedir {plan.label}
+                <button
+                  type="button"
+                  className="btn btn-primary mt-4 w-full btn-sm"
+                  onClick={() => setActivatingPlan({ key: plan.key, label: plan.label, monthly: plan.monthlyPriceMzn!, annual: plan.annualPriceMzn ?? plan.monthlyPriceMzn! * 12 })}
+                >
+                  Activar {plan.label}
+                </button>
+                <a href={planWhatsApp(plan.label)} target="_blank" rel="noreferrer" className="action-link mt-2 block text-center text-xs">
+                  ou falar com a equipa por WhatsApp
                 </a>
               </div>
             ))}
@@ -242,7 +269,48 @@ export default function CreditsPage() {
             .
           </p>
         </section>
+
+        {proofs.length > 0 && (
+          <section className="card card-pad space-y-3">
+            <h2 className="section-title">Comprovativos enviados</h2>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs text-slate-500">
+                    <th className="pb-2 pr-4">Data</th>
+                    <th className="pb-2 pr-4">Plano</th>
+                    <th className="pb-2 pr-4">Valor</th>
+                    <th className="pb-2 pr-4">Estado</th>
+                    <th className="pb-2">Detalhe</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {proofs.map((p) => (
+                    <tr key={p.id} className="border-t border-slate-100">
+                      <td className="py-2 pr-4 tabular-nums">{new Date(p.createdAt).toLocaleDateString("pt-MZ")}</td>
+                      <td className="py-2 pr-4">{p.plan}</td>
+                      <td className="py-2 pr-4 tabular-nums">{formatMzn(Number(p.amount))}</td>
+                      <td className="py-2 pr-4"><span className={`badge ${PROOF_STATUS_CLASS[p.status]}`}>{PROOF_STATUS_LABEL[p.status]}</span></td>
+                      <td className="py-2 text-xs text-slate-500">{p.status === "rejeitado" ? p.rejectionReason : "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
       </div>
+
+      {activatingPlan && (
+        <SubmitPaymentProofModal
+          planKey={activatingPlan.key}
+          planLabel={activatingPlan.label}
+          monthlyPriceMzn={activatingPlan.monthly}
+          annualPriceMzn={activatingPlan.annual}
+          onClose={() => setActivatingPlan(null)}
+          onSubmitted={reloadProofs}
+        />
+      )}
     </Layout>
   );
 }

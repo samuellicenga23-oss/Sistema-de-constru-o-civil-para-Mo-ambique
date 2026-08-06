@@ -19,7 +19,7 @@ export async function truncateAll() {
     invoice_credit_notes, invoice_receipts, project_invoices,
     contract_variations, project_contracts,
     plants, extracted_rooms, extracted_rebar_schedules,
-    financial_entries, audit_events, site_diary_entries,
+    financial_entries, audit_events, site_diary_entries, payment_proofs,
     suppliers, supplier_material_prices, supplier_labour_prices, supplier_equipment_prices,
     purchase_orders, purchase_order_lines, stock_movements
   CASCADE`;
@@ -33,7 +33,7 @@ export async function createCompany(name: string) {
 
 export async function createUser(companyId: string | null, role: UserRole, email: string, password = "password123") {
   const passwordHash = await hashPassword(password);
-  const [user] = await db.insert(users).values({ companyId, name: "Utilizador de Teste", email, passwordHash, role }).returning();
+  const [user] = await db.insert(users).values({ companyId, name: "Utilizador de Teste", email, passwordHash, role, emailVerifiedAt: new Date() }).returning();
   return user;
 }
 

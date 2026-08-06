@@ -199,6 +199,7 @@ export async function userRoutes(app: FastifyInstance) {
         permissions,
         preferredLanguage: parsed.data.preferredLanguage ?? company?.defaultLanguage ?? "pt",
         mustChangePassword: true,
+        emailVerifiedAt: new Date(),
       })
       .returning();
     await recordAuditEvent({

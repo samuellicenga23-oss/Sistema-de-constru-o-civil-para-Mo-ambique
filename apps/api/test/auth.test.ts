@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import type { FastifyInstance } from "fastify";
+import { eq } from "drizzle-orm";
 import { buildApp } from "../src/app.js";
-import { sql } from "../src/db/index.js";
+import { db, sql } from "../src/db/index.js";
+import { users } from "../src/db/schema.js";
 import { truncateAll, createCompany, createUser } from "./helpers.js";
 
 let app: FastifyInstance;
@@ -60,5 +62,60 @@ describe("Login", () => {
       lastStatus = res.statusCode;
     }
     expect(lastStatus).toBe(429);
+  });
+});
+
+describe("Registo público", () => {
+  it("cria empresa em trial, mas bloqueia login até confirmar o email", async () => {
+    const registerRes = await app.inject({
+      method: "POST",
+      url: "/api/auth/register",
+      payload: { companyName: "Obra Nova Lda", adminName: "Dono da Obra", email: "novo@test.local", password: "password123" },
+    });
+    expect(registerRes.statusCode).toBe(201);
+    expect(registerRes.json()).toEqual({ ok: true, email: "novo@test.local" });
+
+    const loginBeforeRes = await app.inject({ method: "POST", url: "/api/auth/login", headers: { "x-forwarded-for": "198.18.1.1" }, payload: { email: "novo@test.local", password: "password123" } });
+    expect(loginBeforeRes.statusCode).toBe(403);
+    expect(loginBeforeRes.json()).toEqual(expect.objectContaining({ code: "EMAIL_NAO_VERIFICADO" }));
+
+    const [user] = await db.select().from(users).where(eq(users.email, "novo@test.local"));
+    expect(user.emailVerificationToken).toBeTruthy();
+    expect(user.emailVerifiedAt).toBeNull();
+
+    const verifyRes = await app.inject({ method: "GET", url: `/api/auth/verify-email?token=${user.emailVerificationToken}` });
+    expect(verifyRes.statusCode).toBe(302);
+    expect(verifyRes.headers["set-cookie"]).toBeDefined();
+
+    const [verifiedUser] = await db.select().from(users).where(eq(users.email, "novo@test.local"));
+    expect(verifiedUser.emailVerifiedAt).not.toBeNull();
+    expect(verifiedUser.emailVerificationToken).toBeNull();
+
+    const loginAfterRes = await app.inject({ method: "POST", url: "/api/auth/login", headers: { "x-forwarded-for": "198.18.1.2" }, payload: { email: "novo@test.local", password: "password123" } });
+    expect(loginAfterRes.statusCode).toBe(200);
+  });
+
+  it("recusa um email de token inválido ou expirado", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/auth/verify-email?token=nao-existe" });
+    expect(res.statusCode).toBe(302);
+    expect(res.headers.location).toContain("error=token_expirado");
+  });
+
+  it("recusa registar um email já existente", async () => {
+    const company = await createCompany("Empresa Existente");
+    await createUser(company.id, "admin_empresa", "existente@test.local");
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/auth/register",
+      payload: { companyName: "Outra Obra", adminName: "Outro Dono", email: "existente@test.local", password: "password123" },
+    });
+    expect(res.statusCode).toBe(409);
+  });
+
+  it("reenvio de verificação responde de forma genérica, sem revelar se a conta existe", async () => {
+    const resKnown = await app.inject({ method: "POST", url: "/api/auth/resend-verification", payload: { email: "nao-existe@test.local" } });
+    expect(resKnown.statusCode).toBe(200);
+    expect(resKnown.json()).toEqual(expect.objectContaining({ ok: true }));
   });
 });

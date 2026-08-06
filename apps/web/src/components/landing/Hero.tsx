@@ -2,19 +2,12 @@ import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import { ArrowRightIcon, PlayCircleIcon } from "lucide-react";
 import { useAuth } from "../../auth/AuthContext";
-import { SIGO_WHATSAPP_NUMBER } from "../../commercialPlans";
 import { Button } from "./ui/Button";
 import { ProductMock } from "./ProductMock";
 
-function whatsappHref() {
-  const message = "Olá Samuel. Gostaria de ver o SIGO em funcionamento para a minha empresa.";
-  return `https://wa.me/${SIGO_WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`;
-}
-
 export function Hero() {
   const { user } = useAuth();
-  const demoHref = user ? (user.role === "super_admin" ? "/admin" : "/painel") : whatsappHref();
-  const demoExternal = !user;
+  const demoHref = user ? (user.role === "super_admin" ? "/admin" : "/painel") : "/registar";
 
   return (
     <section id="inicio" className="relative overflow-hidden">
@@ -67,21 +60,12 @@ export function Hero() {
             transition={{ duration: 0.45, delay: 0.18 }}
             className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row"
           >
-            {demoExternal ? (
-              <a href={demoHref} target="_blank" rel="noreferrer" className="w-full sm:w-auto">
-                <Button size="lg" fullWidth className="sm:w-auto">
-                  <PlayCircleIcon className="h-4 w-4" />
-                  Ver o SIGO em funcionamento
-                </Button>
-              </a>
-            ) : (
-              <Link to={demoHref} className="w-full sm:w-auto">
-                <Button size="lg" fullWidth className="sm:w-auto">
-                  <PlayCircleIcon className="h-4 w-4" />
-                  Abrir plataforma
-                </Button>
-              </Link>
-            )}
+            <Link to={demoHref} className="w-full sm:w-auto">
+              <Button size="lg" fullWidth className="sm:w-auto">
+                <PlayCircleIcon className="h-4 w-4" />
+                {user ? "Abrir plataforma" : "Criar conta grátis"}
+              </Button>
+            </Link>
             <a href="#produto" className="w-full sm:w-auto">
               <Button size="lg" variant="secondary" fullWidth className="sm:w-auto">
                 Explorar a plataforma

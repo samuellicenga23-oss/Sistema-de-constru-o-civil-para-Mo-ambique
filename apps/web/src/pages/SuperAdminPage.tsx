@@ -6,6 +6,7 @@ import {
   type AdminCompanyUser,
   type Company,
   type CompanyModuleKey,
+  type PaymentProof,
   type PlatformPayment,
   type SubscriptionUpdateInput,
 } from "../api/companies";
@@ -41,6 +42,7 @@ const CYCLE_LABELS: Record<string, string> = {
 const METHOD_LABELS: Record<string, string> = {
   transferencia: "Transferência",
   mpesa: "M-Pesa",
+  emola: "e-Mola",
   cash: "Numerário",
   cartao: "Cartão",
   outro: "Outro",
@@ -227,6 +229,28 @@ export default function SuperAdminPage() {
   const [trash, setTrash] = useState<TrashedProject[]>([]);
   const [storageLoading, setStorageLoading] = useState(false);
   const [cleanupRunning, setCleanupRunning] = useState(false);
+  const [pendingProofs, setPendingProofs] = useState<PaymentProof[]>([]);
+  const [proofActionId, setProofActionId] = useState<string | null>(null);
+  const [mailEnabled, setMailEnabled] = useState<boolean | null>(null);
+  const [testingEmail, setTestingEmail] = useState(false);
+
+  async function handleTestEmail() {
+    setTestingEmail(true);
+    setError(null);
+    try {
+      const result = await companiesApi.sendTestEmail();
+      setSuccess(en ? `Test email sent to ${result.sentTo}` : `Email de teste enviado para ${result.sentTo}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao enviar email de teste");
+    } finally {
+      setTestingEmail(false);
+    }
+  }
+
+  async function reloadPendingProofs() {
+    const rows = await companiesApi.listPendingPaymentProofs("pendente");
+    setPendingProofs(rows);
+  }
 
   async function reload() {
     const [companyRows, userRows, statsData] = await Promise.all([
@@ -242,7 +266,39 @@ export default function SuperAdminPage() {
 
   useEffect(() => {
     reload().catch((err) => setError(err.message));
+    reloadPendingProofs().catch((err) => setError(err.message));
+    companiesApi.getMailStatus().then((r) => setMailEnabled(r.enabled)).catch(() => setMailEnabled(false));
   }, []);
+
+  async function handleApproveProof(proof: PaymentProof) {
+    setProofActionId(proof.id);
+    setError(null);
+    try {
+      await companiesApi.approvePaymentProof(proof.id);
+      setSuccess(`Comprovativo de ${proof.companyName ?? "empresa"} aprovado — plano ${proof.plan} activado.`);
+      await Promise.all([reloadPendingProofs(), reload()]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao aprovar comprovativo");
+    } finally {
+      setProofActionId(null);
+    }
+  }
+
+  async function handleRejectProof(proof: PaymentProof) {
+    const reason = window.prompt("Motivo da rejeição (visível para a empresa):");
+    if (!reason || !reason.trim()) return;
+    setProofActionId(proof.id);
+    setError(null);
+    try {
+      await companiesApi.rejectPaymentProof(proof.id, reason.trim());
+      setSuccess(`Comprovativo de ${proof.companyName ?? "empresa"} rejeitado.`);
+      await reloadPendingProofs();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao rejeitar comprovativo");
+    } finally {
+      setProofActionId(null);
+    }
+  }
 
   async function reloadStorage() {
     setStorageLoading(true);
@@ -746,9 +802,73 @@ export default function SuperAdminPage() {
                       })()}
                     </strong>
                   </div>
+                  <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+                    <p className="text-xs text-slate-500">{en ? "Email (SMTP)" : "Email (SMTP)"}</p>
+                    <div className="flex items-center justify-between gap-2">
+                      <strong className={mailEnabled ? "text-emerald-700" : "text-slate-500"}>
+                        {mailEnabled === null ? "…" : mailEnabled ? (en ? "Configured" : "Configurado") : (en ? "Not configured" : "Não configurado")}
+                      </strong>
+                      {mailEnabled && (
+                        <button type="button" onClick={handleTestEmail} disabled={testingEmail} className="btn btn-secondary btn-sm">
+                          {testingEmail ? "…" : en ? "Test" : "Testar"}
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
               </section>
             </div>
+
+            <section className="card p-5">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <h2 className="section-title">{en ? "Pending payment proofs" : "Comprovativos de pagamento pendentes"}</h2>
+                <span className="badge">{pendingProofs.length}</span>
+              </div>
+              {pendingProofs.length === 0 ? (
+                <p className="text-sm text-slate-500">{en ? "Nothing to review." : "Nada por rever."}</p>
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  {pendingProofs.map((proof) => (
+                    <div key={proof.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
+                      <div>
+                        <strong className="text-sm text-slate-950">{proof.companyName}</strong>
+                        <p className="text-xs text-slate-500">
+                          {getPlanDefinition(proof.plan)?.label ?? proof.plan} · {money(Number(proof.amount), proof.currency)} ·{" "}
+                          {METHOD_LABELS[proof.method] ?? proof.method}
+                          {proof.reference ? ` · ref. ${proof.reference}` : ""} · {fmtDate(proof.createdAt)}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <a
+                          href={companiesApi.paymentProofFileUrl(proof.id)}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="btn btn-secondary btn-sm"
+                        >
+                          {en ? "View file" : "Ver ficheiro"}
+                        </a>
+                        <button
+                          type="button"
+                          disabled={proofActionId === proof.id}
+                          onClick={() => handleRejectProof(proof)}
+                          className="btn btn-secondary btn-sm"
+                        >
+                          {en ? "Reject" : "Rejeitar"}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={proofActionId === proof.id}
+                          onClick={() => handleApproveProof(proof)}
+                          className="btn btn-primary btn-sm"
+                        >
+                          {proofActionId === proof.id ? "..." : en ? "Approve" : "Aprovar"}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
 
             <div className="grid gap-4 lg:grid-cols-2">
               <section className="card p-5">

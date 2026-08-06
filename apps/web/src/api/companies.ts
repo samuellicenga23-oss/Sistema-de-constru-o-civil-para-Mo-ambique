@@ -47,6 +47,27 @@ export type PlatformPayment = {
   createdAt: string;
 };
 
+export type PaymentProof = {
+  id: string;
+  companyId: string;
+  companyName?: string;
+  submittedByUserId: string;
+  plan: string;
+  billingCycle: string | null;
+  amount: string;
+  currency: string;
+  method: string;
+  reference: string | null;
+  notes: string | null;
+  filePath: string;
+  originalFileName: string | null;
+  status: "pendente" | "aprovado" | "rejeitado";
+  reviewedByUserId: string | null;
+  reviewedAt: string | null;
+  rejectionReason: string | null;
+  createdAt: string;
+};
+
 export type Company = {
   id: string;
   name: string;
@@ -287,4 +308,44 @@ export const companiesApi = {
     }
     return res.json() as Promise<Company>;
   },
+  submitPaymentProof: async (data: {
+    plan: string;
+    billingCycle?: "monthly" | "annual";
+    amount: number;
+    currency?: string;
+    method: string;
+    reference?: string;
+    notes?: string;
+    file: File;
+  }) => {
+    const form = new FormData();
+    form.append("plan", data.plan);
+    if (data.billingCycle) form.append("billingCycle", data.billingCycle);
+    form.append("amount", String(data.amount));
+    form.append("currency", data.currency ?? "MZN");
+    form.append("method", data.method);
+    if (data.reference) form.append("reference", data.reference);
+    if (data.notes) form.append("notes", data.notes);
+    form.append("file", data.file);
+    const res = await fetch("/api/companies/me/payment-proofs", { method: "POST", credentials: "include", body: form });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new ApiError(res.status, body.error ?? `Erro ${res.status}`);
+    }
+    return res.json() as Promise<PaymentProof>;
+  },
+  listMyPaymentProofs: () => request<PaymentProof[]>("/companies/me/payment-proofs"),
+  listPendingPaymentProofs: (status?: "pendente" | "aprovado" | "rejeitado") =>
+    request<PaymentProof[]>(`/admin/payment-proofs${status ? `?status=${status}` : ""}`),
+  paymentProofFileUrl: (id: string) => `/api/admin/payment-proofs/${id}/file`,
+  approvePaymentProof: (id: string, data?: { periodEnd?: string; notes?: string }) =>
+    request<{ proof: PaymentProof; payment: PlatformPayment }>(`/admin/payment-proofs/${id}/approve`, {
+      method: "POST",
+      body: JSON.stringify(data ?? {}),
+    }),
+  rejectPaymentProof: (id: string, reason: string) =>
+    request<PaymentProof>(`/admin/payment-proofs/${id}/reject`, { method: "POST", body: JSON.stringify({ reason }) }),
+
+  getMailStatus: () => request<{ enabled: boolean }>("/admin/mail/status"),
+  sendTestEmail: () => request<{ ok: true; sentTo: string }>("/admin/mail/test", { method: "POST" }),
 };

@@ -19,6 +19,7 @@ import {
 } from "../auth/session.js";
 import { requireAuth } from "../auth/middleware.js";
 import { detectImageExtension } from "../services/imageValidation.js";
+import { createTrialCompany } from "../services/companyOnboarding.js";
 import { env } from "../env.js";
 import { isCompanyUserRole, resolveRoleTemplate } from "@sigo/shared";
 
@@ -87,6 +88,9 @@ export async function authRoutes(app: FastifyInstance) {
       if (!user.isActive) {
         return reply.code(403).send({ error: "Esta conta foi desactivada. Contacte o administrador da sua empresa." });
       }
+      if (!user.emailVerifiedAt) {
+        return reply.code(403).send({ error: "Confirme o seu email antes de entrar — veja a caixa de entrada.", code: "EMAIL_NAO_VERIFICADO" });
+      }
 
       if (user.companyId) {
         const [sub] = await db
@@ -136,6 +140,108 @@ export async function authRoutes(app: FastifyInstance) {
         createdAt: user.createdAt,
       };
     }
+  );
+
+  const registerSchema = z.object({
+    companyName: z.string().trim().min(2).max(150),
+    adminName: z.string().trim().min(2).max(150),
+    email: z.string().trim().toLowerCase().email(),
+    password: z.string().min(8, "A palavra-passe deve ter pelo menos 8 caracteres"),
+  });
+
+  function verificationLink(token: string): string {
+    return `${env.publicUrl}/api/auth/verify-email?token=${token}`;
+  }
+
+  async function sendVerificationEmail(to: string, adminName: string, token: string) {
+    const { sendEmail, emailLayout } = await import("../services/mailer.js");
+    await sendEmail(
+      {
+        to,
+        subject: "SIGO — Confirme o seu email",
+        html: emailLayout(
+          "Bem-vindo ao SIGO",
+          `<p>Olá ${adminName}, falta um passo para começar: confirme o seu email para activar a conta e o período de avaliação de 14 dias.</p>`,
+          verificationLink(token),
+          "Confirmar email",
+        ),
+      },
+      app.log,
+    );
+  }
+
+  // Registo público (self-service) — cria a empresa já em trial de 14 dias, mas a conta só
+  // consegue entrar depois de confirmar o email (ver gate no /api/auth/login acima). Nunca
+  // revela se um email já existe na resposta de erro genérica — evita enumeração de contas.
+  app.post(
+    "/api/auth/register",
+    { config: { rateLimit: { max: 5, timeWindow: "1 hour" } } },
+    async (request, reply) => {
+      const parsed = registerSchema.safeParse(request.body);
+      if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+
+      const [existing] = await db.select({ id: users.id }).from(users).where(eq(users.email, parsed.data.email)).limit(1);
+      if (existing) {
+        return reply.code(409).send({ error: "Já existe uma conta com este email. Experimente entrar ou recuperar a palavra-passe." });
+      }
+
+      const passwordHash = await hashPassword(parsed.data.password);
+      const token = randomBytes(32).toString("hex");
+      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+      const { admin } = await createTrialCompany({
+        companyName: parsed.data.companyName,
+        adminName: parsed.data.adminName,
+        adminEmail: parsed.data.email,
+        adminPasswordHash: passwordHash,
+        mustChangePassword: false,
+        emailVerifiedAt: null,
+        emailVerificationToken: token,
+        emailVerificationExpiresAt: expiresAt,
+      });
+
+      await sendVerificationEmail(admin.email, admin.name, token);
+
+      return reply.code(201).send({ ok: true, email: admin.email });
+    },
+  );
+
+  app.get("/api/auth/verify-email", async (request, reply) => {
+    const { token } = request.query as { token?: string };
+    if (!token) return reply.redirect(loginErrorUrl("token_invalido"));
+
+    const [user] = await db.select().from(users).where(eq(users.emailVerificationToken, token)).limit(1);
+    if (!user || !user.emailVerificationExpiresAt || user.emailVerificationExpiresAt < new Date()) {
+      return reply.redirect(loginErrorUrl("token_expirado"));
+    }
+
+    await db
+      .update(users)
+      .set({ emailVerifiedAt: new Date(), emailVerificationToken: null, emailVerificationExpiresAt: null })
+      .where(eq(users.id, user.id));
+
+    const session = await createSession(user.id, sessionMetaOf(request));
+    reply.setCookie("sid", session.id, { ...COOKIE_OPTS, expires: session.expiresAt });
+    return reply.redirect(`${env.frontendUrl}/painel?bemvindo=1`);
+  });
+
+  app.post(
+    "/api/auth/resend-verification",
+    { config: { rateLimit: { max: 3, timeWindow: "1 hour" } } },
+    async (request, reply) => {
+      const parsed = z.object({ email: z.string().trim().toLowerCase().email() }).safeParse(request.body);
+      if (!parsed.success) return reply.code(400).send({ error: "Email inválido" });
+
+      const [user] = await db.select().from(users).where(eq(users.email, parsed.data.email)).limit(1);
+      if (user && !user.emailVerifiedAt) {
+        const token = randomBytes(32).toString("hex");
+        const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+        await db.update(users).set({ emailVerificationToken: token, emailVerificationExpiresAt: expiresAt }).where(eq(users.id, user.id));
+        await sendVerificationEmail(user.email, user.name, token);
+      }
+      // Resposta genérica sempre — não revela se a conta existe ou já está verificada.
+      return { ok: true, message: "Se existir uma conta por confirmar com este email, foi enviado um novo link." };
+    },
   );
 
   app.get("/api/auth/config", async () => {
@@ -219,6 +325,9 @@ export async function authRoutes(app: FastifyInstance) {
       }
       if (!user.isActive) {
         return reply.redirect(loginErrorUrl("conta_desactivada"));
+      }
+      if (!user.emailVerifiedAt) {
+        return reply.redirect(loginErrorUrl("email_nao_verificado"));
       }
 
       if (user.companyId) {

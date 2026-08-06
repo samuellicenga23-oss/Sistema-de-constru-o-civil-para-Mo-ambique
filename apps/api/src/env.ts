@@ -55,4 +55,18 @@ export const env = {
   // sítio certo. Só é preciso definir em desenvolvimento, onde o Vite corre numa porta diferente
   // da API (ex: FRONTEND_URL=http://localhost:5273).
   frontendUrl: process.env.FRONTEND_URL ?? "",
+  // URL pública e absoluta do site — para links dentro de emails, que (ao contrário de um
+  // redirect no browser) não têm uma página "actual" para resolver um caminho relativo contra.
+  // `frontendUrl` fica vazio de propósito em produção (mesma origem); este NUNCA pode ficar
+  // vazio em produção, ou os links nos emails saem partidos. Defina como "https://sigomz.com".
+  publicUrl: process.env.PUBLIC_URL || process.env.FRONTEND_URL || "http://localhost:5273",
+  // Envio de email transaccional (notificações, comprovativos, subscrição a expirar). Sem estas
+  // três variáveis definidas, o mailer fica "desligado" — regista no log em vez de enviar, para
+  // nunca rebentar um pedido só porque o email falhou. Gmail SMTP com "App Password" é o caminho
+  // mais simples sem custos (myaccount.google.com/apppasswords, exige verificação em 2 passos).
+  smtpHost: process.env.SMTP_HOST || null,
+  smtpPort: Number(process.env.SMTP_PORT ?? 587),
+  smtpUser: process.env.SMTP_USER || null,
+  smtpPass: process.env.SMTP_PASS || null,
+  mailFrom: process.env.MAIL_FROM || process.env.SMTP_USER || null,
 };

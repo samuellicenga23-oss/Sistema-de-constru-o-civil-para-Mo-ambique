@@ -14,6 +14,8 @@ const GOOGLE_ERROR_MESSAGES: Record<string, string> = {
   conta_google_nao_encontrada: "Não existe nenhuma conta SIGO com este email. Peça ao administrador da sua empresa para a criar primeiro.",
   conta_desactivada: "Esta conta foi desactivada. Contacte o administrador da sua empresa.",
   subscricao_suspensa: "A subscrição da sua empresa está suspensa. Contacte o suporte.",
+  email_nao_verificado: "Confirme o seu email antes de entrar — veja a caixa de entrada.",
+  token_expirado: "Este link de confirmação expirou ou é inválido. Peça um novo abaixo.",
 };
 
 export default function LoginPage() {
@@ -31,6 +33,9 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [googleEnabled, setGoogleEnabled] = useState(false);
+  const [needsVerification, setNeedsVerification] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [resendMessage, setResendMessage] = useState<string | null>(null);
 
   useEffect(() => {
     document.title = "Entrar — SIGO";
@@ -42,6 +47,7 @@ export default function LoginPage() {
   useEffect(() => {
     const code = searchParams.get("error");
     if (code) setError(GOOGLE_ERROR_MESSAGES[code] ?? "Não foi possível entrar com Google.");
+    if (code === "email_nao_verificado" || code === "token_expirado") setNeedsVerification(true);
   }, [searchParams]);
 
   useEffect(() => {
@@ -60,15 +66,36 @@ export default function LoginPage() {
     e.preventDefault();
     if (submitting) return;
     setError(null);
+    setNeedsVerification(false);
+    setResendMessage(null);
     setSubmitting(true);
     try {
       const loggedInUser = await login(email.trim(), password);
       navigate(loggedInUser.mustChangePassword ? "/perfil?password=required" : loggedInUser.role === "super_admin" ? "/admin" : "/painel");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Erro ao entrar");
+      setNeedsVerification(err instanceof ApiError && err.code === "EMAIL_NAO_VERIFICADO");
       window.setTimeout(() => document.getElementById(passwordId)?.focus(), 0);
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleResend() {
+    setResending(true);
+    setResendMessage(null);
+    try {
+      const res = await fetch("/api/auth/resend-verification", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim() }),
+      });
+      const data = await res.json();
+      setResendMessage(data.message ?? "Se existir uma conta por confirmar com este email, foi enviado um novo link.");
+    } catch {
+      setResendMessage("Não foi possível reenviar agora. Tente novamente.");
+    } finally {
+      setResending(false);
     }
   }
 
@@ -180,12 +207,23 @@ export default function LoginPage() {
               </div>
             </div>
 
-            <div id={errorId} aria-live="polite" className="mt-4 min-h-0">
+            <div id={errorId} aria-live="polite" className="mt-4 min-h-0 space-y-2">
               {error && (
                 <AlertBanner tone="error" onDismiss={() => setError(null)}>
                   {error}
                 </AlertBanner>
               )}
+              {needsVerification && !resendMessage && (
+                <button
+                  type="button"
+                  onClick={handleResend}
+                  disabled={resending}
+                  className="text-[13px] font-semibold text-teal-700 underline-offset-2 hover:underline disabled:opacity-60"
+                >
+                  {resending ? "A reenviar..." : "Reenviar email de confirmação"}
+                </button>
+              )}
+              {resendMessage && <AlertBanner tone="info">{resendMessage}</AlertBanner>}
             </div>
 
             <Button type="submit" size="lg" fullWidth loading={submitting} className="mt-5">
@@ -226,8 +264,14 @@ export default function LoginPage() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.4, delay: 0.12 }}
-          className="mt-8 text-center"
+          className="mt-8 space-y-3 text-center"
         >
+          <p className="text-[13.5px] text-ink-400">
+            Ainda não tem conta?{" "}
+            <Link to="/registar" className="font-semibold text-teal-700 hover:underline">
+              Criar conta grátis — 14 dias
+            </Link>
+          </p>
           <Link
             to="/"
             className="text-[13.5px] font-semibold text-ink-400 transition-colors hover:text-teal-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal"

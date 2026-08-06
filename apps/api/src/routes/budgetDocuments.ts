@@ -29,6 +29,8 @@ import {
 } from "../services/measurementImportJobs.js";
 import { documentLockedMessage, evaluateDocumentReadiness } from "../services/documentRules.js";
 import { recordAuditEvent } from "../services/auditTrail.js";
+import { sendEmail, emailLayout } from "../services/mailer.js";
+import { env } from "../env.js";
 import { CURRENCIES, DEFAULT_IVA_RATE, UNITS, LINE_ITEM_KINDS, fixedSigo } from "@sigo/shared";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista"] as const;
@@ -264,6 +266,48 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
       after: { status: updated.status, title: updated.title, documentType: updated.documentType, submittedByUserId: updated.submittedByUserId, approvedByUserId: updated.approvedByUserId },
       metadata: parsed.data.decisionNote ? { decisionNote: parsed.data.decisionNote } : null,
     });
+
+    const docLabel = document.documentType === "medicao" ? "medição" : "orçamento";
+    if (parsed.data.status === "submetido") {
+      const admins = await db
+        .select({ email: users.email })
+        .from(users)
+        .where(and(eq(users.companyId, companyId), eq(users.role, "admin_empresa"), eq(users.isActive, true)));
+      const recipients = admins.map((a) => a.email).filter((e) => e !== request.currentUser!.email);
+      if (recipients.length) {
+        void sendEmail(
+          {
+            to: recipients,
+            subject: `SIGO — «${updated.title}» pendente de aprovação`,
+            html: emailLayout(
+              `Uma ${docLabel} aguarda a sua aprovação`,
+              `<p><strong>${updated.title}</strong> foi submetida por ${request.currentUser!.name} e precisa de ser aprovada.</p>`,
+              `${env.publicUrl}/documentos/${id}`,
+              "Rever documento",
+            ),
+          },
+          request.log,
+        );
+      }
+    } else if (parsed.data.status === "aprovado" && document.submittedByUserId) {
+      const [submitter] = await db.select({ email: users.email }).from(users).where(eq(users.id, document.submittedByUserId)).limit(1);
+      if (submitter?.email) {
+        void sendEmail(
+          {
+            to: submitter.email,
+            subject: `SIGO — «${updated.title}» aprovado`,
+            html: emailLayout(
+              `A sua ${docLabel} foi aprovada`,
+              `<p><strong>${updated.title}</strong> foi aprovada por ${request.currentUser!.name}.</p>`,
+              `${env.publicUrl}/documentos/${id}`,
+              "Ver documento",
+            ),
+          },
+          request.log,
+        );
+      }
+    }
+
     return updated;
   });
 

@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from "./auth/AuthContext";
 import { canAccessPath, isModuleEnabled } from "./permissions";
 import LoadingState from "./components/LoadingState";
 import LoginPage from "./pages/LoginPage";
+import RegisterPage from "./pages/RegisterPage";
 import PublicLandingPage from "./pages/PublicLandingPage";
 import CheckoutPage from "./pages/CheckoutPage";
 
@@ -61,6 +62,7 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/registar" element={<RegisterPage />} />
       <Route path="/" element={<PublicLandingPage />} />
       <Route path="/checkout/:planSlug" element={<CheckoutPage />} />
       <Route
