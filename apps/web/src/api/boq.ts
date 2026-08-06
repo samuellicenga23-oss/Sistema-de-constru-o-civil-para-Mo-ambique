@@ -366,6 +366,9 @@ export type MeasurementImportPreview = {
     compositionName: string | null;
     compositionId: string | null;
     priceSource: "file" | "composition" | "none";
+    codeCollision?: boolean;
+    needsReview?: boolean;
+    willCreateComposition?: boolean;
   }>;
   catalog: Array<{
     code: string;

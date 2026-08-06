@@ -2,6 +2,7 @@ import { buildApp } from "./app.js";
 import { sql } from "./db/index.js";
 import { env } from "./env.js";
 import { resumePlantProcessingJobs } from "./routes/plants.js";
+import { resumeMeasurementImportJobs } from "./services/measurementImportJobs.js";
 
 const app = await buildApp();
 let shuttingDown = false;
@@ -38,6 +39,8 @@ try {
   await app.listen({ port: env.port, host: "0.0.0.0" });
   const resumedPlantJobs = await resumePlantProcessingJobs();
   if (resumedPlantJobs > 0) app.log.info({ count: resumedPlantJobs }, "Resumed plant jobs");
+  const resumedImportJobs = await resumeMeasurementImportJobs();
+  if (resumedImportJobs > 0) app.log.info({ count: resumedImportJobs }, "Resumed measurement import jobs");
 } catch (error) {
   app.log.fatal(error, "API failed to start");
   await sql.end({ timeout: 5 }).catch(() => undefined);

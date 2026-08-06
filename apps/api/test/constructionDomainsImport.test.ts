@@ -72,3 +72,100 @@ describe("mapeamento SIGO — casos do mapa de qty", () => {
     expect(hit?.compositionName).not.toMatch(/Vala|fossa|infiltra/i);
   });
 });
+
+describe("código igual / composição não confiável", () => {
+  it("marca código igual com domínio diferente como não confiável", async () => {
+    const { catalogCompositionUntrusted } = await import("../src/services/measurementImport.js");
+    expect(
+      catalogCompositionUntrusted(
+        "Pintura de paredes interiores com tinta óleo",
+        "Cobertura em chapa metálica ondulada",
+        "Cobertura em chapa zincada",
+      ),
+    ).toBe(true);
+  });
+
+  it("aceita código igual com descrição alinhada", async () => {
+    const { catalogCompositionUntrusted } = await import("../src/services/measurementImport.js");
+    expect(
+      catalogCompositionUntrusted(
+        "Cobertura em chapa metálica ondulada",
+        "Cobertura em chapa metálica ondulada tipo IBR",
+        "Cobertura em chapa zincada",
+      ),
+    ).toBe(false);
+  });
+
+  it("extrai snapshot estável das linhas do preview", async () => {
+    const { parsedRowsFromPreview } = await import("../src/services/measurementImport.js");
+    const snap = parsedRowsFromPreview({
+      rows: [
+        {
+          rowKey: "PDF|1|10.2",
+          sheet: "PDF",
+          rowNumber: 1,
+          code: "10.2",
+          quantity: 12,
+          description: "Pintura interior",
+          unitRaw: "m2",
+          unit: "m2",
+          scope: "",
+          unitPrice: null,
+          action: "map",
+          targetCode: "10.2",
+          targetItemId: null,
+          targetDescription: "Pintura interior",
+          matchMethod: "code",
+          confidence: 0.45,
+          note: "x",
+          compositionName: null,
+          compositionId: null,
+          priceSource: "composition",
+          codeCollision: true,
+          needsReview: true,
+          willCreateComposition: false,
+        },
+      ],
+      catalog: [],
+      compositionOptions: [],
+      aiUsed: false,
+      aiError: null,
+      rowsRead: 1,
+    });
+    expect(snap).toEqual([
+      {
+        rowKey: "PDF|1|10.2",
+        sheet: "PDF",
+        rowNumber: 1,
+        code: "10.2",
+        quantity: 12,
+        description: "Pintura interior",
+        unitRaw: "m2",
+        unit: "m2",
+        scope: "",
+        unitPrice: null,
+      },
+    ]);
+  });
+});
+
+describe("memória de importação", () => {
+  it("gera chaves estáveis por código+descrição e por descrição", async () => {
+    const { importMappingCodeDescKey, importMappingDescriptionKey, lookupImportMemory } = await import(
+      "../src/services/importCompositionMemory.js"
+    );
+    expect(importMappingCodeDescKey("10.2", "Pintura de paredes")).toBe(importMappingCodeDescKey("10,2", "pintura de paredes"));
+    expect(importMappingDescriptionKey("Pintura interior")).toMatch(/^d:pintura interior$/);
+
+    const memory = {
+      byKey: new Map([
+        [
+          importMappingCodeDescKey("10.2", "Pintura de paredes"),
+          { compositionId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", compositionName: "Pintura acrílica", matchKey: "x" },
+        ],
+      ]),
+    };
+    expect(lookupImportMemory(memory, "10.2", "Pintura de paredes")?.compositionName).toBe("Pintura acrílica");
+    expect(lookupImportMemory(memory, "99", "Outra coisa")).toBeNull();
+  });
+});

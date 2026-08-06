@@ -9,6 +9,7 @@ import QuickEstimateWizard from "../components/QuickEstimateWizard";
 import CalculationReportView from "../components/CalculationReportView";
 import MaterialsByPhaseModal from "../components/MaterialsByPhaseModal";
 import MeasurementImportReviewModal from "../components/MeasurementImportReviewModal";
+import ImportCompositionReviewWizard from "../components/ImportCompositionReviewWizard";
 import ConfirmDialog from "../components/ConfirmDialog";
 import ModalPortal from "../components/ModalPortal";
 import Layout from "../components/Layout";
@@ -30,16 +31,22 @@ function money(value: number, currency: string) {
   return `${value.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`;
 }
 
-function ImportCreatedCompositionsNotice({ result }: { result: MeasurementImportResult }) {
+function ImportCreatedCompositionsNotice({
+  result,
+  onReviewInsumos,
+}: {
+  result: MeasurementImportResult;
+  onReviewInsumos?: () => void;
+}) {
   const created = result.createdCompositions ?? [];
   if (!created.length && !(result.compositionsCreated ?? 0)) return null;
   return (
     <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-950">
       <p className="font-semibold text-amber-950">
-        {(result.compositionsCreated ?? created.length)} composição(ões) nova(s) — verifique no Catálogo
+        {(result.compositionsCreated ?? created.length)} composição(ões) nova(s) — verifique insumos
       </p>
       <p className="mt-1 text-amber-900/90">
-        Confirme rendimentos, insumos e preços antes de usar estes valores em orçamento.
+        Confirme rendimentos, materiais e preços antes de usar estes valores em orçamento.
       </p>
       {created.length > 0 && (
         <ul className="mt-2.5 max-h-40 space-y-1.5 overflow-y-auto">
@@ -55,9 +62,16 @@ function ImportCreatedCompositionsNotice({ result }: { result: MeasurementImport
           ))}
         </ul>
       )}
-      <Link to="/catalogo" className="mt-3 inline-flex text-xs font-semibold text-brand-800 hover:underline">
-        Abrir Catálogo de Preços →
-      </Link>
+      <div className="mt-3 flex flex-wrap gap-3">
+        {created.length > 0 && onReviewInsumos && (
+          <button type="button" onClick={onReviewInsumos} className="text-xs font-semibold text-brand-800 hover:underline">
+            Rever insumos agora →
+          </button>
+        )}
+        <Link to="/catalogo" className="text-xs font-semibold text-brand-800 hover:underline">
+          Abrir Catálogo de Preços →
+        </Link>
+      </div>
     </div>
   );
 }
@@ -65,9 +79,11 @@ function ImportCreatedCompositionsNotice({ result }: { result: MeasurementImport
 function MeasurementImportResultCard({
   result,
   onDismiss,
+  onReviewInsumos,
 }: {
   result: MeasurementImportResult;
   onDismiss?: () => void;
+  onReviewInsumos?: () => void;
 }) {
   return (
     <div className="mt-4 space-y-3">
@@ -78,7 +94,7 @@ function MeasurementImportResultCard({
           {(result.compositionsCreated ?? 0) > 0 ? ` (${result.compositionsCreated} nova(s))` : ""}.
         </p>
       </AlertBanner>
-      <ImportCreatedCompositionsNotice result={result} />
+      <ImportCreatedCompositionsNotice result={result} onReviewInsumos={onReviewInsumos} />
       {result.unmatched.length > 0 && (
         <AlertBanner tone="warning">
           <p className="font-medium">{result.unmatched.length} linha(s) não foram aplicadas</p>
@@ -142,6 +158,7 @@ export default function BudgetDocumentPage() {
   const [importPreview, setImportPreview] = useState<MeasurementImportPreview | null>(null);
   const [importJobId, setImportJobId] = useState<string | null>(null);
   const [applyingImport, setApplyingImport] = useState(false);
+  const [showImportInsumosWizard, setShowImportInsumosWizard] = useState(false);
   const [showRepriceConfirm, setShowRepriceConfirm] = useState(false);
   const [repricing, setRepricing] = useState(false);
   const [repriceResult, setRepriceResult] = useState<BudgetRepriceResult | null>(null);
@@ -411,6 +428,9 @@ export default function BudgetDocumentPage() {
       setImportResult(result);
       setImportPreview(null);
       setImportJobId(null);
+      if ((result.createdCompositions?.length ?? 0) > 0) {
+        setShowImportInsumosWizard(true);
+      }
       const { dismissImportProcessingTask } = await import("../services/importProcessingTracker");
       dismissImportProcessingTask(jobId);
       await reload();
@@ -888,7 +908,15 @@ export default function BudgetDocumentPage() {
                   </button>
                 </form>
                 {importResult && (
-                  <MeasurementImportResultCard result={importResult} onDismiss={() => setImportResult(null)} />
+                  <MeasurementImportResultCard
+                    result={importResult}
+                    onDismiss={() => setImportResult(null)}
+                    onReviewInsumos={
+                      (importResult.createdCompositions?.length ?? 0) > 0
+                        ? () => setShowImportInsumosWizard(true)
+                        : undefined
+                    }
+                  />
                 )}
               </div>
             </section>
@@ -1175,7 +1203,15 @@ export default function BudgetDocumentPage() {
                 </button>
               </form>
               {importResult && (
-                <MeasurementImportResultCard result={importResult} onDismiss={() => setImportResult(null)} />
+                <MeasurementImportResultCard
+                  result={importResult}
+                  onDismiss={() => setImportResult(null)}
+                  onReviewInsumos={
+                    (importResult.createdCompositions?.length ?? 0) > 0
+                      ? () => setShowImportInsumosWizard(true)
+                      : undefined
+                  }
+                />
               )}
             </div>
           </section>
@@ -1374,6 +1410,13 @@ export default function BudgetDocumentPage() {
             setImportJobId(null);
           }}
           onApply={applyImportReview}
+        />
+      )}
+
+      {showImportInsumosWizard && (importResult?.createdCompositions?.length ?? 0) > 0 && (
+        <ImportCompositionReviewWizard
+          compositions={importResult!.createdCompositions!}
+          onClose={() => setShowImportInsumosWizard(false)}
         />
       )}
 

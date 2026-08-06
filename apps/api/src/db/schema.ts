@@ -322,6 +322,30 @@ export const workItemTemplates = pgTable("work_item_templates", {
   isActive: boolean("is_active").notNull().default(true),
 });
 
+/** Memória da empresa: código/descrição de mapa → composição escolhida em importações anteriores. */
+export const importCompositionMappings = pgTable(
+  "import_composition_mappings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    matchKey: varchar("match_key", { length: 220 }).notNull(),
+    sourceCode: varchar("source_code", { length: 30 }),
+    sourceDescription: text("source_description"),
+    compositionId: uuid("composition_id")
+      .notNull()
+      .references(() => costCompositions.id, { onDelete: "cascade" }),
+    hitCount: integer("hit_count").notNull().default(1),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    unique("import_composition_mappings_company_key").on(table.companyId, table.matchKey),
+    index("import_composition_mappings_company_idx").on(table.companyId),
+  ],
+);
+
 // ---------- Projecto e Mapa de Quantidades ----------
 
 export const projects = pgTable("projects", {
@@ -457,6 +481,34 @@ export const budgetDocuments = pgTable("budget_documents", {
     | null
   >(),
 });
+
+/** Jobs persistentes de importação de mapas (sobrevivem a restart da API). */
+export const measurementImportJobsTable = pgTable(
+  "measurement_import_jobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    documentId: uuid("document_id")
+      .notNull()
+      .references(() => budgetDocuments.id, { onDelete: "cascade" }),
+    fileName: varchar("file_name", { length: 300 }).notNull(),
+    filePath: text("file_path").notNull(),
+    status: varchar("status", { length: 20 }).notNull().default("pendente"),
+    progress: integer("progress").notNull().default(0),
+    stage: varchar("stage", { length: 200 }),
+    errorMessage: text("error_message"),
+    preview: jsonb("preview").$type<Record<string, unknown> | null>(),
+    parsedRows: jsonb("parsed_rows").$type<unknown[] | null>(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    index("measurement_import_jobs_doc_idx").on(table.documentId, table.updatedAt),
+    index("measurement_import_jobs_status_idx").on(table.status, table.updatedAt),
+  ],
+);
 
 export const budgetSections = pgTable("budget_sections", {
   id: uuid("id").primaryKey().defaultRandom(),

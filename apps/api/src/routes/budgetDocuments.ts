@@ -694,7 +694,7 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
     if (quota) {
       return reply.code(403).send({ error: quota.error, code: quota.code, upgradeHint: quota.upgradeHint, actionPath: quota.actionPath });
     }
-    const job = enqueueMeasurementImportJob({
+    const job = await enqueueMeasurementImportJob({
       companyId,
       documentId: id,
       buffer,
@@ -709,7 +709,7 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
     const companyId = companyIdOf(request);
     const document = await assertDocumentOwned(id, companyId);
     if (!document) return reply.code(404).send({ error: "Documento não encontrado" });
-    const job = getMeasurementImportJob(jobId, companyId, id);
+    const job = await getMeasurementImportJob(jobId, companyId, id);
     if (!job) return reply.code(404).send({ error: "Trabalho de importação não encontrado ou expirado" });
     return job;
   });
