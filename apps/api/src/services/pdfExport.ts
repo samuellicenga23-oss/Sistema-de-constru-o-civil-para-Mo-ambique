@@ -1,17 +1,17 @@
 import puppeteer from "puppeteer";
 import type { BudgetDocumentSummary, LineItemNode, SectionNode } from "./boqEngine.js";
+import type { CompanyBrand } from "./companyBrand.js";
+import {
+  escapeHtml,
+  pdfChromeStyles,
+  pdfFooterHtml,
+  pdfLetterheadHtml,
+} from "./documentChrome.js";
 
 function money(value: number) {
   return value.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-function escapeHtml(text: string) {
-  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-// Gera as linhas <tr> de um nó e dos seus filhos, recursivamente.
-// Lição do projecto ADIN: nunca usar CSS Grid/multi-column para conteúdo que pagina no
-// Puppeteer — só <table> nativa sequencial pagina correctamente (thead repete-se).
 function renderNodeRows(node: LineItemNode, depth: number): string {
   const indent = depth * 16;
   const isChapterLike = node.kind === "capitulo" || node.kind === "grupo";
@@ -44,10 +44,10 @@ function renderSection(section: SectionNode): string {
     .join("");
 
   return `
-    <h2>${escapeHtml(section.name)}</h2>
+    <h2 class="doc-section">${escapeHtml(section.name)}</h2>
     <table>
       <thead>
-        <tr><th>ITEM</th><th>DESCRIÇÃO</th><th>UN</th><th>QUANT.</th><th>PREÇO UNIT.</th><th>PREÇO TOTAL</th></tr>
+        <tr><th class="doc-th">ITEM</th><th class="doc-th">DESCRIÇÃO</th><th class="doc-th">UN</th><th class="doc-th">QUANT.</th><th class="doc-th">PREÇO UNIT.</th><th class="doc-th">PREÇO TOTAL</th></tr>
       </thead>
       <tbody>
         ${chapterBlocks}
@@ -56,9 +56,17 @@ function renderSection(section: SectionNode): string {
     </table>`;
 }
 
-function buildHtml(summary: BudgetDocumentSummary): string {
+function buildHtml(summary: BudgetDocumentSummary, brand: CompanyBrand): string {
   const { document, sections, sellingSubtotal, contingencias, subtotal2, iva, total } = summary;
+  const accent = brand.primaryColor || "#ED6C22";
   const sectionsHtml = sections.map(renderSection).join("");
+  const subtitle = [
+    document.revision ? `Revisão ${document.revision}` : null,
+    document.fileNumber ? `Nº ${document.fileNumber}` : null,
+    document.currency,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return `<!doctype html>
 <html lang="pt">
@@ -66,40 +74,29 @@ function buildHtml(summary: BudgetDocumentSummary): string {
 <meta charset="utf-8" />
 <style>
   * { box-sizing: border-box; }
-  body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: #1e1b4b; margin: 24px; }
-  h1 { font-size: 16px; margin: 0 0 4px; }
-  h2 { font-size: 13px; margin: 18px 0 6px; color: #312e81; }
-  .header { display: flex; justify-content: space-between; border-bottom: 2px solid #312e81; padding-bottom: 8px; margin-bottom: 12px; }
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: #14213d; margin: 22px; }
   table { width: 100%; border-collapse: collapse; margin-bottom: 4px; }
   thead { display: table-header-group; }
   tr { break-inside: avoid; }
   th, td { border-bottom: 1px solid #e5e7eb; padding: 3px 6px; text-align: left; }
-  th { background: #eef2ff; font-size: 10px; }
+  th { font-size: 10px; }
   td.code { width: 50px; color: #6b7280; }
-  td.num, th.num { text-align: right; }
   .num { text-align: right; }
   .chapter-row { font-weight: bold; }
   .note-row { font-style: italic; color: #6b7280; }
-  .subtotal-row { font-weight: bold; background: #f5f5ff; }
-  .total-row { font-weight: bold; background: #e0e7ff; }
+  .subtotal-row { font-weight: bold; background: #f8fafc; }
+  .total-row { font-weight: bold; background: #f1f5f9; }
   .resumo { margin-top: 24px; page-break-before: always; }
   .resumo table { width: 60%; margin-left: auto; }
-  .resumo .grand-total td { font-size: 14px; font-weight: bold; border-top: 2px solid #312e81; }
+  .resumo .grand-total td { font-size: 14px; font-weight: bold; border-top: 2px solid ${escapeHtml(accent)}; }
+  ${pdfChromeStyles(accent)}
 </style>
 </head>
 <body>
-  <div class="header">
-    <div>
-      <h1>${escapeHtml(document.title)}</h1>
-      <div>Revisão: ${escapeHtml(document.revision ?? "-")} ${document.fileNumber ? `· Nº ${escapeHtml(document.fileNumber)}` : ""}</div>
-    </div>
-    <div>${document.currency}</div>
-  </div>
-
+  ${pdfLetterheadHtml(brand, { title: document.title, subtitle })}
   ${sectionsHtml}
-
   <div class="resumo">
-    <h2>RESUMO</h2>
+    <h2 class="doc-section">RESUMO</h2>
     <table>
       ${sections
         .map((s) => `<tr><td>${escapeHtml(s.name)}</td><td class="num">${money(s.sellingTotal)}</td></tr>`)
@@ -111,16 +108,21 @@ function buildHtml(summary: BudgetDocumentSummary): string {
       <tr class="grand-total"><td>VALOR TOTAL</td><td class="num">${money(total)} ${document.currency}</td></tr>
     </table>
   </div>
+  ${pdfFooterHtml(brand, "Orçamento / mapa de quantidades")}
 </body>
 </html>`;
 }
 
-export async function buildBudgetDocumentPdf(summary: BudgetDocumentSummary): Promise<Buffer> {
+export async function buildBudgetDocumentPdf(summary: BudgetDocumentSummary, brand: CompanyBrand): Promise<Buffer> {
   const browser = await puppeteer.launch({ args: ["--no-sandbox", "--disable-setuid-sandbox"] });
   try {
     const page = await browser.newPage();
-    await page.setContent(buildHtml(summary), { waitUntil: "networkidle0" });
-    const pdf = await page.pdf({ format: "A4", printBackground: true, margin: { top: "15mm", bottom: "15mm", left: "12mm", right: "12mm" } });
+    await page.setContent(buildHtml(summary, brand), { waitUntil: "networkidle0" });
+    const pdf = await page.pdf({
+      format: "A4",
+      printBackground: true,
+      margin: { top: "14mm", bottom: "16mm", left: "12mm", right: "12mm" },
+    });
     return Buffer.from(pdf);
   } finally {
     await browser.close();
@@ -137,28 +139,42 @@ function renderMeasurementNodeRows(node: LineItemNode, depth: number): string {
   </tr>${node.children.map((child) => renderMeasurementNodeRows(child, depth + 1)).join("")}`;
 }
 
-export async function buildMeasurementDocumentPdf(summary: BudgetDocumentSummary): Promise<Buffer> {
-  const sections = summary.sections.map((section) => `
-    <h2>${escapeHtml(section.name)}</h2>
+export async function buildMeasurementDocumentPdf(summary: BudgetDocumentSummary, brand: CompanyBrand): Promise<Buffer> {
+  const accent = brand.primaryColor || "#ED6C22";
+  const sections = summary.sections
+    .map(
+      (section) => `
+    <h2 class="doc-section">${escapeHtml(section.name)}</h2>
     <table>
-      <thead><tr><th>ITEM</th><th>DESCRIÇÃO</th><th>UN</th><th>QUANTIDADE</th></tr></thead>
+      <thead><tr><th class="doc-th">ITEM</th><th class="doc-th">DESCRIÇÃO</th><th class="doc-th">UN</th><th class="doc-th">QUANTIDADE</th></tr></thead>
       <tbody>${section.items.map((node) => renderMeasurementNodeRows(node, 0)).join("")}</tbody>
-    </table>`).join("");
+    </table>`,
+    )
+    .join("");
   const html = `<!doctype html><html lang="pt"><head><meta charset="utf-8" /><style>
-    *{box-sizing:border-box} body{font-family:Arial,sans-serif;font-size:11px;color:#172033;margin:24px}
-    h1{font-size:17px;margin:0 0 3px} h2{font-size:13px;margin:18px 0 6px}
-    .header{border-bottom:2px solid #172033;padding-bottom:8px;margin-bottom:12px}
+    *{box-sizing:border-box} body{font-family:Arial,sans-serif;font-size:11px;color:#14213d;margin:22px}
     table{width:100%;border-collapse:collapse} thead{display:table-header-group} tr{break-inside:avoid}
     th,td{border-bottom:1px solid #dfe3e8;padding:4px 6px;text-align:left}
-    th{background:#f1f4f7;font-size:10px}.code{width:55px;color:#64748b}.num{text-align:right}
+    th{font-size:10px}.code{width:55px;color:#64748b}.num{text-align:right}
     .chapter-row{font-weight:bold;background:#f8fafc}.note-row{font-style:italic;color:#64748b}
-  </style></head><body><div class="header"><h1>Mapa de Medições e Quantidades</h1>
-  <div>${escapeHtml(summary.document.title)} · revisão ${escapeHtml(summary.document.revision ?? "-")}</div></div>${sections}</body></html>`;
+    ${pdfChromeStyles(accent)}
+  </style></head><body>
+  ${pdfLetterheadHtml(brand, {
+    title: "Mapa de Medições e Quantidades",
+    subtitle: `${summary.document.title} · revisão ${summary.document.revision ?? "-"}`,
+  })}
+  ${sections}
+  ${pdfFooterHtml(brand, "Medições")}
+  </body></html>`;
   const browser = await puppeteer.launch({ args: ["--no-sandbox", "--disable-setuid-sandbox"] });
   try {
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: "networkidle0" });
-    const pdf = await page.pdf({ format: "A4", printBackground: true, margin: { top: "15mm", bottom: "15mm", left: "12mm", right: "12mm" } });
+    const pdf = await page.pdf({
+      format: "A4",
+      printBackground: true,
+      margin: { top: "14mm", bottom: "16mm", left: "12mm", right: "12mm" },
+    });
     return Buffer.from(pdf);
   } finally {
     await browser.close();

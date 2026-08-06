@@ -1,7 +1,10 @@
 import ExcelJS from "exceljs";
 import type { BudgetDocumentSummary, LineItemNode, SectionNode } from "./boqEngine.js";
+import type { CompanyBrand } from "./companyBrand.js";
+import { applyExcelLetterhead } from "./documentChrome.js";
 
 const COLUMNS = ["ITEM", "DESCRIÇÃO", "UN", "QUANT.", "PREÇO UNITÁRIO", "PREÇO TOTAL"];
+const COLUMN_WIDTHS = [10, 55, 8, 12, 16, 16];
 
 // Protecção extra (não é a "CSV injection" clássica — o ExcelJS já grava strings como texto
 // puro, tipo "s", que o Excel não reinterpreta como fórmula ao abrir; confirmado a inspeccionar
@@ -23,36 +26,6 @@ function sanitizeSheetName(name: string, usedNames: Set<string>): string {
   return candidate;
 }
 
-function writeHeaderBlock(ws: ExcelJS.Worksheet, title: string, subtitle: string, revision: string | null, fileNumber: string | null) {
-  ws.getCell("A1").value = "TÍTULO";
-  ws.getCell("A2").value = sanitizeExcelText(title);
-  ws.getCell("A3").value = sanitizeExcelText(subtitle);
-  ws.getCell("D1").value = "REVISÃO";
-  ws.getCell("E1").value = revision ?? "";
-  ws.getCell("D2").value = "NO. FICHEIRO";
-  ws.getCell("E2").value = fileNumber ?? "";
-  ws.getRow(1).font = { bold: true };
-  ws.getRow(2).font = { bold: true };
-
-  const headerRowIndex = 5;
-  const headerRow = ws.getRow(headerRowIndex);
-  headerRow.values = COLUMNS;
-  headerRow.font = { bold: true };
-  headerRow.eachCell((cell) => {
-    cell.border = { bottom: { style: "thin" } };
-  });
-  ws.columns = [
-    { width: 10 },
-    { width: 55 },
-    { width: 8 },
-    { width: 12 },
-    { width: 16 },
-    { width: 16 },
-  ];
-  return headerRowIndex + 1; // primeira linha livre para conteúdo
-}
-
-// Escreve um nó (e recursivamente os seus filhos), devolvendo a próxima linha livre.
 function writeNode(ws: ExcelJS.Worksheet, node: LineItemNode, row: number, depth: number): number {
   const r = ws.getRow(row);
   r.getCell(1).value = node.code ?? null;
@@ -82,11 +55,22 @@ function writeNode(ws: ExcelJS.Worksheet, node: LineItemNode, row: number, depth
   return nextRow;
 }
 
-// Escreve uma secção/edifício inteiro numa folha própria; devolve o número da linha do TOTAL
-// (usada pela folha RESUMO para referenciar o total desta secção por fórmula).
-function writeSectionSheet(workbook: ExcelJS.Workbook, section: SectionNode, doc: BudgetDocumentSummary["document"], usedNames: Set<string>) {
+async function writeSectionSheet(
+  workbook: ExcelJS.Workbook,
+  section: SectionNode,
+  doc: BudgetDocumentSummary["document"],
+  brand: CompanyBrand,
+  usedNames: Set<string>,
+) {
   const ws = workbook.addWorksheet(sanitizeSheetName(section.name, usedNames));
-  let row = writeHeaderBlock(ws, doc.title, section.name.toUpperCase(), doc.revision, doc.fileNumber);
+  let row = await applyExcelLetterhead(workbook, ws, brand, {
+    documentTitle: doc.title,
+    documentSubtitle: section.name.toUpperCase(),
+    revision: doc.revision,
+    fileNumber: doc.fileNumber,
+    columnHeaders: COLUMNS,
+    columnWidths: COLUMN_WIDTHS,
+  });
 
   const chapterTotalCells: string[] = [];
   for (const topNode of section.items) {
@@ -104,7 +88,7 @@ function writeSectionSheet(workbook: ExcelJS.Workbook, section: SectionNode, doc
     }
   }
 
-  row++; // linha em branco antes do total
+  row++;
   const totalRow = ws.getRow(row);
   totalRow.getCell(2).value = `TOTAL ${section.name.toUpperCase()}`;
   totalRow.getCell(6).value = chapterTotalCells.length
@@ -117,19 +101,28 @@ function writeSectionSheet(workbook: ExcelJS.Workbook, section: SectionNode, doc
   return { sheetName: ws.name, totalRow: row };
 }
 
-export async function buildBudgetDocumentExcel(summary: BudgetDocumentSummary): Promise<ExcelJS.Buffer> {
+export async function buildBudgetDocumentExcel(
+  summary: BudgetDocumentSummary,
+  brand: CompanyBrand,
+): Promise<ExcelJS.Buffer> {
   const workbook = new ExcelJS.Workbook();
+  workbook.creator = brandDisplaySafe(brand);
+  workbook.company = brandDisplaySafe(brand);
   const usedNames = new Set<string>(["RESUMO"]);
 
   const resumo = workbook.addWorksheet("RESUMO");
-  let row = writeHeaderBlock(resumo, summary.document.title, "RESUMO GERAL", summary.document.revision, summary.document.fileNumber);
-  resumo.getRow(row).getCell(2).value = "RESUMO";
-  resumo.getRow(row).font = { bold: true };
-  row++;
+  let row = await applyExcelLetterhead(workbook, resumo, brand, {
+    documentTitle: summary.document.title,
+    documentSubtitle: "RESUMO GERAL",
+    revision: summary.document.revision,
+    fileNumber: summary.document.fileNumber,
+    columnHeaders: COLUMNS,
+    columnWidths: COLUMN_WIDTHS,
+  });
 
   const sectionRefs: { row: number }[] = [];
   for (const section of summary.sections) {
-    const { sheetName, totalRow } = writeSectionSheet(workbook, section, summary.document, usedNames);
+    const { sheetName, totalRow } = await writeSectionSheet(workbook, section, summary.document, brand, usedNames);
     const r = resumo.getRow(row);
     r.getCell(2).value = section.name;
     r.getCell(3).value = "un";
@@ -180,25 +173,32 @@ export async function buildBudgetDocumentExcel(summary: BudgetDocumentSummary): 
   resumo.getRow(row).getCell(6).numFmt = "#,##0.00";
   resumo.getRow(row).font = { bold: true };
 
-  await writeMeasurementsSheet(workbook, summary);
+  await writeMeasurementsSheet(workbook, summary, brand);
 
   return workbook.xlsx.writeBuffer();
 }
 
-// Exportação técnica: mantém apenas código, descrição, unidade e quantidade. Não transporta
-// preços, margens, IVA ou qualquer outra informação comercial para fora da medição.
-export async function buildMeasurementDocumentExcel(summary: BudgetDocumentSummary): Promise<ExcelJS.Buffer> {
-  const workbook = new ExcelJS.Workbook();
-  const ws = workbook.addWorksheet("QUANTIDADES");
-  ws.columns = [{ width: 12 }, { width: 65 }, { width: 10 }, { width: 16 }];
-  ws.getCell("A1").value = "MAPA DE MEDIÇÕES E QUANTIDADES";
-  ws.getCell("A2").value = sanitizeExcelText(summary.document.title);
-  ws.getRow(1).font = { bold: true, size: 13 };
-  ws.getRow(4).values = ["ITEM", "DESCRIÇÃO", "UN", "QUANTIDADE"];
-  ws.getRow(4).font = { bold: true };
-  ws.getRow(4).eachCell((cell) => (cell.border = { bottom: { style: "thin" } }));
+function brandDisplaySafe(brand: CompanyBrand) {
+  return brand.brandName?.trim() || brand.name?.trim() || "Empresa";
+}
 
-  let row = 5;
+export async function buildMeasurementDocumentExcel(
+  summary: BudgetDocumentSummary,
+  brand: CompanyBrand,
+): Promise<ExcelJS.Buffer> {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = brandDisplaySafe(brand);
+  workbook.company = brandDisplaySafe(brand);
+  const ws = workbook.addWorksheet("QUANTIDADES");
+  let row = await applyExcelLetterhead(workbook, ws, brand, {
+    documentTitle: "MAPA DE MEDIÇÕES E QUANTIDADES",
+    documentSubtitle: summary.document.title,
+    revision: summary.document.revision,
+    fileNumber: summary.document.fileNumber,
+    columnHeaders: ["ITEM", "DESCRIÇÃO", "UN", "QUANTIDADE"],
+    columnWidths: [12, 65, 10, 16],
+  });
+
   const writeQuantityNode = (node: LineItemNode, depth: number) => {
     const current = ws.getRow(row++);
     current.getCell(1).value = node.code ?? "";
@@ -221,14 +221,17 @@ export async function buildMeasurementDocumentExcel(summary: BudgetDocumentSumma
     section.items.forEach((node) => writeQuantityNode(node, 0));
     row++;
   }
-  await writeMeasurementsSheet(workbook, summary);
+
+  await writeMeasurementsSheet(workbook, summary, brand);
   return workbook.xlsx.writeBuffer();
 }
 
-// Folha "MEDIÇÕES": mapa de medições profissional — para cada item que tem linhas de
-// medição dimensionais, lista Nº × Comp. × Larg. × Alt. = Parcial, com o total do item
-// como fórmula SUM sobre os parciais (a coluna Parcial também é fórmula real).
-async function writeMeasurementsSheet(workbook: ExcelJS.Workbook, summary: BudgetDocumentSummary) {
+/** Folha MEDIÇÕES: Nº × Comp. × Larg. × Alt. = Parcial, com fórmulas Excel. */
+async function writeMeasurementsSheet(
+  workbook: ExcelJS.Workbook,
+  summary: BudgetDocumentSummary,
+  brand: CompanyBrand,
+) {
   const { getMeasurementLines } = await import("./dimensionEngine.js");
 
   type ItemWithSection = { sectionName: string; node: LineItemNode };
@@ -246,17 +249,14 @@ async function writeMeasurementsSheet(workbook: ExcelJS.Workbook, summary: Budge
   if (withMeasurements.length === 0) return;
 
   const ws = workbook.addWorksheet("MEDIÇÕES");
-  ws.columns = [{ width: 10 }, { width: 45 }, { width: 8 }, { width: 10 }, { width: 10 }, { width: 10 }, { width: 12 }];
-
-  ws.getCell("A1").value = "MAPA DE MEDIÇÕES";
-  ws.getRow(1).font = { bold: true, size: 12 };
-  let row = 3;
-
-  const header = ws.getRow(row);
-  header.values = ["ITEM", "DESCRIÇÃO", "Nº", "COMP. (m)", "LARG. (m)", "ALT. (m)", "PARCIAL"];
-  header.font = { bold: true };
-  header.eachCell((cell) => (cell.border = { bottom: { style: "thin" } }));
-  row++;
+  let row = await applyExcelLetterhead(workbook, ws, brand, {
+    documentTitle: "MAPA DE MEDIÇÕES",
+    documentSubtitle: summary.document.title,
+    revision: summary.document.revision,
+    fileNumber: summary.document.fileNumber,
+    columnHeaders: ["ITEM", "DESCRIÇÃO", "Nº", "COMP. (m)", "LARG. (m)", "ALT. (m)", "PARCIAL"],
+    columnWidths: [10, 45, 8, 10, 10, 10, 12],
+  });
 
   let currentSection = "";
   for (const item of withMeasurements) {
@@ -284,7 +284,6 @@ async function writeMeasurementsSheet(workbook: ExcelJS.Workbook, summary: Budge
       if (line.width !== null) r.getCell(5).value = Number(line.width);
       if (line.height !== null) r.getCell(6).value = Number(line.height);
       for (const column of [4, 5, 6, 7]) r.getCell(column).numFmt = "#,##0.00";
-      // Parcial = Nº × (dimensões preenchidas; vazias contam como 1)
       r.getCell(7).value = {
         formula: `C${row}*IF(D${row}="",1,D${row})*IF(E${row}="",1,E${row})*IF(F${row}="",1,F${row})`,
       } as ExcelJS.CellFormulaValue;

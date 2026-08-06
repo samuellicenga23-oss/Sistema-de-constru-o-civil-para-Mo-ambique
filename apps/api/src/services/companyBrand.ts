@@ -13,6 +13,7 @@ export type CompanyBrand = {
   address: string | null;
   phone: string | null;
   email: string | null;
+  website: string | null;
   bankDetails: string | null;
   documentFooter: string | null;
   primaryColor: string;
@@ -29,6 +30,7 @@ export async function loadCompanyBrand(companyId: string): Promise<CompanyBrand>
       address: null,
       phone: null,
       email: null,
+      website: null,
       bankDetails: null,
       documentFooter: null,
       primaryColor: "#ED6C22",
@@ -43,6 +45,7 @@ export async function loadCompanyBrand(companyId: string): Promise<CompanyBrand>
     address,
     phone: company.phone,
     email: company.email,
+    website: company.website,
     bankDetails: company.bankDetails,
     documentFooter: company.documentFooter,
     primaryColor: company.primaryColor || company.accentColor || "#ED6C22",

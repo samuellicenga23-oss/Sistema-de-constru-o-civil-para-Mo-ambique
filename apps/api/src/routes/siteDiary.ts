@@ -11,6 +11,7 @@ import { assertProjectOwned } from "../services/accessControl.js";
 import { assertApprovedOrcamentoForSite } from "../services/siteGate.js";
 import { detectImageExtension } from "../services/imageValidation.js";
 import { buildSiteDiaryPdf } from "../services/siteDiaryExport.js";
+import { loadCompanyBrand } from "../services/companyBrand.js";
 import { env } from "../env.js";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista", "engenheiro_fiscal"] as const;
@@ -183,10 +184,15 @@ export async function siteDiaryRoutes(app: FastifyInstance) {
       db.select({ code: scheduleTasks.code, name: scheduleTasks.name, progressPercent: siteDiaryTaskProgress.progressPercent, notes: siteDiaryTaskProgress.notes }).from(siteDiaryTaskProgress).innerJoin(scheduleTasks, eq(siteDiaryTaskProgress.scheduleTaskId, scheduleTasks.id)).where(eq(siteDiaryTaskProgress.diaryEntryId, id)),
       db.select({ name: materials.name, unit: materials.unit, quantity: stockMovements.quantity, notes: stockMovements.notes }).from(stockMovements).innerJoin(materials, eq(stockMovements.materialId, materials.id)).where(eq(stockMovements.diaryEntryId, id)),
     ]);
-    const buffer = await buildSiteDiaryPdf(entry, project, {
-      progress: progressRows.map((row) => ({ ...row, progressPercent: Number(row.progressPercent) })),
-      consumptions: consumptionRows.map((row) => ({ ...row, quantity: Number(row.quantity) })),
-    });
+    const buffer = await buildSiteDiaryPdf(
+      entry,
+      project,
+      {
+        progress: progressRows.map((row) => ({ ...row, progressPercent: Number(row.progressPercent) })),
+        consumptions: consumptionRows.map((row) => ({ ...row, quantity: Number(row.quantity) })),
+      },
+      await loadCompanyBrand(companyIdOf(request)),
+    );
     reply
       .header("Content-Type", "application/pdf")
       .header("Content-Disposition", `attachment; filename="diario-obra-${entry.date}.pdf"`)

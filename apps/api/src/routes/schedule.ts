@@ -8,6 +8,8 @@ import { assertDocumentOwned, assertProjectOwned } from "../services/accessContr
 import { assertApprovedOrcamentoForSite } from "../services/siteGate.js";
 import { addWorkingDays, generateSchedule, getProjectSchedule, getTaskDependency, upsertTaskDependency, validateTaskDependency, workingDaysInclusive } from "../services/scheduleEngine.js";
 import { buildSchedulePdf } from "../services/schedulePdf.js";
+import { loadCompanyBrand, logoDataUri } from "../services/companyBrand.js";
+import { brandDisplayName, brandFooterText } from "../services/documentChrome.js";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista", "engenheiro_fiscal"] as const;
 const scheduleExportQuery = z.object({
@@ -189,7 +191,13 @@ export async function scheduleRoutes(app: FastifyInstance) {
     if (!project) return reply.code(404).send({ error: "Projecto não encontrado" });
     const schedule = await getProjectSchedule(projectId);
     if (!schedule.tasks.length) return reply.code(409).send({ error: "O cronograma ainda não tem tarefas" });
-    const { buffer, options } = await buildSchedulePdf(project, schedule, parsed.data);
+    const companyBrand = await loadCompanyBrand(companyIdOf(request));
+    const { buffer, options } = await buildSchedulePdf(project, schedule, parsed.data, {
+      displayName: brandDisplayName(companyBrand),
+      logoDataUri: logoDataUri(companyBrand.logoUrl),
+      primaryColor: companyBrand.primaryColor,
+      footer: brandFooterText(companyBrand, "Cronograma"),
+    });
     return reply
       .header("Content-Type", "application/pdf")
       .header("X-SIGO-Schedule-Paper", options.paper)

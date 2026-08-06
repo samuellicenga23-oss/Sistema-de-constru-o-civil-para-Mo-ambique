@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { requireCompanyUser } from "../auth/middleware.js";
 import { assertDocumentOwned } from "../services/accessControl.js";
 import { getBudgetDocumentSummary } from "../services/boqEngine.js";
+import { loadCompanyBrand } from "../services/companyBrand.js";
 import { buildBudgetDocumentExcel, buildMeasurementDocumentExcel } from "../services/excelExport.js";
 import { buildBudgetDocumentPdf, buildMeasurementDocumentPdf } from "../services/pdfExport.js";
 
@@ -14,8 +15,9 @@ export async function exportRoutes(app: FastifyInstance) {
 
     const summary = await getBudgetDocumentSummary(id);
     if (!summary) return reply.code(404).send({ error: "Documento não encontrado" });
+    const brand = await loadCompanyBrand(companyId);
 
-    const buffer = await buildBudgetDocumentExcel(summary);
+    const buffer = await buildBudgetDocumentExcel(summary, brand);
     reply
       .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
       .header("Content-Disposition", `attachment; filename="${document.title.replace(/[^\w\- ]/g, "")}.xlsx"`)
@@ -30,8 +32,9 @@ export async function exportRoutes(app: FastifyInstance) {
 
     const summary = await getBudgetDocumentSummary(id);
     if (!summary) return reply.code(404).send({ error: "Documento não encontrado" });
+    const brand = await loadCompanyBrand(companyId);
 
-    const buffer = await buildBudgetDocumentPdf(summary);
+    const buffer = await buildBudgetDocumentPdf(summary, brand);
     reply
       .header("Content-Type", "application/pdf")
       .header("Content-Disposition", `attachment; filename="${document.title.replace(/[^\w\- ]/g, "")}.pdf"`)
@@ -45,7 +48,8 @@ export async function exportRoutes(app: FastifyInstance) {
     if (!document) return reply.code(404).send({ error: "Medição não encontrada" });
     const summary = await getBudgetDocumentSummary(id);
     if (!summary) return reply.code(404).send({ error: "Medição não encontrada" });
-    const buffer = await buildMeasurementDocumentExcel(summary);
+    const brand = await loadCompanyBrand(companyId);
+    const buffer = await buildMeasurementDocumentExcel(summary, brand);
     reply
       .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
       .header("Content-Disposition", `attachment; filename="${document.title.replace(/[^\w\- ]/g, "")}-quantidades.xlsx"`)
@@ -59,7 +63,8 @@ export async function exportRoutes(app: FastifyInstance) {
     if (!document) return reply.code(404).send({ error: "Medição não encontrada" });
     const summary = await getBudgetDocumentSummary(id);
     if (!summary) return reply.code(404).send({ error: "Medição não encontrada" });
-    const buffer = await buildMeasurementDocumentPdf(summary);
+    const brand = await loadCompanyBrand(companyId);
+    const buffer = await buildMeasurementDocumentPdf(summary, brand);
     reply
       .header("Content-Type", "application/pdf")
       .header("Content-Disposition", `attachment; filename="${document.title.replace(/[^\w\- ]/g, "")}-quantidades.pdf"`)

@@ -4,6 +4,7 @@ import { assertDocumentOwned } from "../services/accessControl.js";
 import { computeMaterialsByPhase } from "../services/materialsByPhase.js";
 import { buildMaterialsByPhasePdf } from "../services/materialsByPhaseExport.js";
 import { buildMaterialsByPhaseExcel } from "../services/materialsByPhaseExcelExport.js";
+import { loadCompanyBrand } from "../services/companyBrand.js";
 
 export async function materialsByPhaseRoutes(app: FastifyInstance) {
   app.get("/api/budget-documents/:id/materials-by-phase", { preHandler: requireCompanyUser }, async (request, reply) => {
@@ -25,8 +26,9 @@ export async function materialsByPhaseRoutes(app: FastifyInstance) {
 
     const result = await computeMaterialsByPhase(id, companyId);
     if (!result) return reply.code(404).send({ error: "Documento não encontrado" });
+    const brand = await loadCompanyBrand(companyId);
 
-    const buffer = await buildMaterialsByPhasePdf(document.title, result);
+    const buffer = await buildMaterialsByPhasePdf(document.title, result, brand);
     reply
       .header("Content-Type", "application/pdf")
       .header("Content-Disposition", `attachment; filename="Materiais por Fase - ${document.title.replace(/[^\w\- ]/g, "")}.pdf"`)
@@ -41,8 +43,9 @@ export async function materialsByPhaseRoutes(app: FastifyInstance) {
 
     const result = await computeMaterialsByPhase(id, companyId);
     if (!result) return reply.code(404).send({ error: "Documento não encontrado" });
+    const brand = await loadCompanyBrand(companyId);
 
-    const buffer = await buildMaterialsByPhaseExcel(document.title, result);
+    const buffer = await buildMaterialsByPhaseExcel(document.title, result, brand);
     reply
       .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
       .header("Content-Disposition", `attachment; filename="Materiais por Fase - ${document.title.replace(/[^\w\- ]/g, "")}.xlsx"`)

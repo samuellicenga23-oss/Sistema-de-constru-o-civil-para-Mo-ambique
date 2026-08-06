@@ -228,7 +228,9 @@ export default function CompanySettingsPage() {
               <div>
                 <label className="label">Rodapé dos documentos exportados</label>
                 <textarea value={form.documentFooter ?? ""} onChange={(e) => setForm((f) => ({ ...f, documentFooter: e.target.value }))} disabled={!canEdit} className="input min-h-16" placeholder="Morada, site, agradecimento…" />
-                <p className="mt-1 text-xs text-slate-500">Texto complementar no rodapé do PDF (além dos meios de pagamento).</p>
+                <p className="mt-1 text-xs text-slate-500">
+                  Aparece no rodapé de Excel e PDF (orçamentos, medições, cronograma, diário, materiais, cálculo rápido, facturas e propostas).
+                </p>
               </div>
               {canEdit && (
                 <button type="submit" disabled={saving} className="btn btn-primary">{saving ? "A guardar..." : "Guardar dados"}</button>
@@ -238,18 +240,75 @@ export default function CompanySettingsPage() {
         )}
 
         {tab === "logotipo" && (
-          <section className="card card-pad">
-            <h2 className="section-title mb-2">Logótipo</h2>
-            <p className="muted mb-4">Aparece na barra lateral e no cabeçalho dos PDFs do Comercial (propostas, facturas, recibos).</p>
-            {company.logoUrl && <img src={company.logoUrl} alt="Logótipo" className="mb-4 h-20 object-contain" />}
-            {canEdit ? (
-              <>
-                <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={handleLogoChange} disabled={uploading} className="input py-2 file:mr-3 file:rounded-md file:border-0 file:bg-brand-100 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-brand-800" />
-                {uploading && <p className="muted mt-2">A carregar...</p>}
-              </>
-            ) : (
-              <p className="muted">Só um administrador pode alterar o logótipo.</p>
-            )}
+          <section className="card card-pad space-y-6">
+            <div>
+              <h2 className="section-title mb-2">Logótipo e identidade nos exports</h2>
+              <p className="muted">
+                O logótipo, o nome e os contactos da empresa aparecem no cabeçalho de todos os Excel e PDF exportados
+                (orçamento, medições, materiais, cronograma, diário, cálculo rápido, facturas e propostas).
+              </p>
+            </div>
+
+            <div
+              className="overflow-hidden rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white shadow-sm"
+              style={{ borderBottomColor: company.primaryColor || "#ED6C22", borderBottomWidth: 3 }}
+            >
+              <div className="flex flex-wrap items-start justify-between gap-4 px-5 py-4">
+                <div className="flex min-w-0 items-center gap-3">
+                  {company.logoUrl ? (
+                    <img src={company.logoUrl} alt="" className="h-12 max-w-[7rem] object-contain" />
+                  ) : (
+                    <div
+                      className="grid h-12 w-12 place-items-center rounded-lg text-lg font-bold text-white"
+                      style={{ background: company.primaryColor || "#ED6C22" }}
+                    >
+                      {(company.brandName || company.name).charAt(0).toUpperCase()}
+                    </div>
+                  )}
+                  <div className="min-w-0">
+                    <p className="truncate text-base font-bold text-slate-900">{company.brandName || company.name}</p>
+                    <p className="mt-0.5 text-xs leading-5 text-slate-500">
+                      {[
+                        company.nuit ? `NUIT ${company.nuit}` : null,
+                        [company.address, company.district, company.province].filter(Boolean).join(" · ") || null,
+                        company.phone,
+                        company.email,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ") || "Complete os dados gerais para enriquecer o cabeçalho."}
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm font-bold" style={{ color: company.primaryColor || "#ED6C22" }}>
+                    Documento de exemplo
+                  </p>
+                  <p className="mt-0.5 text-[11px] text-slate-500">Pré-visualização do cabeçalho</p>
+                </div>
+              </div>
+              <div className="border-t border-slate-100 bg-white px-5 py-3 text-[11px] text-slate-500">
+                {company.documentFooter?.trim() || `Documento emitido por ${company.brandName || company.name}`}
+              </div>
+            </div>
+
+            <div>
+              {canEdit ? (
+                <>
+                  <label className="label">Carregar logótipo</label>
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/gif"
+                    onChange={handleLogoChange}
+                    disabled={uploading}
+                    className="input py-2 file:mr-3 file:rounded-md file:border-0 file:bg-brand-100 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-brand-800"
+                  />
+                  {uploading && <p className="muted mt-2">A carregar...</p>}
+                  <p className="mt-2 text-xs text-slate-500">PNG ou JPG com fundo transparente funciona melhor em PDFs e Excel.</p>
+                </>
+              ) : (
+                <p className="muted">Só um administrador pode alterar o logótipo.</p>
+              )}
+            </div>
           </section>
         )}
 

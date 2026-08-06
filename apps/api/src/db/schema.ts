@@ -54,9 +54,7 @@ export const companies = pgTable("companies", {
   email: varchar("email", { length: 200 }),
   website: varchar("website", { length: 200 }),
   bankDetails: text("bank_details"),
-  // Texto livre acrescentado ao rodapé dos documentos exportados (Excel/PDF) desta empresa —
-  // ainda não usado pelos serviços de exportação (services/excelExport.ts, pdfExport.ts); fica
-  // gravado já para quando essa integração for feita.
+  // Texto livre no rodapé dos documentos exportados (Excel/PDF) — aplicado via documentChrome.
   documentFooter: text("document_footer"),
   responsibleName: varchar("responsible_name", { length: 150 }),
   enabledModules: jsonb("enabled_modules").$type<CompanyModuleKey[]>().notNull().default([...COMPANY_MODULE_KEYS]),
