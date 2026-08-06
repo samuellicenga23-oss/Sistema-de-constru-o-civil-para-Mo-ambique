@@ -118,7 +118,19 @@ describe("Percurso planta → diagnóstico → mapa automático", () => {
   });
 
   it("mantém a medição separada e cria um orçamento comercial a partir das quantidades", async () => {
-    const { cookie, project } = await projectContext("MZN", "medicao");
+    const company = await createCompany("Empresa Medições Orçamento");
+    await createUser(company.id, "orcamentista", "medicoes-orc@test.local");
+    await createUser(company.id, "admin_empresa", "medicoes-admin@test.local");
+    const cookie = await loginCookie(app, "medicoes-orc@test.local");
+    const adminCookie = await loginCookie(app, "medicoes-admin@test.local");
+    const projectResponse = await app.inject({
+      method: "POST",
+      url: "/api/projects",
+      headers: { cookie },
+      payload: { name: "Obra de Teste", currency: "MZN", projectType: "medicao" },
+    });
+    expect(projectResponse.statusCode).toBe(201);
+    const project = projectResponse.json() as { id: string; defaultDocumentId: string };
 
     const workspaceResponse = await app.inject({
       method: "POST",
@@ -156,6 +168,21 @@ describe("Percurso planta → diagnóstico → mapa automático", () => {
     });
     expect(quantityResponse.statusCode).toBe(200);
 
+    const submitResponse = await app.inject({
+      method: "PATCH",
+      url: `/api/budget-documents/${project.defaultDocumentId}/status`,
+      headers: { cookie },
+      payload: { status: "submetido" },
+    });
+    expect(submitResponse.statusCode).toBe(200);
+    const approveResponse = await app.inject({
+      method: "PATCH",
+      url: `/api/budget-documents/${project.defaultDocumentId}/status`,
+      headers: { cookie: adminCookie },
+      payload: { status: "aprovado" },
+    });
+    expect(approveResponse.statusCode).toBe(200);
+
     const budgetResponse = await app.inject({
       method: "POST",
       url: `/api/budget-documents/${project.defaultDocumentId}/create-budget`,
@@ -169,37 +196,28 @@ describe("Percurso planta → diagnóstico → mapa automático", () => {
       }),
       created: true,
       revisionCreated: false,
+      scenarioCreated: false,
     });
 
+    // Uma medição aprovada fica bloqueada para edição (sem transição de volta a rascunho) —
+    // para quantidades diferentes o fluxo esperado é duplicar a medição, não reabrir esta.
     const changedQuantityResponse = await app.inject({
       method: "PUT",
       url: `/api/line-items/${firstMeasuredItem.id}`,
       headers: { cookie },
       payload: { quantity: 2 },
     });
-    expect(changedQuantityResponse.statusCode).toBe(200);
+    expect(changedQuantityResponse.statusCode).toBe(409);
 
-    const changedBudgetResponse = await app.inject({
+    // Repetir create-budget sem alterações devolve o mesmo orçamento (idempotente pelo fingerprint).
+    const repeatBudgetResponse = await app.inject({
       method: "POST",
       url: `/api/budget-documents/${project.defaultDocumentId}/create-budget`,
       headers: { cookie },
       payload: {},
     });
-    expect(changedBudgetResponse.statusCode).toBe(409);
-    expect(changedBudgetResponse.json()).toEqual(expect.objectContaining({ code: "MEASUREMENT_CHANGED" }));
-
-    const revisionResponse = await app.inject({
-      method: "POST",
-      url: `/api/budget-documents/${project.defaultDocumentId}/create-budget`,
-      headers: { cookie },
-      payload: { createRevision: true },
-    });
-    expect(revisionResponse.statusCode).toBe(201);
-    expect(revisionResponse.json()).toEqual({
-      document: expect.objectContaining({ revision: "1", sourceMeasurementDocumentId: project.defaultDocumentId }),
-      created: true,
-      revisionCreated: true,
-    });
+    expect(repeatBudgetResponse.statusCode).toBe(200);
+    expect(repeatBudgetResponse.json()).toEqual(expect.objectContaining({ created: false, revisionCreated: false }));
 
     const documentsResponse = await app.inject({
       method: "GET",
@@ -211,6 +229,104 @@ describe("Percurso planta → diagnóstico → mapa automático", () => {
       expect.objectContaining({ id: project.defaultDocumentId, documentType: "medicao" }),
       expect.objectContaining({ documentType: "orcamento", sourceMeasurementDocumentId: project.defaultDocumentId }),
     ]));
+  });
+
+  it("duplica uma medição aprovada numa cópia editável em rascunho, sem afectar a original", async () => {
+    const company = await createCompany("Empresa Duplicação Medição");
+    await createUser(company.id, "orcamentista", "duplicar-orc@test.local");
+    await createUser(company.id, "admin_empresa", "duplicar-admin@test.local");
+    const cookie = await loginCookie(app, "duplicar-orc@test.local");
+    const adminCookie = await loginCookie(app, "duplicar-admin@test.local");
+    const projectResponse = await app.inject({
+      method: "POST",
+      url: "/api/projects",
+      headers: { cookie },
+      payload: { name: "Obra Duplicação", currency: "MZN", projectType: "medicao" },
+    });
+    const project = projectResponse.json() as { id: string; defaultDocumentId: string };
+
+    await app.inject({
+      method: "POST",
+      url: `/api/projects/${project.id}/measurement-workspace`,
+      headers: { cookie },
+    });
+    const summaryResponse = await app.inject({
+      method: "GET",
+      url: `/api/budget-documents/${project.defaultDocumentId}`,
+      headers: { cookie },
+    });
+    const firstMeasuredItem = summaryResponse.json().sections
+      .flatMap((section: { items: Array<{ children?: Array<{ id: string; kind: string }> }> }) => section.items)
+      .flatMap((item: { children?: Array<{ id: string; kind: string }> }) => item.children ?? [])
+      .find((item: { kind: string }) => item.kind === "item");
+    await app.inject({
+      method: "PUT",
+      url: `/api/line-items/${firstMeasuredItem.id}`,
+      headers: { cookie },
+      payload: { quantity: 5 },
+    });
+    await app.inject({
+      method: "PATCH",
+      url: `/api/budget-documents/${project.defaultDocumentId}/status`,
+      headers: { cookie },
+      payload: { status: "submetido" },
+    });
+    await app.inject({
+      method: "PATCH",
+      url: `/api/budget-documents/${project.defaultDocumentId}/status`,
+      headers: { cookie: adminCookie },
+      payload: { status: "aprovado" },
+    });
+
+    const duplicateResponse = await app.inject({
+      method: "POST",
+      url: `/api/budget-documents/${project.defaultDocumentId}/duplicate`,
+      headers: { cookie },
+    });
+    expect(duplicateResponse.statusCode).toBe(201);
+    const duplicated = duplicateResponse.json() as { document: { id: string; status: string; documentType: string; title: string }; sourceDocumentId: string };
+    expect(duplicated.document.status).toBe("rascunho");
+    expect(duplicated.document.documentType).toBe("medicao");
+    expect(duplicated.sourceDocumentId).toBe(project.defaultDocumentId);
+    expect(duplicated.document.id).not.toBe(project.defaultDocumentId);
+
+    // A cópia é livremente editável (está em rascunho), ao contrário da original aprovada.
+    const copySummaryResponse = await app.inject({
+      method: "GET",
+      url: `/api/budget-documents/${duplicated.document.id}`,
+      headers: { cookie },
+    });
+    const copiedItem = copySummaryResponse.json().sections
+      .flatMap((section: { items: Array<{ children?: Array<{ id: string; kind: string; quantity: string | null }> }> }) => section.items)
+      .flatMap((item: { children?: Array<{ id: string; kind: string; quantity: string | null }> }) => item.children ?? [])
+      .find((item: { kind: string }) => item.kind === "item");
+    expect(Number(copiedItem.quantity)).toBe(5);
+    const editCopyResponse = await app.inject({
+      method: "PUT",
+      url: `/api/line-items/${copiedItem.id}`,
+      headers: { cookie },
+      payload: { quantity: 8 },
+    });
+    expect(editCopyResponse.statusCode).toBe(200);
+
+    // A medição original continua bloqueada e com a quantidade inalterada.
+    const originalStillLockedResponse = await app.inject({
+      method: "PUT",
+      url: `/api/line-items/${firstMeasuredItem.id}`,
+      headers: { cookie },
+      payload: { quantity: 99 },
+    });
+    expect(originalStillLockedResponse.statusCode).toBe(409);
+  });
+
+  it("recusa duplicar um orçamento pelo endpoint exclusivo de medições", async () => {
+    const { cookie, project } = await projectContext("MZN", "orcamento");
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/budget-documents/${project.defaultDocumentId}/duplicate`,
+      headers: { cookie },
+    });
+    expect(response.statusCode).toBe(409);
   });
 
   it("recusa rotular custos automáticos MZN como USD, mas permite documento manual USD", async () => {

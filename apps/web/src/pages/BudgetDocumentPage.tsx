@@ -171,6 +171,7 @@ export default function BudgetDocumentPage() {
   const [showOnlyUnpriced, setShowOnlyUnpriced] = useState(searchParams.get("semPreco") === "1");
   const [submittingToBudget, setSubmittingToBudget] = useState(false);
   const [revisingDocument, setRevisingDocument] = useState(false);
+  const [duplicatingMeasurement, setDuplicatingMeasurement] = useState(false);
   const [materialSpecs, setMaterialSpecs] = useState<ProjectMaterialSpecification[]>([]);
   const [applyingSpecs, setApplyingSpecs] = useState(false);
   const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
@@ -483,6 +484,27 @@ export default function BudgetDocumentPage() {
     }
   }
 
+  async function handleDuplicateMeasurement() {
+    if (!documentId) return;
+    const ok = await confirm({
+      title: "Duplicar medição?",
+      message: "Será criada uma cópia independente em rascunho, com as mesmas quantidades. A medição original permanece aprovada e protegida.",
+      confirmLabel: "Duplicar",
+      details: ["Pode editar quantidades livremente na cópia", "A cópia não fica ligada aos orçamentos já criados a partir do original"],
+    });
+    if (!ok) return;
+    setDuplicatingMeasurement(true);
+    setError(null);
+    try {
+      const { document } = await boqApi.duplicateMeasurement(documentId);
+      navigate(`/documentos/${document.id}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao duplicar a medição");
+    } finally {
+      setDuplicatingMeasurement(false);
+    }
+  }
+
   const [changingStatus, setChangingStatus] = useState(false);
 
   async function handleStatusChange(status: "rascunho" | "submetido" | "aprovado") {
@@ -698,6 +720,18 @@ export default function BudgetDocumentPage() {
             <button type="button" onClick={() => handleSubmitToBudget(false)} disabled={submittingToBudget} className="btn btn-primary btn-sm">
               <IconDoc className="w-3.5 h-3.5" />
               {submittingToBudget ? "A enviar..." : "Criar orçamento"}
+            </button>
+          )}
+          {isMeasurementDocument && !isClientView && document.status === "aprovado" && (
+            <button
+              type="button"
+              onClick={() => handleDuplicateMeasurement()}
+              disabled={duplicatingMeasurement}
+              className="btn btn-secondary btn-sm"
+              title="Cria uma cópia editável desta medição para quantidades diferentes"
+            >
+              <IconRefresh className="w-3.5 h-3.5" />
+              {duplicatingMeasurement ? "A duplicar..." : "Duplicar"}
             </button>
           )}
           {isMeasurementDocument && !isClientView && document.status !== "aprovado" && (

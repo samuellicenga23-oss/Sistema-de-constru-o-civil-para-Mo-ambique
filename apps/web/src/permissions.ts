@@ -39,6 +39,11 @@ export function isSiteManagementModuleEnabled(enabledModules: CompanyModuleKey[]
 }
 
 export function isModuleEnabled(pathname: string, enabledModules: CompanyModuleKey[]): boolean {
+  // Regras específicas (ex.: /projectos/:id/compras → "purchasing") têm de ser avaliadas
+  // antes dos fallbacks genéricos por prefixo, senão nunca são alcançadas.
+  const required = PATH_MODULES.find((entry) => entry.match(pathname))?.module;
+  if (required) return enabledModules.includes(required);
+
   if (pathname === "/gestao" || pathname.startsWith("/gestao/")) {
     return isSiteManagementModuleEnabled(enabledModules);
   }
@@ -57,8 +62,7 @@ export function isModuleEnabled(pathname: string, enabledModules: CompanyModuleK
       isSiteManagementModuleEnabled(enabledModules)
     );
   }
-  const required = PATH_MODULES.find((entry) => entry.match(pathname))?.module;
-  return !required || enabledModules.includes(required);
+  return true;
 }
 
 /** Verifica uma permissão estável do catálogo SIGO (ex.: `equipa.gerir`). */

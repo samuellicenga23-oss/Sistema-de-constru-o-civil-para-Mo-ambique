@@ -32,12 +32,19 @@ export async function syncProjectPlantMeasurements(projectId: string): Promise<{
       inArray(lineItems.code, supportedPlantItemCodes()),
     ));
 
+  const existingLineCounts = items.length
+    ? await db
+        .select({ lineItemId: measurementLines.lineItemId })
+        .from(measurementLines)
+        .where(inArray(measurementLines.lineItemId, items.map((item) => item.id)))
+    : [];
+  const itemsWithMeasurementLines = new Set(existingLineCounts.map((row) => row.lineItemId));
+
   let updatedItems = 0;
   for (const item of items) {
     if (!item.code) continue;
-    const existing = await db.select({ id: measurementLines.id }).from(measurementLines).where(eq(measurementLines.lineItemId, item.id));
     const alreadyFromPlant = item.origin === "planta";
-    if (!alreadyFromPlant && (existing.length > 0 || Number(item.quantity ?? 0) !== 0)) continue;
+    if (!alreadyFromPlant && (itemsWithMeasurementLines.has(item.id) || Number(item.quantity ?? 0) !== 0)) continue;
 
     const built = buildMeasurementLinesFromPlant(item.code, context.rooms, context.openings);
     if (!built.ok) continue;

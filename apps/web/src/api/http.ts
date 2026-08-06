@@ -12,6 +12,20 @@ export class ApiError extends Error {
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 
+/** Converte o shape de `zodError.flatten()` numa frase legível para a UI. */
+function zodFlattenToMessage(raw: unknown): string | null {
+  if (!raw || typeof raw !== "object") return null;
+  const { formErrors, fieldErrors } = raw as { formErrors?: unknown; fieldErrors?: unknown };
+  const parts: string[] = [];
+  if (Array.isArray(formErrors)) parts.push(...formErrors.filter((m): m is string => typeof m === "string"));
+  if (fieldErrors && typeof fieldErrors === "object") {
+    for (const messages of Object.values(fieldErrors as Record<string, unknown>)) {
+      if (Array.isArray(messages)) parts.push(...messages.filter((m): m is string => typeof m === "string"));
+    }
+  }
+  return parts.length ? parts.join(" ") : null;
+}
+
 export async function request<T>(path: string, options?: RequestInit & { timeoutMs?: number }): Promise<T> {
   const hasFormData = typeof FormData !== "undefined" && options?.body instanceof FormData;
   const { timeoutMs = DEFAULT_TIMEOUT_MS, ...fetchOptions } = options ?? {};
@@ -48,8 +62,9 @@ export async function request<T>(path: string, options?: RequestInit & { timeout
       typeof raw === "string"
         ? raw
         : raw && typeof raw === "object"
-          ? // Zod flatten / object errors — evita "[object Object]" na UI
-            JSON.stringify(raw)
+          ? // Zod .flatten() → { formErrors: string[], fieldErrors: Record<string, string[]> }.
+            // Junta as mensagens numa frase legível em vez de mostrar o JSON cru na UI.
+            zodFlattenToMessage(raw) ?? `Erro ${res.status}`
           : `Erro ${res.status}`;
     throw new ApiError(
       res.status,

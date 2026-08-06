@@ -142,21 +142,25 @@ export async function measurementLineRoutes(app: FastifyInstance) {
     const built = buildMeasurementLinesFromPlant(item.code, rooms, openings);
     if (!built.ok) return reply.code(422).send({ error: built.reason });
 
-    await db.delete(measurementLines).where(eq(measurementLines.lineItemId, id));
-    for (const line of built.lines) {
-      await db.insert(measurementLines).values({
-        lineItemId: id,
-        description: line.description,
-        count: line.count.toFixed(2),
-        length: line.length !== null ? line.length.toFixed(2) : null,
-        width: line.width !== null ? line.width.toFixed(2) : null,
-        height: line.height !== null ? line.height.toFixed(2) : null,
-        sortOrder: line.sortOrder,
-      });
-    }
-
-    const newQuantity = await recomputeItemQuantity(id);
-    await db.update(lineItems).set({ origin: "planta" }).where(eq(lineItems.id, id));
+    const newQuantity = await db.transaction(async (tx) => {
+      await tx.delete(measurementLines).where(eq(measurementLines.lineItemId, id));
+      if (built.lines.length) {
+        await tx.insert(measurementLines).values(
+          built.lines.map((line) => ({
+            lineItemId: id,
+            description: line.description,
+            count: line.count.toFixed(2),
+            length: line.length !== null ? line.length.toFixed(2) : null,
+            width: line.width !== null ? line.width.toFixed(2) : null,
+            height: line.height !== null ? line.height.toFixed(2) : null,
+            sortOrder: line.sortOrder,
+          })),
+        );
+      }
+      const quantity = await recomputeItemQuantity(id, tx);
+      await tx.update(lineItems).set({ origin: "planta" }).where(eq(lineItems.id, id));
+      return quantity;
+    });
 
     return {
       linesCreated: built.lines.length,

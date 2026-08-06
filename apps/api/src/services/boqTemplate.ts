@@ -2,14 +2,14 @@ import { eq, isNull, or, and } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { budgetSections, lineItems, costCompositions, workItemTemplates } from "../db/schema.js";
 import { computeCompositionUnitCost } from "./costEngine.js";
-import { fixedSigo } from "@sigo/shared";
+import { fixedSigo, type Unit } from "@sigo/shared";
 
 // Estrutura padrão de um Mapa de Quantidades moçambicano (capítulos e trabalhos correntes,
 // derivada dos ficheiros reais analisados: Dr Castro, Centro de Excelência TB, UEM).
 // Cada item pode referenciar uma composição do catálogo pelo nome — o preço unitário é
 // calculado no momento da geração; quantidades começam a 0 para serem preenchidas por
 // medições dimensionais (Nº × Comp. × Larg. × Alt.) ou manualmente.
-export type TemplateItem = { code: string; description: string; unit: string; composition?: string; compositionId?: string | null };
+export type TemplateItem = { code: string; description: string; unit: Unit; composition?: string; compositionId?: string | null };
 export type TemplateChapter = {
   code: string;
   name: string;
@@ -213,7 +213,7 @@ export async function ensureDefaultWorkChapterLibrary() {
         chapterName: chapter.name,
         itemCode: item.code,
         description: item.description,
-        unit: item.unit as any,
+        unit: item.unit,
         compositionName: item.composition ?? null,
         discipline: metadata.discipline,
         detectionTags: metadata.detectionTags,
@@ -397,7 +397,7 @@ export async function generateStandardBoq(
         kind: "item",
         code: item.code,
         description: item.description,
-        unit: item.unit as any,
+        unit: item.unit,
         quantity: "0",
         unitPrice: unitPrice !== null ? fixedSigo(unitPrice) : null,
         compositionId,

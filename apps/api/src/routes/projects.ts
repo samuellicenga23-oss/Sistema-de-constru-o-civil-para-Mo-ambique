@@ -32,7 +32,7 @@ const materialSpecificationSchema = z.object({
 });
 
 const projectSchema = z.object({
-  name: z.string().min(1),
+  name: z.string().trim().min(1),
   client: z.string().optional(),
   bairro: z.string().optional(),
   talhao: z.string().optional(),

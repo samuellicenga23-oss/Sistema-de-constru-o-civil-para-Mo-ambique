@@ -2,6 +2,8 @@ import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { measurementLines, lineItems } from "../db/schema.js";
 
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 // Parcial de uma linha de medição: nº × comprimento × largura × altura.
 // Dimensões vazias contam como 1 (ex: um item medido só em comprimento usa Comp. e deixa Larg./Alt. vazios).
 export function computePartial(line: {
@@ -17,8 +19,8 @@ export function computePartial(line: {
   return count * length * width * height;
 }
 
-export async function getMeasurementLines(lineItemId: string) {
-  const rows = await db
+export async function getMeasurementLines(lineItemId: string, dbOrTx: Tx | typeof db = db) {
+  const rows = await dbOrTx
     .select()
     .from(measurementLines)
     .where(eq(measurementLines.lineItemId, lineItemId))
@@ -30,10 +32,10 @@ export async function getMeasurementLines(lineItemId: string) {
 // gravada (não on-the-fly) para que exportações e autos de medição continuem a funcionar
 // sem conhecer as linhas de medição. Se não restarem linhas, a quantidade fica como está
 // (o utilizador pode voltar a editá-la manualmente).
-export async function recomputeItemQuantity(lineItemId: string): Promise<number | null> {
-  const lines = await getMeasurementLines(lineItemId);
+export async function recomputeItemQuantity(lineItemId: string, dbOrTx: Tx | typeof db = db): Promise<number | null> {
+  const lines = await getMeasurementLines(lineItemId, dbOrTx);
   if (lines.length === 0) return null;
   const total = lines.reduce((sum, l) => sum + l.partial, 0);
-  await db.update(lineItems).set({ quantity: total.toFixed(2) }).where(eq(lineItems.id, lineItemId));
+  await dbOrTx.update(lineItems).set({ quantity: total.toFixed(2) }).where(eq(lineItems.id, lineItemId));
   return total;
 }

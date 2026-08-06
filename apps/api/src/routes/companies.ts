@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { and, eq, desc, count, inArray } from "drizzle-orm";
+import { and, eq, desc, count, inArray, gte, sum } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -632,7 +632,6 @@ export async function companyRoutes(app: FastifyInstance) {
   app.get("/api/admin/stats", { preHandler: requireRole("super_admin") }, async () => {
     const allCompanies = await db.select().from(companies);
     const allSubscriptions = await db.select().from(subscriptions);
-    const allPayments = await db.select().from(platformPayments);
 
     const latestByCompany = new Map<string, (typeof allSubscriptions)[number]>();
     for (const s of allSubscriptions) {
@@ -683,15 +682,18 @@ export async function companyRoutes(app: FastifyInstance) {
 
     expiringSoon.sort((a, b) => a.expiresAt.localeCompare(b.expiresAt));
 
-    const totalCollectedMzn = allPayments
-      .filter((p) => p.currency === "MZN")
-      .reduce((sum, p) => sum + Number(p.amount), 0);
     const monthStart = new Date();
     monthStart.setDate(1);
     monthStart.setHours(0, 0, 0, 0);
-    const collectedThisMonthMzn = allPayments
-      .filter((p) => p.currency === "MZN" && p.paidAt >= monthStart)
-      .reduce((sum, p) => sum + Number(p.amount), 0);
+    const [[totalCollectedRow], [collectedThisMonthRow]] = await Promise.all([
+      db.select({ total: sum(platformPayments.amount) }).from(platformPayments).where(eq(platformPayments.currency, "MZN")),
+      db
+        .select({ total: sum(platformPayments.amount) })
+        .from(platformPayments)
+        .where(and(eq(platformPayments.currency, "MZN"), gte(platformPayments.paidAt, monthStart))),
+    ]);
+    const totalCollectedMzn = Number(totalCollectedRow?.total ?? 0);
+    const collectedThisMonthMzn = Number(collectedThisMonthRow?.total ?? 0);
 
     const planByCompany = new Map([...latestByCompany.entries()].map(([id, sub]) => [id, sub.plan]));
     const usageMap = await getCompaniesUsageMap(

@@ -289,7 +289,7 @@ export async function plantRoutes(app: FastifyInstance) {
     const clientPlantIdValue = typeof clientPlantIdField === "object" && "value" in clientPlantIdField ? String(clientPlantIdField.value) : "";
     const parsedClientPlantId = clientPlantIdSchema.safeParse(clientPlantIdValue);
     if (!parsedClientPlantId.success) return reply.code(400).send({ error: "Identificador de acompanhamento inválido" });
-    if (discipline !== "auto" && !PLANT_DISCIPLINES.includes(discipline as any)) {
+    if (discipline !== "auto" && !(PLANT_DISCIPLINES as readonly string[]).includes(discipline)) {
       return reply.code(400).send({ error: "Disciplina inválida" });
     }
 

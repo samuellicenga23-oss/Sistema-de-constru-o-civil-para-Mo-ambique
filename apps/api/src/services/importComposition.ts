@@ -112,7 +112,13 @@ function chapterTemplate(unit: string, description: string): ChapterTemplate {
       materials: [["Quadro eléctrico parcial", 1], ["Disjuntores e acessórios eléctricos", 1]],
     };
   }
-  if (/electric|eletrico|cabo|tomada|interruptor|luminar|quadro|eletroduto|anelado/.test(d)) {
+  if (/tampa\s+metal|portarolo|caixa\s+de\s+visita/.test(d)) {
+    return {
+      labour: [["Serralheiro", 1.0], ["Servente", 0.5]],
+      materials: [["Perfil metálico IPN (estrutura)", 15], ["Parafuso e bucha", 1], ["Tinta ant ferrugem", 0.1]],
+    };
+  }
+  if (/electric|eletrico|cabo|tomada|interruptor|comutador|luminar|quadro|eletroduto|anelado/.test(d)) {
     if (u === "un") {
       return {
         labour: [["Electricista", 1.2], ["Servente", 0.4]],

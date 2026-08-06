@@ -20,7 +20,7 @@ describe("RoleBadge", () => {
   });
 
   it("roleLabel devolve o mesmo rótulo para todos os perfis", () => {
-    expect(roleLabel("super_admin")).toBe("Super Admin");
+    expect(roleLabel("super_admin")).toBe("Super-administrador");
     expect(roleLabel("admin_empresa")).toBe("Administrador da Empresa");
   });
 });
