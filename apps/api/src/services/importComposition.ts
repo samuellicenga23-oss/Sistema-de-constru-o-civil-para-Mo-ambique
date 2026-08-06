@@ -17,6 +17,7 @@ import {
   isMetalStructureWork,
   isPrimarilyConcreteWork,
 } from "./sigoCompositionMap.js";
+import { constructionDomainsConflict } from "@sigo/shared";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -322,6 +323,7 @@ function isReferenceCategory(category: string | null | undefined): boolean {
 
 /** Evita ligar torre metálica a Betão B25 (e o inverso) por fuzzy / menções incidentais. */
 function domainsIncompatible(description: string, compositionName: string): boolean {
+  if (constructionDomainsConflict(description, compositionName)) return true;
   const d = normalizeText(description);
   const cn = normalizeText(compositionName);
   const compIsConcrete = /\bbetao\b|\bbetão\b|\bb15\b|\bb20\b|\bb25\b|\bb30\b/.test(cn);
@@ -381,7 +383,7 @@ function pickBestComposition(
     if (c.outputUnit === unit) score += 0.05;
     const reference = false;
     if (
-      score >= 0.72 &&
+      score >= 0.82 &&
       (!best ||
         score > best.score ||
         (score === best.score && c.companyId && !best.companyId) ||

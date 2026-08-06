@@ -5,7 +5,7 @@ import { db } from "../db/index.js";
 import { budgetSections, lineItems, measurementLines, workItemTemplates } from "../db/schema.js";
 import { loadWorkChapterLibrary, type TemplateChapter } from "./boqTemplate.js";
 import { getZoneIdForSection } from "./accessControl.js";
-import { normalizeUnit, type Unit } from "@sigo/shared";
+import { normalizeUnit, constructionDomainsConflict, type Unit } from "@sigo/shared";
 import { env } from "../env.js";
 import {
   resolveOrCreateCompositionForImport,
@@ -14,6 +14,7 @@ import {
   type ImportResourcesCache,
   type ResolvedImportComposition,
 } from "./importComposition.js";
+import { mapDescriptionToSigoComposition } from "./sigoCompositionMap.js";
 
 // Importação de Excel de medições — parse robusto (merge cells + unidades), pré-visualização
 // com match híbrido e aplicação confirmada pelo utilizador.
@@ -56,7 +57,17 @@ export type ImportPreviewRow = ParsedExcelRow & {
 
 export type MeasurementImportPreview = {
   rows: ImportPreviewRow[];
-  catalog: Array<{ code: string; description: string; unit: Unit; itemId: string | null; chapterCode: string }>;
+  catalog: Array<{
+    code: string;
+    description: string;
+    unit: Unit;
+    itemId: string | null;
+    chapterCode: string;
+    compositionName?: string | null;
+    compositionId?: string | null;
+  }>;
+  /** Catálogo de composições para o utilizador ligar manualmente na revisão. */
+  compositionOptions: Array<{ id: string; name: string; category: string | null; outputUnit: string }>;
   aiUsed: boolean;
   aiError: string | null;
   rowsRead: number;
@@ -67,6 +78,11 @@ export type ImportApplyDecision = {
   action: ImportMatchAction;
   targetCode?: string | null;
   targetItemId?: string | null;
+  /** Override: composição escolhida pelo utilizador na revisão. */
+  compositionId?: string | null;
+  compositionName?: string | null;
+  /** Forçar criação de composição a partir da descrição (ignorar catálogo por código). */
+  forceCreateComposition?: boolean;
 };
 
 export type CreatedImportComposition = {
@@ -97,6 +113,9 @@ export const importApplyDecisionSchema = z.object({
   action: z.enum(["map", "create", "ignore"]),
   targetCode: z.string().trim().min(1).max(MAX_CODE_LEN).nullable().optional(),
   targetItemId: z.string().uuid().nullable().optional(),
+  compositionId: z.string().uuid().nullable().optional(),
+  compositionName: z.string().trim().max(300).nullable().optional(),
+  forceCreateComposition: z.boolean().optional(),
 });
 
 export const importApplyDecisionsSchema = z.array(importApplyDecisionSchema).min(1).max(MAX_IMPORT_ROWS);
@@ -481,6 +500,16 @@ function scoreDescription(a: string, b: string): number {
   return inter / Math.max(ta.size, tb.size);
 }
 
+/** Código do catálogo SIGO não deve “roubar” a composição se a descrição do mapa for de outro domínio. */
+function catalogCompositionUntrusted(sourceDescription: string, catalogDescription: string, compositionName: string | null): boolean {
+  const target = [catalogDescription, compositionName].filter(Boolean).join(" · ");
+  if (constructionDomainsConflict(sourceDescription, target)) return true;
+  const score = scoreDescription(sourceDescription, catalogDescription);
+  // Código igual mas textos sem overlap relevante → não herdar composição do modelo.
+  if (score < 0.35 && normalizeText(sourceDescription).length >= 12) return true;
+  return false;
+}
+
 export async function previewMeasurementsImport(
   documentId: string,
   buffer: Buffer,
@@ -591,12 +620,27 @@ export async function previewMeasurementsImport(
   for (const row of parsed) {
     const exact = byCode.get(row.code);
     if (exact) {
+      const untrusted = catalogCompositionUntrusted(row.description, exact.description, exact.compositionName);
+      if (untrusted) {
+        // Mantém o código (estrutura do mapa do cliente) mas NÃO herda a composição do modelo SIGO.
+        rows.push(
+          enrichMatch(
+            row,
+            { ...exact, compositionName: null, compositionId: null },
+            "code",
+            0.45,
+            "Código igual ao catálogo SIGO, mas a descrição é de outro tipo de trabalho — composição pela descrição do mapa",
+          ),
+        );
+        continue;
+      }
       rows.push(enrichMatch(row, exact, "code", 1, null));
       continue;
     }
 
     let best: (typeof catalog)[number] & { score: number } | null = null;
     for (const c of catalog) {
+      if (catalogCompositionUntrusted(row.description, c.description, c.compositionName)) continue;
       const score = scoreDescription(row.description, c.description);
       if (score >= DESC_MATCH_FLOOR && (!best || score > best.score)) best = { ...c, score };
     }
@@ -644,22 +688,36 @@ export async function previewMeasurementsImport(
       );
       compositionPreviewCache.set(cacheKey, previewComp);
     }
-    if (row.matchMethod === "none") {
+    if (row.matchMethod === "none" || !row.compositionName) {
       row.compositionName = previewComp.compositionName;
       row.compositionId = previewComp.compositionId;
       row.priceSource = row.unitPrice ? "file" : "composition";
-      row.note = previewComp.matched
-        ? `Composição existente: ${previewComp.compositionName}`
-        : `Será criada composição nova: ${previewComp.compositionName} — verifique rendimentos e insumos no Catálogo após aplicar`;
-    } else if (!row.compositionName && previewComp.matched) {
-      row.compositionName = previewComp.compositionName;
-      row.compositionId = previewComp.compositionId;
-      if (row.priceSource === "none") row.priceSource = "composition";
+      if (row.matchMethod === "none") {
+        row.note = previewComp.matched
+          ? `Composição existente: ${previewComp.compositionName}`
+          : `Será criada composição nova: ${previewComp.compositionName} — verifique rendimentos e insumos no Catálogo após aplicar`;
+      } else if (!row.note?.includes("descrição")) {
+        row.note = previewComp.matched
+          ? `Composição pela descrição: ${previewComp.compositionName}`
+          : `Nova composição pela descrição: ${previewComp.compositionName}`;
+      } else if (previewComp.compositionName) {
+        row.note = `${row.note} · Comp.: ${previewComp.compositionName}`;
+      }
     }
   }
 
+  const compositionOptions = compositionResources.compositions
+    .filter((c) => normalizeText(c.category || "") !== normalizeText("Biblioteca de referência"))
+    .map((c) => ({
+      id: c.id,
+      name: c.name,
+      category: c.category ?? null,
+      outputUnit: c.outputUnit,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name, "pt"));
+
   // Match por código/descrição/SIGO apenas — sem chamada externa (mais rápido e estável).
-  return { rows, catalog, aiUsed: false, aiError: null, rowsRead: parsed.length };
+  return { rows, catalog, compositionOptions, aiUsed: false, aiError: null, rowsRead: parsed.length };
 }
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -726,6 +784,7 @@ async function createLineItemFromImport(
   index: LibraryIndex,
   compositionCache: Map<string, ResolvedImportComposition>,
   resourcesCache: ImportResourcesCache,
+  preferredOverride?: { compositionName?: string | null; compositionId?: string | null; forceCreate?: boolean },
 ): Promise<{
   itemId: string;
   compositionId: string;
@@ -738,20 +797,37 @@ async function createLineItemFromImport(
   const chapterCode = chapterCodeOf(safeCode);
   const chapterId = await ensureChapter(tx, sectionId, chapterCode, index);
   const zoneId = await getZoneIdForSection(sectionId);
+  const desc = description || template?.description || safeCode;
+
+  let preferredName = preferredOverride?.compositionName ?? template?.composition ?? null;
+  let preferredId = preferredOverride?.compositionId ?? template?.compositionId ?? null;
+  if (preferredOverride?.forceCreate) {
+    preferredName = null;
+    preferredId = null;
+  } else if (
+    !preferredOverride?.compositionId &&
+    template &&
+    catalogCompositionUntrusted(desc, template.description, template.composition ?? null)
+  ) {
+    // Não herdar composição do modelo SIGO quando o código colide semanticamente.
+    preferredName = mapDescriptionToSigoComposition(desc, unit)?.compositionName ?? null;
+    preferredId = null;
+  }
 
   const resolved = await resolveOrCreateCompositionForImport(
     tx,
     companyId,
     {
       code: safeCode,
-      description: description || template?.description || safeCode,
+      description: desc,
       unit: normalizeUnit(unit, template?.unit ?? "un"),
-      preferredCompositionName: template?.composition ?? null,
-      preferredCompositionId: template?.compositionId ?? null,
+      preferredCompositionName: preferredName,
+      preferredCompositionId: preferredId,
     },
     zoneId,
     compositionCache,
     resourcesCache,
+    preferredOverride?.forceCreate ? { forceCreate: true } : undefined,
   );
 
   const [item] = await tx
@@ -761,7 +837,7 @@ async function createLineItemFromImport(
       parentId: chapterId,
       kind: "item",
       code: safeCode,
-      description: (description || template?.description || `Item ${safeCode}`).slice(0, 2000),
+      description: desc.slice(0, 2000),
       unit: normalizeUnit(unit, template?.unit ?? "un"),
       compositionId: resolved.compositionId,
       unitPrice: resolved.unitPrice.toFixed(2),
@@ -861,6 +937,7 @@ async function applyQuantityAndComposition(
   preferred: { compositionName?: string | null; compositionId?: string | null },
   compositionCache: Map<string, ResolvedImportComposition>,
   resourcesCache: ImportResourcesCache,
+  forceCreate = false,
 ): Promise<{
   compositionCreated: boolean;
   compositionLinked: boolean;
@@ -889,6 +966,7 @@ async function applyQuantityAndComposition(
     zoneId,
     compositionCache,
     resourcesCache,
+    forceCreate ? { forceCreate: true } : undefined,
   );
 
   // Preço do ficheiro ganha se existir; senão usa o da composição.
@@ -1041,7 +1119,16 @@ export async function applyMeasurementsImport(
   const itemsById = new Map(docItems.map((i) => [i.id, i]));
 
   const unmatched: MeasurementImportResult["unmatched"] = [];
-  const resolved: { row: ParsedExcelRow; itemId: string; created: boolean; sectionId: string; targetCode: string }[] = [];
+  const resolved: {
+    row: ParsedExcelRow;
+    itemId: string;
+    created: boolean;
+    sectionId: string;
+    targetCode: string;
+    compositionId?: string | null;
+    compositionName?: string | null;
+    forceCreateComposition?: boolean;
+  }[] = [];
   const createdForTemplate: Array<{ code: string; description: string; unit: Unit; compositionId?: string | null; compositionName?: string | null }> = [];
   const saveToTemplate = options.saveToCompanyTemplate === true;
   let compositionsLinked = 0;
@@ -1115,11 +1202,25 @@ export async function applyMeasurementsImport(
           index,
           compositionCache,
           resourcesCache,
+          {
+            compositionId: decision.compositionId,
+            compositionName: decision.compositionName,
+            forceCreate: decision.forceCreateComposition === true,
+          },
         );
         item = { id: created.itemId, code: targetCode, origin: "composicao", compositionId: created.compositionId } as DocItem;
         liveByCode.set(targetCode, item);
         liveById.set(created.itemId, item);
-        resolved.push({ row, itemId: created.itemId, created: true, sectionId, targetCode });
+        resolved.push({
+          row,
+          itemId: created.itemId,
+          created: true,
+          sectionId,
+          targetCode,
+          compositionId: decision.compositionId,
+          compositionName: decision.compositionName,
+          forceCreateComposition: decision.forceCreateComposition,
+        });
         createdForTemplate.push({
           code: targetCode,
           description: row.description || targetCode,
@@ -1131,7 +1232,16 @@ export async function applyMeasurementsImport(
           trackCreatedComposition(created.compositionId, created.compositionName, targetCode);
         }
       } else {
-        resolved.push({ row, itemId: item.id, created: false, sectionId, targetCode });
+        resolved.push({
+          row,
+          itemId: item.id,
+          created: false,
+          sectionId,
+          targetCode,
+          compositionId: decision.compositionId,
+          compositionName: decision.compositionName,
+          forceCreateComposition: decision.forceCreateComposition,
+        });
       }
     }
 
@@ -1149,6 +1259,24 @@ export async function applyMeasurementsImport(
       }
       const primary = { ...group[0].row, quantity: totalQty, code: group[0].targetCode };
       const template = index.itemByCode.get(group[0].targetCode);
+      const overrideId = group.find((g) => g.compositionId)?.compositionId;
+      const overrideName = group.find((g) => g.compositionName)?.compositionName;
+      const forceCreate = group.some((g) => g.forceCreateComposition);
+
+      let preferredName = overrideName ?? template?.composition ?? null;
+      let preferredId = overrideId ?? template?.compositionId ?? null;
+      if (forceCreate) {
+        preferredName = null;
+        preferredId = null;
+      } else if (
+        !overrideId &&
+        template &&
+        catalogCompositionUntrusted(primary.description, template.description, template.composition ?? null)
+      ) {
+        preferredName = mapDescriptionToSigoComposition(primary.description, primary.unit)?.compositionName ?? null;
+        preferredId = null;
+      }
+
       const result = await applyQuantityAndComposition(
         tx,
         itemId,
@@ -1156,11 +1284,12 @@ export async function applyMeasurementsImport(
         companyId,
         group[0].sectionId,
         {
-          compositionName: template?.composition ?? null,
-          compositionId: template?.compositionId ?? null,
+          compositionName: preferredName,
+          compositionId: preferredId,
         },
         compositionCache,
         resourcesCache,
+        forceCreate,
       );
       // Itens novos já registaram a composição acima; aqui só itens existentes.
       if (!group.some((g) => g.created) && result.compositionCreated) {

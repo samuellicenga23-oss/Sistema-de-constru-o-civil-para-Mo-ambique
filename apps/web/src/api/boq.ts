@@ -339,6 +339,9 @@ export type ImportApplyDecision = {
   action: "map" | "create" | "ignore";
   targetCode?: string | null;
   targetItemId?: string | null;
+  compositionId?: string | null;
+  compositionName?: string | null;
+  forceCreateComposition?: boolean;
 };
 
 export type MeasurementImportPreview = {
@@ -373,6 +376,7 @@ export type MeasurementImportPreview = {
     compositionName?: string | null;
     compositionId?: string | null;
   }>;
+  compositionOptions?: Array<{ id: string; name: string; category: string | null; outputUnit: string }>;
   aiUsed: boolean;
   aiError: string | null;
   rowsRead: number;

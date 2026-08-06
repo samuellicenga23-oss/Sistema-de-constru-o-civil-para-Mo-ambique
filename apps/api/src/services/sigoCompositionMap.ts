@@ -385,8 +385,33 @@ const RULES: Rule[] = [
   },
   {
     name: "muro vedação",
-    test: (d) => /muro\s+de\s+vedac|vedacao\s+em\s+bloco/.test(d),
+    test: (d) =>
+      /\bmuro\b|\bmurro\b/.test(d) ||
+      /vedacao\s+em\s+bloco|muro\s+de\s+vedac|vedacao\s+com\s+bloco|construcao\s+de\s+mur/.test(d),
     compositionName: "Muro de vedação em bloco 20",
+    confidence: 0.94,
+  },
+  {
+    name: "portão em vedação",
+    test: (d) => /portao/.test(d) && /vedac|muro|murro|cerca/.test(d),
+    compositionName: "Portão metálico montado",
+    confidence: 0.9,
+  },
+  {
+    name: "ligação eléctrica / contrato energia",
+    test: (d) =>
+      /ligacao.*(electric|eletrica|energia|corrente)|contrato\s+de\s+ligacao.*(electric|eletrica|corrente)|pagamento.*(electric|eletrica|corrente)/.test(
+        d,
+      ),
+    compositionName: "Quadro eléctrico completo, montado e ensaiado",
+    confidence: 0.9,
+  },
+  {
+    name: "ligação água / contrato água",
+    test: (d) =>
+      /ligacao.*\bagua\b|contrato\s+de\s+ligacao.*\bagua\b|pagamento.*(contrato)?.*\bagua\b|ramal\s+de\s+agua/.test(d),
+    compositionName: "Ponto de água",
+    confidence: 0.9,
   },
   {
     name: "tijolo",
@@ -447,17 +472,20 @@ const RULES: Rule[] = [
   },
   {
     name: "tecto falso",
-    test: (d) => /tecto\s+falso|gesso\s+carton|pladur|contraplacado.*tecto/.test(d),
+    // Não roubar itens cuja actividade principal é pintura (ex.: "pintura … e tecto falso").
+    test: (d) =>
+      /tecto\s+falso|gesso\s+carton|pladur|contraplacado.*tecto/.test(d) &&
+      !/\bpintura\b|\btinta\b|\besmalte\b/.test(d),
     compositionName: "Tecto falso em gesso cartonado",
   },
   {
     name: "massa corrida",
-    test: (d) => /massa\s+corrida|lixagem/.test(d),
+    test: (d) => /massa\s+corrida|lixagem/.test(d) && !/\bpintura\b/.test(d),
     compositionName: "Massa corrida e lixagem antes de pintura",
   },
   {
     name: "pintura metal / antiferro",
-    test: (d) => /anti\s*corros|ant\s*ferrug|pintura.*metal|grade.*pint/.test(d),
+    test: (d) => /anti\s*corros|ant\s*ferrug|pintura.*metal|grade.*pint|pintura.*porta|pintura.*grade/.test(d),
     compositionName: "Pintura ant ferrugem em metal",
   },
   {
@@ -472,7 +500,7 @@ const RULES: Rule[] = [
   },
   {
     name: "pintura interior / esmalte",
-    test: (d) => /pintura|esmalte|cinacryl|tinta\s+aquos|primario\s+selante/.test(d),
+    test: (d) => /pintura|esmalte|cinacryl|tinta\s+aquos|tinta\s+oleo|primario\s+selante/.test(d),
     compositionName: "Pintura esmalte aquoso interior (2 demãos + primário)",
   },
 

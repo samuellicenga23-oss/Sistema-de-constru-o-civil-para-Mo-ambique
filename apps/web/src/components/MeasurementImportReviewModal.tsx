@@ -15,11 +15,13 @@ type DecisionState = ImportApplyDecision & {
   note: string | null;
   targetDescription: string | null;
   compositionName: string | null;
+  compositionId: string | null;
+  forceCreateComposition: boolean;
   priceSource: "file" | "composition" | "none";
 };
 
-function willCreateComposition(note: string | null | undefined) {
-  return Boolean(note?.includes("Será criada composição"));
+function willCreateComposition(row: DecisionState) {
+  return row.forceCreateComposition || Boolean(row.note?.includes("Será criada composição") || row.note?.includes("Nova composição"));
 }
 
 export default function MeasurementImportReviewModal({
@@ -36,6 +38,7 @@ export default function MeasurementImportReviewModal({
   const [saveToCompanyTemplate, setSaveToCompanyTemplate] = useState(false);
   const [rows, setRows] = useState<DecisionState[]>([]);
   const [applyError, setApplyError] = useState<string | null>(null);
+  const compositionOptions = preview.compositionOptions ?? [];
 
   useEffect(() => {
     setApplyError(null);
@@ -45,6 +48,9 @@ export default function MeasurementImportReviewModal({
         action: row.action,
         targetCode: row.targetCode,
         targetItemId: row.targetItemId,
+        compositionId: row.compositionId ?? null,
+        compositionName: row.compositionName ?? null,
+        forceCreateComposition: false,
         sheet: row.sheet,
         rowNumber: row.rowNumber,
         code: row.code,
@@ -56,7 +62,6 @@ export default function MeasurementImportReviewModal({
         confidence: row.confidence,
         note: row.note,
         targetDescription: row.targetDescription,
-        compositionName: row.compositionName ?? null,
         priceSource: row.priceSource ?? "none",
       })),
     );
@@ -68,8 +73,9 @@ export default function MeasurementImportReviewModal({
     const ignore = rows.filter((r) => r.action === "ignore").length;
     const withFilePrice = rows.filter((r) => r.unitPrice != null && r.unitPrice > 0).length;
     const withComposition = rows.filter((r) => r.compositionName).length;
-    const newCompositions = rows.filter((r) => r.action !== "ignore" && willCreateComposition(r.note)).length;
-    return { map, create, ignore, withFilePrice, withComposition, newCompositions };
+    const newCompositions = rows.filter((r) => r.action !== "ignore" && willCreateComposition(r)).length;
+    const suspicious = rows.filter((r) => r.note?.includes("outro tipo de trabalho") || (r.matchMethod === "code" && r.confidence < 0.7)).length;
+    return { map, create, ignore, withFilePrice, withComposition, newCompositions, suspicious };
   }, [rows]);
 
   function updateRow(rowKey: string, patch: Partial<DecisionState>) {
@@ -81,14 +87,28 @@ export default function MeasurementImportReviewModal({
           const match = preview.catalog.find((c) => c.code === patch.targetCode);
           next.targetItemId = match?.itemId ?? null;
           next.targetDescription = match?.description ?? null;
-          next.compositionName = match?.compositionName ?? null;
+          if (!patch.compositionId && !patch.forceCreateComposition) {
+            next.compositionName = match?.compositionName ?? row.compositionName;
+            next.compositionId = match?.compositionId ?? row.compositionId;
+          }
           next.priceSource =
-            row.unitPrice && row.unitPrice > 0 ? "file" : match?.compositionName ? "composition" : "none";
+            row.unitPrice && row.unitPrice > 0 ? "file" : next.compositionName ? "composition" : "none";
         }
-        if (patch.action === "create") {
+        if (patch.compositionId !== undefined) {
+          const comp = compositionOptions.find((c) => c.id === patch.compositionId);
+          next.compositionName = comp?.name ?? null;
+          next.forceCreateComposition = false;
+          next.priceSource = row.unitPrice && row.unitPrice > 0 ? "file" : comp ? "composition" : "none";
+          next.note = comp ? `Composição ligada manualmente: ${comp.name}` : row.note;
+        }
+        if (patch.forceCreateComposition === true) {
+          next.compositionId = null;
+          next.compositionName = `Nova a partir da descrição (${row.description.slice(0, 60)}…)`;
+          next.priceSource = row.unitPrice && row.unitPrice > 0 ? "file" : "composition";
+          next.note = "Será criada composição nova a partir da descrição — identificar insumos no Catálogo";
+        }
+        if (patch.action === "create" && patch.forceCreateComposition === undefined && !patch.compositionId) {
           next.targetItemId = null;
-          next.compositionName = null;
-          next.priceSource = row.unitPrice && row.unitPrice > 0 ? "file" : "none";
         }
         return next;
       }),
@@ -98,9 +118,9 @@ export default function MeasurementImportReviewModal({
   return (
     <Modal
       title="Rever importação de medições"
-      subtitle={`${preview.rowsRead} linha(s) lidas do ficheiro — confirme o destino de cada item antes de aplicar.`}
+      subtitle={`${preview.rowsRead} linha(s) lidas — confirme destino e composição. Códigos iguais ao catálogo SIGO não forçam a composição se a descrição for de outro tipo de trabalho.`}
       onClose={onClose}
-      maxWidth="max-w-5xl"
+      maxWidth="max-w-6xl"
     >
       <div className="space-y-4">
         <div className="flex flex-wrap gap-2">
@@ -110,19 +130,21 @@ export default function MeasurementImportReviewModal({
           {summary.withFilePrice > 0 && <span className="badge badge-gray">{summary.withFilePrice} c/ preço ficheiro</span>}
           {summary.withComposition > 0 && <span className="badge badge-brand">{summary.withComposition} c/ composição</span>}
           {summary.newCompositions > 0 && <span className="badge badge-gray">{summary.newCompositions} composição nova</span>}
+          {summary.suspicious > 0 && <span className="badge badge-yellow">{summary.suspicious} a confirmar</span>}
         </div>
 
         {applyError && (
           <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{applyError}</p>
         )}
+        {summary.suspicious > 0 && (
+          <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-950">
+            Há linhas em que o código do mapa coincide com o catálogo SIGO mas a descrição é diferente (ex.: pintura vs cobertura).
+            Escolha a composição correcta ou «Criar pela descrição».
+          </p>
+        )}
         {summary.withFilePrice === 0 && (
           <p className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-700">
             Este mapa não traz preços unitários. Ao aplicar, cada item será ligado a uma composição SIGO existente ou será criada uma composição nova da empresa — e o preço unitário será calculado automaticamente.
-          </p>
-        )}
-        {summary.newCompositions > 0 && (
-          <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-950">
-            Há {summary.newCompositions} linha(s) com composição nova. Depois de aplicar, abra cada composição no Catálogo e confirme rendimentos, insumos e preços.
           </p>
         )}
 
@@ -146,9 +168,13 @@ export default function MeasurementImportReviewModal({
             </thead>
             <tbody className="divide-y divide-slate-100 bg-white">
               {rows.map((row) => {
-                const creatingComp = willCreateComposition(row.note);
+                const creatingComp = willCreateComposition(row);
+                const needsAttention = Boolean(row.note?.includes("outro tipo de trabalho")) || (row.matchMethod === "code" && row.confidence < 0.7);
                 return (
-                  <tr key={row.rowKey} className={`align-top ${creatingComp && row.action !== "ignore" ? "bg-amber-50/40" : ""}`}>
+                  <tr
+                    key={row.rowKey}
+                    className={`align-top ${creatingComp && row.action !== "ignore" ? "bg-amber-50/40" : needsAttention ? "bg-orange-50/50" : ""}`}
+                  >
                     <td className="px-3 py-2.5">
                       <strong className="block text-slate-950">{row.code}</strong>
                       <span className="mt-0.5 block text-xs text-slate-500">{row.description || "—"}</span>
@@ -178,11 +204,11 @@ export default function MeasurementImportReviewModal({
                         <option value="ignore">Ignorar</option>
                       </select>
                     </td>
-                    <td className="min-w-[12rem] px-3 py-2.5">
+                    <td className="min-w-[16rem] px-3 py-2.5">
                       {row.action === "ignore" ? (
                         <span className="text-xs text-slate-400">—</span>
                       ) : (
-                        <>
+                        <div className="space-y-2">
                           <input
                             value={row.targetCode ?? ""}
                             onChange={(e) => updateRow(row.rowKey, { targetCode: e.target.value })}
@@ -197,14 +223,39 @@ export default function MeasurementImportReviewModal({
                               </option>
                             ))}
                           </datalist>
-                          {row.targetDescription && <span className="mt-1 block text-[11px] text-slate-500">{row.targetDescription}</span>}
+                          {row.targetDescription && <span className="block text-[11px] text-slate-500">{row.targetDescription}</span>}
+
+                          <label className="block text-[10px] font-semibold uppercase tracking-wide text-slate-500">Composição</label>
+                          <select
+                            value={row.forceCreateComposition ? "__create__" : (row.compositionId ?? "")}
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              if (value === "__create__") {
+                                updateRow(row.rowKey, { forceCreateComposition: true });
+                              } else if (!value) {
+                                updateRow(row.rowKey, { compositionId: null, compositionName: null, forceCreateComposition: false });
+                              } else {
+                                updateRow(row.rowKey, { compositionId: value, forceCreateComposition: false });
+                              }
+                            }}
+                            className="input text-sm"
+                          >
+                            <option value="">— escolher / automática —</option>
+                            <option value="__create__">Criar pela descrição (nova)</option>
+                            {compositionOptions.map((c) => (
+                              <option key={c.id} value={c.id}>
+                                {c.name}
+                                {c.category ? ` · ${c.category}` : ""}
+                              </option>
+                            ))}
+                          </select>
                           {row.compositionName && (
-                            <span className={`mt-1 block text-[11px] ${creatingComp ? "font-medium text-amber-800" : "text-brand-800"}`}>
+                            <span className={`block text-[11px] ${creatingComp ? "font-medium text-amber-800" : "text-brand-800"}`}>
                               {creatingComp ? "Nova comp. (verificar): " : "Comp.: "}
                               {row.compositionName}
                             </span>
                           )}
-                        </>
+                        </div>
                       )}
                     </td>
                     <td className="px-3 py-2.5 text-xs text-slate-500">
@@ -236,7 +287,15 @@ export default function MeasurementImportReviewModal({
             onClick={() => {
               setApplyError(null);
               void onApply(
-                rows.map(({ rowKey, action, targetCode, targetItemId }) => ({ rowKey, action, targetCode, targetItemId })),
+                rows.map(({ rowKey, action, targetCode, targetItemId, compositionId, compositionName, forceCreateComposition }) => ({
+                  rowKey,
+                  action,
+                  targetCode,
+                  targetItemId,
+                  compositionId: forceCreateComposition ? null : compositionId,
+                  compositionName: forceCreateComposition ? null : compositionName,
+                  forceCreateComposition: forceCreateComposition || undefined,
+                })),
                 saveToCompanyTemplate,
               ).catch((err: unknown) => {
                 setApplyError(err instanceof Error ? err.message : "Não foi possível aplicar a importação.");
