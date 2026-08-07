@@ -324,7 +324,33 @@ def extract_rows_with_ai(text: str) -> tuple[list[dict[str, Any]], str | None]:
 def extract_boq_from_pdf(file_bytes: bytes) -> dict[str, Any]:
     if not file_bytes:
         return {"rows": [], "pages": 0, "method": "none", "error": "empty_pdf", "aiError": None}
-    text, pages = _extract_pdf_text(file_bytes)
+    # Excel/ZIP enviado com extensão .pdf — rejeita cedo com mensagem clara em vez de crash no PyMuPDF.
+    if file_bytes.startswith(b"PK"):
+        return {
+            "rows": [],
+            "pages": 0,
+            "method": "none",
+            "error": "Este ficheiro parece Excel (.xlsx), não PDF. Importe-o como .xlsx ou renomeie a extensão.",
+            "aiError": None,
+        }
+    if not file_bytes.startswith(b"%PDF"):
+        return {
+            "rows": [],
+            "pages": 0,
+            "method": "none",
+            "error": "O ficheiro não é um PDF válido.",
+            "aiError": None,
+        }
+    try:
+        text, pages = _extract_pdf_text(file_bytes)
+    except Exception:
+        return {
+            "rows": [],
+            "pages": 0,
+            "method": "none",
+            "error": "Não foi possível abrir este PDF (ficheiro corrompido ou protegido).",
+            "aiError": None,
+        }
     if not _looks_like_boq(text):
         return {
             "rows": [],

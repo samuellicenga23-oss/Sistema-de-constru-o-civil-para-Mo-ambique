@@ -419,8 +419,14 @@ async function parseMeasurementsPdf(buffer: Buffer): Promise<ParsedExcelRow[]> {
     signal: AbortSignal.timeout(120_000),
   });
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error((body as { error?: string }).error || `Falha ao ler PDF de mapa (${res.status})`);
+    const body = (await res.json().catch(() => ({}))) as { error?: string; detail?: string | { msg?: string }[] };
+    const detail =
+      typeof body.detail === "string"
+        ? body.detail
+        : Array.isArray(body.detail)
+          ? body.detail.map((d) => d.msg).filter(Boolean).join("; ")
+          : "";
+    throw new Error(body.error || detail || `Falha ao ler PDF de mapa (${res.status})`);
   }
   const body = (await res.json()) as {
     rows?: Array<{
@@ -467,13 +473,15 @@ async function parseMeasurementsPdf(buffer: Buffer): Promise<ParsedExcelRow[]> {
   return rows;
 }
 
-/** Detecta Excel vs PDF pelo conteúdo (ZIP/xlsx vs %PDF). */
+/** Detecta Excel vs PDF pelo conteúdo (ZIP/xlsx vs %PDF); a extensão só entra se o magic for ambíguo. */
 export async function parseMeasurementsFile(buffer: Buffer, filename = ""): Promise<ParsedExcelRow[]> {
   const lower = filename.toLowerCase();
-  const isPdf =
-    lower.endsWith(".pdf") ||
-    buffer.subarray(0, 4).toString("utf8") === "%PDF";
-  if (isPdf) return parseMeasurementsPdf(buffer);
+  const head = buffer.subarray(0, 5).toString("utf8");
+  const magicPdf = head.startsWith("%PDF");
+  const magicZip = buffer.length >= 2 && buffer[0] === 0x50 && buffer[1] === 0x4b; // PK = xlsx/xls zip
+  if (magicPdf) return parseMeasurementsPdf(buffer);
+  if (magicZip || lower.endsWith(".xlsx") || lower.endsWith(".xls")) return parseMeasurementsExcel(buffer);
+  if (lower.endsWith(".pdf")) return parseMeasurementsPdf(buffer);
   return parseMeasurementsExcel(buffer);
 }
 
