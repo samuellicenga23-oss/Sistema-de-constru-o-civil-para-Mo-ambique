@@ -64,9 +64,31 @@ export type MarketplaceProfile = {
   location: string | null;
 };
 
-export type MarketplaceMaterialPrice = { id: string; materialId: string; materialName: string; unit: string; unitCost: string; currency: string };
-export type MarketplaceLabourPrice = { id: string; labourCategoryId: string; labourName: string; hourlyCost: string; currency: string };
-export type MarketplaceEquipmentPrice = { id: string; equipmentId: string; equipmentName: string; hourlyCost: string; currency: string };
+export type MarketplaceMaterialPrice = {
+  id: string | null;
+  materialId: string;
+  materialName: string;
+  unit: string;
+  category?: string;
+  specification?: string | null;
+  source?: "nacional" | "pedido";
+  unitCost: string | null;
+  currency: string;
+};
+export type MarketplaceLabourPrice = {
+  id: string | null;
+  labourCategoryId: string;
+  labourName: string;
+  hourlyCost: string | null;
+  currency: string;
+};
+export type MarketplaceEquipmentPrice = {
+  id: string | null;
+  equipmentId: string;
+  equipmentName: string;
+  hourlyCost: string | null;
+  currency: string;
+};
 
 export const publicApi = {
   zones: () => request<PriceZone[]>("/public/price-zones"),
@@ -89,10 +111,9 @@ export const supplierPortalApi = {
     request<SupplierQuoteRequest>(`/supplier/quote-requests/${id}/respond`, { method: "POST", body: JSON.stringify(data) }),
 };
 
-// Ficha e preços no marketplace nacional (SIGO Fornecedores) — só existe para contas registadas
-// publicamente, nunca para a conta global "SIGO Preços".
+// Ficha e preços no marketplace nacional (SIGO Fornecedores), incluindo a Equipa SIGO Preços.
 export type MarketplaceCatalog = {
-  materials: Array<{ id: string; name: string; unit: string }>;
+  materials: Array<{ id: string; name: string; unit: string; category?: string; specification?: string | null; source?: "nacional" | "pedido" }>;
   labourCategories: Array<{ id: string; name: string }>;
   equipment: Array<{ id: string; name: string }>;
 };

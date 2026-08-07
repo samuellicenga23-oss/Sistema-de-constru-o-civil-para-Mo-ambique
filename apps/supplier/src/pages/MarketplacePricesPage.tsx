@@ -21,6 +21,29 @@ const TABS: Array<{ id: Tab; label: string }> = [
   { id: "maquinas", label: "Máquinas" },
 ];
 
+type MaterialOption = MarketplaceCatalog["materials"][number];
+
+function groupKey(category: string | undefined | null) {
+  const c = (category ?? "").trim();
+  return c || "Outros";
+}
+
+function groupMaterialsByCategory<T extends { category?: string | null; name?: string; materialName?: string }>(items: T[]) {
+  const map = new Map<string, T[]>();
+  for (const item of items) {
+    const key = groupKey(item.category);
+    const list = map.get(key) ?? [];
+    list.push(item);
+    map.set(key, list);
+  }
+  return [...map.entries()]
+    .sort(([a], [b]) => a.localeCompare(b, "pt"))
+    .map(([category, rows]) => ({
+      category,
+      rows: rows.slice().sort((x, y) => (x.materialName ?? x.name ?? "").localeCompare(y.materialName ?? y.name ?? "", "pt")),
+    }));
+}
+
 export default function MarketplacePricesPage() {
   const navigate = useNavigate();
   const toast = useToast();
@@ -36,6 +59,7 @@ export default function MarketplacePricesPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
 
   async function reload() {
     const [cat, mats, labs, eqs] = await Promise.all([
@@ -69,21 +93,74 @@ export default function MarketplacePricesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const options = useMemo(() => {
+  const materialOptionsGrouped = useMemo(() => {
     if (!catalog) return [];
-    const source = tab === "materiais" ? catalog.materials : tab === "mao-de-obra" ? catalog.labourCategories : catalog.equipment;
     const needle = query.trim().toLocaleLowerCase("pt");
-    return needle ? source.filter((o) => o.name.toLocaleLowerCase("pt").includes(needle)) : source;
-  }, [catalog, tab, query]);
+    const filtered = needle
+      ? catalog.materials.filter((o) => {
+          const name = o.name.toLocaleLowerCase("pt");
+          const spec = o.specification ? String(o.specification).toLocaleLowerCase("pt") : "";
+          const cat = (o.category ?? "").toLocaleLowerCase("pt");
+          return name.includes(needle) || spec.includes(needle) || cat.includes(needle);
+        })
+      : catalog.materials;
+    return groupMaterialsByCategory(filtered);
+  }, [catalog, query]);
 
-  const activeList = tab === "materiais" ? materialPrices : tab === "mao-de-obra" ? labourPrices : equipmentPrices;
-  const filteredActiveList = useMemo(() => {
+  const labourOptions = useMemo(() => {
+    if (!catalog) return [];
     const needle = query.trim().toLocaleLowerCase("pt");
-    if (!needle) return activeList;
-    return (activeList as Array<{ materialName?: string; labourName?: string; equipmentName?: string }>).filter((p) =>
-      (p.materialName ?? p.labourName ?? p.equipmentName ?? "").toLocaleLowerCase("pt").includes(needle),
-    );
-  }, [activeList, query]);
+    return needle ? catalog.labourCategories.filter((o) => o.name.toLocaleLowerCase("pt").includes(needle)) : catalog.labourCategories;
+  }, [catalog, query]);
+
+  const equipmentOptions = useMemo(() => {
+    if (!catalog) return [];
+    const needle = query.trim().toLocaleLowerCase("pt");
+    return needle ? catalog.equipment.filter((o) => o.name.toLocaleLowerCase("pt").includes(needle)) : catalog.equipment;
+  }, [catalog, query]);
+
+  const filteredMaterials = useMemo(() => {
+    const needle = query.trim().toLocaleLowerCase("pt");
+    if (!needle) return materialPrices;
+    return materialPrices.filter((p) => {
+      const label = p.materialName.toLocaleLowerCase("pt");
+      const spec = (p.specification ?? "").toLocaleLowerCase("pt");
+      const cat = (p.category ?? "").toLocaleLowerCase("pt");
+      return label.includes(needle) || spec.includes(needle) || cat.includes(needle);
+    });
+  }, [materialPrices, query]);
+
+  const materialGroups = useMemo(() => groupMaterialsByCategory(filteredMaterials), [filteredMaterials]);
+
+  const filteredLabour = useMemo(() => {
+    const needle = query.trim().toLocaleLowerCase("pt");
+    if (!needle) return labourPrices;
+    return labourPrices.filter((p) => p.labourName.toLocaleLowerCase("pt").includes(needle));
+  }, [labourPrices, query]);
+
+  const filteredEquipment = useMemo(() => {
+    const needle = query.trim().toLocaleLowerCase("pt");
+    if (!needle) return equipmentPrices;
+    return equipmentPrices.filter((p) => p.equipmentName.toLocaleLowerCase("pt").includes(needle));
+  }, [equipmentPrices, query]);
+
+  const pricedCount = useMemo(() => {
+    if (tab === "materiais") return materialPrices.filter((p) => p.unitCost != null).length;
+    if (tab === "mao-de-obra") return labourPrices.filter((p) => p.hourlyCost != null).length;
+    return equipmentPrices.filter((p) => p.hourlyCost != null).length;
+  }, [tab, materialPrices, labourPrices, equipmentPrices]);
+
+  const activeListLength =
+    tab === "materiais" ? materialPrices.length : tab === "mao-de-obra" ? labourPrices.length : equipmentPrices.length;
+
+  function selectRow(id: string, existingCost: string | null) {
+    setResourceId(id);
+    setCost(existingCost != null ? String(Number(existingCost)) : "");
+  }
+
+  function toggleGroup(category: string) {
+    setCollapsedGroups((prev) => ({ ...prev, [category]: !prev[category] }));
+  }
 
   async function handleAdd() {
     const c = Number(cost);
@@ -94,7 +171,13 @@ export default function MarketplacePricesPage() {
       if (tab === "materiais") await marketplaceApi.setMaterial({ materialId: resourceId, unitCost: c });
       else if (tab === "mao-de-obra") await marketplaceApi.setLabour({ labourCategoryId: resourceId, hourlyCost: c });
       else await marketplaceApi.setEquipment({ equipmentId: resourceId, hourlyCost: c });
-      const resourceName = options.find((o) => o.id === resourceId)?.name ?? "Preço";
+      const allOptions: Array<{ id: string; name: string }> =
+        tab === "materiais"
+          ? materialOptionsGrouped.flatMap((g) => g.rows.map((o: MaterialOption) => ({ id: o.id, name: o.name })))
+          : tab === "mao-de-obra"
+            ? labourOptions
+            : equipmentOptions;
+      const resourceName = allOptions.find((o) => o.id === resourceId)?.name ?? "Preço";
       setCost("");
       setResourceId("");
       await reload();
@@ -108,7 +191,8 @@ export default function MarketplacePricesPage() {
     }
   }
 
-  async function handleRemove(kind: Tab, priceId: string) {
+  async function handleRemove(kind: Tab, priceId: string | null) {
+    if (!priceId) return;
     setError(null);
     try {
       if (kind === "materiais") await marketplaceApi.deleteMaterial(priceId);
@@ -134,8 +218,6 @@ export default function MarketplacePricesPage() {
     );
   }
 
-  const unitOf = (p: MarketplaceMaterialPrice) => p.unit;
-
   return (
     <AppShell accountName={account.name}>
       <main className="portal-main">
@@ -144,8 +226,8 @@ export default function MarketplacePricesPage() {
             <p className="hero-eyebrow">SIGO Fornecedores</p>
             <h1 className="hero-title">Meus preços</h1>
             <p className="hero-subtitle">
-              Os preços que indicar aqui ficam visíveis a todas as empresas que usam o SIGO na sua zona — é o que elas veem antes de lhe
-              pedirem uma cotação. Mantenha-os actualizados para receber mais pedidos.
+              Materiais estão organizados por grupo (ex. Cimento → Limak, Cimento Nacional, Dugongo). Cada marca/classe
+              tem o seu preço. Clique numa linha para precificar.
             </p>
           </div>
         </section>
@@ -155,21 +237,34 @@ export default function MarketplacePricesPage() {
         <section className="card fade-up delay-1">
           <div style={{ display: "flex", gap: "0.5rem", padding: "1.1rem 1.25rem 0", flexWrap: "wrap" }}>
             {TABS.map((t) => {
-              const count = t.id === "materiais" ? materialPrices.length : t.id === "mao-de-obra" ? labourPrices.length : equipmentPrices.length;
+              const total = t.id === "materiais" ? materialPrices.length : t.id === "mao-de-obra" ? labourPrices.length : equipmentPrices.length;
+              const priced =
+                t.id === "materiais"
+                  ? materialPrices.filter((p) => p.unitCost != null).length
+                  : t.id === "mao-de-obra"
+                    ? labourPrices.filter((p) => p.hourlyCost != null).length
+                    : equipmentPrices.filter((p) => p.hourlyCost != null).length;
               return (
                 <button
                   key={t.id}
                   type="button"
-                  onClick={() => { setTab(t.id); setResourceId(""); setQuery(""); }}
+                  onClick={() => {
+                    setTab(t.id);
+                    setResourceId("");
+                    setQuery("");
+                  }}
                   className={`btn btn-sm ${tab === t.id ? "btn-primary" : "btn-secondary"}`}
                 >
-                  {t.label} <span style={{ opacity: 0.75 }}>({count})</span>
+                  {t.label}{" "}
+                  <span style={{ opacity: 0.75 }}>
+                    ({priced}/{total})
+                  </span>
                 </button>
               );
             })}
             <div className="search-field" style={{ marginLeft: "auto", minWidth: "12rem", flex: 1 }}>
               <IconSearch size={15} />
-              <input value={query} onChange={(e) => setQuery(e.target.value)} className="input" placeholder="Pesquisar recurso…" />
+              <input value={query} onChange={(e) => setQuery(e.target.value)} className="input" placeholder="Pesquisar grupo ou marca (Limak, 42.5)…" />
             </div>
           </div>
 
@@ -178,68 +273,232 @@ export default function MarketplacePricesPage() {
               <label className="label">{tab === "materiais" ? "Material" : tab === "mao-de-obra" ? "Categoria" : "Equipamento"}</label>
               <select value={resourceId} onChange={(e) => setResourceId(e.target.value)} className="input">
                 <option value="">Seleccione...</option>
-                {options.map((o) => (
-                  <option key={o.id} value={o.id}>{o.name}{"unit" in o ? ` (${o.unit})` : ""}</option>
-                ))}
+                {tab === "materiais" &&
+                  materialOptionsGrouped.map((group) => (
+                    <optgroup key={group.category} label={group.category}>
+                      {group.rows.map((o) => (
+                        <option key={o.id} value={o.id}>
+                          {o.name} ({o.unit})
+                          {o.source === "pedido" ? " · pedido" : ""}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                {tab === "mao-de-obra" &&
+                  labourOptions.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.name}
+                    </option>
+                  ))}
+                {tab === "maquinas" &&
+                  equipmentOptions.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.name}
+                    </option>
+                  ))}
               </select>
             </div>
             <div>
               <label className="label">Preço</label>
               <input type="number" min="0" step="any" value={cost} onChange={(e) => setCost(e.target.value)} className="input" placeholder="0.00" />
             </div>
-            <button type="button" onClick={handleAdd} disabled={saving || !resourceId || !cost} className="btn btn-primary">
+            <button type="button" onClick={handleAdd} disabled={saving || !resourceId || cost === ""} className="btn btn-primary">
               <IconPlus size={14} /> {saving ? "A guardar..." : "Guardar"}
             </button>
           </div>
 
+          <p style={{ padding: "0 1.25rem 0.5rem", margin: 0, fontSize: "0.8rem", color: "var(--ink-400)" }}>
+            {pricedCount} com preço · {activeListLength - pricedCount} sem preço
+            {tab === "materiais" ? ` · ${materialGroups.length} grupos` : ""}
+          </p>
+
           <div className="stagger">
-            {tab === "materiais" && filteredActiveList.map((p) => {
-              const price = p as MarketplaceMaterialPrice;
-              return (
-                <div key={price.id} className="rich-row">
-                  <span className="rich-row-avatar" style={{ background: "#effbfb", color: "var(--teal-700)" }}><IconTag size={16} /></span>
-                  <div className="rich-row-body">
-                    <p className="list-row-title">{price.materialName}</p>
-                    <p className="list-row-sub">{unitOf(price)}</p>
+            {tab === "materiais" &&
+              materialGroups.map((group) => {
+                const collapsed = collapsedGroups[group.category];
+                const pricedInGroup = group.rows.filter((r) => r.unitCost != null).length;
+                return (
+                  <div key={group.category} style={{ marginBottom: "0.75rem" }}>
+                    <button
+                      type="button"
+                      onClick={() => toggleGroup(group.category)}
+                      style={{
+                        width: "100%",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "0.6rem",
+                        padding: "0.65rem 1.25rem",
+                        background: "transparent",
+                        border: "none",
+                        borderBottom: "1px solid var(--border, #e2e8f0)",
+                        cursor: "pointer",
+                        textAlign: "left",
+                      }}
+                    >
+                      <span style={{ fontSize: "0.75rem", opacity: 0.7 }}>{collapsed ? "▸" : "▾"}</span>
+                      <strong style={{ fontSize: "0.95rem" }}>{group.category}</strong>
+                      <span style={{ fontSize: "0.78rem", color: "var(--ink-400)" }}>
+                        {pricedInGroup}/{group.rows.length} com preço
+                      </span>
+                    </button>
+                    {!collapsed &&
+                      group.rows.map((price) => {
+                        const unpriced = price.unitCost == null;
+                        return (
+                          <div
+                            key={price.materialId}
+                            className="rich-row"
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => selectRow(price.materialId, price.unitCost)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") selectRow(price.materialId, price.unitCost);
+                            }}
+                            style={{ cursor: "pointer", opacity: unpriced ? 0.92 : 1 }}
+                          >
+                            <span className="rich-row-avatar" style={{ background: "#effbfb", color: "var(--teal-700)" }}>
+                              <IconTag size={16} />
+                            </span>
+                            <div className="rich-row-body">
+                              <p className="list-row-title">
+                                {price.materialName}
+                                {price.source === "pedido" ? (
+                                  <span style={{ marginLeft: "0.4rem", fontSize: "0.7rem", color: "var(--orange-hover)" }}>pedido</span>
+                                ) : null}
+                              </p>
+                              <p className="list-row-sub">
+                                {price.unit}
+                                {price.specification ? ` · ${price.specification}` : ""}
+                              </p>
+                            </div>
+                            {unpriced ? (
+                              <span style={{ color: "var(--orange-hover)", fontWeight: 600, fontSize: "0.85rem" }}>Sem preço</span>
+                            ) : (
+                              <strong style={{ fontFamily: "var(--font-display)" }}>
+                                {Number(price.unitCost).toLocaleString("pt-PT", { minimumFractionDigits: 2 })} {price.currency}
+                              </strong>
+                            )}
+                            {price.id ? (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void handleRemove("materiais", price.id);
+                                }}
+                                className="icon-btn-ghost"
+                                title="Remover preço"
+                              >
+                                <IconTrash size={14} />
+                              </button>
+                            ) : (
+                              <span style={{ width: "2rem" }} />
+                            )}
+                          </div>
+                        );
+                      })}
                   </div>
-                  <strong style={{ fontFamily: "var(--font-display)" }}>{Number(price.unitCost).toLocaleString("pt-PT", { minimumFractionDigits: 2 })} {price.currency}</strong>
-                  <button type="button" onClick={() => handleRemove("materiais", price.id)} className="icon-btn-ghost" title="Remover">
-                    <IconTrash size={14} />
-                  </button>
-                </div>
-              );
-            })}
-            {tab === "mao-de-obra" && filteredActiveList.map((p) => {
-              const price = p as MarketplaceLabourPrice;
-              return (
-                <div key={price.id} className="rich-row">
-                  <span className="rich-row-avatar" style={{ background: "#fff1e8", color: "var(--orange-hover)" }}><IconTag size={16} /></span>
-                  <p className="list-row-title rich-row-body">{price.labourName}</p>
-                  <strong style={{ fontFamily: "var(--font-display)" }}>{Number(price.hourlyCost).toLocaleString("pt-PT", { minimumFractionDigits: 2 })} {price.currency}/h</strong>
-                  <button type="button" onClick={() => handleRemove("mao-de-obra", price.id)} className="icon-btn-ghost" title="Remover">
-                    <IconTrash size={14} />
-                  </button>
-                </div>
-              );
-            })}
-            {tab === "maquinas" && filteredActiveList.map((p) => {
-              const price = p as MarketplaceEquipmentPrice;
-              return (
-                <div key={price.id} className="rich-row">
-                  <span className="rich-row-avatar" style={{ background: "#f1f5f9", color: "var(--ink-400)" }}><IconTag size={16} /></span>
-                  <p className="list-row-title rich-row-body">{price.equipmentName}</p>
-                  <strong style={{ fontFamily: "var(--font-display)" }}>{Number(price.hourlyCost).toLocaleString("pt-PT", { minimumFractionDigits: 2 })} {price.currency}/h</strong>
-                  <button type="button" onClick={() => handleRemove("maquinas", price.id)} className="icon-btn-ghost" title="Remover">
-                    <IconTrash size={14} />
-                  </button>
-                </div>
-              );
-            })}
-            {filteredActiveList.length === 0 && (
+                );
+              })}
+
+            {tab === "mao-de-obra" &&
+              filteredLabour.map((price) => {
+                const unpriced = price.hourlyCost == null;
+                return (
+                  <div
+                    key={price.labourCategoryId}
+                    className="rich-row"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => selectRow(price.labourCategoryId, price.hourlyCost)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") selectRow(price.labourCategoryId, price.hourlyCost);
+                    }}
+                    style={{ cursor: "pointer" }}
+                  >
+                    <span className="rich-row-avatar" style={{ background: "#fff1e8", color: "var(--orange-hover)" }}>
+                      <IconTag size={16} />
+                    </span>
+                    <p className="list-row-title rich-row-body">{price.labourName}</p>
+                    {unpriced ? (
+                      <span style={{ color: "var(--orange-hover)", fontWeight: 600, fontSize: "0.85rem" }}>Sem preço</span>
+                    ) : (
+                      <strong style={{ fontFamily: "var(--font-display)" }}>
+                        {Number(price.hourlyCost).toLocaleString("pt-PT", { minimumFractionDigits: 2 })} {price.currency}/h
+                      </strong>
+                    )}
+                    {price.id ? (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void handleRemove("mao-de-obra", price.id);
+                        }}
+                        className="icon-btn-ghost"
+                        title="Remover"
+                      >
+                        <IconTrash size={14} />
+                      </button>
+                    ) : (
+                      <span style={{ width: "2rem" }} />
+                    )}
+                  </div>
+                );
+              })}
+
+            {tab === "maquinas" &&
+              filteredEquipment.map((price) => {
+                const unpriced = price.hourlyCost == null;
+                return (
+                  <div
+                    key={price.equipmentId}
+                    className="rich-row"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => selectRow(price.equipmentId, price.hourlyCost)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") selectRow(price.equipmentId, price.hourlyCost);
+                    }}
+                    style={{ cursor: "pointer" }}
+                  >
+                    <span className="rich-row-avatar" style={{ background: "#f1f5f9", color: "var(--ink-400)" }}>
+                      <IconTag size={16} />
+                    </span>
+                    <p className="list-row-title rich-row-body">{price.equipmentName}</p>
+                    {unpriced ? (
+                      <span style={{ color: "var(--orange-hover)", fontWeight: 600, fontSize: "0.85rem" }}>Sem preço</span>
+                    ) : (
+                      <strong style={{ fontFamily: "var(--font-display)" }}>
+                        {Number(price.hourlyCost).toLocaleString("pt-PT", { minimumFractionDigits: 2 })} {price.currency}/h
+                      </strong>
+                    )}
+                    {price.id ? (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void handleRemove("maquinas", price.id);
+                        }}
+                        className="icon-btn-ghost"
+                        title="Remover"
+                      >
+                        <IconTrash size={14} />
+                      </button>
+                    ) : (
+                      <span style={{ width: "2rem" }} />
+                    )}
+                  </div>
+                );
+              })}
+
+            {((tab === "materiais" && materialGroups.length === 0) ||
+              (tab === "mao-de-obra" && filteredLabour.length === 0) ||
+              (tab === "maquinas" && filteredEquipment.length === 0)) && (
               <div className="empty-state">
-                <span className="empty-state-icon"><IconTag size={20} /></span>
-                <h3>{query ? "Nenhum resultado" : "Sem preços aqui ainda"}</h3>
-                <p>{query ? "Experimente outro termo de pesquisa." : "Escolha um item acima e indique o seu preço — é o primeiro passo para começar a receber pedidos."}</p>
+                <span className="empty-state-icon">
+                  <IconTag size={20} />
+                </span>
+                <h3>{query ? "Nenhum resultado" : "Catálogo vazio"}</h3>
+                <p>{query ? "Experimente outro grupo, marca ou classe." : "O catálogo nacional ainda não tem itens nesta categoria."}</p>
               </div>
             )}
           </div>

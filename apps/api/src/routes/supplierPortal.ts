@@ -16,12 +16,14 @@ import {
   supplierMaterialPrices,
   supplierLabourPrices,
   supplierEquipmentPrices,
+  supplierAccounts,
 } from "../db/schema.js";
 import { requireSupplierAuth } from "../auth/supplierMiddleware.js";
 import { sendEmail, emailLayout, escapeHtml } from "../services/mailer.js";
 import { listNotificationsForSupplierAccount, markAllNotificationsRead, markNotificationRead, notifyUsers } from "../services/notifications.js";
 import { CURRENCIES } from "@sigo/shared";
 import { env } from "../env.js";
+import { ensureSigoMarketplaceSupplier, isSigoPricesAccount } from "../services/sigoPrices.js";
 
 function supplierAccountIdOf(request: FastifyRequest): string {
   return request.currentSupplier!.id;
@@ -43,6 +45,108 @@ async function ownGlobalSupplier(supplierAccountId: string) {
     .where(and(eq(suppliers.supplierAccountId, supplierAccountId), isNull(suppliers.companyId)))
     .limit(1);
   return row ?? null;
+}
+
+/** Cria a ficha marketplace se a conta ainda só tiver fichas ligadas a empresas (ex.: Equipa SIGO Preços). */
+async function ensureOwnMarketplaceSupplier(supplierAccountId: string) {
+  const existing = await ownGlobalSupplier(supplierAccountId);
+  if (existing) return existing;
+
+  const [account] = await db.select().from(supplierAccounts).where(eq(supplierAccounts.id, supplierAccountId)).limit(1);
+  if (!account) return null;
+
+  if (isSigoPricesAccount(account)) {
+    return ensureSigoMarketplaceSupplier();
+  }
+
+  const [zone] = await db.select().from(priceZones).where(isNull(priceZones.companyId)).orderBy(priceZones.name).limit(1);
+
+  const [row] = await db
+    .insert(suppliers)
+    .values({
+      companyId: null,
+      name: account.name,
+      contact: account.phone,
+      supplierAccountId,
+      zoneId: zone?.id ?? null,
+      location: zone?.name ?? "Moçambique",
+      notes: null,
+    })
+    .returning();
+  return row;
+}
+
+/** Materiais do catálogo nacional + materiais de empresa pedidos em cotação a esta conta (aparecem sem preço). */
+async function marketplaceMaterialCatalog(supplierAccountId: string) {
+  const national = await db
+    .select({
+      id: materials.id,
+      name: materials.name,
+      unit: materials.unit,
+      specification: materials.specification,
+      category: materials.category,
+      companyId: materials.companyId,
+    })
+    .from(materials)
+    .where(and(isNull(materials.companyId), eq(materials.isActive, true)))
+    .orderBy(materials.name);
+
+  const owned = await ownedSupplierIds(supplierAccountId);
+  let fromRfq: typeof national = [];
+  if (owned.length) {
+    const rfqIds = await db
+      .selectDistinct({ materialId: quoteRequestLines.materialId })
+      .from(quoteRequestLines)
+      .innerJoin(quoteRequests, eq(quoteRequestLines.quoteRequestId, quoteRequests.id))
+      .where(and(inArray(quoteRequests.supplierId, owned), eq(quoteRequestLines.kind, "material")));
+    const ids = rfqIds.map((r) => r.materialId).filter((id): id is string => Boolean(id));
+    const nationalIds = new Set(national.map((m) => m.id));
+    const companyOnlyIds = ids.filter((id) => !nationalIds.has(id));
+    if (companyOnlyIds.length) {
+      fromRfq = await db
+        .select({
+          id: materials.id,
+          name: materials.name,
+          unit: materials.unit,
+          specification: materials.specification,
+          category: materials.category,
+          companyId: materials.companyId,
+        })
+        .from(materials)
+        .where(and(inArray(materials.id, companyOnlyIds), eq(materials.isActive, true)))
+        .orderBy(materials.name);
+    }
+  }
+
+  return [
+    ...national.map((m) => ({ ...m, source: "nacional" as const })),
+    ...fromRfq.map((m) => ({ ...m, source: "pedido" as const })),
+  ];
+}
+
+async function materialAllowedForMarketplace(supplierAccountId: string, materialId: string): Promise<boolean> {
+  const [national] = await db
+    .select({ id: materials.id })
+    .from(materials)
+    .where(and(eq(materials.id, materialId), isNull(materials.companyId), eq(materials.isActive, true)))
+    .limit(1);
+  if (national) return true;
+
+  const owned = await ownedSupplierIds(supplierAccountId);
+  if (!owned.length) return false;
+  const [rfq] = await db
+    .select({ id: quoteRequestLines.id })
+    .from(quoteRequestLines)
+    .innerJoin(quoteRequests, eq(quoteRequestLines.quoteRequestId, quoteRequests.id))
+    .where(
+      and(
+        inArray(quoteRequests.supplierId, owned),
+        eq(quoteRequestLines.kind, "material"),
+        eq(quoteRequestLines.materialId, materialId),
+      ),
+    )
+    .limit(1);
+  return Boolean(rfq);
 }
 
 export async function supplierPortalRoutes(app: FastifyInstance) {
@@ -170,19 +274,34 @@ export async function supplierPortalRoutes(app: FastifyInstance) {
   });
 
   // ---------- Ficha e preços no marketplace nacional (SIGO Fornecedores) ----------
-  // Catálogo nacional (só recursos globais) para o fornecedor escolher o que quer preçar — não
-  // tem sessão de empresa, por isso não pode usar as rotas /api/catalog/* normais.
-  app.get("/api/supplier/marketplace/catalog", { preHandler: requireSupplierAuth }, async () => {
+  // Catálogo nacional + materiais de empresa já pedidos em cotação a esta conta (para precificar).
+  app.get("/api/supplier/marketplace/catalog", { preHandler: requireSupplierAuth }, async (request) => {
+    const accountId = supplierAccountIdOf(request);
     const [materialRows, labourRows, equipmentRows] = await Promise.all([
-      db.select({ id: materials.id, name: materials.name, unit: materials.unit }).from(materials).where(and(isNull(materials.companyId), eq(materials.isActive, true))).orderBy(materials.name),
-      db.select({ id: labourCategories.id, name: labourCategories.name }).from(labourCategories).where(and(isNull(labourCategories.companyId), eq(labourCategories.isActive, true))).orderBy(labourCategories.name),
+      marketplaceMaterialCatalog(accountId),
+      db
+        .select({ id: labourCategories.id, name: labourCategories.name })
+        .from(labourCategories)
+        .where(and(isNull(labourCategories.companyId), eq(labourCategories.isActive, true)))
+        .orderBy(labourCategories.name),
       db.select({ id: equipment.id, name: equipment.name }).from(equipment).where(isNull(equipment.companyId)).orderBy(equipment.name),
     ]);
-    return { materials: materialRows, labourCategories: labourRows, equipment: equipmentRows };
+    return {
+      materials: materialRows.map((m) => ({
+        id: m.id,
+        name: m.name,
+        unit: m.unit,
+        category: m.category,
+        specification: m.specification,
+        source: m.source,
+      })),
+      labourCategories: labourRows,
+      equipment: equipmentRows,
+    };
   });
 
   app.get("/api/supplier/marketplace/profile", { preHandler: requireSupplierAuth }, async (request, reply) => {
-    const supplier = await ownGlobalSupplier(supplierAccountIdOf(request));
+    const supplier = await ensureOwnMarketplaceSupplier(supplierAccountIdOf(request));
     if (!supplier) return reply.code(404).send({ error: "Ficha de marketplace não encontrada" });
     return supplier;
   });
@@ -195,7 +314,7 @@ export async function supplierPortalRoutes(app: FastifyInstance) {
   });
 
   app.put("/api/supplier/marketplace/profile", { preHandler: requireSupplierAuth }, async (request, reply) => {
-    const supplier = await ownGlobalSupplier(supplierAccountIdOf(request));
+    const supplier = await ensureOwnMarketplaceSupplier(supplierAccountIdOf(request));
     if (!supplier) return reply.code(404).send({ error: "Ficha de marketplace não encontrada" });
     const parsed = profileSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
@@ -231,19 +350,38 @@ export async function supplierPortalRoutes(app: FastifyInstance) {
   });
 
   app.get("/api/supplier/marketplace/materials", { preHandler: requireSupplierAuth }, async (request, reply) => {
-    const supplier = await ownGlobalSupplier(supplierAccountIdOf(request));
+    const accountId = supplierAccountIdOf(request);
+    const supplier = await ensureOwnMarketplaceSupplier(accountId);
     if (!supplier) return reply.code(404).send({ error: "Ficha de marketplace não encontrada" });
-    const rows = await db
-      .select({ price: supplierMaterialPrices, materialName: materials.name, unit: materials.unit, zoneName: priceZones.name })
+
+    const catalog = await marketplaceMaterialCatalog(accountId);
+    const priceRows = await db
+      .select({ price: supplierMaterialPrices, zoneName: priceZones.name })
       .from(supplierMaterialPrices)
-      .innerJoin(materials, eq(supplierMaterialPrices.materialId, materials.id))
       .leftJoin(priceZones, eq(supplierMaterialPrices.zoneId, priceZones.id))
       .where(eq(supplierMaterialPrices.supplierId, supplier.id));
-    return rows.map((r) => ({ ...r.price, materialName: r.materialName, unit: r.unit, zoneName: r.zoneName }));
+    const priceByMaterial = new Map(priceRows.map((r) => [r.price.materialId, r]));
+
+    return catalog.map((m) => {
+      const match = priceByMaterial.get(m.id);
+      return {
+        id: match?.price.id ?? null,
+        materialId: m.id,
+        materialName: m.name,
+        unit: m.unit,
+        category: m.category,
+        specification: m.specification,
+        source: m.source,
+        unitCost: match?.price.unitCost ?? null,
+        currency: match?.price.currency ?? "MZN",
+        zoneName: match?.zoneName ?? null,
+      };
+    });
   });
 
   app.put("/api/supplier/marketplace/materials", { preHandler: requireSupplierAuth }, async (request, reply) => {
-    const supplier = await ownGlobalSupplier(supplierAccountIdOf(request));
+    const accountId = supplierAccountIdOf(request);
+    const supplier = await ensureOwnMarketplaceSupplier(accountId);
     if (!supplier) return reply.code(404).send({ error: "Ficha de marketplace não encontrada" });
     const parsed = marketplaceMaterialSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
@@ -254,8 +392,9 @@ export async function supplierPortalRoutes(app: FastifyInstance) {
       if (!zone) return reply.code(400).send({ error: "Zona inválida" });
     }
 
-    const [material] = await db.select({ id: materials.id }).from(materials).where(and(eq(materials.id, materialId), isNull(materials.companyId))).limit(1);
-    if (!material) return reply.code(404).send({ error: "Material não encontrado no Catálogo nacional" });
+    if (!(await materialAllowedForMarketplace(accountId, materialId))) {
+      return reply.code(404).send({ error: "Material não disponível para precificar nesta conta" });
+    }
 
     const zoneFilter = zoneId == null ? isNull(supplierMaterialPrices.zoneId) : eq(supplierMaterialPrices.zoneId, zoneId);
     const [existing] = await db
@@ -273,26 +412,41 @@ export async function supplierPortalRoutes(app: FastifyInstance) {
 
   app.delete("/api/supplier/marketplace/materials/:priceId", { preHandler: requireSupplierAuth }, async (request, reply) => {
     const { priceId } = request.params as { priceId: string };
-    const supplier = await ownGlobalSupplier(supplierAccountIdOf(request));
+    const supplier = await ensureOwnMarketplaceSupplier(supplierAccountIdOf(request));
     if (!supplier) return { ok: true };
     await db.delete(supplierMaterialPrices).where(and(eq(supplierMaterialPrices.id, priceId), eq(supplierMaterialPrices.supplierId, supplier.id)));
     return { ok: true };
   });
 
   app.get("/api/supplier/marketplace/labour", { preHandler: requireSupplierAuth }, async (request, reply) => {
-    const supplier = await ownGlobalSupplier(supplierAccountIdOf(request));
+    const supplier = await ensureOwnMarketplaceSupplier(supplierAccountIdOf(request));
     if (!supplier) return reply.code(404).send({ error: "Ficha de marketplace não encontrada" });
-    const rows = await db
-      .select({ price: supplierLabourPrices, labourName: labourCategories.name, zoneName: priceZones.name })
+    const categories = await db
+      .select({ id: labourCategories.id, name: labourCategories.name })
+      .from(labourCategories)
+      .where(and(isNull(labourCategories.companyId), eq(labourCategories.isActive, true)))
+      .orderBy(labourCategories.name);
+    const priceRows = await db
+      .select({ price: supplierLabourPrices, zoneName: priceZones.name })
       .from(supplierLabourPrices)
-      .innerJoin(labourCategories, eq(supplierLabourPrices.labourCategoryId, labourCategories.id))
       .leftJoin(priceZones, eq(supplierLabourPrices.zoneId, priceZones.id))
       .where(eq(supplierLabourPrices.supplierId, supplier.id));
-    return rows.map((r) => ({ ...r.price, labourName: r.labourName, zoneName: r.zoneName }));
+    const byCat = new Map(priceRows.map((r) => [r.price.labourCategoryId, r]));
+    return categories.map((c) => {
+      const match = byCat.get(c.id);
+      return {
+        id: match?.price.id ?? null,
+        labourCategoryId: c.id,
+        labourName: c.name,
+        hourlyCost: match?.price.hourlyCost ?? null,
+        currency: match?.price.currency ?? "MZN",
+        zoneName: match?.zoneName ?? null,
+      };
+    });
   });
 
   app.put("/api/supplier/marketplace/labour", { preHandler: requireSupplierAuth }, async (request, reply) => {
-    const supplier = await ownGlobalSupplier(supplierAccountIdOf(request));
+    const supplier = await ensureOwnMarketplaceSupplier(supplierAccountIdOf(request));
     if (!supplier) return reply.code(404).send({ error: "Ficha de marketplace não encontrada" });
     const parsed = marketplaceLabourSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
@@ -322,26 +476,37 @@ export async function supplierPortalRoutes(app: FastifyInstance) {
 
   app.delete("/api/supplier/marketplace/labour/:priceId", { preHandler: requireSupplierAuth }, async (request, reply) => {
     const { priceId } = request.params as { priceId: string };
-    const supplier = await ownGlobalSupplier(supplierAccountIdOf(request));
+    const supplier = await ensureOwnMarketplaceSupplier(supplierAccountIdOf(request));
     if (!supplier) return { ok: true };
     await db.delete(supplierLabourPrices).where(and(eq(supplierLabourPrices.id, priceId), eq(supplierLabourPrices.supplierId, supplier.id)));
     return { ok: true };
   });
 
   app.get("/api/supplier/marketplace/equipment", { preHandler: requireSupplierAuth }, async (request, reply) => {
-    const supplier = await ownGlobalSupplier(supplierAccountIdOf(request));
+    const supplier = await ensureOwnMarketplaceSupplier(supplierAccountIdOf(request));
     if (!supplier) return reply.code(404).send({ error: "Ficha de marketplace não encontrada" });
-    const rows = await db
-      .select({ price: supplierEquipmentPrices, equipmentName: equipment.name, zoneName: priceZones.name })
+    const items = await db.select({ id: equipment.id, name: equipment.name }).from(equipment).where(isNull(equipment.companyId)).orderBy(equipment.name);
+    const priceRows = await db
+      .select({ price: supplierEquipmentPrices, zoneName: priceZones.name })
       .from(supplierEquipmentPrices)
-      .innerJoin(equipment, eq(supplierEquipmentPrices.equipmentId, equipment.id))
       .leftJoin(priceZones, eq(supplierEquipmentPrices.zoneId, priceZones.id))
       .where(eq(supplierEquipmentPrices.supplierId, supplier.id));
-    return rows.map((r) => ({ ...r.price, equipmentName: r.equipmentName, zoneName: r.zoneName }));
+    const byEq = new Map(priceRows.map((r) => [r.price.equipmentId, r]));
+    return items.map((e) => {
+      const match = byEq.get(e.id);
+      return {
+        id: match?.price.id ?? null,
+        equipmentId: e.id,
+        equipmentName: e.name,
+        hourlyCost: match?.price.hourlyCost ?? null,
+        currency: match?.price.currency ?? "MZN",
+        zoneName: match?.zoneName ?? null,
+      };
+    });
   });
 
   app.put("/api/supplier/marketplace/equipment", { preHandler: requireSupplierAuth }, async (request, reply) => {
-    const supplier = await ownGlobalSupplier(supplierAccountIdOf(request));
+    const supplier = await ensureOwnMarketplaceSupplier(supplierAccountIdOf(request));
     if (!supplier) return reply.code(404).send({ error: "Ficha de marketplace não encontrada" });
     const parsed = marketplaceEquipmentSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
@@ -371,7 +536,7 @@ export async function supplierPortalRoutes(app: FastifyInstance) {
 
   app.delete("/api/supplier/marketplace/equipment/:priceId", { preHandler: requireSupplierAuth }, async (request, reply) => {
     const { priceId } = request.params as { priceId: string };
-    const supplier = await ownGlobalSupplier(supplierAccountIdOf(request));
+    const supplier = await ensureOwnMarketplaceSupplier(supplierAccountIdOf(request));
     if (!supplier) return { ok: true };
     await db.delete(supplierEquipmentPrices).where(and(eq(supplierEquipmentPrices.id, priceId), eq(supplierEquipmentPrices.supplierId, supplier.id)));
     return { ok: true };

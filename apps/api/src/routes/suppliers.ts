@@ -25,6 +25,9 @@ import { assertSupplierMarketplaceAccess } from "../services/subscriptionEntitle
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista"] as const;
 
+const COMPANY_PRICEBOOK_FORBIDDEN =
+  "Os preços e produtos do fornecedor só podem ser geridos no Portal do Fornecedor. No SIGO pode consultar e pedir confirmação de preço/disponibilidade com quantidades.";
+
 function companyIdOf(request: FastifyRequest): string {
   return request.currentUser!.companyId!;
 }
@@ -123,56 +126,12 @@ export async function supplierRoutes(app: FastifyInstance) {
     }));
   });
 
-  app.put("/api/suppliers/:id/materials", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const companyId = companyIdOf(request);
-    const supplier = await assertSupplierOwned(id, companyId);
-    if (!supplier) return reply.code(404).send({ error: "Fornecedor não encontrado" });
-
-    const parsed = materialPriceSchema.safeParse(request.body);
-    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
-    const { materialId, zoneId, unitCost, currency } = parsed.data;
-
-    const [material] = await db
-      .select()
-      .from(materials)
-      .where(and(eq(materials.id, materialId), or(isNull(materials.companyId), eq(materials.companyId, companyId))))
-      .limit(1);
-    if (!material) return reply.code(404).send({ error: "Material não encontrado no Catálogo" });
-
-    const existing = await db
-      .select()
-      .from(supplierMaterialPrices)
-      .where(
-        and(
-          eq(supplierMaterialPrices.supplierId, id),
-          eq(supplierMaterialPrices.materialId, materialId),
-          zoneId ? eq(supplierMaterialPrices.zoneId, zoneId) : isNull(supplierMaterialPrices.zoneId)
-        )
-      )
-      .limit(1);
-
-    if (existing[0]) {
-      const [row] = await db
-        .update(supplierMaterialPrices)
-        .set({ unitCost: unitCost.toString(), currency })
-        .where(eq(supplierMaterialPrices.id, existing[0].id))
-        .returning();
-      return row;
-    }
-    const [row] = await db
-      .insert(supplierMaterialPrices)
-      .values({ supplierId: id, materialId, zoneId: zoneId ?? null, unitCost: unitCost.toString(), currency })
-      .returning();
-    return reply.code(201).send(row);
+  app.put("/api/suppliers/:id/materials", { preHandler: requireRole(...WRITE_ROLES) }, async (_request, reply) => {
+    return reply.code(403).send({ error: COMPANY_PRICEBOOK_FORBIDDEN });
   });
 
-  app.delete("/api/suppliers/:id/materials/:priceId", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
-    const { id, priceId } = request.params as { id: string; priceId: string };
-    const supplier = await assertSupplierOwned(id, companyIdOf(request));
-    if (!supplier) return { ok: true };
-    await db.delete(supplierMaterialPrices).where(and(eq(supplierMaterialPrices.id, priceId), eq(supplierMaterialPrices.supplierId, id)));
-    return { ok: true };
+  app.delete("/api/suppliers/:id/materials/:priceId", { preHandler: requireRole(...WRITE_ROLES) }, async (_request, reply) => {
+    return reply.code(403).send({ error: COMPANY_PRICEBOOK_FORBIDDEN });
   });
 
   // ---------- Preços de mão-de-obra subcontratada por fornecedor ----------
@@ -196,56 +155,12 @@ export async function supplierRoutes(app: FastifyInstance) {
     return rows.map((r) => ({ ...r.price, labourName: r.labourName, zoneName: r.zoneName }));
   });
 
-  app.put("/api/suppliers/:id/labour", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const companyId = companyIdOf(request);
-    const supplier = await assertSupplierOwned(id, companyId);
-    if (!supplier) return reply.code(404).send({ error: "Fornecedor não encontrado" });
-
-    const parsed = labourPriceSchema.safeParse(request.body);
-    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
-    const { labourCategoryId, zoneId, hourlyCost, currency } = parsed.data;
-
-    const [category] = await db
-      .select()
-      .from(labourCategories)
-      .where(and(eq(labourCategories.id, labourCategoryId), or(isNull(labourCategories.companyId), eq(labourCategories.companyId, companyId))))
-      .limit(1);
-    if (!category) return reply.code(404).send({ error: "Categoria de mão-de-obra não encontrada no Catálogo" });
-
-    const existing = await db
-      .select()
-      .from(supplierLabourPrices)
-      .where(
-        and(
-          eq(supplierLabourPrices.supplierId, id),
-          eq(supplierLabourPrices.labourCategoryId, labourCategoryId),
-          zoneId ? eq(supplierLabourPrices.zoneId, zoneId) : isNull(supplierLabourPrices.zoneId)
-        )
-      )
-      .limit(1);
-
-    if (existing[0]) {
-      const [row] = await db
-        .update(supplierLabourPrices)
-        .set({ hourlyCost: hourlyCost.toString(), currency })
-        .where(eq(supplierLabourPrices.id, existing[0].id))
-        .returning();
-      return row;
-    }
-    const [row] = await db
-      .insert(supplierLabourPrices)
-      .values({ supplierId: id, labourCategoryId, zoneId: zoneId ?? null, hourlyCost: hourlyCost.toString(), currency })
-      .returning();
-    return reply.code(201).send(row);
+  app.put("/api/suppliers/:id/labour", { preHandler: requireRole(...WRITE_ROLES) }, async (_request, reply) => {
+    return reply.code(403).send({ error: COMPANY_PRICEBOOK_FORBIDDEN });
   });
 
-  app.delete("/api/suppliers/:id/labour/:priceId", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
-    const { id, priceId } = request.params as { id: string; priceId: string };
-    const supplier = await assertSupplierOwned(id, companyIdOf(request));
-    if (!supplier) return { ok: true };
-    await db.delete(supplierLabourPrices).where(and(eq(supplierLabourPrices.id, priceId), eq(supplierLabourPrices.supplierId, id)));
-    return { ok: true };
+  app.delete("/api/suppliers/:id/labour/:priceId", { preHandler: requireRole(...WRITE_ROLES) }, async (_request, reply) => {
+    return reply.code(403).send({ error: COMPANY_PRICEBOOK_FORBIDDEN });
   });
 
   // ---------- Preços de máquinas/equipamento alugado por fornecedor ----------
@@ -269,56 +184,12 @@ export async function supplierRoutes(app: FastifyInstance) {
     return rows.map((r) => ({ ...r.price, equipmentName: r.equipmentName, zoneName: r.zoneName }));
   });
 
-  app.put("/api/suppliers/:id/equipment", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const companyId = companyIdOf(request);
-    const supplier = await assertSupplierOwned(id, companyId);
-    if (!supplier) return reply.code(404).send({ error: "Fornecedor não encontrado" });
-
-    const parsed = equipmentPriceSchema.safeParse(request.body);
-    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
-    const { equipmentId, zoneId, hourlyCost, currency } = parsed.data;
-
-    const [equip] = await db
-      .select()
-      .from(equipment)
-      .where(and(eq(equipment.id, equipmentId), or(isNull(equipment.companyId), eq(equipment.companyId, companyId))))
-      .limit(1);
-    if (!equip) return reply.code(404).send({ error: "Equipamento não encontrado no Catálogo" });
-
-    const existing = await db
-      .select()
-      .from(supplierEquipmentPrices)
-      .where(
-        and(
-          eq(supplierEquipmentPrices.supplierId, id),
-          eq(supplierEquipmentPrices.equipmentId, equipmentId),
-          zoneId ? eq(supplierEquipmentPrices.zoneId, zoneId) : isNull(supplierEquipmentPrices.zoneId)
-        )
-      )
-      .limit(1);
-
-    if (existing[0]) {
-      const [row] = await db
-        .update(supplierEquipmentPrices)
-        .set({ hourlyCost: hourlyCost.toString(), currency })
-        .where(eq(supplierEquipmentPrices.id, existing[0].id))
-        .returning();
-      return row;
-    }
-    const [row] = await db
-      .insert(supplierEquipmentPrices)
-      .values({ supplierId: id, equipmentId, zoneId: zoneId ?? null, hourlyCost: hourlyCost.toString(), currency })
-      .returning();
-    return reply.code(201).send(row);
+  app.put("/api/suppliers/:id/equipment", { preHandler: requireRole(...WRITE_ROLES) }, async (_request, reply) => {
+    return reply.code(403).send({ error: COMPANY_PRICEBOOK_FORBIDDEN });
   });
 
-  app.delete("/api/suppliers/:id/equipment/:priceId", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
-    const { id, priceId } = request.params as { id: string; priceId: string };
-    const supplier = await assertSupplierOwned(id, companyIdOf(request));
-    if (!supplier) return { ok: true };
-    await db.delete(supplierEquipmentPrices).where(and(eq(supplierEquipmentPrices.id, priceId), eq(supplierEquipmentPrices.supplierId, id)));
-    return { ok: true };
+  app.delete("/api/suppliers/:id/equipment/:priceId", { preHandler: requireRole(...WRITE_ROLES) }, async (_request, reply) => {
+    return reply.code(403).send({ error: COMPANY_PRICEBOOK_FORBIDDEN });
   });
 
   // ---------- Ligação automática de preços (feed externo do fornecedor) ----------

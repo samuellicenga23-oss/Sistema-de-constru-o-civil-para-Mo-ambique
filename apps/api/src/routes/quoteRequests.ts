@@ -45,7 +45,7 @@ async function assertSupplierAccessible(supplierId: string, companyId: string) {
 const lineSchema = z.object({
   kind: z.enum(["material", "labour", "equipment"]),
   resourceId: z.string().uuid(),
-  quantity: z.number().nonnegative().optional(),
+  quantity: z.number().positive({ message: "Indique a quantidade necessária" }),
 });
 
 const createQuoteRequestSchema = z.object({

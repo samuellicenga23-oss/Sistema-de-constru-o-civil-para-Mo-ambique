@@ -41,15 +41,20 @@ const LABOUR_CATEGORIES = [
 // medida usada nas composições (ex: areia medida em m3, vendida por camião) — editável depois
 // no Catálogo, por material; a dimensão real do camião/saco varia por fornecedor.
 const MATERIALS = [
-  { name: "Cimento (saco 50kg)", unit: "un" as const, baseUnitCost: 430, importFactor: 1, purchasePackage: { label: "Saco 50kg", qty: 1 } },
-  { name: "Areia grossa", unit: "m3" as const, baseUnitCost: 1055, importFactor: 1, purchasePackage: { label: "Camião 22m³", qty: 22 } },
-  { name: "Areia fina", unit: "m3" as const, baseUnitCost: 625, importFactor: 1, purchasePackage: { label: "Camião 22m³", qty: 22 } },
-  { name: "Brita 3/4", unit: "m3" as const, baseUnitCost: 920, importFactor: 1, purchasePackage: { label: "Camião 22m³", qty: 22 } },
-  { name: "Saibro", unit: "m3" as const, baseUnitCost: 500, importFactor: 1, purchasePackage: { label: "Camião 22m³", qty: 22 } },
-  { name: "Aço A400", unit: "kg" as const, baseUnitCost: 87, importFactor: 1.05 },
-  // Retalho Maputo/Matola 2026 (~31–32 / ~25); preço posto obra ligeiramente acima.
-  { name: "Bloco de cimento 20x20x40", unit: "un" as const, baseUnitCost: 33, importFactor: 1, purchasePackage: { label: "Palete (100 un)", qty: 100 } },
-  { name: "Bloco de cimento 15x20x40", unit: "un" as const, baseUnitCost: 26, importFactor: 1, purchasePackage: { label: "Palete (100 un)", qty: 100 } },
+  // Grupo «Cimento»: cada marca/classe é um material distinto — preços de mercado diferem.
+  { name: "Cimento (saco 50kg)", unit: "un" as const, baseUnitCost: 430, importFactor: 1, category: "Cimento", purchasePackage: { label: "Saco 50kg", qty: 1 }, specification: "Cimento genérico (saco 50kg), sem marca. Preferir a linha da marca/classe correcta (Limak, Cimentos de Moçambique, Dugongo, etc.)." },
+  { name: "Cimento Limak CEM II/A-V 42,5 N (saco 50kg)", unit: "un" as const, baseUnitCost: 450, importFactor: 1, category: "Cimento", purchasePackage: { label: "Saco 50kg", qty: 1 }, specification: "Limak Cimentos SA (Matola). CEM II/A-V 42,5 N. Também referido como «Lamack 42.5» / Limak 42,5." },
+  { name: "Cimento Limak CEM IV/B (V) 32,5 N (saco 50kg)", unit: "un" as const, baseUnitCost: 420, importFactor: 1, category: "Cimento", purchasePackage: { label: "Saco 50kg", qty: 1 }, specification: "Limak Cimentos SA (Matola). CEM IV/B (V) 32,5 N." },
+  { name: "Cimento Nacional — Cimentos de Moçambique 42,5 (saco 50kg)", unit: "un" as const, baseUnitCost: 445, importFactor: 1, category: "Cimento", purchasePackage: { label: "Saco 50kg", qty: 1 }, specification: "Cimentos de Moçambique (CM / «cimento nacional»), classificação 42,5. Preço distinto de Limak e Dugongo." },
+  { name: "Cimento Nacional — Cimentos de Moçambique 32,5 (saco 50kg)", unit: "un" as const, baseUnitCost: 415, importFactor: 1, category: "Cimento", purchasePackage: { label: "Saco 50kg", qty: 1 }, specification: "Cimentos de Moçambique (CM / «cimento nacional»), classificação 32,5." },
+  { name: "Cimento Dugongo 42,5 (saco 50kg)", unit: "un" as const, baseUnitCost: 440, importFactor: 1, category: "Cimento", purchasePackage: { label: "Saco 50kg", qty: 1 }, specification: "Dugongo Moçambique Cimentos — classificação 42,5." },
+  { name: "Areia grossa", unit: "m3" as const, baseUnitCost: 1055, importFactor: 1, category: "Agregados", purchasePackage: { label: "Camião 22m³", qty: 22 } },
+  { name: "Areia fina", unit: "m3" as const, baseUnitCost: 625, importFactor: 1, category: "Agregados", purchasePackage: { label: "Camião 22m³", qty: 22 } },
+  { name: "Brita 3/4", unit: "m3" as const, baseUnitCost: 920, importFactor: 1, category: "Agregados", purchasePackage: { label: "Camião 22m³", qty: 22 } },
+  { name: "Saibro", unit: "m3" as const, baseUnitCost: 500, importFactor: 1, category: "Agregados", purchasePackage: { label: "Camião 22m³", qty: 22 } },
+  { name: "Aço A400", unit: "kg" as const, baseUnitCost: 87, importFactor: 1.05, category: "Aços" },
+  { name: "Bloco de cimento 20x20x40", unit: "un" as const, baseUnitCost: 33, importFactor: 1, category: "Alvenaria", purchasePackage: { label: "Palete (100 un)", qty: 100 } },
+  { name: "Bloco de cimento 15x20x40", unit: "un" as const, baseUnitCost: 26, importFactor: 1, category: "Alvenaria", purchasePackage: { label: "Palete (100 un)", qty: 100 } },
 ];
 
 // Zonas de preço comuns na área da Grande Maputo — o custo de materiais varia sobretudo pelo
@@ -116,6 +121,8 @@ async function seedMaterials() {
       sourceReference: INE_CONSTRUCTION_REFERENCE,
       priceDate: PRICE_DATE,
       includesVat: false,
+      category: ("category" in m && m.category) ? m.category : "Outros",
+      specification: ("specification" in m && m.specification) ? m.specification : null,
       purchasePackageLabel: m.purchasePackage?.label ?? null,
       purchasePackageQty: m.purchasePackage ? m.purchasePackage.qty.toString() : null,
       updatedAt: new Date(),

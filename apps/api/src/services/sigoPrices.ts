@@ -1,7 +1,7 @@
 import { and, eq, isNull, ne, or } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 import { db } from "../db/index.js";
-import { materials, supplierAccounts, supplierMaterialPrices, suppliers, quoteRequests, quoteRequestLines, users } from "../db/schema.js";
+import { materials, supplierAccounts, supplierMaterialPrices, suppliers, quoteRequests, quoteRequestLines, users, priceZones } from "../db/schema.js";
 import { sendEmail, emailLayout } from "./mailer.js";
 import { env } from "../env.js";
 
@@ -16,10 +16,51 @@ export const SIGO_PRICES_NOTES = [
 // Conta global única (não por empresa) — é ligada à ficha "SIGO Preços" de TODAS as empresas,
 // para a equipa SIGO responder pedidos de cotação de qualquer empresa com um único login no
 // Portal do Fornecedor, tal como qualquer fornecedor externo.
-const SIGO_PRICES_SUPPLIER_EMAIL = "precos@sigomz.com";
+export const SIGO_PRICES_SUPPLIER_EMAIL = "precos@sigomz.com";
 
 export function isSigoPricesSupplier(supplier: { name: string }) {
   return supplier.name.trim().toLocaleLowerCase("pt") === SIGO_PRICES_SUPPLIER_NAME.toLocaleLowerCase("pt");
+}
+
+/** Conta do Portal da Equipa de Preços SIGO (email ou nome). */
+export function isSigoPricesAccount(account: { name: string; email: string }) {
+  const email = account.email.trim().toLowerCase();
+  const name = account.name.trim().toLocaleLowerCase("pt");
+  return email === SIGO_PRICES_SUPPLIER_EMAIL || name === "equipa de preços sigo" || isSigoPricesSupplier(account);
+}
+
+/** Ficha marketplace nacional (companyId null) da Equipa SIGO — onde gerem «Meus preços». */
+export async function ensureSigoMarketplaceSupplier() {
+  const account = await ensureSigoPricesSupplierAccount();
+  const [existing] = await db
+    .select()
+    .from(suppliers)
+    .where(and(eq(suppliers.supplierAccountId, account.id), isNull(suppliers.companyId)))
+    .limit(1);
+  if (existing) {
+    if (existing.name !== SIGO_PRICES_SUPPLIER_NAME || existing.notes !== SIGO_PRICES_NOTES) {
+      const [updated] = await db
+        .update(suppliers)
+        .set({ name: SIGO_PRICES_SUPPLIER_NAME, notes: SIGO_PRICES_NOTES, location: existing.location ?? "Moçambique" })
+        .where(eq(suppliers.id, existing.id))
+        .returning();
+      return updated;
+    }
+    return existing;
+  }
+  const [zone] = await db.select().from(priceZones).where(isNull(priceZones.companyId)).orderBy(priceZones.name).limit(1);
+  const [row] = await db
+    .insert(suppliers)
+    .values({
+      companyId: null,
+      name: SIGO_PRICES_SUPPLIER_NAME,
+      supplierAccountId: account.id,
+      zoneId: zone?.id ?? null,
+      location: zone?.name ?? "Moçambique",
+      notes: SIGO_PRICES_NOTES,
+    })
+    .returning();
+  return row;
 }
 
 // Garante a conta global "SIGO Preços" no Portal do Fornecedor. Se ainda não existir, cria-a e
@@ -73,6 +114,7 @@ async function ensureSigoPricesSupplierAccount() {
  */
 export async function syncSigoPricesForCompany(companyId: string) {
   const sigoAccount = await ensureSigoPricesSupplierAccount();
+  await ensureSigoMarketplaceSupplier();
 
   let [supplier] = await db
     .select()

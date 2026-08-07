@@ -238,6 +238,12 @@ export default function SuperAdminPage() {
   const [supplierAccounts, setSupplierAccounts] = useState<AdminSupplierAccount[]>([]);
   const [quoteStats, setQuoteStats] = useState<AdminQuoteRequestStats | null>(null);
   const [resendingInviteId, setResendingInviteId] = useState<string | null>(null);
+  const [supplierForm, setSupplierForm] = useState({ name: "", email: "", phone: "", password: "", sendInvite: true });
+  const [creatingSupplier, setCreatingSupplier] = useState(false);
+  const [resetPasswordId, setResetPasswordId] = useState<string | null>(null);
+  const [resetPasswordValue, setResetPasswordValue] = useState("");
+  const [resettingPassword, setResettingPassword] = useState(false);
+  const [togglingSupplierId, setTogglingSupplierId] = useState<string | null>(null);
 
   async function reloadSuppliers() {
     const [accounts, stats] = await Promise.all([adminSuppliersApi.listAccounts(), adminSuppliersApi.quoteRequestStats()]);
@@ -255,6 +261,67 @@ export default function SuperAdminPage() {
       setError(err instanceof Error ? err.message : "Erro ao reenviar convite");
     } finally {
       setResendingInviteId(null);
+    }
+  }
+
+  async function handleCreateSupplier(event: FormEvent) {
+    event.preventDefault();
+    setCreatingSupplier(true);
+    setError(null);
+    try {
+      const created = await adminSuppliersApi.createAccount({
+        name: supplierForm.name.trim(),
+        email: supplierForm.email.trim(),
+        phone: supplierForm.phone.trim() || null,
+        password: supplierForm.password.trim() || undefined,
+        sendInvite: supplierForm.sendInvite && !supplierForm.password.trim(),
+      });
+      setSupplierForm({ name: "", email: "", phone: "", password: "", sendInvite: true });
+      await reloadSuppliers();
+      setSuccess(
+        created.temporaryPassword
+          ? en
+            ? `Account created. Temporary password: ${created.temporaryPassword}`
+            : `Conta criada. Palavra-passe temporária: ${created.temporaryPassword}`
+          : en
+            ? "Supplier account created."
+            : "Conta de fornecedor criada.",
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao criar conta");
+    } finally {
+      setCreatingSupplier(false);
+    }
+  }
+
+  async function handleResetSupplierPassword(event: FormEvent) {
+    event.preventDefault();
+    if (!resetPasswordId || resetPasswordValue.trim().length < 8) return;
+    setResettingPassword(true);
+    setError(null);
+    try {
+      await adminSuppliersApi.resetPassword(resetPasswordId, resetPasswordValue.trim());
+      setResetPasswordId(null);
+      setResetPasswordValue("");
+      setSuccess(en ? "Password reset." : "Palavra-passe redefinida.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao redefinir palavra-passe");
+    } finally {
+      setResettingPassword(false);
+    }
+  }
+
+  async function handleToggleSupplierActive(account: AdminSupplierAccount) {
+    setTogglingSupplierId(account.id);
+    setError(null);
+    try {
+      await adminSuppliersApi.patchAccount(account.id, { isActive: !account.isActive });
+      await reloadSuppliers();
+      setSuccess(account.isActive ? (en ? "Account disabled." : "Conta desactivada.") : en ? "Account enabled." : "Conta activada.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao actualizar conta");
+    } finally {
+      setTogglingSupplierId(null);
     }
   }
 
@@ -1577,8 +1644,8 @@ export default function SuperAdminPage() {
             <section className="card p-4">
               <p className="text-sm text-slate-600">
                 {en
-                  ? "The Supplier Portal is a separate site (apps/supplier) — suppliers never see this panel, and system users never see theirs. This is just a read-only window for the SIGO team to follow who's connected."
-                  : "O Portal do Fornecedor é um site à parte (apps/supplier) — os fornecedores nunca vêem este painel, e os utilizadores do sistema nunca vêem o deles. Isto é só uma janela de leitura para a equipa SIGO acompanhar quem está ligado."}
+                  ? "Create supplier portal accounts, reset passwords, and follow who is connected. Suppliers never see this panel."
+                  : "Crie contas do Portal do Fornecedor, redefina palavras-passe e acompanhe quem está ligado. Os fornecedores nunca vêem este painel."}
               </p>
             </section>
 
@@ -1603,6 +1670,70 @@ export default function SuperAdminPage() {
               </div>
             )}
 
+            <section className="card p-4">
+              <h2 className="section-title">{en ? "Create supplier account" : "Criar conta de fornecedor"}</h2>
+              <p className="mt-0.5 text-xs text-slate-500">
+                {en
+                  ? "Creates the portal login and a national marketplace profile so the supplier can set prices immediately."
+                  : "Cria o login do portal e uma ficha no marketplace nacional para o fornecedor poder indicar preços de imediato."}
+              </p>
+              <form onSubmit={handleCreateSupplier} className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <div>
+                  <label className="label">{en ? "Name" : "Nome"}</label>
+                  <input
+                    required
+                    value={supplierForm.name}
+                    onChange={(e) => setSupplierForm((f) => ({ ...f, name: e.target.value }))}
+                    className="input"
+                    placeholder={en ? "Company / contact name" : "Nome da empresa / contacto"}
+                  />
+                </div>
+                <div>
+                  <label className="label">Email</label>
+                  <input
+                    required
+                    type="email"
+                    value={supplierForm.email}
+                    onChange={(e) => setSupplierForm((f) => ({ ...f, email: e.target.value }))}
+                    className="input"
+                  />
+                </div>
+                <div>
+                  <label className="label">{en ? "Phone" : "Telefone"}</label>
+                  <input
+                    value={supplierForm.phone}
+                    onChange={(e) => setSupplierForm((f) => ({ ...f, phone: e.target.value }))}
+                    className="input"
+                  />
+                </div>
+                <div>
+                  <label className="label">{en ? "Password (optional)" : "Palavra-passe (opcional)"}</label>
+                  <input
+                    type="text"
+                    minLength={8}
+                    value={supplierForm.password}
+                    onChange={(e) => setSupplierForm((f) => ({ ...f, password: e.target.value }))}
+                    className="input"
+                    placeholder={en ? "Min. 8 chars — activates immediately" : "Mín. 8 caracteres — activa de imediato"}
+                  />
+                </div>
+                <div className="flex items-end gap-3 sm:col-span-2 lg:col-span-2">
+                  <label className="flex items-center gap-2 text-sm text-slate-600">
+                    <input
+                      type="checkbox"
+                      checked={supplierForm.sendInvite && !supplierForm.password}
+                      disabled={Boolean(supplierForm.password)}
+                      onChange={(e) => setSupplierForm((f) => ({ ...f, sendInvite: e.target.checked }))}
+                    />
+                    {en ? "Send invite email (if no password)" : "Enviar convite por email (se sem palavra-passe)"}
+                  </label>
+                  <button type="submit" disabled={creatingSupplier} className="btn btn-primary btn-sm ml-auto">
+                    {creatingSupplier ? (en ? "Creating…" : "A criar…") : en ? "Create account" : "Criar conta"}
+                  </button>
+                </div>
+              </form>
+            </section>
+
             <section className="card overflow-hidden">
               <div className="border-b border-slate-200 p-4">
                 <h2 className="section-title">{en ? "Supplier accounts" : "Contas de fornecedor"}</h2>
@@ -1622,37 +1753,105 @@ export default function SuperAdminPage() {
                           {account.activated ? (en ? "Active" : "Activa") : en ? "Pending activation" : "Convite pendente"}
                         </span>
                         {!account.isActive && <span className="badge badge-red">{en ? "Disabled" : "Desactivada"}</span>}
+                        {account.hasMarketplaceProfile && (
+                          <span className="badge badge-neutral">{en ? "Marketplace" : "Marketplace"}</span>
+                        )}
                       </div>
-                      <p className="mt-0.5 text-xs text-slate-500">{account.email}{account.phone ? ` · ${account.phone}` : ""}</p>
+                      <p className="mt-0.5 text-xs text-slate-500">
+                        {account.email}
+                        {account.phone ? ` · ${account.phone}` : ""}
+                      </p>
                       <div className="mt-2 flex flex-wrap gap-1.5">
                         {account.companies.map((c) => (
-                          <span key={c.companyId} className="badge badge-neutral">{c.companyName}</span>
+                          <span key={c.companyId} className="badge badge-neutral">
+                            {c.companyName}
+                          </span>
                         ))}
-                        {account.companies.length === 0 && <span className="text-xs text-slate-400">{en ? "No company linked yet" : "Ainda sem nenhuma empresa ligada"}</span>}
+                        {account.companies.length === 0 && (
+                          <span className="text-xs text-slate-400">{en ? "No company linked yet" : "Ainda sem nenhuma empresa ligada"}</span>
+                        )}
                       </div>
                       {Object.keys(account.quoteRequestsByStatus).length > 0 && (
                         <p className="mt-2 text-xs text-slate-500">
-                          {Object.entries(account.quoteRequestsByStatus).map(([status, total]) => `${status}: ${total}`).join(" · ")}
+                          {Object.entries(account.quoteRequestsByStatus)
+                            .map(([status, total]) => `${status}: ${total}`)
+                            .join(" · ")}
                         </p>
                       )}
+                      {resetPasswordId === account.id && (
+                        <form onSubmit={handleResetSupplierPassword} className="mt-3 flex flex-wrap items-end gap-2">
+                          <div>
+                            <label className="label">{en ? "New password" : "Nova palavra-passe"}</label>
+                            <input
+                              required
+                              minLength={8}
+                              value={resetPasswordValue}
+                              onChange={(e) => setResetPasswordValue(e.target.value)}
+                              className="input"
+                              autoFocus
+                            />
+                          </div>
+                          <button type="submit" disabled={resettingPassword} className="btn btn-primary btn-sm">
+                            {resettingPassword ? (en ? "Saving…" : "A guardar…") : en ? "Save password" : "Guardar palavra-passe"}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => {
+                              setResetPasswordId(null);
+                              setResetPasswordValue("");
+                            }}
+                          >
+                            {en ? "Cancel" : "Cancelar"}
+                          </button>
+                        </form>
+                      )}
                     </div>
-                    {!account.activated && (
+                    <div className="flex shrink-0 flex-wrap gap-2">
+                      {!account.activated && (
+                        <button
+                          type="button"
+                          onClick={() => handleResendInvite(account.id)}
+                          disabled={resendingInviteId === account.id}
+                          className="btn btn-secondary btn-sm"
+                        >
+                          {resendingInviteId === account.id ? (en ? "Sending…" : "A enviar…") : en ? "Resend invite" : "Reenviar convite"}
+                        </button>
+                      )}
                       <button
                         type="button"
-                        onClick={() => handleResendInvite(account.id)}
-                        disabled={resendingInviteId === account.id}
-                        className="btn btn-secondary btn-sm shrink-0"
+                        onClick={() => {
+                          setResetPasswordId(account.id);
+                          setResetPasswordValue("");
+                        }}
+                        className="btn btn-secondary btn-sm"
                       >
-                        {resendingInviteId === account.id ? (en ? "Sending…" : "A enviar…") : en ? "Resend invite" : "Reenviar convite"}
+                        {en ? "Reset password" : "Redefinir palavra-passe"}
                       </button>
-                    )}
+                      <button
+                        type="button"
+                        onClick={() => void handleToggleSupplierActive(account)}
+                        disabled={togglingSupplierId === account.id}
+                        className="btn btn-secondary btn-sm"
+                      >
+                        {togglingSupplierId === account.id
+                          ? "…"
+                          : account.isActive
+                            ? en
+                              ? "Disable"
+                              : "Desactivar"
+                            : en
+                              ? "Enable"
+                              : "Activar"}
+                      </button>
+                    </div>
                   </div>
                 ))}
                 {supplierAccounts.length === 0 && (
                   <p className="p-6 text-center text-sm text-slate-500">
                     {en
-                      ? "No supplier has been invited yet — companies invite suppliers from Suppliers → “Invite to Supplier Portal”."
-                      : "Ainda nenhum fornecedor foi convidado — as empresas convidam a partir de Fornecedores → «Convidar para o Portal do Fornecedor»."}
+                      ? "No supplier accounts yet — create one above or invite from a company."
+                      : "Ainda sem contas — crie acima ou convide a partir de uma empresa."}
                   </p>
                 )}
               </div>
