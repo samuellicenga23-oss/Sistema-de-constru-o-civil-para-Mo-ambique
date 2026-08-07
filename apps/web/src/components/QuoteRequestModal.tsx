@@ -9,7 +9,17 @@ type PickedLine = QuoteRequestLineInput & { key: string; description: string; un
 
 const KIND_LABELS: Record<QuoteRequestLineKind, string> = { material: "Material", labour: "Mão-de-obra", equipment: "Equipamento" };
 
-export default function QuoteRequestModal({ supplier, onClose, onCreated }: { supplier: Supplier; onClose: () => void; onCreated: () => void }) {
+export default function QuoteRequestModal({
+  supplier,
+  projectId,
+  onClose,
+  onCreated,
+}: {
+  supplier: Supplier;
+  projectId?: string | null;
+  onClose: () => void;
+  onCreated: () => void;
+}) {
   const [materials, setMaterials] = useState<Material[]>([]);
   const [labour, setLabour] = useState<LabourCategory[]>([]);
   const [equipment, setEquipment] = useState<Equipment[]>([]);
@@ -70,6 +80,7 @@ export default function QuoteRequestModal({ supplier, onClose, onCreated }: { su
     try {
       await quoteRequestsApi.create({
         supplierId: supplier.id,
+        projectId: projectId || undefined,
         title: title.trim(),
         message: message.trim() || undefined,
         deadlineDate: deadlineDate || undefined,
