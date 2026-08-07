@@ -253,7 +253,7 @@ export default function CreditsPage() {
                   <span className="text-sm font-normal text-slate-500"> /mês</span>
                 </p>
                 <ul className="mt-3 space-y-1 text-xs text-slate-600">
-                  {plan.features.slice(0, 4).map((f) => (
+                  {plan.features.slice(0, 5).map((f) => (
                     <li key={f}>· {f}</li>
                   ))}
                 </ul>

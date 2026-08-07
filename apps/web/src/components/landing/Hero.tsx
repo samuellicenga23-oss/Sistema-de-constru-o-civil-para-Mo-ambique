@@ -49,8 +49,8 @@ export function Hero() {
             transition={{ duration: 0.45, delay: 0.12 }}
             className="mx-auto mt-5 max-w-2xl text-[16.5px] leading-relaxed text-ink-400 sm:text-[18px]"
           >
-            O SIGO liga o orçamento ao planeamento, às compras e cotações, ao campo e à medição — num só fluxo,
-            para que cada quantidade medida no estaleiro chegue ao auto e à facturação sem folhas de
+            O SIGO liga o orçamento ao planeamento, às compras com fornecedores na zona da obra, ao campo e à medição —
+            num só fluxo, para que cada quantidade medida no estaleiro chegue ao auto e à facturação sem folhas de
             cálculo paralelas.
           </motion.p>
 

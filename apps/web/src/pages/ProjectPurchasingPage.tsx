@@ -646,119 +646,249 @@ export default function ProjectPurchasingPage() {
           )}
 
           {showOrderForm && (
-            <Modal title="Nova ordem de compra" subtitle={`Fornecedor, entrega e materiais · IVA ${(Number(project.ivaRate) * 100).toFixed(2)}%`} onClose={() => setShowOrderForm(false)} maxWidth="max-w-6xl">
-            <form id="purchase-order-form" onSubmit={handleCreateOrder} className="space-y-4">
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                <div>
-                  <label className="label">Fornecedor</label>
-                  <select value={supplierId} onChange={(e) => setSupplierId(e.target.value)} className="input">
-                    {orderSuppliers.length === 0 && <option value="">Sem fornecedores</option>}
-                    {orderSuppliers.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.isReference ? `${s.name} (catálogo SIGO)` : s.name}
-                      </option>
-                    ))}
-                  </select>
-                  {orderSuppliers.length === 0 && (
-                    <Link to="/gestao/cotacoes" className="mt-1.5 inline-flex text-xs font-semibold text-brand-700 hover:underline">
-                      Ver cotações no Portal SIGO Fornecedores →
-                    </Link>
-                  )}
-                </div>
-                <div>
-                  <label className="label">Data do pedido</label>
-                  <input type="date" value={orderDate} onChange={(e) => setOrderDate(e.target.value)} className="input" />
-                </div>
-                <div>
-                  <label className="label">Actividade do cronograma</label>
-                  <select value={scheduleTaskId} onChange={(event) => { const id = event.target.value; setScheduleTaskId(id); const task = scheduleTasks.find((item) => item.id === id); if (task) setRequiredByDate(task.startDate); }} className="input"><option value="">Sem actividade associada</option>{scheduleTasks.map((task) => <option key={task.id} value={task.id}>{task.code} · {task.name}</option>)}</select>
-                </div>
-                <div>
-                  <label className="label">Necessário na obra até</label>
-                  <input type="date" value={requiredByDate} onChange={(event) => setRequiredByDate(event.target.value)} className="input" />
-                </div>
-                <div>
-                  <label className="label">Notas</label>
-                  <input value={orderNotes} onChange={(e) => setOrderNotes(e.target.value)} className="input" />
-                </div>
-              </div>
+            <Modal
+              title="Nova ordem de compra"
+              subtitle={`Preços sem IVA · total com IVA ${(Number(project.ivaRate) * 100).toFixed(2)}% · ${project.currency}`}
+              onClose={() => setShowOrderForm(false)}
+              maxWidth="max-w-5xl"
+            >
+              <form id="purchase-order-form" onSubmit={handleCreateOrder} className="space-y-5">
+                <section className="rounded-xl border border-slate-200 bg-white">
+                  <div className="border-b border-slate-100 px-4 py-3">
+                    <h3 className="text-sm font-semibold text-slate-900">1. Cotação e fornecedor</h3>
+                    <p className="mt-0.5 text-xs text-slate-500">
+                      No Profissional+, use cotações reais da zona (o SIGO sugere o melhor preço). No Individual, só SIGO Preços de referência.
+                    </p>
+                  </div>
+                  <div className="grid gap-4 p-4 sm:grid-cols-2">
+                    <div className="sm:col-span-2">
+                      <label className="label">Fornecedor da ordem</label>
+                      <select value={supplierId} onChange={(e) => setSupplierId(e.target.value)} className="input" required>
+                        {orderSuppliers.length === 0 && <option value="">Sem cotações disponíveis</option>}
+                        {orderSuppliers.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.isReference ? `${s.name} (SIGO Preços)` : s.name}
+                          </option>
+                        ))}
+                      </select>
+                      {orderSuppliers.length === 0 ? (
+                        <Link to="/gestao/cotacoes" className="mt-1.5 inline-flex text-xs font-semibold text-brand-700 hover:underline">
+                          Abrir Gestão da obra → Cotações
+                        </Link>
+                      ) : (
+                        <p className="mt-1.5 text-[11px] text-slate-500">
+                          Ao mudar o fornecedor, os preços unitários passam a usar a melhor cotação compatível com a zona da obra (melhor custo primeiro).
+                        </p>
+                      )}
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="label">Notas (opcional)</label>
+                      <input
+                        value={orderNotes}
+                        onChange={(e) => setOrderNotes(e.target.value)}
+                        className="input"
+                        placeholder="Referência interna, condições de entrega…"
+                      />
+                    </div>
+                  </div>
+                </section>
 
-              <div className="space-y-2">
-                <label className="label">
-                  Linhas do Catálogo — quantidades e preços unitários sem IVA; o total aplica IVA automaticamente
-                </label>
-                {materials.length === 0 ? (
-                  <p className="text-xs text-gray-400">Sem materiais no Catálogo ainda — adicione materiais no Catálogo de Preços primeiro.</p>
-                ) : (
-                  lines.map((line, i) => {
-                    const material = materialById.get(line.materialId);
-                    const quotedPrice = preferredSupplierPrice(supplierPrices, line.materialId, project.zoneId, project.currency);
-                    const incompatibleCurrencies = Array.from(
-                      new Set(supplierPrices.filter((price) => price.materialId === line.materialId).map((price) => price.currency)),
-                    ).filter((currency) => currency !== project.currency);
-                    return (
-                      <div key={i} className="grid gap-2 sm:grid-cols-12 items-end">
-                        <div className="sm:col-span-5">
-                          <select value={line.materialId} onChange={(e) => handleLineMaterialChange(i, e.target.value)} className="input">
-                            {materials.map((m) => (
-                              <option key={m.id} value={m.id}>
-                                {m.name} ({m.unit})
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                        <div className="sm:col-span-2">
-                          <input
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            placeholder="Quantidade"
-                            value={line.quantity || ""}
-                            onChange={(e) => updateLine(i, { quantity: Number(e.target.value) })}
-                            className="input"
-                          />
-                        </div>
-                        <div className="sm:col-span-3">
-                          <input
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            placeholder="Preço unit."
-                            value={line.unitCost || ""}
-                            onChange={(e) => updateLine(i, { unitCost: Number(e.target.value) })}
-                            className="input"
-                          />
-                          {quotedPrice ? (
-                            <span className="text-[11px] font-medium text-emerald-700">
-                              {quotedPrice.zoneId ? `Cotação para ${quotedPrice.zoneName ?? "a zona da obra"}` : "Cotação geral do fornecedor"} · por {material?.unit}
-                            </span>
-                          ) : incompatibleCurrencies.length > 0 ? (
-                            <span className="text-[11px] text-amber-700">
-                              Cotação em {incompatibleCurrencies.join("/")} não aplicada; introduza o preço em {project.currency}
-                            </span>
-                          ) : (
-                            <span className="text-[11px] text-gray-400">Sem cotação aplicável · por {material?.unit}</span>
-                          )}
-                        </div>
-                        <div className="sm:col-span-2 flex gap-2">
-                          <button type="button" onClick={() => setLines((prev) => [...prev, emptyLine(materials)])} className="btn btn-secondary btn-sm">
-                            <IconPlus className="w-3.5 h-3.5" />
-                          </button>
-                          {lines.length > 1 && (
-                            <button type="button" onClick={() => setLines((prev) => prev.filter((_, idx) => idx !== i))} className="icon-btn-danger">
-                              <IconTrash className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-                        </div>
+                <section className="rounded-xl border border-slate-200 bg-white">
+                  <div className="border-b border-slate-100 px-4 py-3">
+                    <h3 className="text-sm font-semibold text-slate-900">2. Entrega em obra</h3>
+                    <p className="mt-0.5 text-xs text-slate-500">Datas e ligação ao cronograma (opcional).</p>
+                  </div>
+                  <div className="grid gap-4 p-4 sm:grid-cols-3">
+                    <div>
+                      <label className="label">Data do pedido</label>
+                      <input type="date" value={orderDate} onChange={(e) => setOrderDate(e.target.value)} className="input" required />
+                    </div>
+                    <div>
+                      <label className="label">Necessário na obra até</label>
+                      <input type="date" value={requiredByDate} onChange={(e) => setRequiredByDate(e.target.value)} className="input" />
+                    </div>
+                    <div>
+                      <label className="label">Actividade do cronograma</label>
+                      <select
+                        value={scheduleTaskId}
+                        onChange={(event) => {
+                          const id = event.target.value;
+                          setScheduleTaskId(id);
+                          const task = scheduleTasks.find((item) => item.id === id);
+                          if (task) setRequiredByDate(task.startDate);
+                        }}
+                        className="input"
+                      >
+                        <option value="">Sem actividade</option>
+                        {scheduleTasks.map((task) => (
+                          <option key={task.id} value={task.id}>
+                            {task.code} · {task.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+                  <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 px-4 py-3">
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-900">3. Materiais</h3>
+                      <p className="mt-0.5 text-xs text-slate-500">Quantidades e preços unitários sem IVA · o total aplica IVA automaticamente</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setLines((prev) => [...prev, emptyLine(materials)])}
+                      disabled={!materials.length}
+                      className="btn btn-secondary btn-sm"
+                    >
+                      <IconPlus className="h-3.5 w-3.5" />
+                      Adicionar linha
+                    </button>
+                  </div>
+
+                  {materials.length === 0 ? (
+                    <p className="px-4 py-6 text-sm text-slate-500">Sem materiais no Catálogo — adicione-os primeiro em Catálogo de Preços.</p>
+                  ) : (
+                    <div className="divide-y divide-slate-100">
+                      <div className="hidden grid-cols-[minmax(0,1.6fr)_5.5rem_7.5rem_6.5rem_auto] gap-3 px-4 py-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400 sm:grid">
+                        <span>Material</span>
+                        <span className="text-right">Qtd.</span>
+                        <span className="text-right">Preço unit.</span>
+                        <span className="text-right">Linha</span>
+                        <span className="sr-only">Acções</span>
                       </div>
-                    );
-                  })
-                )}
-              </div>
+                      {lines.map((line, i) => {
+                        const material = materialById.get(line.materialId);
+                        const quotedPrice = preferredSupplierPrice(supplierPrices, line.materialId, project.zoneId, project.currency);
+                        const incompatibleCurrencies = Array.from(
+                          new Set(supplierPrices.filter((price) => price.materialId === line.materialId).map((price) => price.currency)),
+                        ).filter((currency) => currency !== project.currency);
+                        const lineTotal = Number(line.quantity || 0) * Number(line.unitCost || 0);
+                        const quoteMatches =
+                          quotedPrice != null && Math.abs(Number(line.unitCost || 0) - Number(quotedPrice.unitCost)) < 0.0001;
+                        return (
+                          <div key={i} className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,1.6fr)_5.5rem_7.5rem_6.5rem_auto] sm:items-start">
+                            <div className="min-w-0">
+                              <label className="label sm:hidden">Material</label>
+                              <select
+                                value={line.materialId}
+                                onChange={(e) => handleLineMaterialChange(i, e.target.value)}
+                                className="input"
+                              >
+                                {materials.map((m) => (
+                                  <option key={m.id} value={m.id}>
+                                    {m.name} ({m.unit})
+                                  </option>
+                                ))}
+                              </select>
+                              <div className="mt-1.5 min-h-[1.1rem]">
+                                {quotedPrice ? (
+                                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                                    <span className={`text-[11px] font-medium ${quoteMatches ? "text-emerald-700" : "text-amber-700"}`}>
+                                      {quoteMatches ? "Cotação aplicada" : "Cotação disponível"}
+                                      {quotedPrice.zoneId
+                                        ? ` · ${quotedPrice.zoneName ?? "zona da obra"}`
+                                        : " · geral"}{" "}
+                                      · {Number(quotedPrice.unitCost).toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{" "}
+                                      {project.currency}/{material?.unit}
+                                    </span>
+                                    {!quoteMatches && (
+                                      <button
+                                        type="button"
+                                        className="text-[11px] font-semibold text-brand-700 underline-offset-2 hover:underline"
+                                        onClick={() => updateLine(i, { unitCost: Number(quotedPrice.unitCost) })}
+                                      >
+                                        Usar cotação
+                                      </button>
+                                    )}
+                                  </div>
+                                ) : incompatibleCurrencies.length > 0 ? (
+                                  <span className="text-[11px] text-amber-700">
+                                    Cotação em {incompatibleCurrencies.join("/")} — introduza o preço em {project.currency}
+                                  </span>
+                                ) : (
+                                  <span className="text-[11px] text-slate-400">Sem cotação deste fornecedor · por {material?.unit}</span>
+                                )}
+                              </div>
+                            </div>
+                            <div>
+                              <label className="label sm:hidden">Quantidade</label>
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                value={line.quantity || ""}
+                                onChange={(e) => updateLine(i, { quantity: Number(e.target.value) })}
+                                className="input text-right"
+                              />
+                            </div>
+                            <div>
+                              <label className="label sm:hidden">Preço unit. ({project.currency})</label>
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                value={line.unitCost || ""}
+                                onChange={(e) => updateLine(i, { unitCost: Number(e.target.value) })}
+                                className="input text-right"
+                              />
+                            </div>
+                            <div className="text-right">
+                              <label className="label sm:hidden">Total linha</label>
+                              <strong className="block pt-2.5 text-sm tabular-nums text-slate-900">
+                                {lineTotal.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </strong>
+                            </div>
+                            <div className="flex items-start justify-end pt-1 sm:pt-2">
+                              {lines.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => setLines((prev) => prev.filter((_, idx) => idx !== i))}
+                                  className="icon-btn-danger"
+                                  title="Remover linha"
+                                >
+                                  <IconTrash className="h-3.5 w-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </section>
 
-              <div className="grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-3"><div><span className="text-xs text-slate-500">Subtotal</span><strong className="mt-1 block tabular-nums">{orderDraftTotals.subtotal.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {project.currency}</strong></div><div><span className="text-xs text-slate-500">IVA {(orderDraftTotals.ivaRate * 100).toFixed(2)}%</span><strong className="mt-1 block tabular-nums">{orderDraftTotals.iva.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {project.currency}</strong></div><div><span className="text-xs font-semibold text-slate-700">Total da ordem</span><strong className="mt-1 block text-lg tabular-nums text-slate-950">{orderDraftTotals.total.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {project.currency}</strong></div></div>
-              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><button type="button" onClick={() => setShowOrderForm(false)} className="btn btn-secondary">Cancelar</button><button type="submit" disabled={saving || !supplierId || materials.length === 0} className="btn btn-primary">{saving ? "A guardar..." : "Criar ordem de compra"}</button></div>
-            </form>
+                <div className="grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-3">
+                  <div>
+                    <span className="text-xs text-slate-500">Subtotal</span>
+                    <strong className="mt-1 block tabular-nums">
+                      {orderDraftTotals.subtotal.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {project.currency}
+                    </strong>
+                  </div>
+                  <div>
+                    <span className="text-xs text-slate-500">IVA {(orderDraftTotals.ivaRate * 100).toFixed(2)}%</span>
+                    <strong className="mt-1 block tabular-nums">
+                      {orderDraftTotals.iva.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {project.currency}
+                    </strong>
+                  </div>
+                  <div>
+                    <span className="text-xs font-semibold text-slate-700">Total da ordem</span>
+                    <strong className="mt-1 block text-lg tabular-nums text-slate-950">
+                      {orderDraftTotals.total.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {project.currency}
+                    </strong>
+                  </div>
+                </div>
+
+                <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                  <button type="button" onClick={() => setShowOrderForm(false)} className="btn btn-secondary">
+                    Cancelar
+                  </button>
+                  <button type="submit" disabled={saving || !supplierId || materials.length === 0} className="btn btn-primary">
+                    {saving ? "A guardar..." : "Criar ordem de compra"}
+                  </button>
+                </div>
+              </form>
             </Modal>
           )}
 

@@ -102,7 +102,7 @@ export const PLAN_CATALOG: Record<PublicSubscriptionPlanKey, PlanDefinition> = {
       "Até 30 composições próprias",
       "5 importações inteligentes / mês",
       "5 análises de plantas / mês",
-      "Preços de referência SIGO Preços (editáveis por si)",
+      "Preços de referência SIGO Preços (editáveis) — sem marketplace de fornecedores",
     ],
   },
   profissional: {
@@ -135,11 +135,12 @@ export const PLAN_CATALOG: Record<PublicSubscriptionPlanKey, PlanDefinition> = {
     },
     features: [
       "Tudo do Individual",
+      "SIGO Fornecedores: preços reais por zona, contacto directo e PDF do pedido (melhor preço → mais caro)",
+      "O SIGO identifica quem tem o material na região da obra e ordena pelo melhor custo",
       "5 utilizadores · 15 obras activas",
       "Composições próprias ilimitadas",
       "30 importações e 30 plantas / mês",
       "Equipa, roles e logótipo nos documentos",
-      "Marketplace SIGO Fornecedores — cotações e preços reais por zona (portal à parte)",
     ],
   },
   empresa: {
@@ -170,7 +171,7 @@ export const PLAN_CATALOG: Record<PublicSubscriptionPlanKey, PlanDefinition> = {
       supplierMarketplace: true,
     },
     features: [
-      "Tudo do Profissional",
+      "Tudo do Profissional (incl. SIGO Fornecedores e PDF de pedidos por preço/zona)",
       "15 utilizadores · 50 obras activas",
       "100 importações e 100 plantas / mês",
       "Templates de permissões e governação",

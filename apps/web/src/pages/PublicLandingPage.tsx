@@ -3,6 +3,7 @@ import { Hero } from "../components/landing/Hero";
 import { FeatureGrid } from "../components/landing/FeatureGrid";
 import { ProductTabs } from "../components/landing/ProductTabs";
 import { Roles } from "../components/landing/Roles";
+import { SuppliersSection } from "../components/landing/SuppliersSection";
 import { Pricing } from "../components/landing/Pricing";
 import { Faq } from "../components/landing/Faq";
 import { ContactCTA } from "../components/landing/ContactCTA";
@@ -18,6 +19,7 @@ export default function PublicLandingPage() {
         <FeatureGrid />
         <ProductTabs />
         <Roles />
+        <SuppliersSection />
         <Pricing />
         <Faq />
         <ContactCTA />

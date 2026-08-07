@@ -84,9 +84,18 @@ export default function QuoteRequestModal({ supplier, onClose, onCreated }: { su
   }
 
   return (
-    <Modal title="Pedir cotação" subtitle={`Enviar pedido de preços a «${supplier.name}»`} onClose={onClose} maxWidth="max-w-3xl">
+    <Modal
+      title="Pedir cotação"
+      subtitle={`Enviar a «${supplier.name}» — no Profissional+ o SIGO pode juntar fornecedores da zona num PDF ordenado por preço`}
+      onClose={onClose}
+      maxWidth="max-w-3xl"
+    >
       {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
       <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="rounded-lg border border-teal-200 bg-teal-50/50 px-3 py-2.5 text-[12.5px] leading-relaxed text-teal-950">
+          O pedido lista os materiais/serviços e contacta o fornecedor. Com Profissional ou superior, o sistema destaca
+          quem tem o item na região da obra e organiza do melhor preço ao mais caro (PDF com contactos).
+        </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <label className="label">Título do pedido</label>

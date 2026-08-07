@@ -31,7 +31,7 @@ export const features = [
     icon: "Truck",
     title: "Compras e cotações",
     description:
-      "Compare propostas no Portal SIGO Fornecedores, aceite cotações na Gestão da obra e execute as compras na obra.",
+      "No Profissional+, o SIGO sugere os melhores preços na região da obra, prepara o PDF do pedido com contactos e liga as cotações às compras.",
   },
   {
     icon: "ClipboardList",
@@ -92,7 +92,11 @@ export const roles = [
     role: "Construtora",
     description:
       "Controle margens por capítulo, antecipe compras e feche autos sem retrabalho no fim do mês.",
-    points: ["Custo real por frente", "Cotações na Gestão da obra", "Pedidos de compra ligados ao mapa"],
+    points: [
+      "Custo real por frente",
+      "Cotações Profissional+ com fornecedores na zona",
+      "Pedidos de compra ligados ao mapa",
+    ],
   },
   {
     icon: "ClipboardCheck",
@@ -110,10 +114,40 @@ export const roles = [
   },
 ];
 
+/** Secção dedicada a SIGO Fornecedores — portal gratuito para fornecedores; mercado Profissional+ para obras. */
+export const suppliersSection = {
+  eyebrow: "SIGO Fornecedores",
+  title: "Fornecedores reais, na região da sua obra",
+  lead:
+    "O catálogo SIGO Preços serve de referência em qualquer plano. A partir do Profissional, a obra fala directamente com fornecedores da zona: preços reais, contactos e um PDF do pedido ordenado do melhor custo ao mais caro.",
+  forBuilders: {
+    title: "Para a construtora (Profissional+)",
+    points: [
+      "Quando cria uma cotação, o SIGO identifica quem tem o material na região da obra",
+      "Sugere os melhores preços tendo em conta a zona e a proximidade",
+      "Gera um PDF com lista de materiais, fornecedores e contactos — do mais barato ao mais caro",
+      "Comunicação directa no pedido; as respostas entram em Gestão da obra → Cotações",
+    ],
+  },
+  forSuppliers: {
+    title: "Para o fornecedor (portal gratuito)",
+    points: [
+      "Conta no Portal SIGO Fornecedores sem custo de plano SIGO",
+      "Publica preços por zona e recebe pedidos de cotação das obras",
+      "Responde com preços e notas; a construtora aceita na Gestão da obra",
+      "Visibilidade junto de obras que trabalham em Profissional ou superior",
+    ],
+  },
+};
+
 export const faqs = [
   {
     q: "O SIGO funciona com fraca ligação à internet no estaleiro?",
     a: "Sim. O diário de obra e as medições de campo funcionam offline no telemóvel e sincronizam automaticamente quando a ligação regressa.",
+  },
+  {
+    q: "Como funcionam os fornecedores nos planos?",
+    a: "No Individual (e no período de avaliação) usa SIGO Preços de referência, editáveis por si. A partir do Profissional, activa o SIGO Fornecedores: preços reais por zona, contacto directo, e ao pedir cotação o sistema monta a lista de fornecedores com o material — com PDF ordenado do melhor preço ao mais caro. O Portal do Fornecedor em si é gratuito para quem vende.",
   },
   {
     q: "Posso trabalhar em MZN e USD na mesma obra?",
@@ -125,7 +159,7 @@ export const faqs = [
   },
   {
     q: "Como funciona o catálogo de preços por zona?",
-    a: "Mantém um catálogo central de artigos e composições, com factores de preço por zona do país, de forma a orçamentar Beira ou Tete com custos realistas.",
+    a: "Mantém um catálogo central de artigos e composições, com factores de preço por zona do país, de forma a orçamentar Beira ou Tete com custos realistas. No Profissional+, as cotações de fornecedores reais reforçam esses preços na região da obra.",
   },
   {
     q: "É possível importar mapas de quantidades existentes em Excel?",

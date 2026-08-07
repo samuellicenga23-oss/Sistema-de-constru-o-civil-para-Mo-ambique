@@ -21,8 +21,9 @@ export function Pricing() {
             </span>
           </h2>
           <p className="mt-4 text-[16px] leading-relaxed text-ink-400">
-            Individual, equipa ou empresa — o fluxo da obra está em todos os planos.
-            Os preços estão em meticais, com IVA incluído. No anual poupa 15% no valor mensal.
+            Individual inclui SIGO Preços de referência. A partir do Profissional activa fornecedores
+            reais, contacto directo e o PDF do pedido ordenado por preço na zona da obra.
+            Preços em meticais, com IVA incluído — no anual poupa 15% no valor mensal.
           </p>
           <div className="mt-7 flex flex-col items-center gap-3">
             <div className="inline-flex rounded-xl border border-slate-200 bg-surface p-1">

@@ -84,11 +84,20 @@ export default function QuoteRequestsPage() {
   return (
     <Layout
       title="Gestão da obra"
-      subtitle="Cotações do Portal SIGO Fornecedores — aceite para referência de compra; o preço base do Catálogo (orçamentos) edita-se à parte"
+      subtitle="Cotações: no Profissional+ o SIGO compara fornecedores da zona e ordena do melhor preço ao mais caro — aceite para referência de compra"
     >
       <div className="mx-auto w-full max-w-5xl space-y-5">
         <GestaoTabs />
         {error && <p className="text-sm text-red-600">{error}</p>}
+
+        <div className="rounded-xl border border-teal-200 bg-teal-50/60 px-4 py-3 text-sm text-teal-950">
+          <p className="font-semibold">Como funciona o pedido de cotação</p>
+          <p className="mt-1 text-[13px] leading-relaxed text-teal-900/90">
+            No plano Profissional ou superior, ao pedir materiais o SIGO identifica fornecedores com stock/preço na região da obra,
+            prepara a lista (e PDF) com contactos, e ordena do melhor custo ao mais caro. As respostas chegam aqui;
+            aceitar guarda a cotação para compras — não altera o preço base dos orçamentos. No Individual só tem SIGO Preços de referência.
+          </p>
+        </div>
 
         <section className="card overflow-hidden">
           <div className="border-b border-slate-200 p-4 sm:p-5">
@@ -97,7 +106,7 @@ export default function QuoteRequestsPage() {
               <div>
                 <h2 className="section-title text-base">Cotações recebidas</h2>
                 <p className="mt-0.5 text-xs text-slate-500">
-                  Os fornecedores respondem no Portal do Fornecedor. Aceitar guarda a cotação para compras — não altera o preço base dos orçamentos.
+                  Fornecedores respondem no Portal (gratuito para quem vende). Aceite aqui para usar nas compras da obra.
                 </p>
               </div>
             </div>
@@ -114,7 +123,7 @@ export default function QuoteRequestsPage() {
             ))}
             {requests.length === 0 && (
               <p className="px-5 py-10 text-center text-sm text-slate-500">
-                Ainda não há cotações. Os pedidos são gerados automaticamente (SIGO Preços) ou pelos fornecedores no portal.
+                Ainda não há cotações. No Profissional+, peça cotação a partir das compras ou do catálogo — o SIGO junta fornecedores da zona num PDF ordenado por preço.
               </p>
             )}
           </div>
