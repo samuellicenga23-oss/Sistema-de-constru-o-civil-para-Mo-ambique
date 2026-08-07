@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { request } from "../api/http";
-import { SIGO_WHATSAPP_NUMBER } from "../commercialPlans";
 import { useAuth } from "../auth/AuthContext";
 
 type EntitlementsSummary = {
@@ -58,8 +57,6 @@ export default function SubscriptionBanner() {
 
   if (!entitlements || user?.platformRole === "super_admin") return null;
 
-  const whatsapp = `https://wa.me/${SIGO_WHATSAPP_NUMBER}?text=${encodeURIComponent("Olá — quero activar / actualizar o plano SIGO.")}`;
-
   if (entitlements.expired) {
     return (
       <div className="border-b border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 md:px-8">
@@ -72,9 +69,6 @@ export default function SubscriptionBanner() {
             <Link to="/creditos?foco=plano" className="btn btn-primary btn-sm">
               Activar plano
             </Link>
-            <a href={whatsapp} target="_blank" rel="noreferrer" className="btn btn-secondary btn-sm">
-              WhatsApp
-            </a>
           </div>
         </div>
       </div>

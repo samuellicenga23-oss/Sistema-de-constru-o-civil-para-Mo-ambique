@@ -77,3 +77,26 @@ jobs:
       # sem correcção disponível ainda.
       - name: Auditoria de dependências (informativo)
         run: npm audit --audit-level=high || true
+
+  plant-service-tests:
+    # Job à parte (não depende de Postgres/Node) — o leitor de plantas é um serviço Python
+    # independente; um teste dele a falhar não deve ficar escondido atrás dos testes do
+    # Node só porque corriam no mesmo job.
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: apps/plant-service/requirements-dev.txt
+
+      - name: Instalar dependências
+        working-directory: apps/plant-service
+        run: pip install -r requirements-dev.txt
+
+      - name: Testes do plant-service
+        working-directory: apps/plant-service
+        run: pytest -v

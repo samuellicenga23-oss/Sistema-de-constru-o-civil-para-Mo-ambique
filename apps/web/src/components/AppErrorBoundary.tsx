@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { captureException } from "../monitoring";
 
 type Props = { children: ReactNode };
 type State = { error: Error | null };
@@ -12,6 +13,7 @@ export default class AppErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error("SIGO UI error:", error, info.componentStack);
+    captureException(error, { componentStack: info.componentStack ?? undefined });
   }
 
   render() {

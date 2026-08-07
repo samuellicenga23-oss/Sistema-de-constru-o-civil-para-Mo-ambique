@@ -433,6 +433,35 @@ export async function projectRoutes(app: FastifyInstance) {
     return row;
   });
 
+  // ---------- Link público para o dono da obra (progresso/valor/diário, sem login) ----------
+  app.get("/api/projects/:id/public-share", { preHandler: requireCompanyUser }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const companyId = request.currentUser!.companyId!;
+    const project = await assertProjectOwned(id, companyId);
+    if (!project) return reply.code(404).send({ error: "Projecto não encontrado" });
+    return { enabled: Boolean(project.publicShareToken), token: project.publicShareToken };
+  });
+
+  app.post("/api/projects/:id/public-share", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const companyId = request.currentUser!.companyId!;
+    const project = await assertProjectOwned(id, companyId);
+    if (!project) return reply.code(404).send({ error: "Projecto não encontrado" });
+    const { generatePublicShareToken } = await import("../services/publicShare.js");
+    const token = await generatePublicShareToken(id);
+    return { enabled: true, token };
+  });
+
+  app.delete("/api/projects/:id/public-share", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const companyId = request.currentUser!.companyId!;
+    const project = await assertProjectOwned(id, companyId);
+    if (!project) return reply.code(404).send({ error: "Projecto não encontrado" });
+    const { revokePublicShareToken } = await import("../services/publicShare.js");
+    await revokePublicShareToken(id);
+    return { enabled: false };
+  });
+
   app.delete("/api/projects/:id", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const companyId = request.currentUser!.companyId!;

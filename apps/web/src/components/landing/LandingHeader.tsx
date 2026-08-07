@@ -2,7 +2,6 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { MenuIcon, XIcon } from "lucide-react";
 import { useAuth } from "../../auth/AuthContext";
-import { SIGO_WHATSAPP_NUMBER } from "../../commercialPlans";
 import { Logo } from "./brand/Logo";
 import { Button } from "./ui/Button";
 
@@ -13,11 +12,6 @@ const links = [
   { label: "Planos", href: "#planos" },
   { label: "Perguntas", href: "#faq" },
 ];
-
-function whatsappHref() {
-  const message = "Olá Samuel. Gostaria de conhecer melhor o SIGO para a minha empresa de construção.";
-  return `https://wa.me/${SIGO_WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`;
-}
 
 export function LandingHeader() {
   const { user } = useAuth();
@@ -47,9 +41,11 @@ export function LandingHeader() {
           <Link to={platformHref}>
             <Button variant="secondary">{user ? "Abrir plataforma" : "Entrar"}</Button>
           </Link>
-          <a href={whatsappHref()} target="_blank" rel="noreferrer">
-            <Button>Pedir demonstração</Button>
-          </a>
+          {!user && (
+            <Link to="/registar">
+              <Button>Criar conta grátis</Button>
+            </Link>
+          )}
         </div>
 
         <button
@@ -83,9 +79,11 @@ export function LandingHeader() {
                 {user ? "Abrir plataforma" : "Entrar"}
               </Button>
             </Link>
-            <a href={whatsappHref()} target="_blank" rel="noreferrer" onClick={() => setOpen(false)}>
-              <Button fullWidth>Pedir demonstração</Button>
-            </a>
+            {!user && (
+              <Link to="/registar" onClick={() => setOpen(false)}>
+                <Button fullWidth>Criar conta grátis</Button>
+              </Link>
+            )}
           </div>
         </div>
       )}

@@ -7,6 +7,7 @@ import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
 import PublicLandingPage from "./pages/PublicLandingPage";
 import CheckoutPage from "./pages/CheckoutPage";
+import PublicProjectPage from "./pages/PublicProjectPage";
 
 const DashboardPage = lazy(() => import("./pages/DashboardPage"));
 const CatalogPage = lazy(() => import("./pages/CatalogPage"));
@@ -63,6 +64,7 @@ function AppRoutes() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/registar" element={<RegisterPage />} />
+      <Route path="/obra/:token" element={<PublicProjectPage />} />
       <Route path="/" element={<PublicLandingPage />} />
       <Route path="/checkout/:planSlug" element={<CheckoutPage />} />
       <Route

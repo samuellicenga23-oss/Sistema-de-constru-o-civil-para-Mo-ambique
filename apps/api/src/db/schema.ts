@@ -139,6 +139,36 @@ export const paymentProofs = pgTable(
   ],
 );
 
+/**
+ * Pedidos comerciais (registo de interesse num plano, pack de créditos, ou upgrade) — chegam
+ * directamente ao super_admin por email + aqui no painel. Nunca redirecciona ninguém para o
+ * WhatsApp pessoal: quer venha do site público (companyId null) quer de dentro da app já
+ * autenticada (companyId preenchido), fica registado e a equipa SIGO contacta a partir daqui.
+ */
+export const commercialLeadStatusEnum = pgEnum("commercial_lead_status", ["novo", "contactado", "resolvido"]);
+
+export const commercialLeads = pgTable(
+  "commercial_leads",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id").references(() => companies.id, { onDelete: "set null" }),
+    source: varchar("source", { length: 40 }).notNull(),
+    name: varchar("name", { length: 150 }).notNull(),
+    company: varchar("company", { length: 200 }),
+    email: varchar("email", { length: 200 }).notNull(),
+    phone: varchar("phone", { length: 60 }),
+    nuit: varchar("nuit", { length: 50 }),
+    city: varchar("city", { length: 150 }),
+    teamSize: varchar("team_size", { length: 60 }),
+    planOrPack: varchar("plan_or_pack", { length: 100 }),
+    billingCycle: varchar("billing_cycle", { length: 20 }),
+    notes: text("notes"),
+    status: commercialLeadStatusEnum("status").notNull().default("novo"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [index("commercial_leads_status_idx").on(table.status, table.createdAt)],
+);
+
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
   companyId: uuid("company_id").references(() => companies.id, { onDelete: "cascade" }),
@@ -421,6 +451,12 @@ export const projects = pgTable("projects", {
   trashedByUserId: uuid("trashed_by_user_id").references(() => users.id, { onDelete: "set null" }),
   filesPurgedAt: timestamp("files_purged_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
+  /**
+   * Token do link público para o dono da obra (progresso, valor certificado, diário) — sem
+   * login. Nunca é o ID interno do projecto: gerar de novo invalida o link anterior sem afectar
+   * mais nada. Null = partilha desligada.
+   */
+  publicShareToken: varchar("public_share_token", { length: 64 }).unique(),
 });
 
 export const usageEvents = pgTable(

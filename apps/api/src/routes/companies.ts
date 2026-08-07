@@ -892,6 +892,20 @@ export async function companyRoutes(app: FastifyInstance) {
     return { enabled: isMailEnabled() };
   });
 
+  app.get("/api/admin/monitoring/status", { preHandler: requireRole("super_admin") }, async () => {
+    const { isMonitoringEnabled } = await import("../services/monitoring.js");
+    return { enabled: isMonitoringEnabled() };
+  });
+
+  app.post("/api/admin/monitoring/test", { preHandler: requireRole("super_admin") }, async (request, reply) => {
+    const { isMonitoringEnabled, captureException: capture } = await import("../services/monitoring.js");
+    if (!isMonitoringEnabled()) {
+      return reply.code(409).send({ error: "Sentry não configurado — defina SENTRY_DSN." });
+    }
+    capture(new Error("SIGO — erro de teste (Sentry configurado correctamente)"), { triggeredBy: request.currentUser!.email });
+    return { ok: true };
+  });
+
   app.post("/api/admin/mail/test", { preHandler: requireRole("super_admin") }, async (request, reply) => {
     const { isMailEnabled, sendEmail: send, emailLayout: layout } = await import("../services/mailer.js");
     if (!isMailEnabled()) {

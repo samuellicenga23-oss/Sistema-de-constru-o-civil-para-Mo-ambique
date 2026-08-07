@@ -4,6 +4,7 @@ import { useAuth } from "../auth/AuthContext";
 import {
   companiesApi,
   type AdminCompanyUser,
+  type CommercialLead,
   type Company,
   type CompanyModuleKey,
   type PaymentProof,
@@ -231,8 +232,30 @@ export default function SuperAdminPage() {
   const [cleanupRunning, setCleanupRunning] = useState(false);
   const [pendingProofs, setPendingProofs] = useState<PaymentProof[]>([]);
   const [proofActionId, setProofActionId] = useState<string | null>(null);
+  const [leads, setLeads] = useState<CommercialLead[]>([]);
+  const [leadActionId, setLeadActionId] = useState<string | null>(null);
+
+  async function reloadLeads() {
+    const rows = await companiesApi.listLeads("novo");
+    setLeads(rows);
+  }
+
+  async function handleLeadStatus(id: string, status: CommercialLead["status"]) {
+    setLeadActionId(id);
+    setError(null);
+    try {
+      await companiesApi.updateLeadStatus(id, status);
+      await reloadLeads();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao actualizar o pedido");
+    } finally {
+      setLeadActionId(null);
+    }
+  }
   const [mailEnabled, setMailEnabled] = useState<boolean | null>(null);
   const [testingEmail, setTestingEmail] = useState(false);
+  const [monitoringEnabled, setMonitoringEnabled] = useState<boolean | null>(null);
+  const [testingMonitoring, setTestingMonitoring] = useState(false);
 
   async function handleTestEmail() {
     setTestingEmail(true);
@@ -244,6 +267,19 @@ export default function SuperAdminPage() {
       setError(err instanceof Error ? err.message : "Erro ao enviar email de teste");
     } finally {
       setTestingEmail(false);
+    }
+  }
+
+  async function handleTestMonitoring() {
+    setTestingMonitoring(true);
+    setError(null);
+    try {
+      await companiesApi.sendTestError();
+      setSuccess(en ? "Test error sent to Sentry" : "Erro de teste enviado ao Sentry");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao enviar erro de teste");
+    } finally {
+      setTestingMonitoring(false);
     }
   }
 
@@ -267,7 +303,9 @@ export default function SuperAdminPage() {
   useEffect(() => {
     reload().catch((err) => setError(err.message));
     reloadPendingProofs().catch((err) => setError(err.message));
+    reloadLeads().catch((err) => setError(err.message));
     companiesApi.getMailStatus().then((r) => setMailEnabled(r.enabled)).catch(() => setMailEnabled(false));
+    companiesApi.getMonitoringStatus().then((r) => setMonitoringEnabled(r.enabled)).catch(() => setMonitoringEnabled(false));
   }, []);
 
   async function handleApproveProof(proof: PaymentProof) {
@@ -815,9 +853,77 @@ export default function SuperAdminPage() {
                       )}
                     </div>
                   </div>
+                  <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+                    <p className="text-xs text-slate-500">Sentry</p>
+                    <div className="flex items-center justify-between gap-2">
+                      <strong className={monitoringEnabled ? "text-emerald-700" : "text-slate-500"}>
+                        {monitoringEnabled === null ? "…" : monitoringEnabled ? (en ? "Configured" : "Configurado") : (en ? "Not configured" : "Não configurado")}
+                      </strong>
+                      {monitoringEnabled && (
+                        <button type="button" onClick={handleTestMonitoring} disabled={testingMonitoring} className="btn btn-secondary btn-sm">
+                          {testingMonitoring ? "…" : en ? "Test" : "Testar"}
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
               </section>
             </div>
+
+            <section className="card p-5">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <h2 className="section-title">{en ? "Commercial requests" : "Pedidos comerciais"}</h2>
+                <span className="badge">{leads.length}</span>
+              </div>
+              {leads.length === 0 ? (
+                <p className="text-sm text-slate-500">{en ? "Nothing new." : "Nada de novo."}</p>
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  {leads.map((lead) => (
+                    <div key={lead.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
+                      <div>
+                        <strong className="text-sm text-slate-950">
+                          {lead.name}
+                          {lead.company ? ` · ${lead.company}` : ""}
+                        </strong>
+                        <p className="text-xs text-slate-500">
+                          {lead.planOrPack ? `${lead.planOrPack} · ` : ""}
+                          {lead.email}
+                          {lead.phone ? ` · ${lead.phone}` : ""} · {fmtDate(lead.createdAt)}
+                        </p>
+                        {lead.notes && <p className="mt-1 text-xs text-slate-500">{lead.notes}</p>}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <a href={`mailto:${lead.email}`} className="btn btn-secondary btn-sm">
+                          {en ? "Email" : "Email"}
+                        </a>
+                        {lead.phone && (
+                          <a href={`tel:${lead.phone}`} className="btn btn-secondary btn-sm">
+                            {en ? "Call" : "Ligar"}
+                          </a>
+                        )}
+                        <button
+                          type="button"
+                          disabled={leadActionId === lead.id}
+                          onClick={() => handleLeadStatus(lead.id, "contactado")}
+                          className="btn btn-secondary btn-sm"
+                        >
+                          {en ? "Contacted" : "Contactado"}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={leadActionId === lead.id}
+                          onClick={() => handleLeadStatus(lead.id, "resolvido")}
+                          className="btn btn-primary btn-sm"
+                        >
+                          {leadActionId === lead.id ? "..." : en ? "Resolved" : "Resolvido"}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
 
             <section className="card p-5">
               <div className="mb-3 flex items-center justify-between gap-2">

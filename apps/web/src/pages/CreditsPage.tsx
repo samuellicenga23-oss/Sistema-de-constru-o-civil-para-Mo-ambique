@@ -8,7 +8,7 @@ import {
 } from "@sigo/shared";
 import { request } from "../api/http";
 import { companiesApi, type PaymentProof } from "../api/companies";
-import { SIGO_WHATSAPP_NUMBER, formatMzn, formatPlanPriceWithVat } from "../commercialPlans";
+import { formatMzn, formatPlanPriceWithVat } from "../commercialPlans";
 import Layout from "../components/Layout";
 import AlertBanner from "../components/AlertBanner";
 import SubmitPaymentProofModal from "../components/SubmitPaymentProofModal";
@@ -47,17 +47,6 @@ type EntitlementsSummary = {
   } | null;
 };
 
-function packWhatsApp(pack: CreditPack) {
-  const text = encodeURIComponent(
-    `Olá — quero o pack SIGO «${pack.label}» (${pack.smartImports} importações · ${pack.plantAnalyses} plantas) por ${pack.priceMzn} MZN + IVA.`,
-  );
-  return `https://wa.me/${SIGO_WHATSAPP_NUMBER}?text=${text}`;
-}
-
-function planWhatsApp(planLabel: string) {
-  const text = encodeURIComponent(`Olá — quero activar / mudar para o plano SIGO ${planLabel}.`);
-  return `https://wa.me/${SIGO_WHATSAPP_NUMBER}?text=${text}`;
-}
 
 function Meter({
   label,
@@ -104,9 +93,24 @@ export default function CreditsPage() {
   const [error, setError] = useState<string | null>(null);
   const [proofs, setProofs] = useState<PaymentProof[]>([]);
   const [activatingPlan, setActivatingPlan] = useState<{ key: string; label: string; monthly: number; annual: number } | null>(null);
+  const [requestingId, setRequestingId] = useState<string | null>(null);
+  const [requestedIds, setRequestedIds] = useState<Set<string>>(new Set());
 
   function reloadProofs() {
     companiesApi.listMyPaymentProofs().then(setProofs).catch(() => undefined);
+  }
+
+  async function handleRequestLead(id: string, source: "plan_upgrade" | "credit_pack", planOrPack: string) {
+    setRequestingId(id);
+    setError(null);
+    try {
+      await companiesApi.submitLead({ source, planOrPack });
+      setRequestedIds((current) => new Set(current).add(id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao enviar o pedido");
+    } finally {
+      setRequestingId(null);
+    }
   }
 
   useEffect(() => {
@@ -191,7 +195,7 @@ export default function CreditsPage() {
           <div>
             <h2 className="section-title">Packs de créditos</h2>
             <p className="text-sm text-slate-600">
-              Preços com IVA. Pedido via WhatsApp — o super-admin confirma o pagamento e carrega o saldo.
+              Preços com IVA. Enviamos o pedido à equipa SIGO, que confirma o pagamento e carrega o saldo.
             </p>
           </div>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -218,9 +222,14 @@ export default function CreditsPage() {
                     {formatMzn(withVat).replace(",00", "")}
                   </p>
                   <p className="text-xs text-slate-500">com IVA · líquido {formatMzn(pack.priceMzn)}</p>
-                  <a href={packWhatsApp(pack)} target="_blank" rel="noreferrer" className="btn btn-primary mt-4 w-full">
-                    Pedir este pack
-                  </a>
+                  <button
+                    type="button"
+                    disabled={requestingId === pack.id || requestedIds.has(pack.id)}
+                    onClick={() => handleRequestLead(pack.id, "credit_pack", `${pack.label} (${pack.smartImports} importações · ${pack.plantAnalyses} plantas)`)}
+                    className="btn btn-primary mt-4 w-full"
+                  >
+                    {requestedIds.has(pack.id) ? "Pedido enviado ✓" : requestingId === pack.id ? "A enviar..." : "Pedir este pack"}
+                  </button>
                 </div>
               );
             })}
@@ -255,17 +264,19 @@ export default function CreditsPage() {
                 >
                   Activar {plan.label}
                 </button>
-                <a href={planWhatsApp(plan.label)} target="_blank" rel="noreferrer" className="action-link mt-2 block text-center text-xs">
-                  ou falar com a equipa por WhatsApp
-                </a>
               </div>
             ))}
           </div>
           <p className="text-xs text-slate-500">
             Enterprise e condições especiais:{" "}
-            <a className="font-semibold text-brand-800 hover:underline" href={planWhatsApp("Enterprise")}>
-              contacte a equipa SIGO
-            </a>
+            <button
+              type="button"
+              disabled={requestingId === "enterprise" || requestedIds.has("enterprise")}
+              onClick={() => handleRequestLead("enterprise", "plan_upgrade", "Enterprise")}
+              className="font-semibold text-brand-800 hover:underline disabled:no-underline"
+            >
+              {requestedIds.has("enterprise") ? "pedido enviado ✓" : requestingId === "enterprise" ? "a enviar..." : "contacte a equipa SIGO"}
+            </button>
             .
           </p>
         </section>

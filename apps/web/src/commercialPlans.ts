@@ -5,7 +5,6 @@ import {
   type PublicSubscriptionPlanKey,
 } from "@sigo/shared";
 
-export const SIGO_WHATSAPP_NUMBER = "258866384194";
 export const SIGO_CONTACT_EMAIL = "licsenga.samuel@mechanical.co.mz";
 
 /** Dados para pagamento manual (sem gateway) — titular: Samuel Rafael Licenga. */
@@ -14,7 +13,7 @@ export const PAYMENT_DETAILS = {
   banks: [
     { name: "Millennium BIM", account: "374947681" },
     { name: "Standard Bank", account: "1058484601005", nib: "000301050848460100523" },
-    { name: "EDBANK", account: "00041496100", nib: "004300000004149610061" },
+    { name: "Nedbank", account: "00041496100", nib: "004300000004149610061" },
   ],
   mobileMoney: [
     { name: "e-Mola", number: "866384194" },

@@ -69,4 +69,7 @@ export const env = {
   smtpUser: process.env.SMTP_USER || null,
   smtpPass: process.env.SMTP_PASS || null,
   mailFrom: process.env.MAIL_FROM || process.env.SMTP_USER || null,
+  // Monitorização de erros (Sentry, tier grátis até 5k eventos/mês). Sem isto definido, os erros
+  // continuam só no log do servidor — não deixa de funcionar, só não avisa proactivamente.
+  sentryDsn: process.env.SENTRY_DSN || null,
 };

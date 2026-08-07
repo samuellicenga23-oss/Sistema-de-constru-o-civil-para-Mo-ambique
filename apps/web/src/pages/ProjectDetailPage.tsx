@@ -12,7 +12,9 @@ import { usePlantPolling } from "../hooks/usePlantPolling";
 import { SectionHeader } from "../components/WorkspaceUI";
 import ProjectWorkspaceNav from "../components/ProjectWorkspaceNav";
 import ProjectWorkflowBanner from "../components/ProjectWorkflowBanner";
+import PublicShareModal from "../components/PublicShareModal";
 import { IconDoc, IconClipboard, IconMap, IconPlus, IconRuler, IconTrash, IconUpload } from "../components/icons";
+import { useAuth } from "../auth/AuthContext";
 import { UNITS, type Unit } from "@sigo/shared";
 
 const PLANT_STATUS_BADGE: Record<Plant["processingStatus"], { label: string; cls: string }> = {
@@ -43,6 +45,8 @@ export default function ProjectDetailPage() {
   const { confirm, dialog } = useConfirmDialog();
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const [showPublicShare, setShowPublicShare] = useState(false);
   const [searchParams] = useSearchParams();
   const [project, setProject] = useState<Project | null>(null);
   const [documents, setDocuments] = useState<BudgetDocument[]>([]);
@@ -356,11 +360,18 @@ export default function ProjectDetailPage() {
       title={project.name}
       back={{ label: backLabel, fallbackTo: backTo }}
       actions={
-          approvedBudgetDocuments.length > 0 && fase !== "gestao" ? (
-              <Link to={`/projectos/${projectId}?fase=gestao`} className="btn btn-primary btn-sm">
-                Abrir gestão da obra
-              </Link>
-          ) : undefined
+        <div className="flex flex-wrap items-center gap-2">
+          {user?.role === "admin_empresa" && (
+            <button type="button" onClick={() => setShowPublicShare(true)} className="btn btn-secondary btn-sm">
+              Partilhar com o dono da obra
+            </button>
+          )}
+          {approvedBudgetDocuments.length > 0 && fase !== "gestao" && (
+            <Link to={`/projectos/${projectId}?fase=gestao`} className="btn btn-primary btn-sm">
+              Abrir gestão da obra
+            </Link>
+          )}
+        </div>
       }
     >
       <div className="mx-auto grid w-full max-w-7xl items-start gap-5 xl:grid-cols-2">
@@ -806,6 +817,7 @@ export default function ProjectDetailPage() {
         )}
       </div>
       {dialog}
+      {showPublicShare && <PublicShareModal projectId={projectId!} onClose={() => setShowPublicShare(false)} />}
     </Layout>
   );
 }

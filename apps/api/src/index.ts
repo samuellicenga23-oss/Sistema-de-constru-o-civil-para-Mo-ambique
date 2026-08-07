@@ -1,3 +1,7 @@
+import { initMonitoring, captureException } from "./services/monitoring.js";
+
+initMonitoring();
+
 import { buildApp } from "./app.js";
 import { sql } from "./db/index.js";
 import { env } from "./env.js";
@@ -31,9 +35,13 @@ async function shutdown(signal: string) {
 
 process.once("SIGTERM", () => { void shutdown("SIGTERM"); });
 process.once("SIGINT", () => { void shutdown("SIGINT"); });
-process.on("unhandledRejection", (reason) => app.log.error({ reason }, "Unhandled promise rejection"));
+process.on("unhandledRejection", (reason) => {
+  app.log.error({ reason }, "Unhandled promise rejection");
+  captureException(reason);
+});
 process.on("uncaughtException", (error) => {
   app.log.fatal(error, "Uncaught exception");
+  captureException(error);
   void shutdown("uncaughtException");
 });
 
@@ -47,6 +55,7 @@ try {
   startSubscriptionReminderScheduler(app.log);
 } catch (error) {
   app.log.fatal(error, "API failed to start");
+  captureException(error);
   await sql.end({ timeout: 5 }).catch(() => undefined);
   process.exit(1);
 }

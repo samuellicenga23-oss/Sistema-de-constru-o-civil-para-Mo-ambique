@@ -46,11 +46,19 @@ createdb sigo_test   # ou: psql -U postgres -c "CREATE DATABASE sigo_test"
 cp apps/api/.env.test.example apps/api/.env.test   # ajustar credenciais se necessário
 
 npm run test   # corre backend (Vitest + Fastify inject()) e frontend (Vitest + Testing Library)
+
+# Plant-service (leitor de plantas, Python) — venv próprio, independente do resto
+cd apps/plant-service
+./.venv/Scripts/activate   # Linux/Mac: source .venv/bin/activate
+pip install -r requirements-dev.txt
+pytest -v
 ```
 
-O CI (`.github/workflows/ci.yml`) corre `npm ci`, build, typecheck, os mesmos testes contra um
-Postgres efémero, validação de que o schema e as migrations estão sincronizados, e uma
-auditoria de dependências informativa — em cada push/PR. Nunca faz deploy sozinho.
+O CI (`.github/workflows/ci.yml`) corre dois jobs em cada push/PR: `build-and-test` (`npm ci`,
+build, typecheck, os testes de backend/frontend contra um Postgres efémero, validação de que o
+schema e as migrations estão sincronizados, auditoria de dependências informativa) e
+`plant-service-tests` (suite pytest do leitor de plantas, independente do resto). Nenhum dos dois
+faz deploy sozinho.
 
 O acesso local/VPS, a ligação segura à base de dados e a lista completa de tecnologias estão em
 [`ACESSO_TECNICO.md`](./ACESSO_TECNICO.md). O histórico comum para continuidade entre Codex e

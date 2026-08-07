@@ -9,7 +9,7 @@ import LoadingState from "../components/LoadingState";
 import AlertBanner from "../components/AlertBanner";
 import TeamAccessPanel from "../components/TeamAccessPanel";
 import { CURRENCIES, getPlanDefinition } from "@sigo/shared";
-import { SIGO_WHATSAPP_NUMBER, formatMzn } from "../commercialPlans";
+import { formatMzn } from "../commercialPlans";
 
 const STATUS_LABELS: Record<string, string> = { trial: "Trial", activo: "Activo", suspenso: "Suspenso" };
 const STATUS_BADGE: Record<string, string> = { trial: "badge-yellow", activo: "badge-green", suspenso: "badge-red" };
@@ -49,6 +49,18 @@ export default function CompanySettingsPage() {
   const [uploading, setUploading] = useState(false);
   const [userCount, setUserCount] = useState(0);
   const [projectCount, setProjectCount] = useState(0);
+  const [upgradeRequested, setUpgradeRequested] = useState(false);
+
+  async function handleRequestUpgrade(planOrPack: string) {
+    setError(null);
+    try {
+      await companiesApi.submitLead({ source: "plan_upgrade", planOrPack });
+      setUpgradeRequested(true);
+      setMessage("Pedido enviado — a equipa SIGO entra em contacto em breve.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao enviar o pedido");
+    }
+  }
 
   async function reload() {
     const data = await companiesApi.me();
@@ -387,18 +399,18 @@ export default function CompanySettingsPage() {
                 </>
               )}
             </div>
-            <p className="text-xs text-slate-500">A activação e alteração de plano é feita pela equipa SIGO (facturação fora do sistema). Contacte o suporte para upgrade ou mais capacidade.</p>
+            <p className="text-xs text-slate-500">A activação e alteração de plano é feita pela equipa SIGO (facturação fora do sistema).</p>
             <div className="flex flex-wrap gap-2">
               <Link to="/creditos" className="btn btn-primary btn-sm">Créditos e planos</Link>
               <Link to="/#planos" className="btn btn-secondary btn-sm">Ver planos públicos</Link>
-              <a
-                href={`https://wa.me/${SIGO_WHATSAPP_NUMBER}?text=${encodeURIComponent("Olá, gostaria de alterar o plano ou aumentar a capacidade da minha empresa no SIGO.")}`}
-                target="_blank"
-                rel="noreferrer"
+              <button
+                type="button"
+                disabled={upgradeRequested}
+                onClick={() => handleRequestUpgrade("Aumentar capacidade / mudar de plano")}
                 className="btn btn-secondary btn-sm"
               >
-                Pedir upgrade
-              </a>
+                {upgradeRequested ? "Pedido enviado ✓" : "Pedir upgrade"}
+              </button>
             </div>
           </section>
         )}
@@ -413,14 +425,14 @@ export default function CompanySettingsPage() {
                 <p className="text-xs text-slate-500">
                   Para engenheiro, orçamentista, fiscal e financeiro com contas separadas, active o plano Profissional (5 utilizadores).
                 </p>
-                <a
-                  href={`https://wa.me/${SIGO_WHATSAPP_NUMBER}?text=${encodeURIComponent("Olá — quero passar ao plano Profissional para trabalhar em equipa no SIGO.")}`}
-                  target="_blank"
-                  rel="noreferrer"
+                <button
+                  type="button"
+                  disabled={upgradeRequested}
+                  onClick={() => handleRequestUpgrade("Profissional")}
                   className="btn btn-primary btn-sm w-fit"
                 >
-                  Activar Profissional
-                </a>
+                  {upgradeRequested ? "Pedido enviado ✓" : "Activar Profissional"}
+                </button>
               </section>
             ) : (
               <TeamAccessPanel maxUsers={plan?.maxUsers ?? null} onCountChange={setUserCount} />

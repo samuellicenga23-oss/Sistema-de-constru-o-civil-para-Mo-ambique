@@ -68,6 +68,24 @@ export type PaymentProof = {
   createdAt: string;
 };
 
+export type CommercialLead = {
+  id: string;
+  companyId: string | null;
+  source: string;
+  name: string;
+  company: string | null;
+  email: string;
+  phone: string | null;
+  nuit: string | null;
+  city: string | null;
+  teamSize: string | null;
+  planOrPack: string | null;
+  billingCycle: string | null;
+  notes: string | null;
+  status: "novo" | "contactado" | "resolvido";
+  createdAt: string;
+};
+
 export type Company = {
   id: string;
   name: string;
@@ -348,4 +366,13 @@ export const companiesApi = {
 
   getMailStatus: () => request<{ enabled: boolean }>("/admin/mail/status"),
   sendTestEmail: () => request<{ ok: true; sentTo: string }>("/admin/mail/test", { method: "POST" }),
+
+  getMonitoringStatus: () => request<{ enabled: boolean }>("/admin/monitoring/status"),
+  sendTestError: () => request<{ ok: true }>("/admin/monitoring/test", { method: "POST" }),
+
+  submitLead: (data: { source: "plan_upgrade" | "credit_pack"; planOrPack?: string; notes?: string }) =>
+    request<{ ok: true }>("/companies/me/leads", { method: "POST", body: JSON.stringify(data) }),
+  listLeads: (status?: CommercialLead["status"]) => request<CommercialLead[]>(`/admin/leads${status ? `?status=${status}` : ""}`),
+  updateLeadStatus: (id: string, status: CommercialLead["status"]) =>
+    request<CommercialLead>(`/admin/leads/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) }),
 };

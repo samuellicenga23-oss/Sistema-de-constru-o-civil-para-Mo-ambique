@@ -1,11 +1,7 @@
+import { Link } from "react-router-dom";
 import { MailIcon, PhoneIcon } from "lucide-react";
-import { SIGO_CONTACT_EMAIL, SIGO_WHATSAPP_NUMBER } from "../../commercialPlans";
+import { SIGO_CONTACT_EMAIL } from "../../commercialPlans";
 import { Button } from "./ui/Button";
-
-function whatsappHref() {
-  const message = "Olá Samuel. Gostaria de agendar uma demonstração do SIGO com os dados da minha obra.";
-  return `https://wa.me/${SIGO_WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`;
-}
 
 export function ContactCTA() {
   return (
@@ -31,11 +27,11 @@ export function ContactCTA() {
             </p>
           </div>
           <div className="flex w-full flex-col gap-2.5 sm:w-auto sm:flex-row lg:flex-col">
-            <a href={whatsappHref()} target="_blank" rel="noreferrer" className="w-full sm:w-auto">
+            <Link to="/registar" className="w-full sm:w-auto">
               <Button variant="navy" size="lg" fullWidth className="sm:w-auto">
-                Marcar demonstração
+                Criar conta grátis
               </Button>
-            </a>
+            </Link>
             <a href="tel:+258866384194" className="w-full sm:w-auto">
               <Button
                 variant="secondary"

@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, Navigate, useParams, useSearchParams } from "react-router-dom";
 import { calculateVatTotals } from "@sigo/shared";
-import { SIGO_CONTACT_EMAIL, SIGO_WHATSAPP_NUMBER, findCommercialPlan, formatMzn } from "../commercialPlans";
+import { SIGO_CONTACT_EMAIL, findCommercialPlan, formatMzn } from "../commercialPlans";
 import { LogoFull } from "../components/Logo";
+import { ApiError } from "../api/http";
+import AlertBanner from "../components/AlertBanner";
 
 type CheckoutForm = {
   name: string;
@@ -23,7 +25,9 @@ export default function CheckoutPage() {
   const plan = findCommercialPlan(planSlug);
   const [billingCycle, setBillingCycle] = useState<"mensal" | "anual">(searchParams.get("periodo") === "anual" ? "anual" : "mensal");
   const [form, setForm] = useState(EMPTY_FORM);
-  const [reviewing, setReviewing] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "auto" });
@@ -41,34 +45,46 @@ export default function CheckoutPage() {
 
   function update(field: keyof CheckoutForm, value: string) {
     setForm((current) => ({ ...current, [field]: value }));
-    setReviewing(false);
   }
 
   function changeBillingCycle(value: "mensal" | "anual") {
     setBillingCycle(value);
     setSearchParams({ periodo: value }, { replace: true });
-    setReviewing(false);
   }
 
-  function review(event: FormEvent) {
+  async function handleSubmit(event: FormEvent) {
     event.preventDefault();
-    setReviewing(true);
+    if (submitting) return;
+    setError(null);
+    setSubmitting(true);
+    try {
+      const res = await fetch("/api/public/leads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: form.name,
+          company: form.company,
+          email: form.email,
+          phone: form.phone,
+          nuit: form.nuit || undefined,
+          city: form.city || undefined,
+          teamSize: form.teamSize || undefined,
+          planOrPack: plan!.name,
+          billingCycle,
+          notes: form.notes || undefined,
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new ApiError(res.status, typeof body.error === "string" ? body.error : "Não foi possível enviar o pedido");
+      }
+      setSubmitted(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao enviar o pedido");
+    } finally {
+      setSubmitting(false);
+    }
   }
-
-  const requestText = [
-    `Olá Samuel. Quero avançar com a subscrição ${billingCycle} do SIGO — plano ${plan.name}.`,
-    `Total ${billingCycle} com IVA: ${formatMzn(totals.total)}.`,
-    `Empresa: ${form.company}`,
-    `Responsável: ${form.name}`,
-    `Email: ${form.email}`,
-    `Telefone: ${form.phone}`,
-    form.nuit ? `NUIT: ${form.nuit}` : "",
-    form.city ? `Cidade/Província: ${form.city}` : "",
-    form.teamSize ? `Tamanho da equipa: ${form.teamSize}` : "",
-    form.notes ? `Observações: ${form.notes}` : "",
-  ].filter(Boolean).join("\n");
-  const whatsappUrl = `https://wa.me/${SIGO_WHATSAPP_NUMBER}?text=${encodeURIComponent(requestText)}`;
-  const emailUrl = `mailto:${SIGO_CONTACT_EMAIL}?subject=${encodeURIComponent(`Subscrição ${billingCycle} SIGO — ${plan.name}`)}&body=${encodeURIComponent(requestText)}`;
 
   return (
     <div className="min-h-screen bg-surface text-ink">
@@ -88,7 +104,16 @@ export default function CheckoutPage() {
             <h1 className="mt-2 font-display text-2xl font-black tracking-tight sm:text-3xl">Dados para activar o SIGO</h1>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">Confirme os dados da empresa. Não será feita nenhuma cobrança nesta página; a equipa SIGO valida a implementação e envia a proposta final.</p>
           </div>
-          <form onSubmit={review} className="space-y-5 p-5 sm:p-7">
+          {submitted ? (
+            <div className="p-5 sm:p-7">
+              <AlertBanner tone="success">
+                Pedido recebido! A equipa SIGO vai analisar e entrar em contacto por email ou telefone — normalmente em
+                poucas horas.
+              </AlertBanner>
+            </div>
+          ) : (
+          <form onSubmit={handleSubmit} className="space-y-5 p-5 sm:p-7">
+            {error && <AlertBanner tone="error" onDismiss={() => setError(null)}>{error}</AlertBanner>}
             <fieldset>
               <legend className="mb-3 text-sm font-bold text-slate-900">Responsável pela subscrição</legend>
               <div className="grid gap-4 sm:grid-cols-2">
@@ -120,14 +145,17 @@ export default function CheckoutPage() {
               </div>
             </fieldset>
             <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
-              <input required type="checkbox" className="mt-1 h-4 w-4" checked={accepted} onChange={(e) => { setAccepted(e.target.checked); setReviewing(false); }} />
+              <input required type="checkbox" className="mt-1 h-4 w-4" checked={accepted} onChange={(e) => setAccepted(e.target.checked)} />
               <span className="text-xs leading-5 text-slate-600">
                 <strong className="block text-sm text-slate-900">Confirmo que os dados estão correctos</strong>
                 Autorizo o contacto da equipa SIGO para validar a subscrição e a implementação.
               </span>
             </label>
-            <button disabled={!accepted} className="btn btn-primary w-full sm:w-auto">Rever pedido →</button>
+            <button disabled={!accepted || submitting} className="btn btn-primary w-full sm:w-auto">
+              {submitting ? "A enviar..." : "Enviar pedido"}
+            </button>
           </form>
+          )}
         </section>
 
         <aside className="space-y-4 lg:sticky lg:top-6">
@@ -150,17 +178,7 @@ export default function CheckoutPage() {
               <p className={`mt-4 rounded-lg px-3 py-2 text-xs font-semibold ${billingCycle === "anual" ? "bg-emerald-50 text-emerald-800" : "bg-slate-50 text-slate-600"}`}>{billingCycle === "anual" ? "15% de desconto anual já incluído." : "Cobrança mensal, sem compromisso anual."}</p>
             </div>
           </section>
-          {reviewing && (
-            <section className="rounded-2xl border border-emerald-200 bg-white p-5 shadow-sm">
-              <p className="text-sm font-bold text-slate-900">Pedido pronto para enviar</p>
-              <p className="mt-1 text-xs leading-5 text-slate-600">Escolha o canal. Os dados acima serão incluídos na mensagem para evitar repetir informação.</p>
-              <div className="mt-4 grid gap-2">
-                <a className="btn btn-primary w-full" href={whatsappUrl} target="_blank" rel="noreferrer">Continuar no WhatsApp</a>
-                <a className="btn btn-secondary w-full" href={emailUrl}>Enviar por email</a>
-              </div>
-            </section>
-          )}
-          <p className="px-2 text-center text-xs leading-5 text-slate-500">Precisa de ajuda? +258 86 638 4194 · {SIGO_CONTACT_EMAIL}</p>
+          <p className="px-2 text-center text-xs leading-5 text-slate-500">Dúvidas? {SIGO_CONTACT_EMAIL}</p>
         </aside>
       </main>
     </div>

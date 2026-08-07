@@ -35,7 +35,10 @@ import { invoiceRoutes } from "./routes/invoices.js";
 import { contractRoutes } from "./routes/contracts.js";
 import { workChapterRoutes } from "./routes/workChapters.js";
 import { practiceRoutes } from "./routes/practice.js";
+import { publicShareRoutes } from "./routes/publicShare.js";
+import { leadRoutes } from "./routes/leads.js";
 import { mutationOriginAllowed, SECURITY_HEADERS } from "./services/httpSecurity.js";
+import { captureException } from "./services/monitoring.js";
 import { normalizeSigoDecimals } from "@sigo/shared";
 
 // Separado de index.ts (que só chama isto e depois app.listen()) para os testes poderem
@@ -95,6 +98,7 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
     if (statusCode && statusCode < 500) {
       return reply.code(statusCode).send({ error: error instanceof Error ? error.message : "Pedido inválido", requestId: request.id });
     }
+    captureException(error, { requestId: request.id, url: request.url, method: request.method });
     return reply.code(500).send({ error: "Erro interno. Tente novamente.", requestId: request.id });
   });
 
@@ -149,6 +153,8 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   await app.register(contractRoutes);
   await app.register(workChapterRoutes);
   await app.register(practiceRoutes);
+  await app.register(publicShareRoutes);
+  await app.register(leadRoutes);
 
   // Em produção corremos um único processo Node (padrão CloudPanel: um domínio → um appPort) —
   // a API também serve o build do frontend, em vez de depender de um Nginx separado a servir
