@@ -183,21 +183,27 @@ export default function SupplierDashboardPage() {
                 <p>Não há pedidos pendentes neste momento — respire fundo, já volta a haver.</p>
               </div>
             ) : (
-              pending.map((r) => (
-                <Link key={r.id} to={`/pedidos/${r.id}`} className="rich-row">
-                  <span className="rich-row-avatar">{initialsOf(r.companyName)}</span>
-                  <div className="rich-row-body">
-                    <p className="list-row-title">{r.title}</p>
-                    <p className="list-row-sub">
-                      {r.companyName}
-                      {r.projectName ? ` · ${r.projectName}` : ""}
-                      {r.deadlineDate ? ` · Prazo: ${new Date(r.deadlineDate).toLocaleDateString("pt-PT")}` : ""}
-                    </p>
-                  </div>
-                  <span className={`badge ${STATUS_BADGE[r.status]}`}>{STATUS_LABELS[r.status]}</span>
-                  <IconArrowRight size={16} className="text-muted-sm" />
-                </Link>
-              ))
+              pending.map((r) => {
+                const isNew = Date.now() - new Date(r.createdAt).getTime() < 48 * 60 * 60 * 1000;
+                return (
+                  <Link key={r.id} to={`/pedidos/${r.id}`} className="rich-row">
+                    <span className="rich-row-avatar">{initialsOf(r.companyName)}</span>
+                    <div className="rich-row-body">
+                      <p className="list-row-title">
+                        {r.title}
+                        {isNew && <span className="badge badge-brand" style={{ marginLeft: "0.5rem" }}>Novo</span>}
+                      </p>
+                      <p className="list-row-sub">
+                        {r.companyName}
+                        {r.projectName ? ` · ${r.projectName}` : ""}
+                        {r.deadlineDate ? ` · Prazo: ${new Date(r.deadlineDate).toLocaleDateString("pt-PT")}` : ""}
+                      </p>
+                    </div>
+                    <span className={`badge ${STATUS_BADGE[r.status]}`}>{STATUS_LABELS[r.status]}</span>
+                    <IconArrowRight size={16} className="text-muted-sm" />
+                  </Link>
+                );
+              })
             )}
           </div>
         </section>

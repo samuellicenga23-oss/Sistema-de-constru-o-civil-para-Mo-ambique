@@ -11,6 +11,7 @@ import { computeProcurementPlan } from "../services/procurementEngine.js";
 import { recordAuditEvent } from "../services/auditTrail.js";
 import { assertSupplierMarketplaceAccess } from "../services/subscriptionEntitlements.js";
 import { resolveBuyerContact } from "../services/buyerContact.js";
+import { notifySupplierAccount } from "../services/notifications.js";
 import { sendEmail, emailLayout, escapeHtml } from "../services/mailer.js";
 import { env } from "../env.js";
 
@@ -61,27 +62,63 @@ async function assertPurchaseOrderOwned(id: string, companyId: string) {
 async function notifyMarketplaceSupplierOfOrder(supplierAccountId: string | null, companyId: string, buyerUserId: string | null, itemCount: number) {
   if (!supplierAccountId) return;
   const [account] = await db.select({ email: supplierAccounts.email, name: supplierAccounts.name }).from(supplierAccounts).where(eq(supplierAccounts.id, supplierAccountId)).limit(1);
-  if (!account?.email) return;
+  if (!account) return;
   const buyer = await resolveBuyerContact(companyId, buyerUserId);
   const contactLines = [
     buyer.buyerName ? `<strong>${escapeHtml(buyer.buyerName)}</strong>` : null,
     buyer.buyerEmail ? escapeHtml(buyer.buyerEmail) : null,
     buyer.companyPhone ? escapeHtml(buyer.companyPhone) : null,
   ].filter(Boolean);
-  void sendEmail(
-    {
-      to: account.email,
-      subject: `SIGO — ${buyer.companyName} criou uma ordem de compra consigo`,
-      html: emailLayout(
-        "Nova ordem de compra",
-        `<p>Olá ${escapeHtml(account.name)}, a empresa <strong>${escapeHtml(buyer.companyName)}</strong> criou uma ordem de compra com os seus preços (${itemCount} item(ns)).</p>
-         ${contactLines.length ? `<p><strong>Contacto de compras</strong> — ${contactLines.join(" · ")}. Ligue directamente para confirmar prazos e ajudar a fechar esta compra.</p>` : ""}
-         <p>Entre no seu Portal do Fornecedor para rever os seus preços e os pedidos desta empresa.</p>`,
-        `${env.supplierPublicUrl}/login`,
-        "Abrir Portal do Fornecedor",
-      ),
-    },
-    undefined,
+  if (account.email) {
+    void sendEmail(
+      {
+        to: account.email,
+        subject: `SIGO — ${buyer.companyName} criou uma ordem de compra consigo`,
+        html: emailLayout(
+          "Nova ordem de compra",
+          `<p>Olá ${escapeHtml(account.name)}, a empresa <strong>${escapeHtml(buyer.companyName)}</strong> criou uma ordem de compra com os seus preços (${itemCount} item(ns)).</p>
+           ${contactLines.length ? `<p><strong>Contacto de compras</strong> — ${contactLines.join(" · ")}. Ligue directamente para confirmar prazos e ajudar a fechar esta compra.</p>` : ""}
+           <p>Entre no seu Portal do Fornecedor para rever os seus preços e os pedidos desta empresa.</p>`,
+          `${env.supplierPublicUrl}/login`,
+          "Abrir Portal do Fornecedor",
+        ),
+      },
+      undefined,
+    );
+  }
+  await notifySupplierAccount(supplierAccountId, "Nova ordem de compra", `${buyer.companyName} criou uma ordem de compra com os seus preços (${itemCount} item(ns)).`, "/painel");
+}
+
+// Confirma/desmente ao fornecedor do marketplace se a compra vai mesmo avante — sem isto, uma
+// ordem aprovada ou cancelada fica muda para ele até verificar manualmente o portal.
+async function notifyMarketplaceSupplierOfOrderStatus(supplierId: string, status: "aprovado" | "cancelado") {
+  const [supplier] = await db.select({ companyId: suppliers.companyId, supplierAccountId: suppliers.supplierAccountId, name: suppliers.name }).from(suppliers).where(eq(suppliers.id, supplierId)).limit(1);
+  if (!supplier || supplier.companyId !== null || !supplier.supplierAccountId) return;
+  const [account] = await db.select({ email: supplierAccounts.email, name: supplierAccounts.name }).from(supplierAccounts).where(eq(supplierAccounts.id, supplier.supplierAccountId)).limit(1);
+  if (!account) return;
+  const isApproved = status === "aprovado";
+  if (account.email) {
+    void sendEmail(
+      {
+        to: account.email,
+        subject: isApproved ? "SIGO — Ordem de compra confirmada" : "SIGO — Ordem de compra cancelada",
+        html: emailLayout(
+          isApproved ? "Ordem de compra confirmada" : "Ordem de compra cancelada",
+          isApproved
+            ? `<p>Olá ${escapeHtml(account.name)}, a ordem de compra que lhe pediram foi aprovada — a compra vai mesmo avante. Prepare a entrega conforme combinado.</p>`
+            : `<p>Olá ${escapeHtml(account.name)}, a ordem de compra que lhe pediram foi cancelada. Não é preciso preparar esta entrega.</p>`,
+          `${env.supplierPublicUrl}/login`,
+          "Abrir Portal do Fornecedor",
+        ),
+      },
+      undefined,
+    );
+  }
+  await notifySupplierAccount(
+    supplier.supplierAccountId,
+    isApproved ? "Ordem de compra confirmada" : "Ordem de compra cancelada",
+    isApproved ? "A ordem de compra que lhe pediram foi aprovada — a compra vai mesmo avante." : "A ordem de compra que lhe pediram foi cancelada.",
+    "/painel",
   );
 }
 
@@ -368,6 +405,9 @@ export async function purchasingRoutes(app: FastifyInstance) {
       after: { status: row.status, supplierId: row.supplierId, orderDate: row.orderDate },
       metadata: parsed.data.effectiveDate ? { effectiveDate: parsed.data.effectiveDate } : null,
     });
+    if (change.changed && (parsed.data.status === "aprovado" || parsed.data.status === "cancelado")) {
+      await notifyMarketplaceSupplierOfOrderStatus(row.supplierId, parsed.data.status);
+    }
     return row;
   });
 

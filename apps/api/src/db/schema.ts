@@ -1598,6 +1598,30 @@ export const supplierPriceFeeds = pgTable("supplier_price_feeds", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+// Sino de notificações in-app — fallback para quando o email falha/está desligado, e sinal
+// imediato dentro da própria aplicação sem precisar de sair para o email. Exactamente um dos
+// dois destinatários está preenchido: `userId` (painel SIGO) ou `supplierAccountId` (Portal do
+// Fornecedor) — são sistemas de sessão separados de propósito, por isso a notificação também.
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+    supplierAccountId: uuid("supplier_account_id").references(() => supplierAccounts.id, { onDelete: "cascade" }),
+    title: varchar("title", { length: 200 }).notNull(),
+    body: text("body").notNull(),
+    // Caminho relativo dentro da respectiva app (painel SIGO ou Portal do Fornecedor) — nunca uma
+    // URL absoluta, para nunca ficar desactualizado se o domínio mudar.
+    link: text("link"),
+    readAt: timestamp("read_at"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    index("notifications_user_unread_idx").on(table.userId, table.readAt),
+    index("notifications_supplier_account_unread_idx").on(table.supplierAccountId, table.readAt),
+  ],
+);
+
 // ---------- Relations ----------
 
 export const companiesRelations = relations(companies, ({ many }) => ({

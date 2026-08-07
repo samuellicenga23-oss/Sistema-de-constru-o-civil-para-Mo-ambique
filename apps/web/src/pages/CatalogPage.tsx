@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { catalogApi, type LabourCategory, type LabourCategoryInput, type Material, type MaterialInput, type CostComposition, type PriceZone, type PriceZoneInput } from "../api/catalog";
+import { catalogApi, type LabourCategory, type LabourCategoryInput, type Material, type MaterialInput, type CostComposition } from "../api/catalog";
 import { useAuth } from "../auth/AuthContext";
 import MaterialPricingModal from "../components/MaterialPricingModal";
-import { LabourEditor, MaterialEditor, ZoneEditor } from "../components/CatalogEditors";
+import { LabourEditor, MaterialEditor } from "../components/CatalogEditors";
 import Layout from "../components/Layout";
 import Modal from "../components/Modal";
 import AlertBanner from "../components/AlertBanner";
@@ -16,14 +16,13 @@ function money(value: string | number) {
   return Number(value).toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-type Tab = "composicoes" | "capitulos" | "mao-de-obra" | "materiais" | "zonas";
+type Tab = "composicoes" | "capitulos" | "mao-de-obra" | "materiais";
 
 const TABS: Array<{ id: Tab; label: string }> = [
   { id: "composicoes", label: "Composições de custo" },
   { id: "capitulos", label: "Capítulos de trabalho" },
   { id: "mao-de-obra", label: "Mão-de-obra" },
   { id: "materiais", label: "Materiais" },
-  { id: "zonas", label: "Zonas de Preço" },
 ];
 
 function normalize(text: string) {
@@ -38,7 +37,6 @@ export default function CatalogPage() {
   const [labourCategories, setLabourCategories] = useState<LabourCategory[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
   const [compositions, setCompositions] = useState<CostComposition[]>([]);
-  const [zones, setZones] = useState<PriceZone[]>([]);
   const [chapterCount, setChapterCount] = useState(0);
   const [compositionQuery, setCompositionQuery] = useState("");
   const [labourQuery, setLabourQuery] = useState("");
@@ -49,9 +47,7 @@ export default function CatalogPage() {
   const [showCompositionForm, setShowCompositionForm] = useState(false);
   const [labourEditor, setLabourEditor] = useState<{ item: LabourCategory | null } | null>(null);
   const [materialEditor, setMaterialEditor] = useState<{ item: Material | null } | null>(null);
-  const [zoneEditor, setZoneEditor] = useState<{ item: PriceZone | null } | null>(null);
   const [pricingModalMaterial, setPricingModalMaterial] = useState<Material | null>(null);
-  const [viewZoneId, setViewZoneId] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -67,35 +63,21 @@ export default function CatalogPage() {
     setTimeout(() => setMessage((current) => (current === text ? null : current)), 2500);
   }
 
-  async function reload(zoneId = viewZoneId) {
-    const [lc, m, c, z] = await Promise.all([
+  async function reload() {
+    const [lc, m, c] = await Promise.all([
       catalogApi.listLabourCategories(),
-      catalogApi.listMaterials(zoneId || undefined),
-      catalogApi.listCompositions(zoneId || undefined),
-      catalogApi.listPriceZones(),
+      catalogApi.listMaterials(),
+      catalogApi.listCompositions(),
     ]);
     setLabourCategories(lc);
     setMaterials(m);
     setCompositions(c);
-    setZones(z);
     setLoading(false);
   }
 
   useEffect(() => {
     reload().catch((err) => { setError(err.message); setLoading(false); });
   }, []);
-
-  async function handleViewZoneChange(zoneId: string) {
-    setViewZoneId(zoneId);
-    setError(null);
-    try {
-      const [m, c] = await Promise.all([catalogApi.listMaterials(zoneId || undefined), catalogApi.listCompositions(zoneId || undefined)]);
-      setMaterials(m);
-      setCompositions(c);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro ao mudar de zona");
-    }
-  }
 
   const categories = useMemo(() => Array.from(new Set(compositions.map((c) => c.category))).sort(), [compositions]);
 
@@ -130,60 +112,6 @@ export default function CatalogPage() {
     await reload();
   }
 
-  async function handleSaveMaterialPrice(material: Material, baseUnitCost: number) {
-    const sourceName = material.marketSupplierName ?? "Cotação de fornecedor";
-    const sourceReference = material.marketPriceIsReference
-      ? "Preço de referência SIGO adoptado para cotação. Confirmar disponibilidade, transporte e preço final antes da compra."
-      : `Cotação adoptada de ${sourceName}.`;
-    // Com uma zona seleccionada para visualização, editar o preço aqui edita o preço DESSA
-    // zona (não o preço base) — coerente com o que a coluna está a mostrar nesse momento.
-    if (viewZoneId) {
-      await catalogApi.setMaterialZonePrice(material.id, viewZoneId, {
-        unitCost: baseUnitCost,
-        sourceName,
-        sourceReference,
-        includesVat: false,
-        transportIncluded: false,
-      });
-      flash(material.marketPriceIsReference ? "Preço SIGO aplicado à cotação desta zona." : "Cotação do fornecedor aplicada à zona.");
-      await reload();
-      return;
-    }
-    await catalogApi.updateMaterial(material.id, {
-      baseUnitCost,
-      priceSourceName: sourceName,
-      sourceReference,
-      includesVat: false,
-    });
-    flash(material.marketPriceIsReference ? "Preço SIGO adoptado para cotações e composições." : "Cotação adoptada — as composições foram recalculadas.");
-    await reload();
-  }
-
-  async function handleSaveZonePrice(materialId: string, zoneId: string, unitCost: number) {
-    const material = materials.find((item) => item.id === materialId);
-    await catalogApi.setMaterialZonePrice(materialId, zoneId, {
-      unitCost,
-      sourceName: material?.zonePriceSourceName ?? null,
-      effectiveDate: material?.zonePriceEffectiveDate ?? null,
-    });
-    flash("Preço por zona actualizado.");
-    await reload();
-  }
-
-  async function handleDeleteZone(id: string, name: string) {
-    const ok = await confirm({
-      title: "Eliminar zona?",
-      message: `Eliminar “${name}”?`,
-      confirmLabel: "Eliminar zona",
-      danger: true,
-      details: ["Projectos com esta zona ficam sem zona definida"],
-    });
-    if (!ok) return;
-    await catalogApi.deletePriceZone(id);
-    flash("Zona eliminada.");
-    await reload();
-  }
-
   async function saveLabour(item: LabourCategory | null, data: LabourCategoryInput) {
     setError(null);
     try {
@@ -206,17 +134,6 @@ export default function CatalogPage() {
     } catch (err) { setError(err instanceof Error ? err.message : "Erro ao guardar material"); }
   }
 
-  async function saveZone(item: PriceZone | null, data: PriceZoneInput) {
-    setError(null);
-    try {
-      if (item) await catalogApi.updatePriceZone(item.id, data);
-      else await catalogApi.createPriceZone(data);
-      setZoneEditor(null);
-      flash(item ? "Zona e factores actualizados." : "Zona de preço criada.");
-      await reload();
-    } catch (err) { setError(err instanceof Error ? err.message : "Erro ao guardar zona"); }
-  }
-
   async function handleCreateComposition(e: FormEvent) {
     e.preventDefault();
     setError(null);
@@ -237,7 +154,7 @@ export default function CatalogPage() {
   }
 
   return (
-    <Layout title="Catálogo de Preços" subtitle="Composições, mão-de-obra e materiais — preços internos da empresa (sem fornecedor). Cotações de fornecedores são opcionais e complementares.">
+    <Layout title="Catálogo de Preços" subtitle="Composições, mão-de-obra e materiais — preços internos da empresa. Cotações de fornecedores (incluindo SIGO) em Preços e fornecedores.">
       <div className="mx-auto w-full max-w-7xl space-y-5">
         {error && <AlertBanner tone="error" onDismiss={() => setError(null)}>{error}</AlertBanner>}
         {message && <AlertBanner tone="success" onDismiss={() => setMessage(null)}>{message}</AlertBanner>}
@@ -274,33 +191,12 @@ export default function CatalogPage() {
                     ? chapterCount
                   : t.id === "mao-de-obra"
                     ? labourCategories.length
-                    : t.id === "materiais"
-                      ? materials.length
-                      : zones.length}
+                    : materials.length}
                 )
               </span>
             </button>
           ))}
         </div>
-
-        {(tab === "composicoes" || tab === "materiais") && (
-          <div className="toolbar !items-center !py-3">
-            <label className="text-xs text-gray-500 font-medium">A ver preços da zona:</label>
-            <select value={viewZoneId} onChange={(e) => handleViewZoneChange(e.target.value)} className="input input-sm w-auto">
-              <option value="">Preço base (sem zona)</option>
-              {zones.map((z) => (
-                <option key={z.id} value={z.id}>
-                  {z.name}
-                </option>
-              ))}
-            </select>
-            {viewZoneId && (
-              <span className="text-xs text-gray-400">
-                {tab === "materiais" ? "Preços editáveis já são desta zona." : "Preço unitário já reflecte esta zona."}
-              </span>
-            )}
-          </div>
-        )}
 
         {tab === "composicoes" && (
           <section className="card overflow-hidden">
@@ -391,7 +287,27 @@ export default function CatalogPage() {
               <p className="text-xs leading-5 text-gray-500 max-w-3xl">Preço, especificação, perda e unidade de compra de cada material.</p>
               <div className="flex flex-wrap items-center justify-between gap-3"><input type="search" placeholder="Pesquisar por código, material ou categoria..." value={materialQuery} onChange={(e) => setMaterialQuery(e.target.value)} className="input max-w-sm" /><button type="button" onClick={() => setMaterialEditor({ item: null })} className="btn btn-primary btn-sm"><IconPlus className="w-3.5 h-3.5" /> Novo material</button></div>
             </div>
-            <div className="grid divide-y divide-slate-100 sm:grid-cols-2 sm:divide-x 2xl:grid-cols-3">{filteredMaterials.map((m) => <article key={`mobile-${m.id}`} className="p-4"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><span className="font-mono text-[10px] text-slate-400">{m.code || "SEM CÓD."}</span><strong className="mt-1 block text-sm text-slate-900">{m.name}</strong><p className="mt-1 text-xs text-slate-500">{m.category} · {m.unit}</p></div><span className="text-right"><strong className="block text-sm tabular-nums">{money(m.effectiveUnitCost)} {m.currency}</strong><small className="text-[10px] text-slate-500">{m.priceBasis === "zone_specific" ? "preço da zona" : "preço base"}</small></span></div>{m.marketPrice && <div className={`mt-3 rounded-lg px-3 py-2 text-xs ${m.marketPriceIsReference ? "bg-blue-50 text-blue-900" : "bg-emerald-50 text-emerald-900"}`}><span>{m.marketPriceIsReference ? "Cotação SIGO" : "Melhor cotação"} · {m.marketSupplierName}</span><strong className="float-right tabular-nums">{money(m.marketPrice)} {m.marketCurrency}</strong></div>}<div className="mt-3 grid grid-cols-2 gap-2 border-t border-slate-100 pt-3"><button onClick={() => setMaterialEditor({ item: m })} className="btn btn-secondary btn-sm">Editar ficha</button><button onClick={() => setPricingModalMaterial(m)} className="btn btn-secondary btn-sm">Preços e fornecedores</button>{m.marketPrice && <button type="button" onClick={() => handleSaveMaterialPrice(m, Number(m.marketPrice))} className="btn btn-primary btn-sm col-span-2">{m.marketPriceIsReference ? "Usar preço SIGO na cotação" : "Adoptar melhor cotação"}</button>}</div></article>)}</div>
+            <div className="grid divide-y divide-slate-100 sm:grid-cols-2 sm:divide-x 2xl:grid-cols-3">
+              {filteredMaterials.map((m) => (
+              <article key={`mobile-${m.id}`} className="p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <span className="font-mono text-[10px] text-slate-400">{m.code || "SEM CÓD."}</span>
+                    <strong className="mt-1 block text-sm text-slate-900">{m.name}</strong>
+                    <p className="mt-1 text-xs text-slate-500">{m.category} · {m.unit}</p>
+                  </div>
+                  <span className="text-right">
+                    <strong className="block text-sm tabular-nums">{money(m.baseUnitCost)} {m.currency}</strong>
+                    <small className="text-[10px] text-slate-500">preço base</small>
+                  </span>
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-2 border-t border-slate-100 pt-3">
+                  <button type="button" onClick={() => setMaterialEditor({ item: m })} className="btn btn-secondary btn-sm">Editar ficha</button>
+                  <button type="button" onClick={() => setPricingModalMaterial(m)} className="btn btn-secondary btn-sm">Preços e fornecedores</button>
+                </div>
+              </article>
+            ))}
+            </div>
           </section>
         )}
 
@@ -403,25 +319,10 @@ export default function CatalogPage() {
           />
         )}
 
-        {tab === "zonas" && (
-          <section className="card">
-            <div className="px-5 pt-4 pb-3 border-b border-gray-100 space-y-3">
-              <p className="text-xs leading-5 text-gray-500 max-w-3xl">
-                Lista nacional única de zonas — cada fornecedor indica a sua ao registar-se no SIGO Fornecedores. Continua livre para
-                indicar o preço dos seus materiais em cada uma delas.
-              </p>
-              {user?.role === "super_admin" && (
-                <button type="button" onClick={() => setZoneEditor({ item: null })} className="btn btn-primary btn-sm"><IconPlus className="w-3.5 h-3.5" /> Nova zona</button>
-              )}
-            </div>
-            <div className="grid divide-y divide-slate-100 sm:grid-cols-2 sm:divide-x 2xl:grid-cols-3">{zones.map((z) => <article key={`mobile-${z.id}`} className="p-4"><div className="flex items-start justify-between gap-3"><div><strong className="text-sm text-slate-900">{z.name}</strong><p className="mt-1 text-xs text-slate-500">{[z.district, z.province].filter(Boolean).join(", ") || "Localização por definir"}</p></div><span className="badge badge-gray">Zona</span></div><dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg bg-slate-50 p-3 text-xs"><div className="flex justify-between gap-2"><dt className="text-slate-500">Materiais</dt><dd className="font-semibold">{Number(z.materialAdjustmentPct) >= 0 ? "+" : ""}{money(z.materialAdjustmentPct)}%</dd></div><div className="flex justify-between gap-2"><dt className="text-slate-500">Transporte</dt><dd className="font-semibold">+{money(z.defaultTransportPct)}%</dd></div><div className="flex justify-between gap-2"><dt className="text-slate-500">Mão-de-obra</dt><dd className="font-semibold">{Number(z.labourAdjustmentPct) >= 0 ? "+" : ""}{money(z.labourAdjustmentPct)}%</dd></div><div className="flex justify-between gap-2"><dt className="text-slate-500">Equipamento</dt><dd className="font-semibold">{Number(z.equipmentAdjustmentPct) >= 0 ? "+" : ""}{money(z.equipmentAdjustmentPct)}%</dd></div></dl>{user?.role === "super_admin" && <div className="mt-3 flex gap-2"><button onClick={() => setZoneEditor({ item: z })} className="btn btn-secondary btn-sm flex-1">Configurar zona</button><button onClick={() => handleDeleteZone(z.id, z.name)} className="btn btn-danger btn-sm">Remover</button></div>}</article>)}</div>
-          </section>
-        )}
           </>
         )}
         {labourEditor && <LabourEditor item={labourEditor.item} onClose={() => setLabourEditor(null)} onSave={(data) => saveLabour(labourEditor.item, data)} />}
         {materialEditor && <MaterialEditor item={materialEditor.item} onClose={() => setMaterialEditor(null)} onSave={(data) => saveMaterial(materialEditor.item, data)} />}
-        {zoneEditor && <ZoneEditor item={zoneEditor.item} onClose={() => setZoneEditor(null)} onSave={(data) => saveZone(zoneEditor.item, data)} />}
         {dialog}
       </div>
     </Layout>

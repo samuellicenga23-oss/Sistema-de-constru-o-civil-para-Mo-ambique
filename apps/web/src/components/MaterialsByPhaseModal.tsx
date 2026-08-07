@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { materialsByPhaseApi, type PhaseReport } from "../api/materialsByPhase";
+import { catalogApi, type Material } from "../api/catalog";
 import { IconDownload } from "./icons";
 import ModalPortal from "./ModalPortal";
+import MaterialPricingModal from "./MaterialPricingModal";
 
 function fmt(n: number) {
   return n.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -16,6 +18,8 @@ export default function MaterialsByPhaseModal({ documentId, onClose }: { documen
   const [currency, setCurrency] = useState("MZN");
   const [grandTotal, setGrandTotal] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [materialsById, setMaterialsById] = useState<Record<string, Material>>({});
+  const [suppliersFor, setSuppliersFor] = useState<Material | null>(null);
 
   useEffect(() => {
     materialsByPhaseApi
@@ -26,6 +30,10 @@ export default function MaterialsByPhaseModal({ documentId, onClose }: { documen
         setGrandTotal(res.grandTotal);
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Erro ao calcular materiais por fase"));
+    catalogApi
+      .listMaterials()
+      .then((mats) => setMaterialsById(Object.fromEntries(mats.map((m) => [m.id, m]))))
+      .catch(() => {});
   }, [documentId]);
 
   return (
@@ -87,10 +95,11 @@ export default function MaterialsByPhaseModal({ documentId, onClose }: { documen
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm min-w-[640px] border-collapse">
                     <colgroup>
-                      <col className="w-[38%]" />
+                      <col className="w-[32%]" />
+                      <col className="w-[14%]" />
+                      <col className="w-[22%]" />
                       <col className="w-[16%]" />
-                      <col className="w-[26%]" />
-                      <col className="w-[20%]" />
+                      <col className="w-[16%]" />
                     </colgroup>
                     <thead>
                       <tr className="table-head-row">
@@ -98,6 +107,7 @@ export default function MaterialsByPhaseModal({ documentId, onClose }: { documen
                         <th className="text-right py-2 px-3 font-medium">Quantidade</th>
                         <th className="text-left py-2 px-3 font-medium">Unidade de compra</th>
                         <th className="text-right py-2 px-3 font-medium">Valor</th>
+                        <th className="text-right py-2 px-3 font-medium">Fornecedores</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -111,6 +121,19 @@ export default function MaterialsByPhaseModal({ documentId, onClose }: { documen
                             {m.purchasePackageLabel && m.purchaseQty !== null ? `${m.purchaseQty} × ${m.purchasePackageLabel}` : "—"}
                           </td>
                           <td className="text-right px-3 tabular-nums whitespace-nowrap">{money(m.value, m.currency)}</td>
+                          <td className="text-right px-3 whitespace-nowrap">
+                            {materialsById[m.materialId] ? (
+                              <button
+                                type="button"
+                                onClick={() => setSuppliersFor(materialsById[m.materialId])}
+                                className="btn btn-secondary btn-sm"
+                              >
+                                Ver preços
+                              </button>
+                            ) : (
+                              "—"
+                            )}
+                          </td>
                         </tr>
                       ))}
                       {phase.itemsWithoutComposition.map((i, idx) => (
@@ -127,6 +150,7 @@ export default function MaterialsByPhaseModal({ documentId, onClose }: { documen
                               : "sem composição"}
                           </td>
                           <td className="text-right px-3 tabular-nums text-amber-900 whitespace-nowrap">{money(i.value, currency)}</td>
+                          <td className="px-3" />
                         </tr>
                       ))}
                     </tbody>
@@ -142,6 +166,9 @@ export default function MaterialsByPhaseModal({ documentId, onClose }: { documen
         </div>
         </div>
       </div>
+      {suppliersFor && (
+        <MaterialPricingModal material={suppliersFor} onClose={() => setSuppliersFor(null)} onChanged={() => {}} />
+      )}
     </ModalPortal>
   );
 }

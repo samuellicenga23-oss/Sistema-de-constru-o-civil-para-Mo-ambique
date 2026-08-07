@@ -118,3 +118,12 @@ export const marketplaceApi = {
     request<MarketplaceEquipmentPrice>("/supplier/marketplace/equipment", { method: "PUT", body: JSON.stringify(data) }),
   deleteEquipment: (priceId: string) => request<{ ok: true }>(`/supplier/marketplace/equipment/${priceId}`, { method: "DELETE" }),
 };
+
+export type SupplierNotification = { id: string; title: string; body: string; link: string | null; readAt: string | null; createdAt: string };
+export type SupplierNotificationsResponse = { items: SupplierNotification[]; unreadCount: number };
+
+export const supplierNotificationsApi = {
+  list: () => request<SupplierNotificationsResponse>("/supplier/notifications"),
+  markRead: (id: string) => request<{ ok: true }>(`/supplier/notifications/${id}/read`, { method: "POST" }),
+  markAllRead: () => request<{ ok: true }>("/supplier/notifications/read-all", { method: "POST" }),
+};

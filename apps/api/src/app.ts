@@ -42,6 +42,7 @@ import { supplierPortalRoutes } from "./routes/supplierPortal.js";
 import { quoteRequestRoutes } from "./routes/quoteRequests.js";
 import { adminSupplierRoutes } from "./routes/adminSuppliers.js";
 import { marketplaceRoutes } from "./routes/marketplace.js";
+import { notificationRoutes } from "./routes/notifications.js";
 import { mutationOriginAllowed, SECURITY_HEADERS } from "./services/httpSecurity.js";
 import { captureException } from "./services/monitoring.js";
 import { normalizeSigoDecimals } from "@sigo/shared";
@@ -165,6 +166,7 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   await app.register(quoteRequestRoutes);
   await app.register(adminSupplierRoutes);
   await app.register(marketplaceRoutes);
+  await app.register(notificationRoutes);
 
   // Em produção corremos um único processo Node (padrão CloudPanel: um domínio → um appPort) —
   // a API também serve os builds do frontend, em vez de depender de um Nginx separado a servir

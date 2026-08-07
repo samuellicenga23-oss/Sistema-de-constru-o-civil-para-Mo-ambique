@@ -109,7 +109,7 @@ export default function SupplierMaterialsModal({ supplier, onClose }: { supplier
   const visiblePriceCount = tab === "materiais" ? filteredMaterialPrices.length : tab === "mao-de-obra" ? filteredLabourPrices.length : filteredEquipmentPrices.length;
 
   return (
-    <Modal title={supplier.name} subtitle="Recursos e cotações deste fornecedor usados nas compras e estimativas da obra." onClose={onClose} maxWidth="max-w-4xl">
+    <Modal title={supplier.name} subtitle="Livro de preços deste fornecedor. Indique a zona de cada preço — se opera só numa região, use essa; se estiver em várias, registe um preço por zona." onClose={onClose} maxWidth="max-w-4xl">
       {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
 
       <div className="workspace-tabs mb-5">
@@ -166,9 +166,9 @@ export default function SupplierMaterialsModal({ supplier, onClose }: { supplier
             )}
           </div>
           <div className="min-w-0">
-            <label className="label">Zona (opcional)</label>
+            <label className="label">Zona do preço</label>
             <select value={zoneId} onChange={(e) => setZoneId(e.target.value)} className="input">
-              <option value="">Preço geral (todas as zonas)</option>
+              <option value="">Usar zona principal do fornecedor</option>
               {zones.map((z) => (
                 <option key={z.id} value={z.id}>
                   {z.name}

@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { z } from "zod";
 import { eq, or, isNull, and, inArray, type SQL } from "drizzle-orm";
-import type { AnyPgColumn } from "drizzle-orm/pg-core";
+import { alias, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { db } from "../db/index.js";
 import {
   labourCategories,
@@ -287,10 +287,11 @@ export async function catalogRoutes(app: FastifyInstance) {
       : [];
     const bestQuoteByMaterialId = new Map<string, (typeof quoteRows)[number] & { zoneMatch: boolean }>();
     for (const quote of quoteRows) {
-      const zoneMatch = quote.supplierCompanyId === null ? zoneId != null && quote.supplierZoneId === zoneId : zoneId != null && quote.zoneId === zoneId;
-      // Cotações gerais (sem zona própria) só contam quando não há filtro de zona activo, ou
-      // quando são do próprio catálogo (SIGO Preços) sem zona específica — um fornecedor privado
-      // fora da zona pedida não deve aparecer como sugestão.
+      const zoneMatch =
+        quote.supplierCompanyId === null
+          ? zoneId != null && (quote.zoneId === zoneId || (!quote.zoneId && quote.supplierZoneId === zoneId))
+          : zoneId != null && quote.zoneId === zoneId;
+      // Fora da zona pedida: marketplace noutro local, ou cotação com zona diferente.
       if (quote.supplierCompanyId === null && zoneId != null && !zoneMatch) continue;
       if (quote.supplierCompanyId !== null && quote.zoneId != null && zoneId != null && !zoneMatch) continue;
       const current = bestQuoteByMaterialId.get(quote.materialId);
@@ -385,22 +386,64 @@ export async function catalogRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
-  // Lado inverso de GET /api/suppliers/:id/materials — que fornecedores vendem este material e a
-  // que preço, para a página do Catálogo poder mostrar isso directamente em cada material.
+  // Que fornecedores (SIGO Preços + marketplace quando o plano permite) têm preço neste material.
+  // Comparação e compras — não alimenta o preço base das composições.
   app.get("/api/catalog/materials/:id/suppliers", auth, async (request, reply) => {
     const { id } = request.params as { id: string };
     const [material] = await db.select().from(materials).where(and(eq(materials.id, id), scopeFilter(materials.companyId, request))).limit(1);
     if (!material) return reply.code(404).send({ error: "Material não encontrado" });
 
     const { companyId } = request.currentUser!;
+    if (!companyId) return [];
+
+    // Materiais partilhados (nome igual no catálogo nacional) — o marketplace preça o id global.
+    const related = await db
+      .select({ id: materials.id })
+      .from(materials)
+      .where(or(eq(materials.id, id), and(isNull(materials.companyId), eq(materials.name, material.name))));
+    const materialIds = [...new Set(related.map((r) => r.id))];
+
+    const marketplaceAllowed = !(await assertSupplierMarketplaceAccess(companyId));
+    const priceZone = alias(priceZones, "price_zone");
+    const supplierZone = alias(priceZones, "supplier_zone");
     const rows = await db
-      .select({ price: supplierMaterialPrices, supplierName: suppliers.name, zoneName: priceZones.name })
+      .select({
+        price: supplierMaterialPrices,
+        supplierName: suppliers.name,
+        supplierCompanyId: suppliers.companyId,
+        supplierZoneId: suppliers.zoneId,
+        supplierContact: suppliers.contact,
+        priceZoneName: priceZone.name,
+        supplierZoneName: supplierZone.name,
+      })
       .from(supplierMaterialPrices)
       .innerJoin(suppliers, eq(supplierMaterialPrices.supplierId, suppliers.id))
-      .leftJoin(priceZones, eq(supplierMaterialPrices.zoneId, priceZones.id))
-      .where(and(eq(supplierMaterialPrices.materialId, id), eq(suppliers.companyId, companyId!)));
+      .leftJoin(priceZone, eq(supplierMaterialPrices.zoneId, priceZone.id))
+      .leftJoin(supplierZone, eq(suppliers.zoneId, supplierZone.id))
+      .where(
+        and(
+          inArray(supplierMaterialPrices.materialId, materialIds),
+          marketplaceAllowed ? or(eq(suppliers.companyId, companyId), isNull(suppliers.companyId)) : eq(suppliers.companyId, companyId),
+        ),
+      );
 
-    return rows.map((r) => ({ ...r.price, supplierName: r.supplierName, zoneName: r.zoneName }));
+    // Zona efectiva: preço com zona própria; senão a zona da ficha do fornecedor (marketplace).
+    const withZones = rows.map((r) => {
+      const zoneId = r.price.zoneId ?? r.supplierZoneId ?? null;
+      const zoneName = r.price.zoneId ? r.priceZoneName : r.supplierZoneName;
+      return {
+        ...r.price,
+        zoneId,
+        supplierName: r.supplierName,
+        supplierContact: r.supplierContact,
+        zoneName,
+        isReference: r.supplierName === SIGO_PRICES_SUPPLIER_NAME,
+        isMarketplace: r.supplierCompanyId === null,
+      };
+    });
+
+    withZones.sort((a, b) => Number(a.unitCost) - Number(b.unitCost) || a.supplierName.localeCompare(b.supplierName, "pt"));
+    return withZones;
   });
 
   // ---------- Máquinas/Equipamento ----------

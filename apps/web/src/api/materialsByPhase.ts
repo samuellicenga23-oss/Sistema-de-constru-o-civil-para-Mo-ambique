@@ -1,6 +1,7 @@
 import { request } from "./http";
 
 export type PhaseMaterialLine = {
+  materialId: string;
   name: string;
   unit: string;
   quantity: number;

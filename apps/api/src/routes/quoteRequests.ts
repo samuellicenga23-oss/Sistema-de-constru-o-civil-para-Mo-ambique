@@ -20,6 +20,7 @@ import { sendEmail, emailLayout, escapeHtml } from "../services/mailer.js";
 import { fanOutSigoPriceToAllCompanies } from "../services/sigoPrices.js";
 import { assertSupplierMarketplaceAccess } from "../services/subscriptionEntitlements.js";
 import { resolveBuyerContact, type BuyerContact } from "../services/buyerContact.js";
+import { notifySupplierAccount } from "../services/notifications.js";
 import { buildQuoteComparisonDocument, buildQuoteComparisonPdf } from "../services/quoteComparisonPdf.js";
 import { loadCompanyBrand } from "../services/companyBrand.js";
 import { env } from "../env.js";
@@ -84,28 +85,83 @@ async function resolveLine(companyId: string, line: z.infer<typeof lineSchema>) 
   return { description: row.name, unit: "h", equipmentId: line.resourceId };
 }
 
-async function notifySupplierOfRequest(accountEmail: string | null, accountName: string, buyer: BuyerContact, title: string) {
-  if (!accountEmail) return;
+async function notifySupplierOfRequest(accountId: string | null, accountEmail: string | null, accountName: string, buyer: BuyerContact, title: string) {
+  if (!accountId) return;
   const contactLines = [
     buyer.buyerName ? `<strong>${escapeHtml(buyer.buyerName)}</strong>` : null,
     buyer.buyerEmail ? escapeHtml(buyer.buyerEmail) : null,
     buyer.companyPhone ? escapeHtml(buyer.companyPhone) : null,
   ].filter(Boolean);
-  void sendEmail(
-    {
-      to: accountEmail,
-      subject: `SIGO — Novo pedido de cotação de ${buyer.companyName}`,
-      html: emailLayout(
-        "Novo pedido de cotação",
-        `<p>Olá ${escapeHtml(accountName)}, a empresa <strong>${escapeHtml(buyer.companyName)}</strong> pediu-lhe uma cotação: <strong>${escapeHtml(title)}</strong>.</p>
-         ${contactLines.length ? `<p><strong>Contacto de compras</strong> — ${contactLines.join(" · ")}. Ligue directamente para ajudar a fechar esta compra.</p>` : ""}
-         <p>Entre no seu Portal do Fornecedor para ver os itens e responder com os seus preços.</p>`,
-        `${env.supplierPublicUrl}/login`,
-        "Abrir Portal do Fornecedor",
-      ),
-    },
-    undefined,
-  );
+  if (accountEmail) {
+    void sendEmail(
+      {
+        to: accountEmail,
+        subject: `SIGO — Novo pedido de cotação de ${buyer.companyName}`,
+        html: emailLayout(
+          "Novo pedido de cotação",
+          `<p>Olá ${escapeHtml(accountName)}, a empresa <strong>${escapeHtml(buyer.companyName)}</strong> pediu-lhe uma cotação: <strong>${escapeHtml(title)}</strong>.</p>
+           ${contactLines.length ? `<p><strong>Contacto de compras</strong> — ${contactLines.join(" · ")}. Ligue directamente para ajudar a fechar esta compra.</p>` : ""}
+           <p>Entre no seu Portal do Fornecedor para ver os itens e responder com os seus preços.</p>`,
+          `${env.supplierPublicUrl}/login`,
+          "Abrir Portal do Fornecedor",
+        ),
+      },
+      undefined,
+    );
+  }
+  await notifySupplierAccount(accountId, "Novo pedido de cotação", `${buyer.companyName} pediu-lhe uma cotação: ${title}.`, "/painel");
+}
+
+async function supplierAccountOf(supplierId: string): Promise<{ id: string; email: string; name: string } | null> {
+  const [supplier] = await db.select({ supplierAccountId: suppliers.supplierAccountId, name: suppliers.name }).from(suppliers).where(eq(suppliers.id, supplierId)).limit(1);
+  if (!supplier?.supplierAccountId) return null;
+  const [account] = await db.select({ id: supplierAccounts.id, email: supplierAccounts.email, name: supplierAccounts.name }).from(supplierAccounts).where(eq(supplierAccounts.id, supplier.supplierAccountId)).limit(1);
+  if (!account) return null;
+  return account;
+}
+
+// O fornecedor respondeu e ficou à espera — sem isto, só descobre que a empresa desistiu (ou
+// aceitou) se voltar a abrir o Portal por iniciativa própria.
+async function notifySupplierOfCancellation(supplierId: string, title: string) {
+  const account = await supplierAccountOf(supplierId);
+  if (!account) return;
+  if (account.email) {
+    void sendEmail(
+      {
+        to: account.email,
+        subject: `SIGO — Pedido de cotação cancelado: ${title}`,
+        html: emailLayout(
+          "Pedido de cotação cancelado",
+          `<p>Olá ${escapeHtml(account.name)}, o pedido de cotação <strong>${escapeHtml(title)}</strong> foi cancelado pela empresa — não é preciso responder.</p>`,
+          `${env.supplierPublicUrl}/login`,
+          "Abrir Portal do Fornecedor",
+        ),
+      },
+      undefined,
+    );
+  }
+  await notifySupplierAccount(account.id, "Pedido de cotação cancelado", `O pedido "${title}" foi cancelado pela empresa — não é preciso responder.`, "/painel");
+}
+
+async function notifySupplierOfAcceptance(supplierId: string, title: string) {
+  const account = await supplierAccountOf(supplierId);
+  if (!account) return;
+  if (account.email) {
+    void sendEmail(
+      {
+        to: account.email,
+        subject: `SIGO — A sua cotação foi aceite: ${title}`,
+        html: emailLayout(
+          "Cotação aceite",
+          `<p>Olá ${escapeHtml(account.name)}, a sua cotação para <strong>${escapeHtml(title)}</strong> foi aceite. Prepare a entrega conforme os preços indicados.</p>`,
+          `${env.supplierPublicUrl}/login`,
+          "Abrir Portal do Fornecedor",
+        ),
+      },
+      undefined,
+    );
+  }
+  await notifySupplierAccount(account.id, "Cotação aceite", `A sua cotação para "${title}" foi aceite. Prepare a entrega conforme os preços indicados.`, "/painel");
 }
 
 export async function quoteRequestRoutes(app: FastifyInstance) {
@@ -170,7 +226,7 @@ export async function quoteRequestRoutes(app: FastifyInstance) {
 
     const [account] = await db.select().from(supplierAccounts).where(eq(supplierAccounts.id, supplier.supplierAccountId)).limit(1);
     const buyer = await resolveBuyerContact(companyId, request.currentUser!.id);
-    await notifySupplierOfRequest(account?.email ?? null, account?.name ?? supplier.name, buyer, parsed.data.title);
+    await notifySupplierOfRequest(account?.id ?? null, account?.email ?? null, account?.name ?? supplier.name, buyer, parsed.data.title);
 
     return reply.code(201).send(quoteRequest);
   });
@@ -246,6 +302,7 @@ export async function quoteRequestRoutes(app: FastifyInstance) {
       .where(and(eq(quoteRequests.id, id), eq(quoteRequests.companyId, companyId)))
       .returning();
     if (!updated) return reply.code(404).send({ error: "Pedido não encontrado" });
+    await notifySupplierOfCancellation(updated.supplierId, updated.title);
     return updated;
   });
 
@@ -312,6 +369,8 @@ export async function quoteRequestRoutes(app: FastifyInstance) {
       if (line.unitCost == null || line.kind !== "material" || !line.materialId) continue;
       await fanOutSigoPriceToAllCompanies(quoteRequest.supplierId, line.materialId, line.unitCost, line.currency);
     }
+
+    await notifySupplierOfAcceptance(quoteRequest.supplierId, quoteRequest.title);
 
     const [updated] = await db.select().from(quoteRequests).where(eq(quoteRequests.id, id)).limit(1);
     return updated;

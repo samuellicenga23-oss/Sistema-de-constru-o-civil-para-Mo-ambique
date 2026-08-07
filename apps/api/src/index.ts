@@ -10,6 +10,7 @@ import { resumeMeasurementImportJobs } from "./services/measurementImportJobs.js
 import { startWeeklyProjectTrashScheduler } from "./services/projectStorage.js";
 import { startSubscriptionReminderScheduler } from "./services/subscriptionReminders.js";
 import { startSupplierPriceFeedScheduler } from "./services/supplierPriceFeed.js";
+import { startQuoteRequestExpiryScheduler } from "./services/quoteRequestExpiry.js";
 
 const app = await buildApp();
 let shuttingDown = false;
@@ -55,6 +56,7 @@ try {
   startWeeklyProjectTrashScheduler(app.log);
   startSubscriptionReminderScheduler(app.log);
   startSupplierPriceFeedScheduler(app.log);
+  startQuoteRequestExpiryScheduler(app.log);
 } catch (error) {
   app.log.fatal(error, "API failed to start");
   captureException(error);

@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { companiesApi } from "../api/companies";
 import UserMenu from "./UserMenu";
+import NotificationBell from "./NotificationBell";
 import PageBackButton from "./PageBackButton";
 import InstallAppButton from "./InstallAppButton";
 import OfflineBanner from "./OfflineBanner";
@@ -266,7 +267,10 @@ export default function Layout({
             <IconMenu className="h-5 w-5" />
           </button>
           <LogoFull dark tagline={false} />
-          <UserMenu compact />
+          <div className="flex items-center gap-1.5 text-white [&_.icon-btn]:border-white/10 [&_.icon-btn]:bg-transparent [&_.icon-btn]:text-brand-200 [&_.icon-btn]:hover:bg-white/10 [&_.icon-btn]:hover:text-white">
+            <NotificationBell />
+            <UserMenu compact />
+          </div>
         </div>
 
         {drawerOpen && (
@@ -342,6 +346,7 @@ export default function Layout({
             <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2.5 sm:justify-end">
               <InstallAppButton />
               {actions && <div className="flex max-w-full flex-wrap items-center gap-2 sm:justify-end">{actions}</div>}
+              <NotificationBell />
               <div className="hidden md:block">
                 <UserMenu />
               </div>

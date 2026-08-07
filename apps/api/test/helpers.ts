@@ -22,7 +22,7 @@ export async function truncateAll() {
     financial_entries, audit_events, site_diary_entries, payment_proofs,
     suppliers, supplier_material_prices, supplier_labour_prices, supplier_equipment_prices,
     supplier_accounts, supplier_sessions, quote_requests, quote_request_lines, supplier_price_feeds,
-    purchase_orders, purchase_order_lines, stock_movements
+    purchase_orders, purchase_order_lines, stock_movements, notifications
   CASCADE`;
 }
 

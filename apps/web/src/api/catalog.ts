@@ -288,7 +288,7 @@ export const catalogApi = {
     request<{ ok: true }>(`/catalog/work-chapters/${encodeURIComponent(code)}`, { method: "DELETE" }),
 
   listMaterialSuppliers: (materialId: string) =>
-    request<Array<{ id: string; supplierId: string; supplierName: string; zoneId: string | null; zoneName: string | null; unitCost: string; currency: string }>>(
+    request<Array<{ id: string; supplierId: string; supplierName: string; supplierContact: string | null; zoneId: string | null; zoneName: string | null; unitCost: string; currency: string; isReference?: boolean; isMarketplace?: boolean }>>(
       `/catalog/materials/${materialId}/suppliers`
     ),
   listLabourSuppliers: (labourCategoryId: string) =>

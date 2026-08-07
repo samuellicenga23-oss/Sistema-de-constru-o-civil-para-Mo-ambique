@@ -1,8 +1,11 @@
 import { and, eq, isNull, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db/index.js";
-import { supplierPriceFeeds, suppliers, materials, supplierMaterialPrices } from "../db/schema.js";
+import { supplierPriceFeeds, suppliers, materials, supplierMaterialPrices, users } from "../db/schema.js";
 import { fanOutSigoPriceToAllCompanies, isSigoPricesSupplier } from "./sigoPrices.js";
+import { sendEmail, emailLayout, escapeHtml } from "./mailer.js";
+import { notifyUsers } from "./notifications.js";
+import { env } from "../env.js";
 
 // Contrato simples que qualquer sistema externo de um fornecedor pode implementar para os seus
 // preços serem puxados automaticamente pelo SIGO, sem precisar de responder pedidos de cotação
@@ -48,6 +51,32 @@ export type SupplierPriceFeedSyncResult =
   | { ok: true; matched: number; unmatched: number }
   | { ok: false; error: string };
 
+// Sem isto, um feed mal configurado (URL errada, chave expirada) fica parado indefinidamente e
+// silenciosamente — ninguém na empresa sabe que os preços deixaram de se actualizar até reparar
+// por acaso numa cotação desactualizada.
+async function notifyCompanyOfFeedFailure(supplierId: string, error: string) {
+  const [supplier] = await db.select({ companyId: suppliers.companyId, name: suppliers.name }).from(suppliers).where(eq(suppliers.id, supplierId)).limit(1);
+  if (!supplier?.companyId) return;
+  const admins = await db.select({ id: users.id, email: users.email }).from(users).where(and(eq(users.companyId, supplier.companyId), eq(users.role, "admin_empresa"), eq(users.isActive, true)));
+  if (!admins.length) return;
+  void sendEmail(
+    {
+      to: admins.map((a) => a.email),
+      subject: `SIGO — Falha na ligação automática de preços (${supplier.name})`,
+      html: emailLayout(
+        "Ligação automática de preços falhou",
+        `<p>A ligação automática de preços do fornecedor <strong>${escapeHtml(supplier.name)}</strong> falhou e os preços deixaram de se actualizar sozinhos.</p>
+         <p><strong>Erro:</strong> ${escapeHtml(error)}</p>
+         <p>Reveja a URL e a chave de API em Fornecedores → «Ligação automática de preços».</p>`,
+        `${env.publicUrl}/fornecedores`,
+        "Rever ligação",
+      ),
+    },
+    undefined,
+  );
+  await notifyUsers(admins.map((a) => a.id), "Ligação automática de preços falhou", `A ligação de ${supplier.name} falhou: ${error}`, "/fornecedores");
+}
+
 export async function syncSupplierPriceFeed(supplierId: string): Promise<SupplierPriceFeedSyncResult> {
   const [feed] = await db.select().from(supplierPriceFeeds).where(eq(supplierPriceFeeds.supplierId, supplierId)).limit(1);
   if (!feed) return { ok: false, error: "Ligação automática não configurada" };
@@ -62,6 +91,13 @@ export async function syncSupplierPriceFeed(supplierId: string): Promise<Supplie
         : { lastSyncAt: new Date(), lastSyncStatus: "erro", lastSyncError: result.error.slice(0, 2000) },
     )
     .where(eq(supplierPriceFeeds.id, feed.id));
+
+  // Só avisa quando a ligação PASSA a falhar (estava boa/nunca corrida, agora está com erro) —
+  // nunca a cada tentativa horária, senão um feed persistentemente quebrado inundava a empresa
+  // de emails repetidos sobre o mesmo problema.
+  if (!result.ok && feed.lastSyncStatus !== "erro") {
+    await notifyCompanyOfFeedFailure(supplierId, result.error);
+  }
 
   return result;
 }

@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { LogoMark } from "./Logo";
 import { IconGrid, IconTag, IconLogout } from "./icons";
 import { supplierPortalAuthApi } from "../api/supplierPortal";
+import NotificationBell from "./NotificationBell";
 
 export function AppShell({ accountName, pendingCount = 0, children }: { accountName: string; pendingCount?: number; children: ReactNode }) {
   const location = useLocation();
@@ -45,6 +46,7 @@ export function AppShell({ accountName, pendingCount = 0, children }: { accountN
             </Link>
           </nav>
 
+          <NotificationBell />
           <span className="rich-row-avatar" style={{ width: "2.1rem", height: "2.1rem", fontSize: "0.75rem" }} title={accountName}>
             {initials}
           </span>
