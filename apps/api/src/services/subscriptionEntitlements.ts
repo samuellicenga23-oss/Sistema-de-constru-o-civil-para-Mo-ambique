@@ -338,6 +338,19 @@ export async function assertTeamManagement(companyId: string): Promise<Entitleme
   return null;
 }
 
+export async function assertSupplierMarketplaceAccess(companyId: string): Promise<EntitlementBlock | null> {
+  const ent = await getCompanyEntitlements(companyId);
+  if (!ent) return null;
+  if (!ent.supplierMarketplace) {
+    return block(
+      "PLAN_MARKETPLACE_REQUIRED",
+      "Os preços e contactos de fornecedores reais (SIGO Fornecedores), o pedido com PDF ordenado do melhor ao pior preço na zona da obra, e a comunicação directa estão disponíveis a partir do plano Profissional. O plano actual só tem SIGO Preços de referência (editáveis).",
+      "Activar Profissional",
+    );
+  }
+  return null;
+}
+
 export async function assertCompanyBranding(companyId: string): Promise<EntitlementBlock | null> {
   const ent = await getCompanyEntitlements(companyId);
   if (!ent) return null;

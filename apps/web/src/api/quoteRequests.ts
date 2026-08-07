@@ -1,4 +1,4 @@
-import { request } from "./http";
+import { request, ApiError } from "./http";
 
 export type QuoteRequestStatus = "enviado" | "respondido" | "aceite" | "recusado" | "expirado" | "cancelado";
 export type QuoteRequestLineKind = "material" | "labour" | "equipment";
@@ -61,4 +61,26 @@ export const quoteRequestsApi = {
   create: (data: QuoteRequestInput) => request<QuoteRequest>("/quote-requests", { method: "POST", body: JSON.stringify(data) }),
   cancel: (id: string) => request<QuoteRequest>(`/quote-requests/${id}/cancel`, { method: "POST" }),
   accept: (id: string) => request<QuoteRequest>(`/quote-requests/${id}/accept`, { method: "POST" }),
+  downloadComparisonPdf: async (id: string, title: string) => {
+    const res = await fetch(`/api/quote-requests/${id}/comparison.pdf`, { credentials: "include" });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({} as { error?: string; code?: string; upgradeHint?: string; actionPath?: string }));
+      throw new ApiError(
+        res.status,
+        typeof body.error === "string" ? body.error : `Erro ${res.status}`,
+        typeof body.code === "string" ? body.code : undefined,
+        typeof body.upgradeHint === "string" ? body.upgradeHint : undefined,
+        typeof body.actionPath === "string" ? body.actionPath : undefined,
+      );
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Comparacao fornecedores - ${title.replace(/[^\w\- ]/g, "").slice(0, 80) || "cotacao"}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
 };

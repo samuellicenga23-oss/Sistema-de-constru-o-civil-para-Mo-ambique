@@ -20,6 +20,8 @@ import {
 import { requireCompanyUser, requireRole } from "../auth/middleware.js";
 import { sendEmail, emailLayout, escapeHtml } from "../services/mailer.js";
 import { fanOutSigoPriceToAllCompanies } from "../services/sigoPrices.js";
+import { buildQuoteComparisonDocument, buildQuoteComparisonPdf } from "../services/quoteComparisonPdf.js";
+import { loadCompanyBrand } from "../services/companyBrand.js";
 import { env } from "../env.js";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista"] as const;
@@ -237,6 +239,29 @@ export async function quoteRequestRoutes(app: FastifyInstance) {
     if (!row) return reply.code(404).send({ error: "Pedido não encontrado" });
     const lines = await db.select().from(quoteRequestLines).where(eq(quoteRequestLines.quoteRequestId, id)).orderBy(quoteRequestLines.sortOrder);
     return { ...row.quoteRequest, supplierName: row.supplierName, projectName: row.projectName, lines };
+  });
+
+  // PDF de comparação: para cada item do pedido, lista fornecedores com preço na zona da obra
+  // (proximidade) e ordena do melhor custo ao mais caro, com contactos. Profissional+.
+  app.get("/api/quote-requests/:id/comparison.pdf", { preHandler: requireCompanyUser }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const companyId = companyIdOf(request);
+    try {
+      const result = await buildQuoteComparisonDocument(companyId, id);
+      if ("blocked" in result && result.blocked) return reply.code(402).send(result.blocked);
+      if (!("document" in result)) return reply.code(404).send({ error: "Pedido não encontrado" });
+      const brand = await loadCompanyBrand(companyId);
+      const buffer = await buildQuoteComparisonPdf(result.document, brand);
+      const safeTitle = result.document.title.replace(/[^\w\- ]/g, "").slice(0, 80) || "cotacao";
+      return reply
+        .header("Content-Type", "application/pdf")
+        .header("Content-Disposition", `attachment; filename="Comparacao fornecedores - ${safeTitle}.pdf"`)
+        .send(buffer);
+    } catch (err) {
+      const status = err && typeof err === "object" && "statusCode" in err ? Number((err as { statusCode: number }).statusCode) : 500;
+      if (status === 404) return reply.code(404).send({ error: "Pedido não encontrado" });
+      throw err;
+    }
   });
 
   app.post("/api/quote-requests/:id/cancel", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {

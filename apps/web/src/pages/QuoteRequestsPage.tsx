@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import Layout from "../components/Layout";
 import GestaoTabs from "../components/GestaoTabs";
 import Modal from "../components/Modal";
 import { quoteRequestsApi, type QuoteRequest, type QuoteRequestDetail, type QuoteRequestStatus } from "../api/quoteRequests";
-import { IconClipboard } from "../components/icons";
+import { ApiError } from "../api/http";
+import { IconClipboard, IconDownload } from "../components/icons";
 
 const STATUS_LABELS: Record<QuoteRequestStatus, string> = {
   enviado: "Enviado — a aguardar resposta",
@@ -33,6 +35,7 @@ export default function QuoteRequestsPage() {
   const [error, setError] = useState<string | null>(null);
   const [detail, setDetail] = useState<QuoteRequestDetail | null>(null);
   const [busy, setBusy] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
 
   async function reload() {
     setRequests(await quoteRequestsApi.list());
@@ -78,6 +81,23 @@ export default function QuoteRequestsPage() {
       setError(err instanceof Error ? err.message : "Erro ao cancelar pedido");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function handleDownloadComparisonPdf() {
+    if (!detail) return;
+    setPdfBusy(true);
+    setError(null);
+    try {
+      await quoteRequestsApi.downloadComparisonPdf(detail.id, detail.title);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 402) {
+        setError(`${err.message}${err.upgradeHint ? ` — ${err.upgradeHint}` : ""}`);
+      } else {
+        setError(err instanceof Error ? err.message : "Erro ao gerar PDF de comparação");
+      }
+    } finally {
+      setPdfBusy(false);
     }
   }
 
@@ -165,16 +185,38 @@ export default function QuoteRequestsPage() {
               </table>
             </div>
 
-            <div className="flex flex-col-reverse gap-2 border-t border-slate-200 pt-4 sm:flex-row sm:justify-end">
-              {(detail.status === "enviado" || detail.status === "respondido") && (
-                <button onClick={handleCancel} disabled={busy} className="btn btn-secondary">Cancelar pedido</button>
-              )}
-              {detail.status === "respondido" && (
-                <button onClick={handleAccept} disabled={busy} className="btn btn-primary">
-                  {busy ? "A aceitar..." : "Aceitar e guardar cotação do fornecedor"}
-                </button>
-              )}
+            <div className="flex flex-col-reverse gap-2 border-t border-slate-200 pt-4 sm:flex-row sm:justify-between">
+              <button
+                type="button"
+                onClick={() => void handleDownloadComparisonPdf()}
+                disabled={pdfBusy}
+                className="btn btn-secondary"
+                title="Lista fornecedores com o material, contactos, ordenados do melhor preço ao mais caro (Profissional+)"
+              >
+                <IconDownload className="h-3.5 w-3.5" />
+                {pdfBusy ? "A gerar PDF…" : "PDF comparação de fornecedores"}
+              </button>
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                {(detail.status === "enviado" || detail.status === "respondido") && (
+                  <button onClick={handleCancel} disabled={busy} className="btn btn-secondary">Cancelar pedido</button>
+                )}
+                {detail.status === "respondido" && (
+                  <button onClick={handleAccept} disabled={busy} className="btn btn-primary">
+                    {busy ? "A aceitar..." : "Aceitar e guardar cotação do fornecedor"}
+                  </button>
+                )}
+              </div>
             </div>
+            {error && (
+              <p className="text-sm text-red-600">
+                {error}{" "}
+                {error.includes("Profissional") && (
+                  <Link to="/creditos" className="font-semibold underline">
+                    Ver planos
+                  </Link>
+                )}
+              </p>
+            )}
           </div>
         </Modal>
       )}
