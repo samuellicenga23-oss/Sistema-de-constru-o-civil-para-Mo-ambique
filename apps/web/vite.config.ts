@@ -20,7 +20,7 @@ export default defineConfig({
         // Assets versionados são guardados pelo runtime. Não os incluir no precache evita que
         // o service worker volte a descarregar bundles antigos preservados para abas abertas.
         globPatterns: ["**/*.{html,ico,svg,webmanifest}", "favicon.png", "icon-*.png", "brand/*.png"],
-        navigateFallbackDenylist: [/^\/api\//, /^\/uploads\//],
+        navigateFallbackDenylist: [/^\/api\//, /^\/uploads\//, /^\/fornecedor\//],
         runtimeCaching: [
           {
             urlPattern: /^\/assets\//,
@@ -36,6 +36,11 @@ export default defineConfig({
           },
           {
             urlPattern: /^\/uploads\//,
+            handler: "NetworkOnly",
+          },
+          {
+            // Portal do Fornecedor é um SPA separado — o SW do painel nunca o pode servir.
+            urlPattern: /^\/fornecedor\//,
             handler: "NetworkOnly",
           },
         ],
