@@ -21,6 +21,7 @@ export async function truncateAll() {
     plants, extracted_rooms, extracted_rebar_schedules,
     financial_entries, audit_events, site_diary_entries, payment_proofs,
     suppliers, supplier_material_prices, supplier_labour_prices, supplier_equipment_prices,
+    supplier_accounts, supplier_sessions, quote_requests, quote_request_lines,
     purchase_orders, purchase_order_lines, stock_movements
   CASCADE`;
 }

@@ -112,12 +112,19 @@ export default function MaterialPricingModal({ material, onClose, onChanged }: {
   }
 
   return (
-    <Modal title={`Preços — ${material.name}`} subtitle={`Preço base: ${Number(material.baseUnitCost).toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${material.currency} por ${material.unit}`} onClose={onClose} maxWidth="max-w-2xl">
+    <Modal
+      title={`Preços — ${material.name}`}
+      subtitle={`Preço base do catálogo (orçamentos, sem fornecedor): ${Number(material.baseUnitCost).toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${material.currency} por ${material.unit}`}
+      onClose={onClose}
+      maxWidth="max-w-2xl"
+    >
       {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
 
       <section className="mb-6">
-        <h3 className="text-sm font-semibold text-gray-700 mb-2">Preços por zona</h3>
-        <p className="text-xs text-gray-500 mb-3">Clique num preço para editar. Sem preço próprio, a zona usa o preço base acima.</p>
+        <h3 className="text-sm font-semibold text-gray-700 mb-2">Preços por zona (catálogo interno)</h3>
+        <p className="text-xs text-gray-500 mb-3">
+          Editáveis pela equipa sem escolher fornecedor. Sem preço próprio, a zona usa o preço base acima — é o que entra nas composições e orçamentos.
+        </p>
         {zones.length === 0 ? (
           <p className="text-xs text-gray-400">Ainda não há zonas de preço definidas — crie-as no separador "Zonas de Preço".</p>
         ) : (
@@ -159,9 +166,12 @@ export default function MaterialPricingModal({ material, onClose, onChanged }: {
       </section>
 
       <section>
-        <h3 className="text-sm font-semibold text-gray-700 mb-2">Fornecedores deste material</h3>
+        <h3 className="text-sm font-semibold text-gray-700 mb-2">Cotações de fornecedores (opcional)</h3>
+        <p className="text-xs text-gray-500 mb-3">
+          Referência de mercado/compra. Não substituem automaticamente o preço base do catálogo — pode adoptá-las quando fizer sentido.
+        </p>
         {suppliers.length === 0 ? (
-          <p className="text-xs text-gray-400 mb-3">Sem fornecedores cadastrados — crie um em "Fornecedores".</p>
+          <p className="text-xs text-gray-400 mb-3">Sem fornecedores cadastrados — crie um em "Fornecedores" (opcional).</p>
         ) : (
           <form onSubmit={handleAddSupplierPrice} className="flex gap-2 items-end flex-wrap mb-3">
             <div>

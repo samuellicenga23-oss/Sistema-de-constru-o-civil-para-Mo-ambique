@@ -1378,6 +1378,12 @@ export const suppliers = pgTable("suppliers", {
   location: varchar("location", { length: 200 }),
   nuit: varchar("nuit", { length: 30 }),
   notes: text("notes"),
+  // Preenchido quando este fornecedor aceita o convite e passa a ter conta própria no Portal do
+  // Fornecedor — a partir daí consegue ver e responder a pedidos de cotação. Continua a ser um
+  // registo por empresa (cada empresa mantém a sua ficha própria do mesmo fornecedor real), mas
+  // várias linhas `suppliers` de empresas diferentes podem apontar à MESMA conta — é assim que o
+  // fornecedor vê "todas as empresas que me pediram cotação" num único login.
+  supplierAccountId: uuid("supplier_account_id").references((): AnyPgColumn => supplierAccounts.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -1470,6 +1476,87 @@ export const supplierEquipmentPrices = pgTable("supplier_equipment_prices", {
   hourlyCost: numeric("hourly_cost", { precision: 14, scale: 4 }).notNull(),
   currency: currencyEnum("currency").notNull().default("MZN"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+// ---------- Portal do Fornecedor ----------
+// Identidade global do fornecedor, independente de qualquer empresa — permite que a MESMA pessoa/
+// empresa fornecedora tenha uma única conta e veja, num só login, todos os pedidos de cotação de
+// todas as empresas SIGO com quem trabalha (cada uma mantém a sua própria ficha em `suppliers`,
+// ligada aqui via `suppliers.supplierAccountId`). Deliberadamente um sistema de autenticação à
+// parte de `users`/`sessions` — nunca reutiliza userRoleEnum — para impedir qualquer fuga de
+// privilégios entre o painel da empresa e o portal do fornecedor.
+export const quoteRequestStatusEnum = pgEnum("quote_request_status", [
+  "enviado",
+  "respondido",
+  "aceite",
+  "recusado",
+  "expirado",
+  "cancelado",
+]);
+
+export const quoteRequestLineKindEnum = pgEnum("quote_request_line_kind", ["material", "labour", "equipment"]);
+
+export const supplierAccounts = pgTable("supplier_accounts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: varchar("name", { length: 150 }).notNull(),
+  email: varchar("email", { length: 200 }).notNull().unique(),
+  passwordHash: text("password_hash"), // fica null até o fornecedor aceitar o convite e definir password
+  phone: varchar("phone", { length: 60 }),
+  emailVerifiedAt: timestamp("email_verified_at"),
+  inviteToken: varchar("invite_token", { length: 64 }),
+  inviteTokenExpiresAt: timestamp("invite_token_expires_at"),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const supplierSessions = pgTable("supplier_sessions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  supplierAccountId: uuid("supplier_account_id")
+    .notNull()
+    .references(() => supplierAccounts.id, { onDelete: "cascade" }),
+  expiresAt: timestamp("expires_at").notNull(),
+  userAgent: text("user_agent"),
+  ipAddress: varchar("ip_address", { length: 64 }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const quoteRequests = pgTable("quote_requests", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id")
+    .notNull()
+    .references(() => companies.id, { onDelete: "cascade" }),
+  supplierId: uuid("supplier_id")
+    .notNull()
+    .references(() => suppliers.id, { onDelete: "cascade" }),
+  projectId: uuid("project_id").references(() => projects.id, { onDelete: "set null" }),
+  createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  title: varchar("title", { length: 200 }).notNull(),
+  message: text("message"),
+  deadlineDate: date("deadline_date"),
+  status: quoteRequestStatusEnum("status").notNull().default("enviado"),
+  supplierNotes: text("supplier_notes"),
+  respondedAt: timestamp("responded_at"),
+  acceptedAt: timestamp("accepted_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const quoteRequestLines = pgTable("quote_request_lines", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  quoteRequestId: uuid("quote_request_id")
+    .notNull()
+    .references(() => quoteRequests.id, { onDelete: "cascade" }),
+  kind: quoteRequestLineKindEnum("kind").notNull(),
+  materialId: uuid("material_id").references(() => materials.id, { onDelete: "set null" }),
+  labourCategoryId: uuid("labour_category_id").references(() => labourCategories.id, { onDelete: "set null" }),
+  equipmentId: uuid("equipment_id").references(() => equipment.id, { onDelete: "set null" }),
+  description: varchar("description", { length: 300 }).notNull(),
+  quantity: numeric("quantity", { precision: 14, scale: 3 }),
+  unit: varchar("unit", { length: 20 }),
+  // Preenchidos pelo fornecedor quando responde ao pedido.
+  unitCost: numeric("unit_cost", { precision: 14, scale: 4 }),
+  currency: currencyEnum("currency").notNull().default("MZN"),
+  supplierLineNotes: text("supplier_line_notes"),
+  sortOrder: integer("sort_order").notNull().default(0),
 });
 
 // ---------- Relations ----------

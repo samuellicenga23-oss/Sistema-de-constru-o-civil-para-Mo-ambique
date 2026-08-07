@@ -37,6 +37,9 @@ import { workChapterRoutes } from "./routes/workChapters.js";
 import { practiceRoutes } from "./routes/practice.js";
 import { publicShareRoutes } from "./routes/publicShare.js";
 import { leadRoutes } from "./routes/leads.js";
+import { supplierAuthRoutes } from "./routes/supplierAuth.js";
+import { supplierPortalRoutes } from "./routes/supplierPortal.js";
+import { quoteRequestRoutes } from "./routes/quoteRequests.js";
 import { mutationOriginAllowed, SECURITY_HEADERS } from "./services/httpSecurity.js";
 import { captureException } from "./services/monitoring.js";
 import { normalizeSigoDecimals } from "@sigo/shared";
@@ -155,17 +158,46 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   await app.register(practiceRoutes);
   await app.register(publicShareRoutes);
   await app.register(leadRoutes);
+  await app.register(supplierAuthRoutes);
+  await app.register(supplierPortalRoutes);
+  await app.register(quoteRequestRoutes);
 
   // Em produção corremos um único processo Node (padrão CloudPanel: um domínio → um appPort) —
-  // a API também serve o build do frontend, em vez de depender de um Nginx separado a servir
-  // ficheiros estáticos. Em desenvolvimento o Vite serve o frontend à parte, por isso esta pasta
-  // normalmente não existe localmente e o bloco fica inactivo.
+  // a API também serve os builds do frontend, em vez de depender de um Nginx separado a servir
+  // ficheiros estáticos. Em desenvolvimento o Vite serve cada frontend à parte, por isso estas
+  // pastas normalmente não existem localmente e este bloco fica inactivo.
+  //
+  // São dois sites distintos, de propósito: o painel SIGO (utilizadores do sistema) e o Portal
+  // do Fornecedor (apps/supplier) NUNCA partilham bundle, rotas, layout ou navegação entre si —
+  // só a base de dados e a API é que são comuns. "/fornecedor" está isolado como prefixo próprio
+  // com o seu próprio index.html; nada dentro dele cai de volta no SPA principal, e o SPA
+  // principal nunca serve nada sob esse prefixo. Se um subdomínio próprio (ex:
+  // fornecedor.sigomz.com) vier a ser configurado no Nginx/CloudPanel, este bloco deixa de ser
+  // necessário para o Portal do Fornecedor sem precisar de mudar código nenhum — só configurar
+  // SUPPLIER_PUBLIC_URL e apontar esse subdomínio para o mesmo processo ou para outro.
   const webDistDir = path.resolve(process.cwd(), "../web/dist");
   const webIndexHtml = path.join(webDistDir, "index.html");
+  const supplierDistDir = path.resolve(process.cwd(), "../supplier/dist");
+  const supplierIndexHtml = path.join(supplierDistDir, "index.html");
+
+  if (existsSync(supplierIndexHtml)) {
+    await app.register(fastifyStatic, { root: supplierDistDir, prefix: "/fornecedor/", decorateReply: false });
+  }
+
   if (existsSync(webIndexHtml)) {
     await app.register(fastifyStatic, { root: webDistDir, prefix: "/", decorateReply: false });
     app.setNotFoundHandler((request, reply) => {
       const requestPath = (request.raw.url ?? "/").split("?", 1)[0];
+
+      if (requestPath.startsWith("/fornecedor")) {
+        if (!existsSync(supplierIndexHtml)) {
+          reply.code(404).send({ error: "Não encontrado" });
+          return;
+        }
+        reply.header("Cache-Control", "no-cache, must-revalidate").type("text/html").send(readFileSync(supplierIndexHtml));
+        return;
+      }
+
       const isStaticAsset = requestPath.startsWith("/assets/")
         || requestPath.startsWith("/fonts/")
         || /^\/(?:favicon|icon-|apple-touch-icon|manifest\.webmanifest|sw\.js|registerSW\.js)/.test(requestPath);

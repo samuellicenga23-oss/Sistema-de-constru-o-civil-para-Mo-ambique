@@ -58,10 +58,26 @@ export async function sendEmail(input: SendEmailInput, logger?: { info: (o: unkn
   }
 }
 
+/** Escapa texto dinâmico antes de interpolar em HTML de email. */
+export function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/** Nome de ficheiro seguro para Content-Disposition (sem aspas/quebra de cabeçalho). */
+export function safeContentDispositionFilename(name: string | null | undefined, fallback: string): string {
+  const cleaned = (name ?? fallback).replace(/[\r\n"]/g, "").replace(/[^\w.\- ()[\]]+/g, "_").slice(0, 180);
+  return cleaned || fallback;
+}
+
 /** Moldura simples e consistente para todos os emails do SIGO — sem depender de imagens externas. */
 export function emailLayout(title: string, bodyHtml: string, ctaUrl?: string, ctaLabel?: string): string {
   const cta = ctaUrl && ctaLabel
-    ? `<p style="margin:24px 0;"><a href="${ctaUrl}" style="background:#1AADB4;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:bold;display:inline-block;">${ctaLabel}</a></p>`
+    ? `<p style="margin:24px 0;"><a href="${escapeHtml(ctaUrl)}" style="background:#1AADB4;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:bold;display:inline-block;">${escapeHtml(ctaLabel)}</a></p>`
     : "";
   return `
   <div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:560px;margin:0 auto;color:#0f172a;">
@@ -69,7 +85,7 @@ export function emailLayout(title: string, bodyHtml: string, ctaUrl?: string, ct
       <span style="color:#fff;font-weight:900;font-size:18px;letter-spacing:.02em;">SIGO</span>
     </div>
     <div style="border:1px solid #e2e8f0;border-top:none;border-radius:0 0 12px 12px;padding:24px;">
-      <h1 style="font-size:18px;margin:0 0 16px;">${title}</h1>
+      <h1 style="font-size:18px;margin:0 0 16px;">${escapeHtml(title)}</h1>
       <div style="font-size:14px;line-height:1.6;color:#334155;">${bodyHtml}</div>
       ${cta}
       <p style="margin-top:24px;font-size:12px;color:#94a3b8;">SIGO — Sistema Integrado de Gestão de Obras</p>

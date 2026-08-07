@@ -13,7 +13,7 @@ import { getSessionUser, setSessionActingCompany } from "../auth/session.js";
 import { env } from "../env.js";
 import { COMPANY_MODULE_KEYS, CURRENCIES, SUBSCRIPTION_STATUSES, SUBSCRIPTION_PLAN_KEYS, resolveRoleTemplate, isCompanyUserRole, getPlanDefinition } from "@sigo/shared";
 import { detectImageExtension, detectProofFileExtension } from "../services/imageValidation.js";
-import { sendEmail, emailLayout } from "../services/mailer.js";
+import { sendEmail, emailLayout, escapeHtml, safeContentDispositionFilename } from "../services/mailer.js";
 import { createTrialCompany } from "../services/companyOnboarding.js";
 import { syncSigoPricesForCompany } from "../services/sigoPrices.js";
 import { recordAuditEvent } from "../services/auditTrail.js";
@@ -489,7 +489,7 @@ export async function companyRoutes(app: FastifyInstance) {
         method: parsed.data.method,
         reference: parsed.data.reference ?? null,
         notes: parsed.data.notes ?? null,
-        filePath: path.join("payment-proofs", fileName),
+        filePath: `payment-proofs/${fileName}`,
         originalFileName: data.filename?.slice(0, 300) ?? null,
       })
       .returning();
@@ -511,7 +511,7 @@ export async function companyRoutes(app: FastifyInstance) {
         subject: `SIGO — Novo comprovativo: ${company?.name ?? "empresa"}`,
         html: emailLayout(
           "Novo comprovativo de pagamento",
-          `<p><strong>${company?.name ?? "Empresa"}</strong> enviou um comprovativo para o plano <strong>${getPlanDefinition(created.plan).label}</strong> (${created.amount} ${created.currency}).</p>
+          `<p><strong>${escapeHtml(company?.name ?? "Empresa")}</strong> enviou um comprovativo para o plano <strong>${escapeHtml(getPlanDefinition(created.plan).label)}</strong> (${escapeHtml(String(created.amount))} ${escapeHtml(created.currency)}).</p>
            <p>Reveja o ficheiro e aprove ou rejeite no painel do super admin.</p>`,
           `${env.publicUrl}/admin`,
           "Rever comprovativo",
@@ -551,7 +551,10 @@ export async function companyRoutes(app: FastifyInstance) {
     const ext = path.extname(fullPath).toLowerCase();
     const contentType = ext === ".pdf" ? "application/pdf" : ext === ".png" ? "image/png" : ext === ".gif" ? "image/gif" : ext === ".webp" ? "image/webp" : "image/jpeg";
     reply.header("Content-Type", contentType);
-    reply.header("Content-Disposition", `inline; filename="${proof.originalFileName ?? `comprovativo${ext}`}"`);
+    reply.header(
+      "Content-Disposition",
+      `inline; filename="${safeContentDispositionFilename(proof.originalFileName, `comprovativo${ext}`)}"`,
+    );
     return reply.send(createReadStream(fullPath));
   });
 
@@ -573,57 +576,88 @@ export async function companyRoutes(app: FastifyInstance) {
     if (!current) return reply.code(404).send({ error: "Empresa sem subscrição" });
 
     const now = new Date();
+    // Estende a partir do fim actual (se ainda vigente); senão a partir de agora — nunca
+    // encurtar uma renovação feita antes do vencimento.
+    const extensionBase =
+      current.expiresAt && current.expiresAt.getTime() > now.getTime() ? current.expiresAt : now;
     const periodEnd = parsed.data.periodEnd
       ? new Date(`${parsed.data.periodEnd}T23:59:59.000Z`)
-      : new Date(now.getFullYear(), now.getMonth() + (proof.billingCycle === "annual" ? 12 : 1), now.getDate(), 23, 59, 59);
+      : new Date(
+          extensionBase.getFullYear(),
+          extensionBase.getMonth() + (proof.billingCycle === "annual" ? 12 : 1),
+          extensionBase.getDate(),
+          23,
+          59,
+          59,
+        );
 
-    const [payment, updatedProof] = await db.transaction(async (tx) => {
-      const [createdPayment] = await tx
-        .insert(platformPayments)
-        .values({
-          companyId: proof.companyId,
-          amount: proof.amount,
-          currency: proof.currency,
-          method: proof.method,
-          reference: proof.reference,
-          notes: parsed.data.notes ?? proof.notes,
-          paidAt: now,
-          periodEnd: periodEnd.toISOString().slice(0, 10),
-          plan: proof.plan,
-          billingCycle: proof.billingCycle,
-          recordedByUserId: request.currentUser!.id,
-        })
-        .returning();
+    let payment;
+    let updatedProof;
+    try {
+      [payment, updatedProof] = await db.transaction(async (tx) => {
+        const [locked] = await tx
+          .select()
+          .from(paymentProofs)
+          .where(eq(paymentProofs.id, id))
+          .for("update")
+          .limit(1);
+        if (!locked || locked.status !== "pendente") {
+          throw new Error("PROOF_ALREADY_PROCESSED");
+        }
 
-      await tx
-        .update(subscriptions)
-        .set({
-          status: "activo",
-          plan: proof.plan,
-          billingCycle: proof.billingCycle,
-          expiresAt: periodEnd,
-          activatedAt: current.activatedAt ?? now,
-          activatedByUserId: current.activatedByUserId ?? request.currentUser!.id,
-        })
-        .where(eq(subscriptions.id, current.id));
+        const [createdPayment] = await tx
+          .insert(platformPayments)
+          .values({
+            companyId: proof.companyId,
+            amount: proof.amount,
+            currency: proof.currency,
+            method: proof.method,
+            reference: proof.reference,
+            notes: parsed.data.notes ?? proof.notes,
+            paidAt: now,
+            periodEnd: periodEnd.toISOString().slice(0, 10),
+            plan: proof.plan,
+            billingCycle: proof.billingCycle,
+            recordedByUserId: request.currentUser!.id,
+          })
+          .returning();
 
-      const { clampCompanyModules } = await import("../services/subscriptionEntitlements.js");
-      const [company] = await tx.select({ enabledModules: companies.enabledModules }).from(companies).where(eq(companies.id, proof.companyId)).limit(1);
-      if (company) {
         await tx
-          .update(companies)
-          .set({ enabledModules: clampCompanyModules(company.enabledModules, proof.plan) })
-          .where(eq(companies.id, proof.companyId));
+          .update(subscriptions)
+          .set({
+            status: "activo",
+            plan: proof.plan,
+            billingCycle: proof.billingCycle,
+            expiresAt: periodEnd,
+            activatedAt: current.activatedAt ?? now,
+            activatedByUserId: current.activatedByUserId ?? request.currentUser!.id,
+          })
+          .where(eq(subscriptions.id, current.id));
+
+        const { clampCompanyModules } = await import("../services/subscriptionEntitlements.js");
+        const [company] = await tx.select({ enabledModules: companies.enabledModules }).from(companies).where(eq(companies.id, proof.companyId)).limit(1);
+        if (company) {
+          await tx
+            .update(companies)
+            .set({ enabledModules: clampCompanyModules(company.enabledModules, proof.plan) })
+            .where(eq(companies.id, proof.companyId));
+        }
+
+        const [updated] = await tx
+          .update(paymentProofs)
+          .set({ status: "aprovado", reviewedByUserId: request.currentUser!.id, reviewedAt: now })
+          .where(and(eq(paymentProofs.id, id), eq(paymentProofs.status, "pendente")))
+          .returning();
+        if (!updated) throw new Error("PROOF_ALREADY_PROCESSED");
+
+        return [createdPayment, updated] as const;
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message === "PROOF_ALREADY_PROCESSED") {
+        return reply.code(409).send({ error: "Este comprovativo já foi processado." });
       }
-
-      const [updated] = await tx
-        .update(paymentProofs)
-        .set({ status: "aprovado", reviewedByUserId: request.currentUser!.id, reviewedAt: now })
-        .where(eq(paymentProofs.id, id))
-        .returning();
-
-      return [createdPayment, updated];
-    });
+      throw error;
+    }
 
     await recordAuditEvent({
       companyId: proof.companyId,
@@ -641,8 +675,8 @@ export async function companyRoutes(app: FastifyInstance) {
         subject: "SIGO — Pagamento confirmado, plano activo",
         html: emailLayout(
           "Pagamento confirmado",
-          `<p>Confirmámos o comprovativo enviado para o plano <strong>${getPlanDefinition(proof.plan).label}</strong>.</p>
-           <p>A subscrição está activa até <strong>${periodEnd.toLocaleDateString("pt-PT")}</strong>.</p>`,
+          `<p>Confirmámos o comprovativo enviado para o plano <strong>${escapeHtml(getPlanDefinition(proof.plan).label)}</strong>.</p>
+           <p>A subscrição está activa até <strong>${escapeHtml(periodEnd.toLocaleDateString("pt-PT"))}</strong>.</p>`,
           `${env.publicUrl}/creditos`,
           "Ver na plataforma",
         ),
@@ -665,8 +699,9 @@ export async function companyRoutes(app: FastifyInstance) {
     const [updated] = await db
       .update(paymentProofs)
       .set({ status: "rejeitado", reviewedByUserId: request.currentUser!.id, reviewedAt: new Date(), rejectionReason: parsed.data.reason })
-      .where(eq(paymentProofs.id, id))
+      .where(and(eq(paymentProofs.id, id), eq(paymentProofs.status, "pendente")))
       .returning();
+    if (!updated) return reply.code(409).send({ error: "Este comprovativo já foi processado." });
 
     await recordAuditEvent({
       companyId: proof.companyId,
@@ -684,8 +719,8 @@ export async function companyRoutes(app: FastifyInstance) {
         subject: "SIGO — Comprovativo não confirmado",
         html: emailLayout(
           "Comprovativo não confirmado",
-          `<p>Não foi possível confirmar o comprovativo enviado para o plano <strong>${getPlanDefinition(proof.plan).label}</strong>.</p>
-           <p><strong>Motivo:</strong> ${parsed.data.reason}</p>
+          `<p>Não foi possível confirmar o comprovativo enviado para o plano <strong>${escapeHtml(getPlanDefinition(proof.plan).label)}</strong>.</p>
+           <p><strong>Motivo:</strong> ${escapeHtml(parsed.data.reason)}</p>
            <p>Pode enviar um novo comprovativo em «Créditos e planos».</p>`,
           `${env.publicUrl}/creditos`,
           "Enviar novo comprovativo",

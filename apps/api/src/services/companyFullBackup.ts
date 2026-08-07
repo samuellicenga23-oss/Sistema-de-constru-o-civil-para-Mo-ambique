@@ -32,6 +32,7 @@ import {
   measurementImportJobsTable,
   measurementLines,
   plants,
+  paymentProofs,
   platformPayments,
   practiceAddenda,
   practiceClientRevisions,
@@ -130,6 +131,7 @@ export async function collectCompanyFullBackup(companyId: string) {
   const [
     subscriptionRows,
     paymentRows,
+    paymentProofRows,
     userRows,
     projectRows,
     usageRows,
@@ -154,6 +156,7 @@ export async function collectCompanyFullBackup(companyId: string) {
   ] = await Promise.all([
     db.select().from(subscriptions).where(eq(subscriptions.companyId, companyId)),
     db.select().from(platformPayments).where(eq(platformPayments.companyId, companyId)),
+    db.select().from(paymentProofs).where(eq(paymentProofs.companyId, companyId)),
     db
       .select({
         id: users.id,
@@ -410,6 +413,16 @@ export async function collectCompanyFullBackup(companyId: string) {
     if (meta) pushFile(files, receipt.proofFilePath, `files/invoice-receipts/${receipt.id}_${base}`, "invoice_proof", meta);
   }
 
+  for (const proof of paymentProofRows) {
+    if (!proof.filePath || proof.filePath === PURGED_FILE_MARKER) continue;
+    const absolute = path.isAbsolute(proof.filePath)
+      ? proof.filePath
+      : path.join(env.uploadsDir, proof.filePath);
+    const base = path.basename(absolute);
+    const meta = await fileMeta(absolute);
+    if (meta) pushFile(files, absolute, `files/payment-proofs/${proof.id}_${base}`, "payment_proof", meta);
+  }
+
   const presentFiles = files.filter((f) => !f.missing);
   const missingFiles = files.filter((f) => f.missing);
 
@@ -424,6 +437,7 @@ export async function collectCompanyFullBackup(companyId: string) {
     company,
     subscriptions: subscriptionRows,
     payments: paymentRows,
+    paymentProofs: paymentProofRows,
     users: userRows,
     usageEvents: usageRows,
     credits: {

@@ -1053,8 +1053,8 @@ export default function SuperAdminPage() {
                 <h2 className="section-title">{en ? "Platform disk usage" : "Uso de disco da plataforma"}</h2>
                 <p className="muted mt-1">
                   {en
-                    ? `Read projects idle ${storage?.idleDays ?? 7}+ days move to trash weekly; Super Admin decides permanent delete.`
-                    : `Projectos lidos há ${storage?.idleDays ?? 7}+ dias vão para o lixo semanalmente; o Super Admin decide o apagamento definitivo.`}
+                    ? `Only archived projects idle ${storage?.idleDays ?? 7}+ days are eligible. Cleanup runs only when you click the button; Super Admin decides permanent delete.`
+                    : `Só projectos arquivados e idle há ${storage?.idleDays ?? 7}+ dias são elegíveis. A limpeza só corre quando carregar no botão; o Super Admin decide o apagamento definitivo.`}
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">

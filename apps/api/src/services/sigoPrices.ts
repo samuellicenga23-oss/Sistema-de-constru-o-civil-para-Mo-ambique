@@ -1,26 +1,79 @@
-import { and, eq, isNull, or } from "drizzle-orm";
+import { and, eq, isNull, ne, or } from "drizzle-orm";
+import { randomBytes } from "node:crypto";
 import { db } from "../db/index.js";
-import { materials, supplierMaterialPrices, suppliers } from "../db/schema.js";
+import { materials, supplierAccounts, supplierMaterialPrices, suppliers, quoteRequests, quoteRequestLines, users } from "../db/schema.js";
+import { sendEmail, emailLayout } from "./mailer.js";
+import { env } from "../env.js";
 
 export const SIGO_PRICES_SUPPLIER_NAME = "SIGO Preços";
 export const SIGO_PRICES_REVIEW_DATE = "2026-08-03";
 export const SIGO_PRICES_NOTES = [
   "Fornecedor SIGO (catálogo nacional), sem IVA.",
   "Base inicial: INE Moçambique e preços públicos de fornecedores locais.",
-  "Os preços podem ser editados; novos materiais do catálogo são acrescentados automaticamente.",
+  "Os preços são geridos pela equipa SIGO através do Portal do Fornecedor — pedidos de cotação para materiais novos são gerados automaticamente pelo sistema.",
 ].join(" ");
+
+// Conta global única (não por empresa) — é ligada à ficha "SIGO Preços" de TODAS as empresas,
+// para a equipa SIGO responder pedidos de cotação de qualquer empresa com um único login no
+// Portal do Fornecedor, tal como qualquer fornecedor externo.
+const SIGO_PRICES_SUPPLIER_EMAIL = "precos@sigomz.com";
 
 export function isSigoPricesSupplier(supplier: { name: string }) {
   return supplier.name.trim().toLocaleLowerCase("pt") === SIGO_PRICES_SUPPLIER_NAME.toLocaleLowerCase("pt");
 }
 
+// Garante a conta global "SIGO Preços" no Portal do Fornecedor. Se ainda não existir, cria-a e
+// notifica os super-admins com o link de activação — a equipa SIGO entra com este login e passa a
+// responder pedidos de cotação exactamente como qualquer fornecedor externo.
+async function ensureSigoPricesSupplierAccount() {
+  const [existing] = await db.select().from(supplierAccounts).where(eq(supplierAccounts.email, SIGO_PRICES_SUPPLIER_EMAIL)).limit(1);
+  if (existing) return existing;
+
+  const token = randomBytes(32).toString("hex");
+  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+  const [account] = await db
+    .insert(supplierAccounts)
+    .values({
+      name: "Equipa de Preços SIGO",
+      email: SIGO_PRICES_SUPPLIER_EMAIL,
+      inviteToken: token,
+      inviteTokenExpiresAt: expiresAt,
+    })
+    .returning();
+
+  const admins = await db.select({ email: users.email }).from(users).where(and(eq(users.role, "super_admin"), eq(users.isActive, true)));
+  const emails = admins.map((a) => a.email);
+  if (emails.length) {
+    void sendEmail(
+      {
+        to: emails,
+        subject: "SIGO — Activar conta «SIGO Preços» no Portal do Fornecedor",
+        html: emailLayout(
+          "Conta de preços de referência criada",
+          `<p>A conta global «SIGO Preços» (${SIGO_PRICES_SUPPLIER_EMAIL}) acabou de ser criada — é através dela que os preços de referência do catálogo nacional passam a ser geridos no Portal do Fornecedor, em vez de editados directamente na base de dados.</p>
+           <p>Active-a para começar a responder aos pedidos de cotação automáticos que o sistema vai gerar para materiais novos ainda sem preço.</p>`,
+          `${env.supplierPublicUrl}/aceitar-convite?token=${token}`,
+          "Activar conta SIGO Preços",
+        ),
+      },
+      undefined,
+    );
+  }
+
+  return account;
+}
+
 /**
- * Garante o fornecedor «SIGO Preços» e preenche cotações em falta para cada empresa.
- * Materiais próprios da empresa substituem globais com o mesmo nome.
- * Preços já existentes NÃO são sobrescritos — a empresa pode editá-los livremente.
- * Só materiais novos (ainda sem linha) recebem o preço base do catálogo.
+ * Garante o fornecedor «SIGO Preços» para uma empresa, liga-o à conta global do Portal do
+ * Fornecedor, e preenche cotações em falta com o preço base do catálogo — um ponto de partida
+ * imediato para a empresa, nunca sobrescrito depois. Para cada material realmente novo (sem
+ * cotação anterior nesta empresa), gera também um pedido de cotação automático dirigido à equipa
+ * SIGO, para que o preço definitivo passe a vir de uma resposta real no portal, não só do valor
+ * base gravado no Catálogo.
  */
 export async function syncSigoPricesForCompany(companyId: string) {
+  const sigoAccount = await ensureSigoPricesSupplierAccount();
+
   let [supplier] = await db
     .select()
     .from(suppliers)
@@ -35,12 +88,13 @@ export async function syncSigoPricesForCompany(companyId: string) {
         name: SIGO_PRICES_SUPPLIER_NAME,
         location: "Moçambique",
         notes: SIGO_PRICES_NOTES,
+        supplierAccountId: sigoAccount.id,
       })
       .returning();
-  } else if (supplier.notes !== SIGO_PRICES_NOTES || supplier.location !== "Moçambique") {
+  } else if (supplier.notes !== SIGO_PRICES_NOTES || supplier.location !== "Moçambique" || supplier.supplierAccountId !== sigoAccount.id) {
     [supplier] = await db
       .update(suppliers)
-      .set({ location: "Moçambique", notes: SIGO_PRICES_NOTES })
+      .set({ location: "Moçambique", notes: SIGO_PRICES_NOTES, supplierAccountId: sigoAccount.id })
       .where(eq(suppliers.id, supplier.id))
       .returning();
   }
@@ -64,7 +118,7 @@ export async function syncSigoPricesForCompany(companyId: string) {
     .from(supplierMaterialPrices)
     .where(and(eq(supplierMaterialPrices.supplierId, supplier.id), isNull(supplierMaterialPrices.zoneId)));
   const currentByMaterial = new Map(current.map((price) => [price.materialId, price]));
-  let created = 0;
+  const newlyPriced: Array<{ material: (typeof available)[number]; unitCost: string }> = [];
 
   for (const material of visible) {
     if (currentByMaterial.has(material.id)) continue;
@@ -76,8 +130,76 @@ export async function syncSigoPricesForCompany(companyId: string) {
       unitCost,
       currency: material.currency,
     });
-    created += 1;
+    newlyPriced.push({ material, unitCost });
   }
 
-  return { supplier, materials: visible.length, created, updated: 0 };
+  if (newlyPriced.length) {
+    try {
+      await createAutomaticQuoteRequest(companyId, supplier.id, newlyPriced);
+    } catch (error) {
+      // Tabelas de RFQ podem ainda não estar migradas — preços base já foram gravados.
+      console.warn("[sigoPrices] createAutomaticQuoteRequest skipped", error);
+    }
+  }
+
+  return { supplier, materials: visible.length, created: newlyPriced.length, updated: 0 };
+}
+
+// Pedido de cotação gerado pelo próprio sistema (sem utilizador humano a pedir) — a equipa SIGO
+// responde-lhe no Portal do Fornecedor como a qualquer outro pedido; o preço base do catálogo já
+// aplicado acima fica só como valor provisório até essa resposta.
+async function createAutomaticQuoteRequest(
+  companyId: string,
+  supplierId: string,
+  items: Array<{ material: { id: string; name: string; unit: string }; unitCost: string }>,
+) {
+  const [quoteRequest] = await db
+    .insert(quoteRequests)
+    .values({
+      companyId,
+      supplierId,
+      title: `Confirmação de preços — ${items.length} material(is) novo(s)`,
+      message:
+        "Pedido gerado automaticamente pelo sistema: estes materiais foram adicionados ao Catálogo e receberam um preço base provisório. Confirme ou actualize o preço de cada um.",
+    })
+    .returning();
+
+  await db.insert(quoteRequestLines).values(
+    items.map(({ material }, index) => ({
+      quoteRequestId: quoteRequest.id,
+      kind: "material" as const,
+      materialId: material.id,
+      description: material.name,
+      unit: material.unit,
+      sortOrder: index,
+    })),
+  );
+}
+
+/**
+ * Quando a equipa SIGO aceita uma cotação numa empresa, o preço aplica-se automaticamente à ficha
+ * "SIGO Preços" de TODAS as outras empresas ligadas à mesma conta global — é o mesmo catálogo
+ * nacional em todo o lado, uma única resposta do fornecedor actualiza-o de uma vez.
+ */
+export async function fanOutSigoPriceToAllCompanies(acceptedSupplierId: string, materialId: string, unitCost: string, currency: "MZN" | "USD") {
+  const [acceptedSupplier] = await db.select().from(suppliers).where(eq(suppliers.id, acceptedSupplierId)).limit(1);
+  if (!acceptedSupplier?.supplierAccountId || !isSigoPricesSupplier(acceptedSupplier)) return;
+
+  const otherRows = await db
+    .select()
+    .from(suppliers)
+    .where(and(eq(suppliers.supplierAccountId, acceptedSupplier.supplierAccountId), eq(suppliers.name, SIGO_PRICES_SUPPLIER_NAME), ne(suppliers.id, acceptedSupplierId)));
+
+  for (const row of otherRows) {
+    const [existing] = await db
+      .select()
+      .from(supplierMaterialPrices)
+      .where(and(eq(supplierMaterialPrices.supplierId, row.id), eq(supplierMaterialPrices.materialId, materialId), isNull(supplierMaterialPrices.zoneId)))
+      .limit(1);
+    if (existing) {
+      await db.update(supplierMaterialPrices).set({ unitCost, currency }).where(eq(supplierMaterialPrices.id, existing.id));
+    } else {
+      await db.insert(supplierMaterialPrices).values({ supplierId: row.id, materialId, unitCost, currency });
+    }
+  }
 }

@@ -25,6 +25,7 @@ const QuickCalcPage = lazy(() => import("./pages/QuickCalcPage"));
 const ProjectFinancialPage = lazy(() => import("./pages/ProjectFinancialPage"));
 const ProjectSiteDiaryPage = lazy(() => import("./pages/ProjectSiteDiaryPage"));
 const SuppliersPage = lazy(() => import("./pages/SuppliersPage"));
+const QuoteRequestsPage = lazy(() => import("./pages/QuoteRequestsPage"));
 const ProjectPurchasingPage = lazy(() => import("./pages/ProjectPurchasingPage"));
 const ProjectSchedulePage = lazy(() => import("./pages/ProjectSchedulePage"));
 const PracticeOfficePage = lazy(() => import("./pages/PracticeOfficePage"));
@@ -156,6 +157,16 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+      <Route
+        path="/fornecedores/pedidos"
+        element={
+          <ProtectedRoute>
+            <QuoteRequestsPage />
+          </ProtectedRoute>
+        }
+      />
+      {/* O Portal do Fornecedor (/fornecedor/*) é um site à parte — apps/supplier — nunca uma
+          rota deste SPA. Ver apps/api/src/app.ts para o mapeamento de produção. */}
       <Route
         path="/projectos/:projectId/compras"
         element={

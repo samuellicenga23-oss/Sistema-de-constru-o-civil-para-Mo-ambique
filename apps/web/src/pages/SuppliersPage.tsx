@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
 import { suppliersApi, type Supplier } from "../api/suppliers";
 import SupplierMaterialsModal from "../components/SupplierMaterialsModal";
+import SupplierInviteModal from "../components/SupplierInviteModal";
+import QuoteRequestModal from "../components/QuoteRequestModal";
 import Layout from "../components/Layout";
 import Modal from "../components/Modal";
 import ConfirmDialog from "../components/ConfirmDialog";
 import PageSearch from "../components/PageSearch";
-import { IconPlus, IconTrash, IconUsers } from "../components/icons";
+import { IconPlus, IconTrash, IconUsers, IconUpload } from "../components/icons";
 
 export default function SuppliersPage() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -13,6 +16,8 @@ export default function SuppliersPage() {
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
   const [materialsModalSupplier, setMaterialsModalSupplier] = useState<Supplier | null>(null);
+  const [inviteModalSupplier, setInviteModalSupplier] = useState<Supplier | null>(null);
+  const [quoteModalSupplier, setQuoteModalSupplier] = useState<Supplier | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Supplier | null>(null);
   const [query, setQuery] = useState("");
 
@@ -78,7 +83,12 @@ export default function SuppliersPage() {
     <Layout
       title="Fornecedores"
       subtitle="Empresas, contactos e cotações para compras"
-      actions={<button onClick={() => setShowForm(true)} className="btn btn-primary btn-sm"><IconPlus className="h-3.5 w-3.5" /> Novo fornecedor</button>}
+      actions={
+        <div className="flex items-center gap-2">
+          <Link to="/fornecedores/pedidos" className="btn btn-secondary btn-sm"><IconUpload className="h-3.5 w-3.5" /> Pedidos de cotação</Link>
+          <button onClick={() => setShowForm(true)} className="btn btn-primary btn-sm"><IconPlus className="h-3.5 w-3.5" /> Novo fornecedor</button>
+        </div>
+      }
     >
       <div className="mx-auto w-full max-w-7xl space-y-5">
         {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
@@ -153,13 +163,26 @@ export default function SuppliersPage() {
                   {supplier.contact && <div className="flex justify-between gap-3"><dt className="text-slate-500">Contacto</dt><dd className="break-all text-right font-medium text-slate-700">{supplier.contact}</dd></div>}
                   {supplier.nuit && <div className="flex justify-between gap-3"><dt className="text-slate-500">NUIT</dt><dd className="text-right font-medium text-slate-700">{supplier.nuit}</dd></div>}
                 </dl>}
-                <div className="mt-auto flex items-center gap-2 pt-5">
-                  <button onClick={() => setMaterialsModalSupplier(supplier)} className={`btn btn-sm flex-1 ${supplier.isReference ? "btn-primary" : "btn-secondary"}`}>
-                    {supplier.isReference ? "Editar preços" : "Cotações e recursos"}
-                  </button>
-                  {!supplier.isReference && <button onClick={() => setPendingDelete(supplier)} className="icon-btn-danger" title="Eliminar fornecedor">
-                    <IconTrash className="h-3.5 w-3.5" />
-                  </button>}
+                <div className="mt-auto flex flex-col gap-2 pt-5">
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => setMaterialsModalSupplier(supplier)} className={`btn btn-sm flex-1 ${supplier.isReference ? "btn-primary" : "btn-secondary"}`}>
+                      {supplier.isReference ? "Editar preços" : "Cotações e recursos"}
+                    </button>
+                    {!supplier.isReference && <button onClick={() => setPendingDelete(supplier)} className="icon-btn-danger" title="Eliminar fornecedor">
+                      <IconTrash className="h-3.5 w-3.5" />
+                    </button>}
+                  </div>
+                  {!supplier.isReference && (
+                    supplier.supplierAccountId ? (
+                      <button onClick={() => setQuoteModalSupplier(supplier)} className="btn btn-secondary btn-sm w-full">
+                        Pedir cotação no Portal do Fornecedor
+                      </button>
+                    ) : (
+                      <button onClick={() => setInviteModalSupplier(supplier)} className="btn btn-secondary btn-sm w-full">
+                        Convidar para o Portal do Fornecedor
+                      </button>
+                    )
+                  )}
                 </div>
               </article>
             ))}
@@ -172,6 +195,20 @@ export default function SuppliersPage() {
         </section>
 
         {materialsModalSupplier && <SupplierMaterialsModal supplier={materialsModalSupplier} onClose={() => setMaterialsModalSupplier(null)} />}
+        {inviteModalSupplier && (
+          <SupplierInviteModal
+            supplier={inviteModalSupplier}
+            onClose={() => setInviteModalSupplier(null)}
+            onInvited={() => { reload().catch(() => {}); }}
+          />
+        )}
+        {quoteModalSupplier && (
+          <QuoteRequestModal
+            supplier={quoteModalSupplier}
+            onClose={() => setQuoteModalSupplier(null)}
+            onCreated={() => setQuoteModalSupplier(null)}
+          />
+        )}
         {pendingDelete && <ConfirmDialog title="Eliminar fornecedor?" message={`O fornecedor “${pendingDelete.name}” e as cotações associadas serão removidos.`} confirmLabel="Eliminar fornecedor" danger onCancel={() => setPendingDelete(null)} onConfirm={() => handleDelete(pendingDelete)} />}
       </div>
     </Layout>

@@ -8,6 +8,7 @@ export type Supplier = {
   location: string | null;
   nuit: string | null;
   notes: string | null;
+  supplierAccountId: string | null;
   createdAt: string;
   isReference: boolean;
   referenceMaterialCount: number | null;

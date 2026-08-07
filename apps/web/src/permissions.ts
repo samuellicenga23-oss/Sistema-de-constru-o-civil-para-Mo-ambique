@@ -25,7 +25,7 @@ const PATH_MODULES: Array<{ match: (path: string) => boolean; module: CompanyMod
   { match: (path) => path === "/medicoes" || path.startsWith("/plantas/"), module: "measurements" },
   { match: (path) => path === "/orcamentos" || path.startsWith("/documentos/"), module: "budgets" },
   { match: (path) => path.startsWith("/catalogo"), module: "catalog" },
-  { match: (path) => path === "/fornecedores", module: "suppliers" },
+  { match: (path) => path === "/fornecedores" || path.startsWith("/fornecedores/"), module: "suppliers" },
   { match: (path) => path.endsWith("/compras"), module: "purchasing" },
   { match: (path) => path.endsWith("/cronograma"), module: "schedule" },
   { match: (path) => path.endsWith("/diario"), module: "site_diary" },

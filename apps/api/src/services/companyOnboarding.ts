@@ -62,7 +62,13 @@ export async function createTrialCompany(input: CreateTrialCompanyInput) {
     billingCycle: "trial",
     expiresAt: trialEnds,
   });
-  await syncSigoPricesForCompany(company.id);
+  try {
+    await syncSigoPricesForCompany(company.id);
+  } catch (error) {
+    // Cotação automática / contas de fornecedor podem ainda não existir (migração pendente).
+    // A empresa e o trial têm de ficar criados na mesma — o sync corre depois nos jobs manuais.
+    console.warn("[companyOnboarding] syncSigoPricesForCompany falhou (não bloqueia o trial)", error);
+  }
 
   return { company, admin };
 }

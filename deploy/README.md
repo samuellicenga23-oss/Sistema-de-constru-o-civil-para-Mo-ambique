@@ -11,12 +11,18 @@ automação remota; cada bloco de código é para colar no terminal da VPS (ou l
 
 ```
 /var/www/sigo/            ← código (clonado do teu repositório)
-  apps/web/dist/               ← build do frontend, servido directamente pelo Nginx
+  apps/web/dist/               ← build do painel SIGO
+  apps/supplier/dist/          ← build do Portal do Fornecedor (/fornecedor/)
   apps/api/dist/                ← build da API Node, corre via PM2 na porta 4100 (só localhost)
   apps/plant-service/.venv/     ← ambiente Python, corre via systemd na porta 8001 (só localhost)
-Nginx (porta 80/443, público) → serve o build do web + faz proxy de /api e /uploads para a API
+Nginx (porta 80/443, público) → web + /fornecedor/ (proxy à API) + /api e /uploads
 PostgreSQL (porta 5432, só localhost) ← base de dados
 ```
+
+O painel e o Portal do Fornecedor são sites separados (bundles distintos). Em CloudPanel / um
+único processo Node, a API serve ambos os `dist`. Com Nginx a servir estáticos, a `location
+/fornecedor/` tem de apontar para a API (ou para `apps/supplier/dist`) — caso contrário
+`/fornecedor/*` cai no SPA principal.
 
 O frontend chama sempre caminhos relativos (`/api/...`), por isso não há nada a configurar do
 lado do build do web para apontar para um domínio — o Nginx é que decide para onde tudo vai,
@@ -118,8 +124,10 @@ a partir do teu PC funciona também, mas perdes o `git pull` fácil para actuali
 ```bash
 cd /var/www/sigo
 npm install
-npm run build   # compila packages/shared, apps/api e apps/web, por esta ordem
+npm run build   # shared + api + web + supplier (Portal do Fornecedor em apps/supplier/dist)
 ```
+
+Confirme que existem `apps/web/dist/index.html` e `apps/supplier/dist/index.html` após o build.
 
 Ambiente da API — copiar o exemplo e editar:
 
@@ -138,9 +146,13 @@ SESSION_COOKIE_SECRET=<gerar um valor aleatório longo>
 PLANT_SERVICE_URL=http://127.0.0.1:8001
 UPLOADS_DIR=./uploads
 CORS_ORIGIN=https://SEU_DOMINIO
+PUBLIC_URL=https://SEU_DOMINIO
+# Opcional: subdomínio próprio do portal. Sem isto, emails usam https://SEU_DOMINIO/fornecedor
+# SUPPLIER_PUBLIC_URL=https://fornecedor.SEU_DOMINIO
 NODE_ENV=production
 ```
 
+`PUBLIC_URL` é obrigatório em produção (links absolutos em emails: convites, lembretes, portal).
 `NODE_ENV=production` é importante — activa o cookie de sessão `secure` (só enviado por HTTPS).
 `CORS_ORIGIN` é importante também — sem isto, em produção o CORS fica fechado por omissão (o que
 está certo se só o próprio frontend, servido pelo mesmo Nginx, chamar a API); só precisas de o

@@ -8,7 +8,7 @@ import path from "node:path";
 import { db } from "../db/index.js";
 import { commercialLeads, companies, users } from "../db/schema.js";
 import { requireRole } from "../auth/middleware.js";
-import { sendEmail, emailLayout } from "../services/mailer.js";
+import { sendEmail, emailLayout, escapeHtml, safeContentDispositionFilename } from "../services/mailer.js";
 import { detectProofFileExtension } from "../services/imageValidation.js";
 import { env } from "../env.js";
 
@@ -35,11 +35,11 @@ async function notifySuperAdmins(lead: typeof commercialLeads.$inferSelect) {
       subject: `SIGO — Novo pedido comercial: ${lead.name}${lead.company ? ` (${lead.company})` : ""}`,
       html: emailLayout(
         "Novo pedido comercial",
-        `<p><strong>${lead.name}</strong>${lead.company ? ` · ${lead.company}` : ""} pediu ${lead.planOrPack ? `«${lead.planOrPack}»` : "informação"}.</p>
-         <p>Email: ${lead.email}${lead.phone ? ` · Telefone: ${lead.phone}` : ""}</p>
-         ${lead.notes ? `<p>Notas: ${lead.notes}</p>` : ""}
+        `<p><strong>${escapeHtml(lead.name)}</strong>${lead.company ? ` · ${escapeHtml(lead.company)}` : ""} pediu ${lead.planOrPack ? `«${escapeHtml(lead.planOrPack)}»` : "informação"}.</p>
+         <p>Email: ${escapeHtml(lead.email)}${lead.phone ? ` · Telefone: ${escapeHtml(lead.phone)}` : ""}</p>
+         ${lead.notes ? `<p>Notas: ${escapeHtml(lead.notes)}</p>` : ""}
          ${lead.proofFilePath ? "<p><strong>Anexou comprovativo de pagamento.</strong></p>" : ""}
-         <p>Fonte: ${lead.source}</p>`,
+         <p>Fonte: ${escapeHtml(lead.source)}</p>`,
         `${env.publicUrl}/admin`,
         "Ver no painel",
       ),
@@ -101,7 +101,7 @@ export async function leadRoutes(app: FastifyInstance) {
         await mkdir(uploadsDir, { recursive: true });
         const savedFileName = `${randomUUID()}${ext}`;
         await writeFile(path.join(uploadsDir, savedFileName), fileBuffer);
-        proofFilePath = path.join("lead-proofs", savedFileName);
+        proofFilePath = `lead-proofs/${savedFileName}`;
         proofOriginalFileName = fileName?.slice(0, 300) ?? null;
       }
 
@@ -163,7 +163,10 @@ export async function leadRoutes(app: FastifyInstance) {
     const ext = path.extname(fullPath).toLowerCase();
     const contentType = ext === ".pdf" ? "application/pdf" : ext === ".png" ? "image/png" : ext === ".gif" ? "image/gif" : ext === ".webp" ? "image/webp" : "image/jpeg";
     reply.header("Content-Type", contentType);
-    reply.header("Content-Disposition", `inline; filename="${lead.proofOriginalFileName ?? `comprovativo${ext}`}"`);
+    reply.header(
+      "Content-Disposition",
+      `inline; filename="${safeContentDispositionFilename(lead.proofOriginalFileName, `comprovativo${ext}`)}"`,
+    );
     return reply.send(await readFile(fullPath));
   });
 

@@ -1,7 +1,7 @@
 import { and, eq, isNotNull } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { subscriptions, companies, users } from "../db/schema.js";
-import { sendEmail, emailLayout } from "./mailer.js";
+import { sendEmail, emailLayout, escapeHtml } from "./mailer.js";
 import { env } from "../env.js";
 import { getPlanDefinition } from "@sigo/shared";
 
@@ -11,8 +11,10 @@ import { getPlanDefinition } from "@sigo/shared";
 const REMINDER_DAY_THRESHOLDS = [7, 1] as const;
 
 function daysUntil(date: Date, now: Date): number {
-  const msPerDay = 24 * 60 * 60 * 1000;
-  return Math.ceil((date.getTime() - now.getTime()) / msPerDay);
+  // Diff em dias de calendário UTC (ignora hora) — evita saltar 7/1 por causa da hora do job.
+  const start = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const end = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+  return Math.round((end - start) / (24 * 60 * 60 * 1000));
 }
 
 export async function runSubscriptionExpiryReminders(
@@ -49,7 +51,7 @@ export async function runSubscriptionExpiryReminders(
         subject: days === 1 ? "SIGO — A sua subscrição expira amanhã" : `SIGO — A sua subscrição expira em ${days} dias`,
         html: emailLayout(
           days === 1 ? "A subscrição expira amanhã" : `A subscrição expira em ${days} dias`,
-          `<p>A subscrição de <strong>${sub.companyName}</strong> ao plano <strong>${getPlanDefinition(sub.plan).label}</strong> expira em <strong>${sub.expiresAt.toLocaleDateString("pt-PT")}</strong>.</p>
+          `<p>A subscrição de <strong>${escapeHtml(sub.companyName)}</strong> ao plano <strong>${escapeHtml(getPlanDefinition(sub.plan).label)}</strong> expira em <strong>${escapeHtml(sub.expiresAt.toLocaleDateString("pt-PT"))}</strong>.</p>
            <p>Envie o comprovativo do próximo período em «Créditos e planos» para não perder o acesso.</p>`,
           `${env.publicUrl}/creditos`,
           "Renovar agora",

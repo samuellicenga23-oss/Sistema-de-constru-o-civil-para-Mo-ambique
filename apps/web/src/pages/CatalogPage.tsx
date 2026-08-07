@@ -237,7 +237,7 @@ export default function CatalogPage() {
   }
 
   return (
-    <Layout title="Catálogo de Preços" subtitle="Composições de custo, mão-de-obra e materiais — a base de todos os orçamentos">
+    <Layout title="Catálogo de Preços" subtitle="Composições, mão-de-obra e materiais — preços internos da empresa (sem fornecedor). Cotações de fornecedores são opcionais e complementares.">
       <div className="mx-auto w-full max-w-7xl space-y-5">
         {error && <AlertBanner tone="error" onDismiss={() => setError(null)}>{error}</AlertBanner>}
         {message && <AlertBanner tone="success" onDismiss={() => setMessage(null)}>{message}</AlertBanner>}

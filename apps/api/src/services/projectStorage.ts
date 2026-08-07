@@ -1,6 +1,6 @@
 import { readdir, stat, unlink } from "node:fs/promises";
 import path from "node:path";
-import { and, desc, eq, isNull, ne, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import {
   budgetDocuments,
@@ -228,7 +228,8 @@ export async function permanentlyDeleteProject(projectId: string): Promise<{ ok:
   return { ok: true, deletedFiles: purge.deletedFiles };
 }
 
-/** Projectos com todas as plantas concluídas e sem actividade há N dias. */
+/** Projectos arquivados com todas as plantas concluídas e sem actividade há N dias.
+ * Só o Super Admin dispara limpeza (botão); a limpeza automática no boot está desligada. */
 export async function findProjectsEligibleForWeeklyTrash(idleDays = PROJECT_TRASH_IDLE_DAYS) {
   // postgres.js não aceita Date em sql`` — passar ISO string.
   const cutoffIso = new Date(Date.now() - idleDays * 24 * 60 * 60 * 1000).toISOString();
@@ -243,7 +244,7 @@ export async function findProjectsEligibleForWeeklyTrash(idleDays = PROJECT_TRAS
     })
     .from(projects)
     .innerJoin(plants, eq(plants.projectId, projects.id))
-    .where(isNull(projects.trashedAt))
+    .where(and(isNull(projects.trashedAt), isNotNull(projects.archivedAt)))
     .groupBy(projects.id)
     .having(
       and(
@@ -520,37 +521,11 @@ export async function getStorageOverview(): Promise<StorageOverview> {
   };
 }
 
-let trashJobTimer: ReturnType<typeof setInterval> | null = null;
-let trashJobRunning = false;
-
 export function startWeeklyProjectTrashScheduler(logger: {
   info: (obj: unknown, msg?: string) => void;
   error: (obj: unknown, msg?: string) => void;
 }) {
-  if (trashJobTimer) return;
-
-  const tick = async () => {
-    if (trashJobRunning) return;
-    trashJobRunning = true;
-    try {
-      await runWeeklyProjectTrashJob(logger);
-    } catch (error) {
-      logger.error(error, "Weekly project trash job failed");
-    } finally {
-      trashJobRunning = false;
-    }
-  };
-
-  // Primeira passagem 5 min após arranque; depois a cada 24 h (elegibilidade já exige N dias idle).
-  const initial = setTimeout(() => {
-    void tick();
-  }, 5 * 60 * 1000);
-  initial.unref?.();
-
-  trashJobTimer = setInterval(() => {
-    void tick();
-  }, 24 * 60 * 60 * 1000);
-  trashJobTimer.unref?.();
-
-  logger.info({ idleDays: PROJECT_TRASH_IDLE_DAYS }, "Weekly project trash scheduler started");
+  // Limpeza automática desligada de propósito — só o Super Admin corre via
+  // POST /api/admin/trash/run-cleanup, e só em projectos já arquivados.
+  logger.info({ idleDays: PROJECT_TRASH_IDLE_DAYS, automatic: false }, "Weekly project trash scheduler disabled (manual only)");
 }

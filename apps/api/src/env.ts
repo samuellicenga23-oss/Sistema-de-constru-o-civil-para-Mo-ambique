@@ -23,6 +23,12 @@ if (isProduction) {
   if (!process.env.PLANT_SERVICE_TOKEN) {
     throw new Error("PLANT_SERVICE_TOKEN tem de estar definido em produção.");
   }
+  // Links de email (convite fornecedor, lembretes, etc.) precisam de URL absoluta.
+  if (!process.env.PUBLIC_URL && !process.env.FRONTEND_URL && !process.env.SUPPLIER_PUBLIC_URL) {
+    throw new Error(
+      "PUBLIC_URL (ou FRONTEND_URL / SUPPLIER_PUBLIC_URL) tem de estar definido em produção para links em emails.",
+    );
+  }
 }
 
 export const env = {
@@ -60,6 +66,19 @@ export const env = {
   // `frontendUrl` fica vazio de propósito em produção (mesma origem); este NUNCA pode ficar
   // vazio em produção, ou os links nos emails saem partidos. Defina como "https://sigomz.com".
   publicUrl: process.env.PUBLIC_URL || process.env.FRONTEND_URL || "http://localhost:5273",
+  // Portal do Fornecedor é um SITE À PARTE (apps/supplier), nunca uma rota do SPA principal —
+  // nem os utilizadores do sistema o alcançam a partir do painel, nem um fornecedor consegue
+  // navegar para o painel a partir daqui. Em produção fica por omissão sob "/fornecedor" no
+  // mesmo domínio (ver o mapeamento estático em app.ts); definir SUPPLIER_PUBLIC_URL para um
+  // subdomínio próprio (ex: "https://fornecedor.sigomz.com") quando isso for configurado no
+  // Nginx/CloudPanel, sem precisar de mudar nenhum código. Em dev aponta para o servidor Vite
+  // próprio deste site (porta 5174, nunca a 5273 do painel principal).
+  supplierPublicUrl: (() => {
+    if (process.env.SUPPLIER_PUBLIC_URL) return process.env.SUPPLIER_PUBLIC_URL.replace(/\/$/, "");
+    if (!isProduction) return "http://localhost:5174/fornecedor";
+    const base = (process.env.PUBLIC_URL || process.env.FRONTEND_URL || "").replace(/\/$/, "");
+    return base ? `${base}/fornecedor` : "http://localhost:5174/fornecedor";
+  })(),
   // Envio de email transaccional (notificações, comprovativos, subscrição a expirar). Sem estas
   // três variáveis definidas, o mailer fica "desligado" — regista no log em vez de enviar, para
   // nunca rebentar um pedido só porque o email falhou. Gmail SMTP com "App Password" é o caminho

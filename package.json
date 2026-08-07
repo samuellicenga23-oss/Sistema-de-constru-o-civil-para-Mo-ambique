@@ -4,17 +4,20 @@
   "version": "0.1.0",
   "workspaces": [
     "apps/web",
+    "apps/supplier",
     "apps/api",
     "packages/shared"
   ],
   "scripts": {
     "dev:api": "npm run dev --workspace=apps/api",
     "dev:web": "npm run dev --workspace=apps/web",
+    "dev:supplier": "npm run dev --workspace=apps/supplier",
     "dev:plant": "node scripts/dev-plant.mjs",
     "build:shared": "npm run build --workspace=packages/shared",
     "build:api": "npm run build:shared && npm run build --workspace=apps/api",
     "build:web": "npm run build:shared && npm run build --workspace=apps/web",
-    "build": "npm run build:shared && npm run build --workspace=apps/api && npm run build --workspace=apps/web",
+    "build:supplier": "npm run build --workspace=apps/supplier",
+    "build": "npm run build:shared && npm run build --workspace=apps/api && npm run build --workspace=apps/web && npm run build --workspace=apps/supplier",
     "db:generate": "npm run db:generate --workspace=apps/api",
     "db:migrate": "npm run db:migrate --workspace=apps/api",
     "db:seed": "npm run db:seed --workspace=apps/api",
