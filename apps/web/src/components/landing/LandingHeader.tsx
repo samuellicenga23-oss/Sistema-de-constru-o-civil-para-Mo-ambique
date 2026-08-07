@@ -42,7 +42,7 @@ export function LandingHeader() {
             href="/fornecedor/login"
             className="rounded-lg px-3 py-2 text-[13.5px] font-semibold text-ink-400 transition-colors hover:bg-white hover:text-teal-700"
           >
-            Portal fornecedor
+            Portal SIGO Fornecedores
           </a>
           <Link to={platformHref}>
             <Button variant="secondary">{user ? "Abrir plataforma" : "Entrar"}</Button>

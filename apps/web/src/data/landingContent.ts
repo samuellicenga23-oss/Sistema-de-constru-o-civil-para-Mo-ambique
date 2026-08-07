@@ -29,9 +29,9 @@ export const features = [
   },
   {
     icon: "Truck",
-    title: "Compras e fornecedores",
+    title: "Compras e cotações",
     description:
-      "Pedidos de cotação, comparação de propostas e histórico de preços por zona do país.",
+      "Compare propostas no Portal SIGO Fornecedores, aceite cotações na Gestão da obra e execute as compras na obra.",
   },
   {
     icon: "ClipboardList",
@@ -92,7 +92,7 @@ export const roles = [
     role: "Construtora",
     description:
       "Controle margens por capítulo, antecipe compras e feche autos sem retrabalho no fim do mês.",
-    points: ["Custo real por frente", "Pedidos de compra ligados ao mapa", "Produtividade por equipa"],
+    points: ["Custo real por frente", "Cotações na Gestão da obra", "Pedidos de compra ligados ao mapa"],
   },
   {
     icon: "ClipboardCheck",

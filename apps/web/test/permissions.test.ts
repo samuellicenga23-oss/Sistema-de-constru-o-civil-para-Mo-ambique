@@ -41,7 +41,7 @@ describe("isModuleEnabled", () => {
     const enabled = ["dashboard", "budgets"] as const;
     expect(isModuleEnabled("/painel", [...enabled])).toBe(true);
     expect(isModuleEnabled("/orcamentos", [...enabled])).toBe(true);
-    expect(isModuleEnabled("/fornecedores", [...enabled])).toBe(false);
+    expect(isModuleEnabled("/gestao/cotacoes", [...enabled])).toBe(false);
     expect(isModuleEnabled("/projectos/abc/compras", [...enabled])).toBe(false);
     expect(isModuleEnabled("/perfil", [...enabled])).toBe(true);
   });

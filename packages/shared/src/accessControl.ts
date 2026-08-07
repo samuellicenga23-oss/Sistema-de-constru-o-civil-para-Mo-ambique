@@ -52,7 +52,7 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
   { id: "materiais.ver", label: "Ver materiais e stock", group: "Compras" },
   { id: "materiais.requisitar", label: "Requisitar / criar pedidos", group: "Compras" },
   { id: "materiais.aprovar", label: "Aprovar ordens de compra", group: "Compras" },
-  { id: "fornecedores.gerir", label: "Gerir fornecedores e cotações", group: "Compras" },
+  { id: "fornecedores.gerir", label: "Ver e aceitar cotações de fornecedores", group: "Compras" },
 
   { id: "cronograma.ver", label: "Ver cronograma", group: "Cronograma" },
   { id: "cronograma.editar", label: "Editar cronograma", group: "Cronograma" },

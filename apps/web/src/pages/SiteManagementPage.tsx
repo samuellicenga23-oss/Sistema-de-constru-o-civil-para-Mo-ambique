@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { boqApi, type Project } from "../api/boq";
 import Layout from "../components/Layout";
+import GestaoTabs from "../components/GestaoTabs";
 import PageSearch from "../components/PageSearch";
 import LoadingState from "../components/LoadingState";
 import EmptyState from "../components/EmptyState";
@@ -51,9 +52,10 @@ export default function SiteManagementPage() {
   return (
     <Layout
       title="Gestão da obra"
-      subtitle="Obras com orçamento aprovado — diário, cronograma, compras e financeiro"
+      subtitle="Diário, cronograma, compras, cotações e financeiro — fornecedores respondem no Portal SIGO Fornecedores"
     >
       <div className="mx-auto w-full max-w-7xl space-y-5">
+        <GestaoTabs />
         {error && <p className="text-sm text-red-600">{error}</p>}
 
         <section className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm">

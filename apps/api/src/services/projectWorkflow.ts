@@ -96,7 +96,7 @@ export async function getProjectWorkflowStatus(projectId: string): Promise<Proje
       actions: [
         { label: "Preparar obra", anchor: "preparar-obra" },
         { label: "Catálogo", path: "/catalogo" },
-        { label: "Fornecedores", path: "/fornecedores" },
+        { label: "Cotações", path: "/gestao/cotacoes" },
       ],
     });
   }

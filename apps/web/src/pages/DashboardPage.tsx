@@ -35,7 +35,7 @@ const OPERATION_FLOW = [
   { step: "01", label: "Medir", detail: "Plantas e quantidades", to: "/medicoes" },
   { step: "02", label: "Orçamentar", detail: "Composições e margem", to: "/orcamentos" },
   { step: "03", label: "Planear", detail: "Cronograma", to: "/orcamentos" },
-  { step: "04", label: "Comprar", detail: "Stock e campo", to: "/fornecedores" },
+  { step: "04", label: "Comprar", detail: "Stock e campo", to: "/gestao" },
   { step: "05", label: "Certificar", detail: "Autos e financeiro", to: "/orcamentos" },
 ];
 

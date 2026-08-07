@@ -25,7 +25,7 @@ export function SiteFooter() {
           <div>
             <Logo size={54} tone="light" showTagline />
             <p className="mt-5 max-w-sm text-[13.5px] leading-relaxed text-white/55">
-              SIGO é uma plataforma moçambicana de gestão de obras: orçamento, planeamento, compras,
+              SIGO é uma plataforma moçambicana de gestão de obras: orçamento, planeamento, compras e cotações,
               campo e medição num só sistema.
             </p>
             <p className="mt-5 text-[12.5px] text-white/40">

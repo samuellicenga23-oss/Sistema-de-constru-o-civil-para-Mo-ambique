@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import Layout from "../components/Layout";
+import GestaoTabs from "../components/GestaoTabs";
 import Modal from "../components/Modal";
 import { quoteRequestsApi, type QuoteRequest, type QuoteRequestDetail, type QuoteRequestStatus } from "../api/quoteRequests";
 import { IconClipboard } from "../components/icons";
@@ -82,10 +83,11 @@ export default function QuoteRequestsPage() {
 
   return (
     <Layout
-      title="Pedidos de Cotação"
-      subtitle="Pedidos ao Portal do Fornecedor — as cotações aceites ficam na ficha do fornecedor; o preço base do Catálogo (orçamentos) edita-se à parte, sem fornecedor"
+      title="Gestão da obra"
+      subtitle="Cotações do Portal SIGO Fornecedores — aceite para referência de compra; o preço base do Catálogo (orçamentos) edita-se à parte"
     >
       <div className="mx-auto w-full max-w-5xl space-y-5">
+        <GestaoTabs />
         {error && <p className="text-sm text-red-600">{error}</p>}
 
         <section className="card overflow-hidden">
@@ -93,9 +95,9 @@ export default function QuoteRequestsPage() {
             <div className="flex items-center gap-2">
               <IconClipboard className="h-4 w-4 text-brand-700" />
               <div>
-                <h2 className="section-title text-base">Pedidos enviados</h2>
+                <h2 className="section-title text-base">Cotações recebidas</h2>
                 <p className="mt-0.5 text-xs text-slate-500">
-                  Peça cotações em Fornecedores → Pedir cotação. Aceitar guarda só a cotação do fornecedor; não substitui o preço base do catálogo.
+                  Os fornecedores respondem no Portal do Fornecedor. Aceitar guarda a cotação para compras — não altera o preço base dos orçamentos.
                 </p>
               </div>
             </div>
@@ -110,7 +112,11 @@ export default function QuoteRequestsPage() {
                 <span className={`badge ${STATUS_BADGE[r.status]}`}>{STATUS_LABELS[r.status]}</span>
               </button>
             ))}
-            {requests.length === 0 && <p className="px-5 py-10 text-center text-sm text-slate-500">Ainda não enviou nenhum pedido de cotação.</p>}
+            {requests.length === 0 && (
+              <p className="px-5 py-10 text-center text-sm text-slate-500">
+                Ainda não há cotações. Os pedidos são gerados automaticamente (SIGO Preços) ou pelos fornecedores no portal.
+              </p>
+            )}
           </div>
         </section>
       </div>

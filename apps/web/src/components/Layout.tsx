@@ -10,7 +10,7 @@ import PlantProcessingCenter from "./PlantProcessingCenter";
 import ImportProcessingCenter from "./ImportProcessingCenter";
 import ReadyForReviewBanner from "./ReadyForReviewBanner";
 import SubscriptionBanner from "./SubscriptionBanner";
-import { IconHome, IconFolder, IconTag, IconBuilding, IconLogout, IconSettings, IconRuler, IconUsers, IconMenu, IconClose, IconClipboard } from "./icons";
+import { IconHome, IconFolder, IconTag, IconBuilding, IconLogout, IconSettings, IconRuler, IconMenu, IconClose, IconClipboard } from "./icons";
 import { LogoFull, LogoIcon } from "./Logo";
 import { useLanguage } from "../i18n";
 import type { CompanyModuleKey } from "../api/companies";
@@ -106,7 +106,6 @@ export default function Layout({
           },
           { to: "/escritorio", label: "Comercial", shortLabel: "Comercial", icon: IconBuilding, module: "practice" as const, section: "fases" as const },
           { to: "/catalogo", label: t("catalog"), shortLabel: "Catálogo", icon: IconTag, module: "catalog" as const, permission: "catalogo.ver", section: "ferramentas" as const },
-          { to: "/fornecedores", label: t("suppliers"), shortLabel: "Fornec.", icon: IconUsers, module: "suppliers" as const, permission: "fornecedores.gerir", section: "ferramentas" as const },
           { to: "/calculos-rapidos", label: t("quickCalculations"), shortLabel: "Cálculos", icon: IconRuler, module: "quick_calculations" as const, permission: "calculos.usar", section: "ferramentas" as const },
           ...(user?.role === "admin_empresa"
             ? [{ to: "/empresa", label: t("companySettings"), shortLabel: "Empresa", icon: IconBuilding, section: "admin" as const }]

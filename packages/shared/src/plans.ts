@@ -39,6 +39,10 @@ export type PlanCapabilities = {
   prioritySupport: boolean;
   assistedMigration: boolean;
   training: "none" | "initial" | "team";
+  /** Acesso ao marketplace SIGO Fornecedores (cotações e preços por zona no portal).
+   * Abaixo do Profissional, a empresa só tem os preços de referência «SIGO Preços» (que continua
+   * livre para editar pessoalmente). */
+  supplierMarketplace: boolean;
 };
 
 export type PlanDefinition = {
@@ -90,6 +94,7 @@ export const PLAN_CATALOG: Record<PublicSubscriptionPlanKey, PlanDefinition> = {
       prioritySupport: false,
       assistedMigration: false,
       training: "none",
+      supplierMarketplace: false,
     },
     features: [
       "Fluxo completo da obra (medições, orçamentos, cronograma, compras, diário, financeiro)",
@@ -97,6 +102,7 @@ export const PLAN_CATALOG: Record<PublicSubscriptionPlanKey, PlanDefinition> = {
       "Até 30 composições próprias",
       "5 importações inteligentes / mês",
       "5 análises de plantas / mês",
+      "Preços de referência SIGO Preços (editáveis por si)",
     ],
   },
   profissional: {
@@ -125,6 +131,7 @@ export const PLAN_CATALOG: Record<PublicSubscriptionPlanKey, PlanDefinition> = {
       prioritySupport: false,
       assistedMigration: true,
       training: "initial",
+      supplierMarketplace: true,
     },
     features: [
       "Tudo do Individual",
@@ -132,6 +139,7 @@ export const PLAN_CATALOG: Record<PublicSubscriptionPlanKey, PlanDefinition> = {
       "Composições próprias ilimitadas",
       "30 importações e 30 plantas / mês",
       "Equipa, roles e logótipo nos documentos",
+      "Marketplace SIGO Fornecedores — cotações e preços reais por zona (portal à parte)",
     ],
   },
   empresa: {
@@ -159,6 +167,7 @@ export const PLAN_CATALOG: Record<PublicSubscriptionPlanKey, PlanDefinition> = {
       prioritySupport: true,
       assistedMigration: true,
       training: "team",
+      supplierMarketplace: true,
     },
     features: [
       "Tudo do Profissional",
@@ -193,6 +202,7 @@ export const PLAN_CATALOG: Record<PublicSubscriptionPlanKey, PlanDefinition> = {
       prioritySupport: true,
       assistedMigration: true,
       training: "team",
+      supplierMarketplace: true,
     },
     features: [
       "Tudo do Empresa",
@@ -218,6 +228,7 @@ export const TRIAL_ENTITLEMENTS: PlanLimits & PlanCapabilities & { modules: Reco
   prioritySupport: false,
   assistedMigration: false,
   training: "none",
+  supplierMarketplace: false,
   modules: { ...ALL_MODULES_ON },
 };
 
@@ -303,6 +314,7 @@ export function resolveEntitlements(input: {
         prioritySupport: TRIAL_ENTITLEMENTS.prioritySupport,
         assistedMigration: TRIAL_ENTITLEMENTS.assistedMigration,
         training: TRIAL_ENTITLEMENTS.training,
+        supplierMarketplace: TRIAL_ENTITLEMENTS.supplierMarketplace,
       }
     : { ...plan.capabilities };
 

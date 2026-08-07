@@ -553,7 +553,7 @@ export default function ProjectDetailPage() {
           <div className="grid gap-px border-t border-slate-200 bg-slate-200 sm:grid-cols-2 xl:grid-cols-4">
             {[
               { n: 1, title: "Zona da obra", value: project.zoneId ? "Definida" : "Em falta", detail: project.zoneId ? zones.find((zone) => zone.id === project.zoneId)?.name ?? "Zona seleccionada" : "Defina a zona no cartão de dados da obra.", ok: Boolean(project.zoneId), href: undefined as string | undefined },
-              { n: 2, title: "Fornecedores e cotações", value: `${costReadiness.quoted}/${costReadiness.materials}`, detail: `${costReadiness.suppliers} fornecedor(es); materiais com cotação aplicável.`, ok: costReadiness.suppliers > 0 && costReadiness.quoted > 0, href: "/fornecedores" },
+              { n: 2, title: "Cotações de materiais", value: `${costReadiness.quoted}/${costReadiness.materials}`, detail: `${costReadiness.suppliers} cotação(ões) de mercado; materiais com preço aplicável.`, ok: costReadiness.suppliers > 0 && costReadiness.quoted > 0, href: "/gestao/cotacoes" },
               { n: 3, title: "Preços adoptados", value: `${costReadiness.zonePriced}/${costReadiness.materials}`, detail: project.zoneId ? "Preços próprios da zona; restantes usam preço base." : "A aguardar zona para validar cobertura.", ok: Boolean(project.zoneId) && costReadiness.zonePriced === costReadiness.materials, href: "/catalogo" },
               { n: 4, title: "Composições / capítulos", value: String(costReadiness.compositions), detail: "Ligue capítulos a composições no Catálogo para o custo unitário entrar no orçamento.", ok: costReadiness.compositions > 0, href: "/catalogo" },
             ].map((item) => (
