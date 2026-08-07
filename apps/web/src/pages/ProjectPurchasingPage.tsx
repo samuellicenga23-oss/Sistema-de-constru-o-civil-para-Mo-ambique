@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { boqApi, type Project } from "../api/boq";
 import { suppliersApi, type Supplier, type SupplierMaterialPrice } from "../api/suppliers";
-import { marketplaceApi } from "../api/marketplace";
 import { catalogApi, type Material } from "../api/catalog";
 import {
   purchasingApi,
@@ -160,13 +159,8 @@ export default function ProjectPurchasingPage() {
       purchasingApi.procurementPlan(projectId).catch(() => null),
       scheduleApi.get(projectId).catch(() => null),
     ]);
-    // Fornecedores do marketplace SIGO Fornecedores da zona da obra — a empresa pode escolhê-los
-    // directamente ao criar uma ordem de compra, ao lado da ficha SIGO Preços. Bloqueado
-    // silenciosamente (lista vazia) para planos sem acesso ao marketplace.
-    const marketplace = await marketplaceApi.listSuppliers(proj.zoneId ?? undefined).catch(() => null);
-    const marketplaceSuppliers = marketplace && !marketplace.locked ? marketplace.suppliers : [];
     setProject(proj);
-    setSuppliers([...sups, ...marketplaceSuppliers]);
+    setSuppliers(sups);
     setMaterials(mats);
     setOrders(ords);
     setMovements(movs);
@@ -503,11 +497,6 @@ export default function ProjectPurchasingPage() {
                         <span className="badge badge-gray">{quote.quoteSource === "zona" ? "Preço da zona" : quote.quoteSource === "geral" ? "Preço geral" : "Catálogo SIGO"}</span>
                       </div>
                       <p className="mt-2 text-sm text-slate-600">{quote.unitCost.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {quote.currency} / {quoteRequirement.unit}</p>
-                      {quote.supplierContact && (
-                        <a href={`tel:${quote.supplierContact}`} className="mt-1 inline-flex text-xs font-semibold text-emerald-700 hover:underline">
-                          Ligar: {quote.supplierContact}
-                        </a>
-                      )}
                     </div>
                     <div className="flex items-center justify-between gap-5 sm:justify-end">
                       <div className="text-right">
@@ -666,7 +655,7 @@ export default function ProjectPurchasingPage() {
                     {orderSuppliers.length === 0 && <option value="">Sem fornecedores</option>}
                     {orderSuppliers.map((s) => (
                       <option key={s.id} value={s.id}>
-                        {s.isReference ? `${s.name} (catálogo SIGO)` : s.contact ? `${s.name} — ${s.contact}` : s.name}
+                        {s.isReference ? `${s.name} (catálogo SIGO)` : s.name}
                       </option>
                     ))}
                   </select>
@@ -675,14 +664,6 @@ export default function ProjectPurchasingPage() {
                       Ver cotações no Portal SIGO Fornecedores →
                     </Link>
                   )}
-                  {(() => {
-                    const selected = orderSuppliers.find((s) => s.id === supplierId);
-                    return selected?.contact ? (
-                      <a href={`tel:${selected.contact}`} className="mt-1.5 inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 hover:underline">
-                        Ligar: {selected.contact}
-                      </a>
-                    ) : null;
-                  })()}
                 </div>
                 <div>
                   <label className="label">Data do pedido</label>
@@ -788,11 +769,6 @@ export default function ProjectPurchasingPage() {
                   <div>
                     <span className="font-medium text-gray-900">{o.supplierName}</span>{" "}
                     <span className="text-gray-400 text-sm">— {o.orderDate}</span>
-                    {o.supplierContact && (
-                      <a href={`tel:${o.supplierContact}`} className="ml-2 text-xs font-semibold text-emerald-700 hover:underline">
-                        Ligar: {o.supplierContact}
-                      </a>
-                    )}
                     {(o.scheduleTaskId || o.requiredByDate) && <small className="block mt-1 text-xs text-blue-700">{o.scheduleTaskId ? scheduleTasks.find((task) => task.id === o.scheduleTaskId)?.name ?? "Actividade do cronograma" : "Entrega planeada"}{o.requiredByDate ? ` · necessário até ${o.requiredByDate}` : ""}</small>}
                   </div>
                   <div className="flex flex-wrap items-center justify-end gap-2">
