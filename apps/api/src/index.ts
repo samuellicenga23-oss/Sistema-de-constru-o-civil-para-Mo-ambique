@@ -9,6 +9,7 @@ import { resumePlantProcessingJobs } from "./routes/plants.js";
 import { resumeMeasurementImportJobs } from "./services/measurementImportJobs.js";
 import { startWeeklyProjectTrashScheduler } from "./services/projectStorage.js";
 import { startSubscriptionReminderScheduler } from "./services/subscriptionReminders.js";
+import { startSupplierPriceFeedScheduler } from "./services/supplierPriceFeed.js";
 
 const app = await buildApp();
 let shuttingDown = false;
@@ -53,6 +54,7 @@ try {
   if (resumedImportJobs > 0) app.log.info({ count: resumedImportJobs }, "Resumed measurement import jobs");
   startWeeklyProjectTrashScheduler(app.log);
   startSubscriptionReminderScheduler(app.log);
+  startSupplierPriceFeedScheduler(app.log);
 } catch (error) {
   app.log.fatal(error, "API failed to start");
   captureException(error);

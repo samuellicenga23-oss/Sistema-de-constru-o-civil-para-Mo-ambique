@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../src/app.js";
 import { db, sql } from "../src/db/index.js";
-import { materials, suppliers, supplierAccounts, supplierMaterialPrices } from "../src/db/schema.js";
+import { materials, suppliers, supplierAccounts, supplierMaterialPrices, priceZones } from "../src/db/schema.js";
 import { and, eq } from "drizzle-orm";
 import { truncateAll, createCompany, createUser, loginCookie } from "./helpers.js";
 
@@ -30,37 +30,29 @@ async function extractCookie(res: { headers: Record<string, unknown> }, name: st
 }
 
 describe("Portal do Fornecedor — pedidos de cotação", () => {
-  it("percorre o fluxo completo: convite, resposta do fornecedor e aceitação (só supplier_*_prices)", async () => {
+  it("percorre o fluxo completo: registo público, resposta do fornecedor e aceitação (só supplier_*_prices)", async () => {
+    // Plano profissional por omissão em createCompany() — é preciso para aceder ao marketplace.
     const company = await createCompany("Construtora RFQ Lda");
     await createUser(company.id, "admin_empresa", "admin-rfq@test.local");
     const companyCookie = await loginCookie(app, "admin-rfq@test.local");
 
-    const [supplier] = await db.insert(suppliers).values({ companyId: company.id, name: "Cimentos do Sul" }).returning();
     const [material] = await db.insert(materials).values({ companyId: null, name: "Cimento 50kg (teste RFQ)", unit: "un", baseUnitCost: "450" }).returning();
+    const [zone] = await db.insert(priceZones).values({ companyId: null, name: "Matola (teste RFQ)" }).returning();
 
-    // 1. Convidar o fornecedor
-    const inviteRes = await app.inject({
+    // 1. O fornecedor regista-se sozinho no SIGO Fornecedores (sem nenhuma empresa o convidar).
+    const registerRes = await app.inject({
       method: "POST",
-      url: `/api/suppliers/${supplier.id}/invite`,
-      headers: { cookie: companyCookie },
-      payload: { email: "fornecedor-rfq@test.local", name: "Cimentos do Sul" },
+      url: "/api/supplier/auth/register",
+      payload: { name: "Cimentos do Sul", email: "fornecedor-rfq@test.local", password: "fornecedorSenha123", zoneId: zone.id },
     });
-    expect(inviteRes.statusCode).toBe(201);
-    expect(inviteRes.json()).toEqual(expect.objectContaining({ ok: true, alreadyActive: false }));
+    expect(registerRes.statusCode).toBe(201);
+    const supplierCookie = await extractCookie(registerRes, "sid_sup");
 
-    const [account] = await db.select().from(supplierAccounts).where(eq(supplierAccounts.email, "fornecedor-rfq@test.local")).limit(1);
-    expect(account?.inviteToken).toBeTruthy();
+    const [supplier] = await db.select().from(suppliers).where(eq(suppliers.name, "Cimentos do Sul")).limit(1);
+    expect(supplier.companyId).toBeNull();
+    expect(supplier.zoneId).toBe(zone.id);
 
-    // 2. Fornecedor aceita o convite
-    const acceptRes = await app.inject({
-      method: "POST",
-      url: "/api/supplier/auth/accept-invite",
-      payload: { token: account!.inviteToken, password: "fornecedorSenha123" },
-    });
-    expect(acceptRes.statusCode).toBe(201);
-    const supplierCookie = await extractCookie(acceptRes, "sid_sup");
-
-    // 3. Empresa cria o pedido de cotação
+    // 2. Empresa (plano Profissional) cria o pedido de cotação a esse fornecedor do marketplace.
     const createRes = await app.inject({
       method: "POST",
       url: "/api/quote-requests",
@@ -112,25 +104,18 @@ describe("Portal do Fornecedor — pedidos de cotação", () => {
 
   it("impede um fornecedor de ver o pedido de cotação de outro fornecedor", async () => {
     const companyA = await createCompany("Empresa A RFQ");
-    const companyB = await createCompany("Empresa B RFQ");
     await createUser(companyA.id, "admin_empresa", "admin-a-rfq@test.local");
-    await createUser(companyB.id, "admin_empresa", "admin-b-rfq@test.local");
     const cookieA = await loginCookie(app, "admin-a-rfq@test.local");
-    const cookieB = await loginCookie(app, "admin-b-rfq@test.local");
 
-    const [supplierA] = await db.insert(suppliers).values({ companyId: companyA.id, name: "Fornecedor A" }).returning();
-    const [supplierB] = await db.insert(suppliers).values({ companyId: companyB.id, name: "Fornecedor B" }).returning();
     const [material] = await db.insert(materials).values({ companyId: null, name: "Areia (teste isolamento)", unit: "m3", baseUnitCost: "300" }).returning();
+    const [zone] = await db.insert(priceZones).values({ companyId: null, name: "Boane (teste isolamento)" }).returning();
 
-    await app.inject({ method: "POST", url: `/api/suppliers/${supplierA.id}/invite`, headers: { cookie: cookieA }, payload: { email: "fornecedor-a@test.local" } });
-    await app.inject({ method: "POST", url: `/api/suppliers/${supplierB.id}/invite`, headers: { cookie: cookieB }, payload: { email: "fornecedor-b@test.local" } });
+    const registerA = await app.inject({ method: "POST", url: "/api/supplier/auth/register", payload: { name: "Fornecedor A", email: "fornecedor-a@test.local", password: "senhaFornecedorA1", zoneId: zone.id } });
+    const registerB = await app.inject({ method: "POST", url: "/api/supplier/auth/register", payload: { name: "Fornecedor B", email: "fornecedor-b@test.local", password: "senhaFornecedorB1", zoneId: zone.id } });
+    const supplierCookieB = await extractCookie(registerB, "sid_sup");
 
-    const [accountA] = await db.select().from(supplierAccounts).where(eq(supplierAccounts.email, "fornecedor-a@test.local")).limit(1);
-    const [accountB] = await db.select().from(supplierAccounts).where(eq(supplierAccounts.email, "fornecedor-b@test.local")).limit(1);
-
-    await app.inject({ method: "POST", url: "/api/supplier/auth/accept-invite", payload: { token: accountA!.inviteToken, password: "senhaFornecedorA1" } });
-    const acceptResB = await app.inject({ method: "POST", url: "/api/supplier/auth/accept-invite", payload: { token: accountB!.inviteToken, password: "senhaFornecedorB1" } });
-    const supplierCookieB = await extractCookie(acceptResB, "sid_sup");
+    const [supplierA] = await db.select().from(suppliers).where(eq(suppliers.name, "Fornecedor A")).limit(1);
+    void registerA;
 
     const createRes = await app.inject({
       method: "POST",

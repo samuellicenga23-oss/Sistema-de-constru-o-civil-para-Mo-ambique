@@ -19,6 +19,7 @@ import { requireRole } from "../auth/middleware.js";
 import { computeHourlyRate } from "../services/costEngine.js";
 import { cloneLabourCategoryForCompany, cloneMaterialForCompany, cloneEquipmentForCompany } from "../services/catalogClone.js";
 import { SIGO_PRICES_SUPPLIER_NAME, syncSigoPricesForCompany } from "../services/sigoPrices.js";
+import { assertSupplierMarketplaceAccess } from "../services/subscriptionEntitlements.js";
 import { CURRENCIES, UNITS, fixedSigo } from "@sigo/shared";
 
 const CATALOG_ROLES = ["super_admin", "admin_empresa", "orcamentista"] as const;
@@ -258,6 +259,13 @@ export async function catalogRoutes(app: FastifyInstance) {
     // cotação geral; dentro do mesmo nível escolhe-se a de menor preço. É uma sugestão explícita —
     // nunca altera silenciosamente o preço usado nas composições/orçamentos.
     const companyId = request.currentUser!.companyId;
+    // Preços próprios (SIGO Preços) sempre entram; preços do marketplace nacional (fornecedores
+    // reais, companyId null) só entram para empresas do plano Profissional — mesmo gate aplicado
+    // em GET /api/marketplace/suppliers. Um fornecedor do marketplace não tem cotação "por zona"
+    // (supplierMaterialPrices.zoneId fica sempre null nesses casos) — a zona é a que ele indicou
+    // no registo (suppliers.zoneId), por isso a correspondência de zona usa uma coluna diferente
+    // consoante o tipo de fornecedor.
+    const marketplaceAllowed = companyId ? !(await assertSupplierMarketplaceAccess(companyId)) : false;
     const quoteRows = companyId && materialIds.length
       ? await db
           .select({
@@ -267,26 +275,31 @@ export async function catalogRoutes(app: FastifyInstance) {
             zoneId: supplierMaterialPrices.zoneId,
             supplierId: suppliers.id,
             supplierName: suppliers.name,
+            supplierCompanyId: suppliers.companyId,
+            supplierZoneId: suppliers.zoneId,
           })
           .from(supplierMaterialPrices)
           .innerJoin(suppliers, eq(supplierMaterialPrices.supplierId, suppliers.id))
           .where(and(
-            eq(suppliers.companyId, companyId),
+            marketplaceAllowed ? or(eq(suppliers.companyId, companyId), isNull(suppliers.companyId)) : eq(suppliers.companyId, companyId),
             inArray(supplierMaterialPrices.materialId, materialIds),
-            zoneId ? or(eq(supplierMaterialPrices.zoneId, zoneId), isNull(supplierMaterialPrices.zoneId)) : isNull(supplierMaterialPrices.zoneId),
           ))
       : [];
-    const bestQuoteByMaterialId = new Map<string, (typeof quoteRows)[number]>();
+    const bestQuoteByMaterialId = new Map<string, (typeof quoteRows)[number] & { zoneMatch: boolean }>();
     for (const quote of quoteRows) {
+      const zoneMatch = quote.supplierCompanyId === null ? zoneId != null && quote.supplierZoneId === zoneId : zoneId != null && quote.zoneId === zoneId;
+      // Cotações gerais (sem zona própria) só contam quando não há filtro de zona activo, ou
+      // quando são do próprio catálogo (SIGO Preços) sem zona específica — um fornecedor privado
+      // fora da zona pedida não deve aparecer como sugestão.
+      if (quote.supplierCompanyId === null && zoneId != null && !zoneMatch) continue;
+      if (quote.supplierCompanyId !== null && quote.zoneId != null && zoneId != null && !zoneMatch) continue;
       const current = bestQuoteByMaterialId.get(quote.materialId);
-      const quoteSpecific = zoneId != null && quote.zoneId === zoneId;
-      const currentSpecific = zoneId != null && current?.zoneId === zoneId;
       if (
         !current ||
-        (quoteSpecific && !currentSpecific) ||
-        (quoteSpecific === currentSpecific && Number(quote.unitCost) < Number(current.unitCost))
+        (zoneMatch && !current.zoneMatch) ||
+        (zoneMatch === current.zoneMatch && Number(quote.unitCost) < Number(current.unitCost))
       ) {
-        bestQuoteByMaterialId.set(quote.materialId, quote);
+        bestQuoteByMaterialId.set(quote.materialId, { ...quote, zoneMatch });
       }
     }
 
@@ -307,7 +320,7 @@ export async function catalogRoutes(app: FastifyInstance) {
         marketSupplierId: quote?.supplierId ?? null,
         marketSupplierName: quote?.supplierName ?? null,
         marketPriceIsReference: quote?.supplierName === SIGO_PRICES_SUPPLIER_NAME,
-        marketPriceIsZoneSpecific: Boolean(zoneId && quote?.zoneId === zoneId),
+        marketPriceIsZoneSpecific: Boolean(quote?.zoneMatch),
       };
     });
   });

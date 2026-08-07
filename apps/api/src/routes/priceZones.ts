@@ -25,17 +25,6 @@ function targetCompanyId(request: FastifyRequest): string | null {
   return role === "super_admin" ? null : companyId!;
 }
 
-function dedupeByName<T extends { name: string; companyId: string | null }>(rows: T[]): T[] {
-  const byName = new Map<string, T>();
-  for (const row of rows) {
-    const current = byName.get(row.name);
-    if (!current || (current.companyId === null && row.companyId !== null)) {
-      byName.set(row.name, row);
-    }
-  }
-  return Array.from(byName.values());
-}
-
 const zoneSchema = z.object({
   name: z.string().trim().min(1).max(100),
   province: z.string().trim().max(100).nullable().optional(),
@@ -71,53 +60,38 @@ function serializeZoneInput(data: z.infer<typeof zoneSchema>) {
 export async function priceZoneRoutes(app: FastifyInstance) {
   const auth = { preHandler: requireRole(...CATALOG_ROLES) };
 
-  // ---------- Zonas de preço ----------
-  app.get("/api/catalog/price-zones", auth, async (request: FastifyRequest) => {
-    const rows = await db.select().from(priceZones).where(scopeFilter(priceZones.companyId, request));
-    return dedupeByName(rows).sort((a, b) => a.name.localeCompare(b.name));
+  // Sem sessão nenhuma — precisa de existir antes de o fornecedor ter conta, para escolher a
+  // zona onde opera no formulário público de registo (apps/supplier).
+  app.get("/api/public/price-zones", async () => {
+    const rows = await db.select({ id: priceZones.id, name: priceZones.name, province: priceZones.province }).from(priceZones).where(isNull(priceZones.companyId));
+    return rows.sort((a, b) => a.name.localeCompare(b.name));
+  });
+  // Zonas passaram a ser uma lista única e nacional, gerida só pela plataforma — é o fornecedor
+  // que, ao registar-se no SIGO Fornecedores, indica em qual delas opera (ver
+  // routes/supplierAuth.ts). A empresa deixou de poder criar/editar/eliminar zonas próprias;
+  // continua livre para indicar o preço dos SEUS materiais em cada zona existente (ver as rotas
+  // de "Preços de material por zona" abaixo, essas continuam abertas a CATALOG_ROLES).
+  const zoneManageAuth = { preHandler: requireRole("super_admin") };
+
+  // ---------- Zonas de preço (lista nacional única, só de leitura para empresas) ----------
+  app.get("/api/catalog/price-zones", auth, async () => {
+    const rows = await db.select().from(priceZones).where(isNull(priceZones.companyId));
+    return rows.sort((a, b) => a.name.localeCompare(b.name));
   });
 
-  app.post("/api/catalog/price-zones", auth, async (request: FastifyRequest, reply: FastifyReply) => {
+  app.post("/api/catalog/price-zones", zoneManageAuth, async (request: FastifyRequest, reply: FastifyReply) => {
     const parsed = zoneSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
-    const companyId = targetCompanyId(request);
-    const [row] = await db.insert(priceZones).values({ ...serializeZoneInput(parsed.data), companyId }).returning();
+    const [row] = await db.insert(priceZones).values({ ...serializeZoneInput(parsed.data), companyId: null }).returning();
     return reply.code(201).send(row);
   });
 
-  app.put("/api/catalog/price-zones/:id", auth, async (request, reply) => {
+  app.put("/api/catalog/price-zones/:id", zoneManageAuth, async (request, reply) => {
     const { id } = request.params as { id: string };
     const parsed = zoneSchema.partial().safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
 
-    const companyId = targetCompanyId(request);
-    let [target] = await db
-      .select()
-      .from(priceZones)
-      .where(and(eq(priceZones.id, id), ownScopeFilter(priceZones.companyId, request)))
-      .limit(1);
-
-    if (!target && companyId) {
-      // Só zonas partilhadas podem ser clonadas; uma zona privada de outra empresa nunca pode
-      // ser copiada por conhecer o seu UUID.
-      const [source] = await db.select().from(priceZones).where(and(eq(priceZones.id, id), isNull(priceZones.companyId))).limit(1);
-      if (!source) return reply.code(404).send({ error: "Zona não encontrada" });
-      const [copy] = await db.insert(priceZones).values({
-        companyId,
-        name: source.name,
-        province: source.province,
-        district: source.district,
-        description: source.description,
-        materialAdjustmentPct: source.materialAdjustmentPct,
-        labourAdjustmentPct: source.labourAdjustmentPct,
-        equipmentAdjustmentPct: source.equipmentAdjustmentPct,
-        defaultTransportPct: source.defaultTransportPct,
-        sourceName: source.sourceName,
-        sourceReference: source.sourceReference,
-        effectiveDate: source.effectiveDate,
-      }).returning();
-      target = copy;
-    }
+    const [target] = await db.select().from(priceZones).where(and(eq(priceZones.id, id), isNull(priceZones.companyId))).limit(1);
     if (!target) return reply.code(404).send({ error: "Zona não encontrada" });
 
     const update = parsed.data;
@@ -132,9 +106,9 @@ export async function priceZoneRoutes(app: FastifyInstance) {
     return row;
   });
 
-  app.delete("/api/catalog/price-zones/:id", auth, async (request, reply) => {
+  app.delete("/api/catalog/price-zones/:id", zoneManageAuth, async (request, reply) => {
     const { id } = request.params as { id: string };
-    await db.delete(priceZones).where(and(eq(priceZones.id, id), ownScopeFilter(priceZones.companyId, request)));
+    await db.delete(priceZones).where(and(eq(priceZones.id, id), isNull(priceZones.companyId)));
     return { ok: true };
   });
 

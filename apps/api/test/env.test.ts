@@ -53,9 +53,27 @@ describe("Guardas de produção (env.ts)", () => {
     expect(result.output).toContain("PLANT_SERVICE_TOKEN");
   });
 
-  it("arranca em produção quando ambos os segredos estão definidos", () => {
-    const result = tryImportEnv({ ...base, SESSION_COOKIE_SECRET: "algo-forte-aleatorio", PLANT_SERVICE_TOKEN: "token-forte" });
+  it("arranca em produção quando os segredos e o URL público estão definidos", () => {
+    const result = tryImportEnv({
+      ...base,
+      SESSION_COOKIE_SECRET: "algo-forte-aleatorio",
+      PLANT_SERVICE_TOKEN: "token-forte",
+      PUBLIC_URL: "https://sigomz.com",
+    });
     expect(result.ok).toBe(true);
+  });
+
+  it("recusa arrancar em produção sem PUBLIC_URL/FRONTEND_URL/SUPPLIER_PUBLIC_URL", () => {
+    const result = tryImportEnv({
+      ...base,
+      SESSION_COOKIE_SECRET: "algo-forte-aleatorio",
+      PLANT_SERVICE_TOKEN: "token-forte",
+      PUBLIC_URL: undefined,
+      FRONTEND_URL: undefined,
+      SUPPLIER_PUBLIC_URL: undefined,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("PUBLIC_URL");
   });
 
   it("em desenvolvimento arranca sem nenhum dos dois segredos", () => {

@@ -2,13 +2,17 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { eq, and, or, isNull, desc, sql as drizzleSql } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { purchaseOrders, purchaseOrderLines, stockMovements, suppliers, materials, budgetDocuments, financialEntries, scheduleTasks } from "../db/schema.js";
+import { purchaseOrders, purchaseOrderLines, stockMovements, suppliers, materials, budgetDocuments, financialEntries, scheduleTasks, supplierAccounts } from "../db/schema.js";
 import { requireCompanyUser, requirePermission, requireRole } from "../auth/middleware.js";
 import { assertProjectOwned } from "../services/accessControl.js";
 import { assertApprovedOrcamentoForSite } from "../services/siteGate.js";
 import { calculateVatTotals, CURRENCIES } from "@sigo/shared";
 import { computeProcurementPlan } from "../services/procurementEngine.js";
 import { recordAuditEvent } from "../services/auditTrail.js";
+import { assertSupplierMarketplaceAccess } from "../services/subscriptionEntitlements.js";
+import { resolveBuyerContact } from "../services/buyerContact.js";
+import { sendEmail, emailLayout, escapeHtml } from "../services/mailer.js";
+import { env } from "../env.js";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista"] as const;
 const canRequestMaterials = requirePermission("materiais.requisitar");
@@ -49,6 +53,36 @@ async function assertPurchaseOrderOwned(id: string, companyId: string) {
   if (!order) return null;
   const project = await assertProjectOwned(order.projectId, companyId);
   return project ? order : null;
+}
+
+// Uma ordem de compra é o sinal mais forte de que a empresa está a usar (ou muito perto de usar)
+// os preços deste fornecedor — avisa-o com o contacto de quem comprou, para poder ligar e
+// ajudar a fechar/confirmar a venda, tal como já acontece ao pedir uma cotação.
+async function notifyMarketplaceSupplierOfOrder(supplierAccountId: string | null, companyId: string, buyerUserId: string | null, itemCount: number) {
+  if (!supplierAccountId) return;
+  const [account] = await db.select({ email: supplierAccounts.email, name: supplierAccounts.name }).from(supplierAccounts).where(eq(supplierAccounts.id, supplierAccountId)).limit(1);
+  if (!account?.email) return;
+  const buyer = await resolveBuyerContact(companyId, buyerUserId);
+  const contactLines = [
+    buyer.buyerName ? `<strong>${escapeHtml(buyer.buyerName)}</strong>` : null,
+    buyer.buyerEmail ? escapeHtml(buyer.buyerEmail) : null,
+    buyer.companyPhone ? escapeHtml(buyer.companyPhone) : null,
+  ].filter(Boolean);
+  void sendEmail(
+    {
+      to: account.email,
+      subject: `SIGO — ${buyer.companyName} criou uma ordem de compra consigo`,
+      html: emailLayout(
+        "Nova ordem de compra",
+        `<p>Olá ${escapeHtml(account.name)}, a empresa <strong>${escapeHtml(buyer.companyName)}</strong> criou uma ordem de compra com os seus preços (${itemCount} item(ns)).</p>
+         ${contactLines.length ? `<p><strong>Contacto de compras</strong> — ${contactLines.join(" · ")}. Ligue directamente para confirmar prazos e ajudar a fechar esta compra.</p>` : ""}
+         <p>Entre no seu Portal do Fornecedor para rever os seus preços e os pedidos desta empresa.</p>`,
+        `${env.supplierPublicUrl}/login`,
+        "Abrir Portal do Fornecedor",
+      ),
+    },
+    undefined,
+  );
 }
 
 async function getOrderWithLines(orderId: string) {
@@ -93,7 +127,7 @@ export async function purchasingRoutes(app: FastifyInstance) {
     if (!project) return reply.code(404).send({ error: "Projecto não encontrado" });
 
     const orders = await db
-      .select({ order: purchaseOrders, supplierName: suppliers.name })
+      .select({ order: purchaseOrders, supplierName: suppliers.name, supplierContact: suppliers.contact })
       .from(purchaseOrders)
       .innerJoin(suppliers, eq(purchaseOrders.supplierId, suppliers.id))
       .where(eq(purchaseOrders.projectId, projectId))
@@ -103,6 +137,7 @@ export async function purchasingRoutes(app: FastifyInstance) {
       orders.map(async (o) => ({
         ...o.order,
         supplierName: o.supplierName,
+        supplierContact: o.supplierContact,
         lines: (await getOrderWithLines(o.order.id)).map((l) => ({ ...l.line, materialName: l.materialName, unit: l.materialUnit })),
       }))
     );
@@ -124,12 +159,19 @@ export async function purchasingRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: "Agrupe quantidades repetidas do mesmo material numa única linha" });
     }
 
+    // A ordem pode apontar à ficha SIGO Preços da própria empresa OU a um fornecedor real do
+    // marketplace nacional (companyId null) — este último exige o plano Profissional, o mesmo
+    // gate aplicado em todo o resto do marketplace.
     const [supplier] = await db
       .select()
       .from(suppliers)
-      .where(and(eq(suppliers.id, parsed.data.supplierId), eq(suppliers.companyId, companyId)))
+      .where(and(eq(suppliers.id, parsed.data.supplierId), or(eq(suppliers.companyId, companyId), isNull(suppliers.companyId))))
       .limit(1);
     if (!supplier) return reply.code(404).send({ error: "Fornecedor não encontrado" });
+    if (supplier.companyId === null) {
+      const blocked = await assertSupplierMarketplaceAccess(companyId);
+      if (blocked) return reply.code(402).send(blocked);
+    }
 
     if (parsed.data.scheduleTaskId) {
       const [task] = await db.select().from(scheduleTasks).where(eq(scheduleTasks.id, parsed.data.scheduleTaskId)).limit(1);
@@ -171,7 +213,10 @@ export async function purchasingRoutes(app: FastifyInstance) {
       entityType: "purchase_order", entityId: order.id, action: "created",
       after: { status: order.status, supplierId: order.supplierId, orderDate: order.orderDate, lineCount: lines.length },
     });
-    return reply.code(201).send({ ...order, supplierName: supplier.name, lines });
+    if (supplier.companyId === null) {
+      await notifyMarketplaceSupplierOfOrder(supplier.supplierAccountId, companyId, request.currentUser!.id, lines.length);
+    }
+    return reply.code(201).send({ ...order, supplierName: supplier.name, supplierContact: supplier.contact, lines });
   });
 
   /** Pedido leve do engenheiro: material + quantidade, sem cotação. Vira OC em rascunho. */
@@ -256,7 +301,7 @@ export async function purchasingRoutes(app: FastifyInstance) {
       action: "material_request_created",
       after: { status: order.status, lineCount: lines.length },
     });
-    return reply.code(201).send({ ...order, supplierName: supplier.name, lines });
+    return reply.code(201).send({ ...order, supplierName: supplier.name, supplierContact: supplier.contact, lines });
   });
 
   // Mudar de estado — "recebido" gera automaticamente as entradas de stock (uma por linha), tal

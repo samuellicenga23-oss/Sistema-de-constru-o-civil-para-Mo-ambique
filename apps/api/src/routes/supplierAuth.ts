@@ -1,9 +1,9 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import rateLimit from "@fastify/rate-limit";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { supplierAccounts } from "../db/schema.js";
+import { supplierAccounts, suppliers, priceZones } from "../db/schema.js";
 import { hashPassword, verifyPassword } from "../auth/password.js";
 import {
   createSupplierSession,
@@ -86,6 +86,61 @@ export async function supplierAuthRoutes(app: FastifyInstance) {
       const session = await createSupplierSession(account.id, sessionMetaOf(request));
       reply.setCookie("sid_sup", session.id, { ...SUPPLIER_COOKIE_OPTS, expires: session.expiresAt });
       return { id: account.id, name: account.name, email: account.email, phone: account.phone };
+    },
+  );
+
+  const registerSchema = z.object({
+    name: z.string().trim().min(2).max(150),
+    email: z.string().trim().toLowerCase().email(),
+    password: z.string().min(8, "A palavra-passe deve ter pelo menos 8 caracteres"),
+    phone: z.string().trim().max(60).optional(),
+    nuit: z.string().trim().max(30).optional(),
+    zoneId: z.string().uuid(),
+  });
+
+  // Registo público — o fornecedor cria a sua própria conta e ficha no SIGO Fornecedores, sem
+  // depender de nenhuma empresa o convidar. Fica logo activo (sem aprovação prévia); indica já a
+  // zona onde opera, porque é essa indicação que substitui a antiga gestão de zonas por empresa.
+  app.post(
+    "/api/supplier/auth/register",
+    { config: { rateLimit: { max: 5, timeWindow: "1 hour" } } },
+    async (request, reply) => {
+      const parsed = registerSchema.safeParse(request.body);
+      if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+
+      const [existing] = await db.select({ id: supplierAccounts.id }).from(supplierAccounts).where(eq(supplierAccounts.email, parsed.data.email)).limit(1);
+      if (existing) {
+        return reply.code(409).send({ error: "Já existe uma conta de fornecedor com este email. Experimente entrar." });
+      }
+
+      const [zone] = await db.select().from(priceZones).where(and(eq(priceZones.id, parsed.data.zoneId), isNull(priceZones.companyId))).limit(1);
+      if (!zone) return reply.code(400).send({ error: "Zona inválida" });
+
+      const passwordHash = await hashPassword(parsed.data.password);
+      const [account] = await db
+        .insert(supplierAccounts)
+        .values({
+          name: parsed.data.name,
+          email: parsed.data.email,
+          passwordHash,
+          phone: parsed.data.phone || null,
+          emailVerifiedAt: new Date(),
+        })
+        .returning();
+
+      await db.insert(suppliers).values({
+        companyId: null,
+        name: parsed.data.name,
+        contact: parsed.data.phone || null,
+        location: zone.name,
+        nuit: parsed.data.nuit || null,
+        zoneId: zone.id,
+        supplierAccountId: account.id,
+      });
+
+      const session = await createSupplierSession(account.id, sessionMetaOf(request));
+      reply.setCookie("sid_sup", session.id, { ...SUPPLIER_COOKIE_OPTS, expires: session.expiresAt });
+      return reply.code(201).send({ id: account.id, name: account.name, email: account.email });
     },
   );
 

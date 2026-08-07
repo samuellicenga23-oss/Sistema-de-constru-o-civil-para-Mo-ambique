@@ -14,6 +14,7 @@ import { computeMaterialsByPhase } from "./materialsByPhase.js";
 import { mapToPhase } from "./phaseMapping.js";
 import { buildRebarPurchasePlan, calculateVatTotals, DEFAULT_REBAR_LENGTH_M, type RebarPurchaseLine } from "@sigo/shared";
 import { SIGO_PRICES_SUPPLIER_NAME } from "./sigoPrices.js";
+import { assertSupplierMarketplaceAccess } from "./subscriptionEntitlements.js";
 
 export type ProjectRebarPurchasePlan = {
   sourcePlantId: string;
@@ -71,6 +72,7 @@ export type ProcurementRequirement = {
   estimatedTotalWithVat: number;
   supplierId: string | null;
   supplierName: string | null;
+  supplierContact: string | null;
   quoteSource: "zona" | "geral" | "catalogo";
   quotes: ProcurementQuote[];
   suggestedScheduleTaskId: string | null;
@@ -81,6 +83,7 @@ export type ProcurementRequirement = {
 export type ProcurementQuote = {
   supplierId: string | null;
   supplierName: string;
+  supplierContact: string | null;
   unitCost: number;
   estimatedSubtotal: number;
   estimatedVat: number;
@@ -169,7 +172,11 @@ export async function computeProcurementPlan(args: {
     };
   }
 
-  const [movementRows, orderRows, quoteRows, taskRows] = await Promise.all([
+  // Preços do marketplace nacional (fornecedores reais, companyId null) só entram no plano de
+  // compras se a empresa tiver acesso (plano Profissional) — mesmo gate do resto do marketplace.
+  const marketplaceAllowed = !(await assertSupplierMarketplaceAccess(args.companyId));
+
+  const [movementRows, orderRows, rawQuoteRows, taskRows] = await Promise.all([
     db.select().from(stockMovements).where(and(eq(stockMovements.projectId, args.projectId), inArray(stockMovements.materialId, materialIds))),
     db
       .select({ order: purchaseOrders, line: purchaseOrderLines })
@@ -181,22 +188,40 @@ export async function computeProcurementPlan(args: {
         materialId: supplierMaterialPrices.materialId,
         supplierId: suppliers.id,
         supplierName: suppliers.name,
+        supplierContact: suppliers.contact,
         zoneId: supplierMaterialPrices.zoneId,
         unitCost: supplierMaterialPrices.unitCost,
         currency: supplierMaterialPrices.currency,
+        supplierCompanyId: suppliers.companyId,
+        supplierZoneId: suppliers.zoneId,
       })
       .from(supplierMaterialPrices)
       .innerJoin(suppliers, eq(supplierMaterialPrices.supplierId, suppliers.id))
       .where(and(
-        eq(suppliers.companyId, args.companyId),
+        marketplaceAllowed ? or(eq(suppliers.companyId, args.companyId), isNull(suppliers.companyId)) : eq(suppliers.companyId, args.companyId),
         inArray(supplierMaterialPrices.materialId, materialIds),
         eq(supplierMaterialPrices.currency, args.currency as "MZN" | "USD"),
-        args.zoneId ? or(isNull(supplierMaterialPrices.zoneId), eq(supplierMaterialPrices.zoneId, args.zoneId)) : isNull(supplierMaterialPrices.zoneId)
       )),
     db.select().from(scheduleTasks).where(eq(scheduleTasks.projectId, args.projectId)),
   ]);
   taskRows.sort((a, b) => a.startDate.localeCompare(b.startDate));
   const summaryTaskIds = new Set(taskRows.filter((task) => task.parentId).map((task) => task.parentId!));
+
+  // Um fornecedor do marketplace não tem cotação "por zona" (o preço é sempre geral) — a zona é
+  // a que ele indicou no registo. Normaliza aqui para o resto do motor (ranking, agrupamento)
+  // continuar a raciocinar só sobre um único `zoneId` por cotação, como já fazia.
+  const quoteRows = rawQuoteRows
+    .filter((row) => (row.supplierCompanyId === null ? row.zoneId === null : true))
+    .map((row) => ({
+      materialId: row.materialId,
+      supplierId: row.supplierId,
+      supplierName: row.supplierName,
+      supplierContact: row.supplierContact,
+      unitCost: row.unitCost,
+      currency: row.currency,
+      zoneId: row.supplierCompanyId === null ? row.supplierZoneId : row.zoneId,
+    }))
+    .filter((row) => (args.zoneId ? row.zoneId === null || row.zoneId === args.zoneId : row.zoneId === null));
 
   const stock = new Map<string, number>();
   const consumed = new Map<string, number>();
@@ -251,6 +276,7 @@ export async function computeProcurementPlan(args: {
       return {
         supplierId: candidate.supplierId,
         supplierName: candidate.supplierName,
+        supplierContact: candidate.supplierContact,
         unitCost: Number(candidate.unitCost),
         estimatedSubtotal: totals.subtotal,
         estimatedVat: totals.iva,
@@ -281,6 +307,7 @@ export async function computeProcurementPlan(args: {
       estimatedTotalWithVat: estimate.total,
       supplierId: quote?.supplierId ?? null,
       supplierName: quote?.supplierName ?? null,
+      supplierContact: quote?.supplierContact ?? null,
       quoteSource,
       quotes,
       suggestedScheduleTaskId: suggestedTask?.id ?? null,

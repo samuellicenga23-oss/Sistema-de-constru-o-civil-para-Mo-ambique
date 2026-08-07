@@ -16,6 +16,7 @@ export type PurchaseOrder = {
   projectId: string;
   supplierId: string;
   supplierName: string;
+  supplierContact: string | null;
   status: "rascunho" | "aprovado" | "recebido" | "cancelado";
   orderDate: string;
   requiredByDate: string | null;
@@ -77,6 +78,7 @@ export type ProcurementRequirement = {
   estimatedTotalWithVat: number;
   supplierId: string | null;
   supplierName: string | null;
+  supplierContact: string | null;
   quoteSource: "zona" | "geral" | "catalogo";
   quotes: ProcurementQuote[];
   suggestedScheduleTaskId: string | null;
@@ -87,6 +89,7 @@ export type ProcurementRequirement = {
 export type ProcurementQuote = {
   supplierId: string | null;
   supplierName: string;
+  supplierContact: string | null;
   unitCost: number;
   estimatedSubtotal: number;
   estimatedVat: number;

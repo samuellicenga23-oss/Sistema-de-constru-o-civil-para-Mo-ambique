@@ -66,14 +66,17 @@ export default function SupplierLoginPage() {
       footer={
         <>
           <p>
+            Ainda não é fornecedor?{" "}
+            <Link to="/registar" className="link-strong">
+              Registar a minha empresa
+            </Link>
+          </p>
+          <p>
             Recebeu um convite?{" "}
             <Link to="/aceitar-convite" className="link-strong">
               Definir palavra-passe
             </Link>
           </p>
-          <a href="/login" className="link-muted">
-            ← Entrar no painel da empresa
-          </a>
         </>
       }
     >

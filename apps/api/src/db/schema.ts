@@ -1370,19 +1370,30 @@ export const siteDiaryTaskProgress = pgTable("site_diary_task_progress", {
 export const purchaseOrderStatusEnum = pgEnum("purchase_order_status", ["rascunho", "aprovado", "recebido", "cancelado"]);
 export const stockMovementTypeEnum = pgEnum("stock_movement_type", ["entrada", "saida"]);
 
+// Duas naturezas de linha nesta tabela, distinguidas por `companyId`:
+// 1) `companyId` preenchido — a ficha «SIGO Preços» de referência dessa empresa (gerida pelo
+//    sistema, ver services/sigoPrices.ts). É a única forma de "fornecedor" que uma empresa ainda
+//    tem dentro do seu próprio painel.
+// 2) `companyId` NULL — um fornecedor real, registado publicamente no SIGO Fornecedores (site à
+//    parte, apps/supplier), visível por TODAS as empresas (sujeito ao plano — ver
+//    services/subscriptionEntitlements.ts:assertSupplierMarketplaceAccess). Uma única linha
+//    global por fornecedor, nunca duplicada por empresa — o mesmo preço de mercado serve todos.
+//    A empresa deixou de poder criar/editar/eliminar fornecedores próprios.
 export const suppliers = pgTable("suppliers", {
   id: uuid("id").primaryKey().defaultRandom(),
-  companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+  companyId: uuid("company_id").references(() => companies.id, { onDelete: "cascade" }),
   name: varchar("name", { length: 200 }).notNull(),
   contact: varchar("contact", { length: 150 }),
   location: varchar("location", { length: 200 }),
   nuit: varchar("nuit", { length: 30 }),
   notes: text("notes"),
-  // Preenchido quando este fornecedor aceita o convite e passa a ter conta própria no Portal do
-  // Fornecedor — a partir daí consegue ver e responder a pedidos de cotação. Continua a ser um
-  // registo por empresa (cada empresa mantém a sua ficha própria do mesmo fornecedor real), mas
-  // várias linhas `suppliers` de empresas diferentes podem apontar à MESMA conta — é assim que o
-  // fornecedor vê "todas as empresas que me pediram cotação" num único login.
+  // Zona onde este fornecedor opera (indicada por ele próprio no registo) — só preenchida em
+  // fornecedores do marketplace (companyId null). Substitui a antiga gestão de zonas por
+  // empresa: a zona passou a ser uma característica do fornecedor, não do catálogo da empresa.
+  zoneId: uuid("zone_id").references(() => priceZones.id, { onDelete: "set null" }),
+  // Conta do Portal do Fornecedor dona desta ficha. Para a ficha «SIGO Preços» de cada empresa,
+  // aponta sempre à mesma conta global (ver sigoPrices.ts); para um fornecedor do marketplace, é
+  // a conta que ele próprio criou ao registar-se — sempre preenchida nesse caso.
   supplierAccountId: uuid("supplier_account_id").references((): AnyPgColumn => supplierAccounts.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
@@ -1557,6 +1568,34 @@ export const quoteRequestLines = pgTable("quote_request_lines", {
   currency: currencyEnum("currency").notNull().default("MZN"),
   supplierLineNotes: text("supplier_line_notes"),
   sortOrder: integer("sort_order").notNull().default(0),
+});
+
+export const supplierPriceFeedSyncStatusEnum = pgEnum("supplier_price_feed_sync_status", ["sucesso", "erro"]);
+
+// Ligação automática a um sistema externo do fornecedor (o próprio site/ERP dele) para puxar
+// preços periodicamente, sem depender de o fornecedor entrar manualmente no Portal do Fornecedor
+// para responder a cada pedido de cotação — um "GET periódico" em vez de um formulário por item.
+// Por ficha `suppliers` (por empresa), não por conta global: cada empresa pode ter um acordo/feed
+// diferente com o mesmo fornecedor real.
+export const supplierPriceFeeds = pgTable("supplier_price_feeds", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  supplierId: uuid("supplier_id")
+    .notNull()
+    .unique()
+    .references(() => suppliers.id, { onDelete: "cascade" }),
+  feedUrl: text("feed_url").notNull(),
+  // Enviado como "Authorization: Bearer <apiKey>" se preenchido — nunca devolvido pela API depois
+  // de gravado (só um indicador "está definido"/"não está definido" no GET).
+  apiKey: text("api_key"),
+  isActive: boolean("is_active").notNull().default(true),
+  intervalHours: integer("interval_hours").notNull().default(24),
+  lastSyncAt: timestamp("last_sync_at"),
+  lastSyncStatus: supplierPriceFeedSyncStatusEnum("last_sync_status"),
+  lastSyncError: text("last_sync_error"),
+  lastSyncMatched: integer("last_sync_matched"),
+  lastSyncUnmatched: integer("last_sync_unmatched"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
 // ---------- Relations ----------

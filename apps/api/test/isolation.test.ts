@@ -89,13 +89,15 @@ describe("Isolamento multi-tenant e catálogo global", () => {
     });
     expect(materialCloneAttempt.statusCode).toBe(404);
 
+    // Zonas deixaram de ser edítáveis por empresas (lista nacional única, só o super_admin gere
+    // — ver routes/priceZones.ts) — bloqueado pelo papel antes sequer de chegar à lógica de posse.
     const zoneCloneAttempt = await app.inject({
       method: "PUT",
       url: `/api/catalog/price-zones/${zoneB.id}`,
       headers: { cookie: cookieA },
       payload: { name: "Tentativa de cópia" },
     });
-    expect(zoneCloneAttempt.statusCode).toBe(404);
+    expect(zoneCloneAttempt.statusCode).toBe(403);
 
     const visibleMaterials = await app.inject({ method: "GET", url: "/api/catalog/materials", headers: { cookie: cookieA } });
     expect((visibleMaterials.json() as Array<{ name: string }>).some((row) => row.name === "Material confidencial B")).toBe(false);

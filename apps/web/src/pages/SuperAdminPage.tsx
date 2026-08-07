@@ -12,15 +12,16 @@ import {
   type SubscriptionUpdateInput,
 } from "../api/companies";
 import { dashboardApi, type AdminStats } from "../api/dashboard";
+import { adminSuppliersApi, type AdminSupplierAccount, type AdminQuoteRequestStats } from "../api/adminSuppliers";
 import Layout from "../components/Layout";
 import Modal from "../components/Modal";
 import PageSearch from "../components/PageSearch";
 import AlertBanner from "../components/AlertBanner";
-import { IconBuilding, IconHardDrive, IconHome, IconPlus, IconSettings, IconUsers } from "../components/icons";
+import { IconBuilding, IconHardDrive, IconHome, IconPlus, IconSettings, IconUsers, IconUpload } from "../components/icons";
 import { SUBSCRIPTION_PLANS, getPlanDefinition, CREDIT_PACKS } from "@sigo/shared";
 import { useLanguage } from "../i18n";
 
-type AdminView = "overview" | "companies" | "users" | "storage" | "configuration";
+type AdminView = "overview" | "companies" | "users" | "storage" | "configuration" | "suppliers";
 type UserRole = AdminCompanyUser["role"];
 type DetailTab = "subscription" | "usage" | "payments" | "credits";
 type StorageOverview = Awaited<ReturnType<typeof companiesApi.getStorage>>;
@@ -234,6 +235,28 @@ export default function SuperAdminPage() {
   const [proofActionId, setProofActionId] = useState<string | null>(null);
   const [leads, setLeads] = useState<CommercialLead[]>([]);
   const [leadActionId, setLeadActionId] = useState<string | null>(null);
+  const [supplierAccounts, setSupplierAccounts] = useState<AdminSupplierAccount[]>([]);
+  const [quoteStats, setQuoteStats] = useState<AdminQuoteRequestStats | null>(null);
+  const [resendingInviteId, setResendingInviteId] = useState<string | null>(null);
+
+  async function reloadSuppliers() {
+    const [accounts, stats] = await Promise.all([adminSuppliersApi.listAccounts(), adminSuppliersApi.quoteRequestStats()]);
+    setSupplierAccounts(accounts);
+    setQuoteStats(stats);
+  }
+
+  async function handleResendInvite(id: string) {
+    setResendingInviteId(id);
+    setError(null);
+    try {
+      await adminSuppliersApi.resendInvite(id);
+      setSuccess(en ? "Invite resent." : "Convite reenviado.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao reenviar convite");
+    } finally {
+      setResendingInviteId(null);
+    }
+  }
 
   async function reloadLeads() {
     const rows = await companiesApi.listLeads("novo");
@@ -304,6 +327,7 @@ export default function SuperAdminPage() {
     reload().catch((err) => setError(err.message));
     reloadPendingProofs().catch((err) => setError(err.message));
     reloadLeads().catch((err) => setError(err.message));
+    reloadSuppliers().catch((err) => setError(err.message));
     companiesApi.getMailStatus().then((r) => setMailEnabled(r.enabled)).catch(() => setMailEnabled(false));
     companiesApi.getMonitoringStatus().then((r) => setMonitoringEnabled(r.enabled)).catch(() => setMonitoringEnabled(false));
   }, []);
@@ -721,6 +745,7 @@ export default function SuperAdminPage() {
     { key: "users", label: en ? "Users" : "Utilizadores", icon: IconUsers },
     { key: "storage", label: en ? "Disk & trash" : "Disco e lixo", icon: IconHardDrive },
     { key: "configuration", label: en ? "Modules & branding" : "Módulos e identidade", icon: IconSettings },
+    { key: "suppliers", label: en ? "Supplier Portal" : "Portal do Fornecedor", icon: IconUpload },
   ];
 
   return (
@@ -1544,6 +1569,94 @@ export default function SuperAdminPage() {
                 </div>
               </form>
             )}
+          </>
+        )}
+
+        {view === "suppliers" && (
+          <>
+            <section className="card p-4">
+              <p className="text-sm text-slate-600">
+                {en
+                  ? "The Supplier Portal is a separate site (apps/supplier) — suppliers never see this panel, and system users never see theirs. This is just a read-only window for the SIGO team to follow who's connected."
+                  : "O Portal do Fornecedor é um site à parte (apps/supplier) — os fornecedores nunca vêem este painel, e os utilizadores do sistema nunca vêem o deles. Isto é só uma janela de leitura para a equipa SIGO acompanhar quem está ligado."}
+              </p>
+            </section>
+
+            {quoteStats && (
+              <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                <div className="card p-4">
+                  <p className="text-2xl font-bold text-slate-950">{supplierAccounts.length}</p>
+                  <p className="text-xs text-slate-500">{en ? "Supplier accounts" : "Contas de fornecedor"}</p>
+                </div>
+                <div className="card p-4">
+                  <p className="text-2xl font-bold text-slate-950">{quoteStats.byStatus.enviado ?? 0}</p>
+                  <p className="text-xs text-slate-500">{en ? "Awaiting response" : "Por responder"}</p>
+                </div>
+                <div className="card p-4">
+                  <p className="text-2xl font-bold text-slate-950">{quoteStats.byStatus.aceite ?? 0}</p>
+                  <p className="text-xs text-slate-500">{en ? "Accepted" : "Aceites"}</p>
+                </div>
+                <div className="card p-4">
+                  <p className="text-2xl font-bold text-slate-950">{quoteStats.activeFeeds}</p>
+                  <p className="text-xs text-slate-500">{en ? "Automatic price feeds" : "Ligações automáticas activas"}</p>
+                </div>
+              </div>
+            )}
+
+            <section className="card overflow-hidden">
+              <div className="border-b border-slate-200 p-4">
+                <h2 className="section-title">{en ? "Supplier accounts" : "Contas de fornecedor"}</h2>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  {en
+                    ? "Each account can be linked to suppliers in several companies at once (e.g. the global “SIGO Preços” pricing account)."
+                    : "Cada conta pode estar ligada a fornecedores de várias empresas ao mesmo tempo (ex: a conta global de preços «SIGO Preços»)."}
+                </p>
+              </div>
+              <div className="divide-y divide-slate-100">
+                {supplierAccounts.map((account) => (
+                  <div key={account.id} className="flex flex-wrap items-start gap-3 p-4">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <strong className="text-slate-950">{account.name}</strong>
+                        <span className={`badge ${account.activated ? "badge-green" : "badge-yellow"}`}>
+                          {account.activated ? (en ? "Active" : "Activa") : en ? "Pending activation" : "Convite pendente"}
+                        </span>
+                        {!account.isActive && <span className="badge badge-red">{en ? "Disabled" : "Desactivada"}</span>}
+                      </div>
+                      <p className="mt-0.5 text-xs text-slate-500">{account.email}{account.phone ? ` · ${account.phone}` : ""}</p>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {account.companies.map((c) => (
+                          <span key={c.companyId} className="badge badge-neutral">{c.companyName}</span>
+                        ))}
+                        {account.companies.length === 0 && <span className="text-xs text-slate-400">{en ? "No company linked yet" : "Ainda sem nenhuma empresa ligada"}</span>}
+                      </div>
+                      {Object.keys(account.quoteRequestsByStatus).length > 0 && (
+                        <p className="mt-2 text-xs text-slate-500">
+                          {Object.entries(account.quoteRequestsByStatus).map(([status, total]) => `${status}: ${total}`).join(" · ")}
+                        </p>
+                      )}
+                    </div>
+                    {!account.activated && (
+                      <button
+                        type="button"
+                        onClick={() => handleResendInvite(account.id)}
+                        disabled={resendingInviteId === account.id}
+                        className="btn btn-secondary btn-sm shrink-0"
+                      >
+                        {resendingInviteId === account.id ? (en ? "Sending…" : "A enviar…") : en ? "Resend invite" : "Reenviar convite"}
+                      </button>
+                    )}
+                  </div>
+                ))}
+                {supplierAccounts.length === 0 && (
+                  <p className="p-6 text-center text-sm text-slate-500">
+                    {en
+                      ? "No supplier has been invited yet — companies invite suppliers from Suppliers → “Invite to Supplier Portal”."
+                      : "Ainda nenhum fornecedor foi convidado — as empresas convidam a partir de Fornecedores → «Convidar para o Portal do Fornecedor»."}
+                  </p>
+                )}
+              </div>
+            </section>
           </>
         )}
       </div>

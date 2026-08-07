@@ -1,5 +1,5 @@
 import puppeteer from "puppeteer";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import { db } from "../db/index.js";
 import {
   quoteRequests,
@@ -61,6 +61,21 @@ function fmtQty(n: number | null) {
   return n.toLocaleString("pt-MZ", { minimumFractionDigits: 0, maximumFractionDigits: 3 });
 }
 
+type RawPriceRow = {
+  resourceId: string;
+  supplierId: string;
+  supplierName: string;
+  supplierContact: string | null;
+  supplierLocation: string | null;
+  supplierCompanyId: string | null;
+  priceZoneId: string | null;
+  supplierZoneId: string | null;
+  unitCost: string;
+  currency: string;
+  accountEmail: string | null;
+  accountPhone: string | null;
+};
+
 type NormalizedPrice = {
   resourceId: string;
   supplierId: string;
@@ -75,6 +90,25 @@ type NormalizedPrice = {
   isReference: boolean;
 };
 
+function normalizePriceRows(rows: RawPriceRow[], projectZoneId: string | null): NormalizedPrice[] {
+  return rows
+    .filter((row) => (row.supplierCompanyId === null ? row.priceZoneId === null : true))
+    .map((row) => ({
+      resourceId: row.resourceId,
+      supplierId: row.supplierId,
+      supplierName: row.supplierName,
+      contact: row.accountPhone || row.supplierContact,
+      email: row.accountEmail,
+      phone: row.accountPhone || row.supplierContact,
+      location: row.supplierLocation,
+      unitCost: row.unitCost,
+      currency: row.currency,
+      zoneId: row.supplierCompanyId === null ? row.supplierZoneId : row.priceZoneId,
+      isReference: row.supplierName === SIGO_PRICES_SUPPLIER_NAME,
+    }))
+    .filter((row) => (projectZoneId ? row.zoneId === null || row.zoneId === projectZoneId : true));
+}
+
 function pickBestPerSupplier(rows: NormalizedPrice[], projectZoneId: string | null): NormalizedPrice[] {
   const bySupplier = new Map<string, NormalizedPrice>();
   for (const row of rows) {
@@ -88,12 +122,7 @@ function pickBestPerSupplier(rows: NormalizedPrice[], projectZoneId: string | nu
   return Array.from(bySupplier.values());
 }
 
-function filterZone(rows: NormalizedPrice[], projectZoneId: string | null): NormalizedPrice[] {
-  if (!projectZoneId) return rows.filter((row) => row.zoneId === null);
-  return rows.filter((row) => row.zoneId === null || row.zoneId === projectZoneId);
-}
-
-/** Monta a comparação de fornecedores para os itens de um pedido (zona → preço). Profissional+. */
+/** Monta a comparação de fornecedores (empresa + marketplace) para um pedido — zona → preço. */
 export async function buildQuoteComparisonDocument(
   companyId: string,
   quoteRequestId: string,
@@ -129,6 +158,7 @@ export async function buildQuoteComparisonDocument(
   const materialIds = lines.filter((l) => l.kind === "material" && l.materialId).map((l) => l.materialId!);
   const labourIds = lines.filter((l) => l.kind === "labour" && l.labourCategoryId).map((l) => l.labourCategoryId!);
   const equipmentIds = lines.filter((l) => l.kind === "equipment" && l.equipmentId).map((l) => l.equipmentId!);
+  const supplierScope = or(eq(suppliers.companyId, companyId), isNull(suppliers.companyId));
 
   const [materialRows, labourRows, equipmentRows, zoneNameRows] = await Promise.all([
     materialIds.length
@@ -139,17 +169,19 @@ export async function buildQuoteComparisonDocument(
             supplierName: suppliers.name,
             supplierContact: suppliers.contact,
             supplierLocation: suppliers.location,
+            supplierCompanyId: suppliers.companyId,
+            priceZoneId: supplierMaterialPrices.zoneId,
+            supplierZoneId: suppliers.zoneId,
             unitCost: supplierMaterialPrices.unitCost,
             currency: supplierMaterialPrices.currency,
-            zoneId: supplierMaterialPrices.zoneId,
             accountEmail: supplierAccounts.email,
             accountPhone: supplierAccounts.phone,
           })
           .from(supplierMaterialPrices)
           .innerJoin(suppliers, eq(supplierMaterialPrices.supplierId, suppliers.id))
           .leftJoin(supplierAccounts, eq(suppliers.supplierAccountId, supplierAccounts.id))
-          .where(and(eq(suppliers.companyId, companyId), inArray(supplierMaterialPrices.materialId, materialIds)))
-      : Promise.resolve([]),
+          .where(and(supplierScope, inArray(supplierMaterialPrices.materialId, materialIds)))
+      : Promise.resolve([] as RawPriceRow[]),
     labourIds.length
       ? db
           .select({
@@ -158,17 +190,19 @@ export async function buildQuoteComparisonDocument(
             supplierName: suppliers.name,
             supplierContact: suppliers.contact,
             supplierLocation: suppliers.location,
+            supplierCompanyId: suppliers.companyId,
+            priceZoneId: supplierLabourPrices.zoneId,
+            supplierZoneId: suppliers.zoneId,
             unitCost: supplierLabourPrices.hourlyCost,
             currency: supplierLabourPrices.currency,
-            zoneId: supplierLabourPrices.zoneId,
             accountEmail: supplierAccounts.email,
             accountPhone: supplierAccounts.phone,
           })
           .from(supplierLabourPrices)
           .innerJoin(suppliers, eq(supplierLabourPrices.supplierId, suppliers.id))
           .leftJoin(supplierAccounts, eq(suppliers.supplierAccountId, supplierAccounts.id))
-          .where(and(eq(suppliers.companyId, companyId), inArray(supplierLabourPrices.labourCategoryId, labourIds)))
-      : Promise.resolve([]),
+          .where(and(supplierScope, inArray(supplierLabourPrices.labourCategoryId, labourIds)))
+      : Promise.resolve([] as RawPriceRow[]),
     equipmentIds.length
       ? db
           .select({
@@ -177,40 +211,27 @@ export async function buildQuoteComparisonDocument(
             supplierName: suppliers.name,
             supplierContact: suppliers.contact,
             supplierLocation: suppliers.location,
+            supplierCompanyId: suppliers.companyId,
+            priceZoneId: supplierEquipmentPrices.zoneId,
+            supplierZoneId: suppliers.zoneId,
             unitCost: supplierEquipmentPrices.hourlyCost,
             currency: supplierEquipmentPrices.currency,
-            zoneId: supplierEquipmentPrices.zoneId,
             accountEmail: supplierAccounts.email,
             accountPhone: supplierAccounts.phone,
           })
           .from(supplierEquipmentPrices)
           .innerJoin(suppliers, eq(supplierEquipmentPrices.supplierId, suppliers.id))
           .leftJoin(supplierAccounts, eq(suppliers.supplierAccountId, supplierAccounts.id))
-          .where(and(eq(suppliers.companyId, companyId), inArray(supplierEquipmentPrices.equipmentId, equipmentIds)))
-      : Promise.resolve([]),
+          .where(and(supplierScope, inArray(supplierEquipmentPrices.equipmentId, equipmentIds)))
+      : Promise.resolve([] as RawPriceRow[]),
     db.select({ id: priceZones.id, name: priceZones.name }).from(priceZones),
   ]);
 
   const zoneNameById = new Map(zoneNameRows.map((z) => [z.id, z.name]));
 
-  const toNormalized = (rows: typeof materialRows): NormalizedPrice[] =>
-    rows.map((r) => ({
-      resourceId: r.resourceId,
-      supplierId: r.supplierId,
-      supplierName: r.supplierName,
-      contact: r.accountPhone || r.supplierContact,
-      email: r.accountEmail,
-      phone: r.accountPhone || r.supplierContact,
-      location: r.supplierLocation,
-      unitCost: r.unitCost,
-      currency: r.currency,
-      zoneId: r.zoneId,
-      isReference: r.supplierName === SIGO_PRICES_SUPPLIER_NAME,
-    }));
-
   const groupByResource = (rows: NormalizedPrice[]) => {
     const map = new Map<string, NormalizedPrice[]>();
-    for (const price of filterZone(rows, projectZoneId)) {
+    for (const price of rows) {
       const list = map.get(price.resourceId) ?? [];
       list.push(price);
       map.set(price.resourceId, list);
@@ -218,9 +239,9 @@ export async function buildQuoteComparisonDocument(
     return map;
   };
 
-  const materialsByResource = groupByResource(toNormalized(materialRows));
-  const labourByResource = groupByResource(toNormalized(labourRows));
-  const equipmentByResource = groupByResource(toNormalized(equipmentRows));
+  const materialsByResource = groupByResource(normalizePriceRows(materialRows as RawPriceRow[], projectZoneId));
+  const labourByResource = groupByResource(normalizePriceRows(labourRows as RawPriceRow[], projectZoneId));
+  const equipmentByResource = groupByResource(normalizePriceRows(equipmentRows as RawPriceRow[], projectZoneId));
 
   const items: QuoteComparisonItem[] = lines.map((line) => {
     const resourceId =
@@ -352,7 +373,7 @@ function buildHtml(doc: QuoteComparisonDocument, brand: CompanyBrand): string {
   ${subtitleParts.length ? `<p class="lead">${escapeHtml(subtitleParts.join(" · "))}</p>` : ""}
   <p class="lead">
     Ordenação: primeiro fornecedores da <strong>zona da obra</strong> (proximidade), depois do <strong>melhor preço
-    unitário ao mais caro</strong>. Contactos para comunicação directa. Disponível a partir do plano Profissional.
+    unitário ao mais caro</strong>. Inclui SIGO Preços e fornecedores do marketplace. Disponível a partir do plano Profissional.
   </p>
   ${itemsHtml || `<p class="empty">Este pedido não tem linhas para comparar.</p>`}
   ${pdfFooterHtml(brand, "Comparação de fornecedores · SIGO Fornecedores")}

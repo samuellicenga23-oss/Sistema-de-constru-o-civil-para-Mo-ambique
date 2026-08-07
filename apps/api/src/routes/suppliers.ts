@@ -7,6 +7,7 @@ import {
   supplierMaterialPrices,
   supplierLabourPrices,
   supplierEquipmentPrices,
+  supplierPriceFeeds,
   materials,
   labourCategories,
   equipment,
@@ -19,21 +20,14 @@ import {
   SIGO_PRICES_REVIEW_DATE,
   syncSigoPricesForCompany,
 } from "../services/sigoPrices.js";
+import { syncSupplierPriceFeed } from "../services/supplierPriceFeed.js";
+import { assertSupplierMarketplaceAccess } from "../services/subscriptionEntitlements.js";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista"] as const;
 
 function companyIdOf(request: FastifyRequest): string {
   return request.currentUser!.companyId!;
 }
-
-const supplierSchema = z.object({
-  name: z.string().min(1),
-  contact: z.string().optional(),
-  location: z.string().optional(),
-  nuit: z.string().optional(),
-  notes: z.string().optional(),
-});
-const supplierUpdateSchema = supplierSchema.partial();
 
 const materialPriceSchema = z.object({
   materialId: z.string().uuid(),
@@ -56,12 +50,28 @@ const equipmentPriceSchema = z.object({
   currency: z.enum(CURRENCIES).default("MZN"),
 });
 
+// Só a ficha "SIGO Preços" da própria empresa (companyId = a empresa) — é a única forma de
+// fornecedor que uma empresa ainda gere directamente. Fornecedores do marketplace (companyId
+// null) só o próprio fornecedor edita, através do Portal do Fornecedor.
 async function assertSupplierOwned(supplierId: string, companyId: string) {
   const [supplier] = await db.select().from(suppliers).where(and(eq(suppliers.id, supplierId), eq(suppliers.companyId, companyId))).limit(1);
   return supplier ?? null;
 }
 
+// Leitura: a própria ficha SIGO Preços OU qualquer fornecedor do marketplace nacional
+// (companyId null) — usado só nas rotas GET de consulta de preços, nunca nas de escrita.
+async function assertSupplierReadable(supplierId: string, companyId: string) {
+  const [supplier] = await db
+    .select()
+    .from(suppliers)
+    .where(and(eq(suppliers.id, supplierId), or(eq(suppliers.companyId, companyId), isNull(suppliers.companyId))))
+    .limit(1);
+  return supplier ?? null;
+}
+
 export async function supplierRoutes(app: FastifyInstance) {
+  // Só devolve a ficha SIGO Preços — a empresa deixou de gerir fornecedores próprios; para ver o
+  // marketplace nacional de fornecedores reais, ver GET /api/marketplace/suppliers.
   app.get("/api/suppliers", { preHandler: requireCompanyUser }, async (request) => {
     const reference = await syncSigoPricesForCompany(companyIdOf(request));
     const rows = await db.select().from(suppliers).where(eq(suppliers.companyId, companyIdOf(request))).orderBy(suppliers.name);
@@ -73,44 +83,21 @@ export async function supplierRoutes(app: FastifyInstance) {
     }));
   });
 
-  app.post("/api/suppliers", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
-    const parsed = supplierSchema.safeParse(request.body);
-    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
-    const [row] = await db.insert(suppliers).values({ ...parsed.data, companyId: companyIdOf(request) }).returning();
-    return reply.code(201).send(row);
-  });
-
-  app.put("/api/suppliers/:id", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const supplier = await assertSupplierOwned(id, companyIdOf(request));
-    if (supplier && isSigoPricesSupplier(supplier)) return reply.code(409).send({ error: "SIGO Preços é uma referência gerida pelo sistema" });
-    const parsed = supplierUpdateSchema.safeParse(request.body);
-    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
-    const [row] = await db
-      .update(suppliers)
-      .set(parsed.data)
-      .where(and(eq(suppliers.id, id), eq(suppliers.companyId, companyIdOf(request))))
-      .returning();
-    if (!row) return reply.code(404).send({ error: "Fornecedor não encontrado" });
-    return row;
-  });
-
-  app.delete("/api/suppliers/:id", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const supplier = await assertSupplierOwned(id, companyIdOf(request));
-    if (supplier && isSigoPricesSupplier(supplier)) return reply.code(409).send({ error: "SIGO Preços não pode ser eliminado" });
-    await db.delete(suppliers).where(and(eq(suppliers.id, id), eq(suppliers.companyId, companyIdOf(request))));
-    return { ok: true };
-  });
-
   // ---------- Preços de materiais por fornecedor (e opcionalmente por zona) ----------
   // Isto é o que faz aparecer "materiais" dentro de um fornecedor — ver também
   // GET /api/catalog/materials/:id/suppliers em catalog.ts para o lado inverso (fornecedores
-  // dentro de um material), sobre os mesmos dados.
+  // dentro de um material), sobre os mesmos dados. Fornecedores do marketplace exigem o plano
+  // Profissional (ver assertSupplierMarketplaceAccess); a ficha SIGO Preços da própria empresa
+  // está sempre acessível, em qualquer plano.
   app.get("/api/suppliers/:id/materials", { preHandler: requireCompanyUser }, async (request, reply) => {
     const { id } = request.params as { id: string };
-    const supplier = await assertSupplierOwned(id, companyIdOf(request));
+    const companyId = companyIdOf(request);
+    const supplier = await assertSupplierReadable(id, companyId);
     if (!supplier) return reply.code(404).send({ error: "Fornecedor não encontrado" });
+    if (supplier.companyId === null) {
+      const blocked = await assertSupplierMarketplaceAccess(companyId);
+      if (blocked) return reply.code(402).send(blocked);
+    }
 
     const rows = await db
       .select({
@@ -191,8 +178,13 @@ export async function supplierRoutes(app: FastifyInstance) {
   // ---------- Preços de mão-de-obra subcontratada por fornecedor ----------
   app.get("/api/suppliers/:id/labour", { preHandler: requireCompanyUser }, async (request, reply) => {
     const { id } = request.params as { id: string };
-    const supplier = await assertSupplierOwned(id, companyIdOf(request));
+    const companyId = companyIdOf(request);
+    const supplier = await assertSupplierReadable(id, companyId);
     if (!supplier) return reply.code(404).send({ error: "Fornecedor não encontrado" });
+    if (supplier.companyId === null) {
+      const blocked = await assertSupplierMarketplaceAccess(companyId);
+      if (blocked) return reply.code(402).send(blocked);
+    }
 
     const rows = await db
       .select({ price: supplierLabourPrices, labourName: labourCategories.name, zoneName: priceZones.name })
@@ -259,8 +251,13 @@ export async function supplierRoutes(app: FastifyInstance) {
   // ---------- Preços de máquinas/equipamento alugado por fornecedor ----------
   app.get("/api/suppliers/:id/equipment", { preHandler: requireCompanyUser }, async (request, reply) => {
     const { id } = request.params as { id: string };
-    const supplier = await assertSupplierOwned(id, companyIdOf(request));
+    const companyId = companyIdOf(request);
+    const supplier = await assertSupplierReadable(id, companyId);
     if (!supplier) return reply.code(404).send({ error: "Fornecedor não encontrado" });
+    if (supplier.companyId === null) {
+      const blocked = await assertSupplierMarketplaceAccess(companyId);
+      if (blocked) return reply.code(402).send(blocked);
+    }
 
     const rows = await db
       .select({ price: supplierEquipmentPrices, equipmentName: equipment.name, zoneName: priceZones.name })
@@ -323,4 +320,74 @@ export async function supplierRoutes(app: FastifyInstance) {
     await db.delete(supplierEquipmentPrices).where(and(eq(supplierEquipmentPrices.id, priceId), eq(supplierEquipmentPrices.supplierId, id)));
     return { ok: true };
   });
+
+  // ---------- Ligação automática de preços (feed externo do fornecedor) ----------
+  // Alternativa a responder pedidos de cotação um a um no Portal do Fornecedor: se o fornecedor
+  // tiver o seu próprio sistema com uma URL que devolva os preços em JSON, o SIGO pode ir
+  // buscá-los periodicamente sozinho. Ver services/supplierPriceFeed.ts para o contrato.
+  const feedSchema = z.object({
+    feedUrl: z.string().trim().url().max(2000),
+    apiKey: z.string().trim().max(500).optional(),
+    intervalHours: z.number().int().min(1).max(24 * 30).default(24),
+    isActive: z.boolean().default(true),
+  });
+
+  app.get("/api/suppliers/:id/price-feed", { preHandler: requireCompanyUser }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const supplier = await assertSupplierOwned(id, companyIdOf(request));
+    if (!supplier) return reply.code(404).send({ error: "Fornecedor não encontrado" });
+    const [feed] = await db.select().from(supplierPriceFeeds).where(eq(supplierPriceFeeds.supplierId, id)).limit(1);
+    if (!feed) return null;
+    const { apiKey, ...rest } = feed;
+    return { ...rest, hasApiKey: Boolean(apiKey) };
+  });
+
+  app.put("/api/suppliers/:id/price-feed", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const companyId = companyIdOf(request);
+    const supplier = await assertSupplierOwned(id, companyId);
+    if (!supplier) return reply.code(404).send({ error: "Fornecedor não encontrado" });
+
+    const parsed = feedSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+
+    const [existing] = await db.select().from(supplierPriceFeeds).where(eq(supplierPriceFeeds.supplierId, id)).limit(1);
+    const values = {
+      feedUrl: parsed.data.feedUrl,
+      // Só substitui a chave se uma nova vier no pedido — o frontend nunca recebe a chave
+      // gravada de volta, por isso não tem como reenviá-la sem querer mudá-la.
+      apiKey: parsed.data.apiKey !== undefined ? parsed.data.apiKey || null : (existing?.apiKey ?? null),
+      intervalHours: parsed.data.intervalHours,
+      isActive: parsed.data.isActive,
+      updatedAt: new Date(),
+    };
+
+    const [feed] = existing
+      ? await db.update(supplierPriceFeeds).set(values).where(eq(supplierPriceFeeds.id, existing.id)).returning()
+      : await db.insert(supplierPriceFeeds).values({ supplierId: id, ...values }).returning();
+
+    const { apiKey, ...rest } = feed;
+    return { ...rest, hasApiKey: Boolean(apiKey) };
+  });
+
+  app.delete("/api/suppliers/:id/price-feed", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const supplier = await assertSupplierOwned(id, companyIdOf(request));
+    if (!supplier) return { ok: true };
+    await db.delete(supplierPriceFeeds).where(eq(supplierPriceFeeds.supplierId, id));
+    return { ok: true };
+  });
+
+  app.post(
+    "/api/suppliers/:id/price-feed/sync",
+    { preHandler: requireRole(...WRITE_ROLES) },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const supplier = await assertSupplierOwned(id, companyIdOf(request));
+      if (!supplier) return reply.code(404).send({ error: "Fornecedor não encontrado" });
+      const result = await syncSupplierPriceFeed(id);
+      if (!result.ok) return reply.code(422).send({ error: result.error });
+      return result;
+    },
+  );
 }

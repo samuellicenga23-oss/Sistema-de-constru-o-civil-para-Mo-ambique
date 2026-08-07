@@ -1,7 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { and, desc, eq, inArray, isNull, or } from "drizzle-orm";
-import { randomBytes } from "node:crypto";
 import { db } from "../db/index.js";
 import {
   suppliers,
@@ -12,7 +11,6 @@ import {
   labourCategories,
   equipment,
   projects,
-  companies,
   supplierMaterialPrices,
   supplierLabourPrices,
   supplierEquipmentPrices,
@@ -20,6 +18,8 @@ import {
 import { requireCompanyUser, requireRole } from "../auth/middleware.js";
 import { sendEmail, emailLayout, escapeHtml } from "../services/mailer.js";
 import { fanOutSigoPriceToAllCompanies } from "../services/sigoPrices.js";
+import { assertSupplierMarketplaceAccess } from "../services/subscriptionEntitlements.js";
+import { resolveBuyerContact, type BuyerContact } from "../services/buyerContact.js";
 import { buildQuoteComparisonDocument, buildQuoteComparisonPdf } from "../services/quoteComparisonPdf.js";
 import { loadCompanyBrand } from "../services/companyBrand.js";
 import { env } from "../env.js";
@@ -30,8 +30,14 @@ function companyIdOf(request: FastifyRequest): string {
   return request.currentUser!.companyId!;
 }
 
-async function assertSupplierOwned(supplierId: string, companyId: string) {
-  const [supplier] = await db.select().from(suppliers).where(and(eq(suppliers.id, supplierId), eq(suppliers.companyId, companyId))).limit(1);
+// A ficha SIGO Preços da própria empresa (companyId = a empresa) OU qualquer fornecedor do
+// marketplace nacional (companyId null, registado directamente no SIGO Fornecedores).
+async function assertSupplierAccessible(supplierId: string, companyId: string) {
+  const [supplier] = await db
+    .select()
+    .from(suppliers)
+    .where(and(eq(suppliers.id, supplierId), or(eq(suppliers.companyId, companyId), isNull(suppliers.companyId))))
+    .limit(1);
   return supplier ?? null;
 }
 
@@ -78,15 +84,21 @@ async function resolveLine(companyId: string, line: z.infer<typeof lineSchema>) 
   return { description: row.name, unit: "h", equipmentId: line.resourceId };
 }
 
-async function notifySupplierOfRequest(accountEmail: string | null, accountName: string, companyName: string, title: string) {
+async function notifySupplierOfRequest(accountEmail: string | null, accountName: string, buyer: BuyerContact, title: string) {
   if (!accountEmail) return;
+  const contactLines = [
+    buyer.buyerName ? `<strong>${escapeHtml(buyer.buyerName)}</strong>` : null,
+    buyer.buyerEmail ? escapeHtml(buyer.buyerEmail) : null,
+    buyer.companyPhone ? escapeHtml(buyer.companyPhone) : null,
+  ].filter(Boolean);
   void sendEmail(
     {
       to: accountEmail,
-      subject: `SIGO — Novo pedido de cotação de ${companyName}`,
+      subject: `SIGO — Novo pedido de cotação de ${buyer.companyName}`,
       html: emailLayout(
         "Novo pedido de cotação",
-        `<p>Olá ${escapeHtml(accountName)}, a empresa <strong>${escapeHtml(companyName)}</strong> pediu-lhe uma cotação: <strong>${escapeHtml(title)}</strong>.</p>
+        `<p>Olá ${escapeHtml(accountName)}, a empresa <strong>${escapeHtml(buyer.companyName)}</strong> pediu-lhe uma cotação: <strong>${escapeHtml(title)}</strong>.</p>
+         ${contactLines.length ? `<p><strong>Contacto de compras</strong> — ${contactLines.join(" · ")}. Ligue directamente para ajudar a fechar esta compra.</p>` : ""}
          <p>Entre no seu Portal do Fornecedor para ver os itens e responder com os seus preços.</p>`,
         `${env.supplierPublicUrl}/login`,
         "Abrir Portal do Fornecedor",
@@ -97,75 +109,24 @@ async function notifySupplierOfRequest(accountEmail: string | null, accountName:
 }
 
 export async function quoteRequestRoutes(app: FastifyInstance) {
-  // ---------- Convite do fornecedor para o Portal do Fornecedor ----------
-  // Liga (ou cria) uma conta global `supplier_accounts` a esta ficha de fornecedor da empresa.
-  // Se a conta já existir (mesmo email já convidado por outra empresa), só liga — o fornecedor
-  // passa a ver as duas empresas no mesmo login, sem duplicar identidade.
-  const inviteSchema = z.object({ email: z.string().trim().toLowerCase().email(), name: z.string().trim().max(150).optional() });
-
-  app.post("/api/suppliers/:id/invite", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const companyId = companyIdOf(request);
-    const supplier = await assertSupplierOwned(id, companyId);
-    if (!supplier) return reply.code(404).send({ error: "Fornecedor não encontrado" });
-
-    const parsed = inviteSchema.safeParse(request.body);
-    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
-
-    const [companyRow] = await db.select({ name: companies.name }).from(companies).where(eq(companies.id, companyId)).limit(1);
-
-    let [account] = await db.select().from(supplierAccounts).where(eq(supplierAccounts.email, parsed.data.email)).limit(1);
-    const token = randomBytes(32).toString("hex");
-    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-
-    if (!account) {
-      [account] = await db
-        .insert(supplierAccounts)
-        .values({
-          name: parsed.data.name || supplier.name,
-          email: parsed.data.email,
-          inviteToken: token,
-          inviteTokenExpiresAt: expiresAt,
-        })
-        .returning();
-    } else if (!account.passwordHash) {
-      // Ainda não activou nenhum convite anterior — actualiza o token para este novo convite.
-      await db.update(supplierAccounts).set({ inviteToken: token, inviteTokenExpiresAt: expiresAt }).where(eq(supplierAccounts.id, account.id));
-    }
-
-    await db.update(suppliers).set({ supplierAccountId: account.id }).where(eq(suppliers.id, id));
-
-    const alreadyActive = Boolean(account.passwordHash);
-    if (!alreadyActive) {
-      void sendEmail(
-        {
-          to: account.email,
-          subject: `SIGO — Convite para o Portal do Fornecedor (${companyRow?.name ?? "uma empresa"})`,
-          html: emailLayout(
-            "Convite para o Portal do Fornecedor",
-            `<p>A empresa <strong>${escapeHtml(companyRow?.name ?? "")}</strong> convidou-o(a) a juntar-se ao Portal do Fornecedor SIGO, onde vai poder ver e responder aos pedidos de cotação directamente.</p>
-             <p>Defina a sua palavra-passe para começar.</p>`,
-            `${env.supplierPublicUrl}/aceitar-convite?token=${token}`,
-            "Definir palavra-passe",
-          ),
-        },
-        app.log,
-      );
-    }
-
-    return reply.code(201).send({ ok: true, alreadyActive, supplierAccountId: account.id });
-  });
-
   // ---------- Pedidos de cotação (RFQ) ----------
+  // O convite/registo de fornecedores deixou de ser feito por cada empresa — fornecedores
+  // registam-se sozinhos no SIGO Fornecedores (ver routes/supplierAuth.ts:register). Pedir uma
+  // cotação a um fornecedor do marketplace (não a própria ficha SIGO Preços) exige o plano
+  // Profissional.
   app.post("/api/quote-requests", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
     const companyId = companyIdOf(request);
     const parsed = createQuoteRequestSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
 
-    const supplier = await assertSupplierOwned(parsed.data.supplierId, companyId);
+    const supplier = await assertSupplierAccessible(parsed.data.supplierId, companyId);
     if (!supplier) return reply.code(404).send({ error: "Fornecedor não encontrado" });
+    if (supplier.companyId === null) {
+      const blocked = await assertSupplierMarketplaceAccess(companyId);
+      if (blocked) return reply.code(402).send(blocked);
+    }
     if (!supplier.supplierAccountId) {
-      return reply.code(409).send({ error: "Convide primeiro este fornecedor para o Portal do Fornecedor" });
+      return reply.code(409).send({ error: "Este fornecedor ainda não tem conta activa no Portal do Fornecedor" });
     }
 
     if (parsed.data.projectId) {
@@ -208,8 +169,8 @@ export async function quoteRequestRoutes(app: FastifyInstance) {
     );
 
     const [account] = await db.select().from(supplierAccounts).where(eq(supplierAccounts.id, supplier.supplierAccountId)).limit(1);
-    const [companyRow2] = await db.select({ name: companies.name }).from(companies).where(eq(companies.id, companyId)).limit(1);
-    await notifySupplierOfRequest(account?.email ?? null, account?.name ?? supplier.name, companyRow2?.name ?? "", parsed.data.title);
+    const buyer = await resolveBuyerContact(companyId, request.currentUser!.id);
+    await notifySupplierOfRequest(account?.email ?? null, account?.name ?? supplier.name, buyer, parsed.data.title);
 
     return reply.code(201).send(quoteRequest);
   });
