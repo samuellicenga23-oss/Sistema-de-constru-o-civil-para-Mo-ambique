@@ -69,7 +69,12 @@ export default function SupplierQuoteRequestPage() {
     <div className="portal-shell">
       <header className="portal-header">
         <div className="portal-header-inner">
-          <Link to="/painel" className="text-muted-sm">← Painel</Link>
+          <Link to="/painel" className="link-muted" style={{ fontSize: "0.85rem" }}>
+            ← Voltar ao painel
+          </Link>
+          <span className={`badge ${detail.status === "enviado" ? "badge-brand" : detail.status === "aceite" ? "badge-success" : "badge-neutral"}`}>
+            {detail.status}
+          </span>
         </div>
       </header>
 

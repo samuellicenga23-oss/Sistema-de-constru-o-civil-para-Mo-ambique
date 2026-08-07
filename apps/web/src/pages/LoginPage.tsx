@@ -272,6 +272,12 @@ export default function LoginPage() {
               Criar conta grátis — 14 dias
             </Link>
           </p>
+          <p className="text-[13.5px] text-ink-400">
+            É fornecedor?{" "}
+            <a href="/fornecedor/login" className="font-semibold text-teal-700 hover:underline">
+              Entrar no Portal do Fornecedor
+            </a>
+          </p>
           <Link
             to="/"
             className="text-[13.5px] font-semibold text-ink-400 transition-colors hover:text-teal-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal"

@@ -19,6 +19,11 @@ export default defineConfig({
         target: "http://localhost:4100",
         changeOrigin: true,
       },
+      // Logos oficiais vivem em apps/web/public/brand — mesma origem em produção.
+      "/brand": {
+        target: "http://127.0.0.1:5273",
+        changeOrigin: true,
+      },
     },
   },
 });
