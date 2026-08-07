@@ -163,6 +163,10 @@ export const commercialLeads = pgTable(
     planOrPack: varchar("plan_or_pack", { length: 100 }),
     billingCycle: varchar("billing_cycle", { length: 20 }),
     notes: text("notes"),
+    // Comprovativo anexado logo no pedido público (sem precisar de ter conta ainda) — opcional,
+    // quem prefere só pedir contacto primeiro e pagar depois continua a poder.
+    proofFilePath: text("proof_file_path"),
+    proofOriginalFileName: varchar("proof_original_file_name", { length: 300 }),
     status: commercialLeadStatusEnum("status").notNull().default("novo"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },

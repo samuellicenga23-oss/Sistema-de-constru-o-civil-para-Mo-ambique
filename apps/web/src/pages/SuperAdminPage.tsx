@@ -902,6 +902,11 @@ export default function SuperAdminPage() {
                             {en ? "Call" : "Ligar"}
                           </a>
                         )}
+                        {lead.proofFilePath && (
+                          <a href={companiesApi.leadProofUrl(lead.id)} target="_blank" rel="noreferrer" className="btn btn-secondary btn-sm">
+                            {en ? "View proof" : "Ver comprovativo"}
+                          </a>
+                        )}
                         <button
                           type="button"
                           disabled={leadActionId === lead.id}

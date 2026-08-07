@@ -58,6 +58,50 @@ describe("Pedidos comerciais", () => {
     expect(filteredResponse.json()).toEqual([]);
   });
 
+  it("aceita um pedido público com comprovativo anexado (multipart)", async () => {
+    const boundary = "----sigoTestBoundary";
+    const fields: Record<string, string> = {
+      name: "Cliente Com Comprovativo",
+      company: "Obra Com Comprovativo Lda",
+      email: "com-comprovativo@test.local",
+      phone: "+258840000001",
+      planOrPack: "Individual",
+      billingCycle: "mensal",
+    };
+    const parts: string[] = [];
+    for (const [key, value] of Object.entries(fields)) {
+      parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="${key}"\r\n\r\n${value}\r\n`);
+    }
+    const fakePdf = Buffer.from("%PDF-1.4\n%teste");
+    const fileHeader = `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="comprovativo.pdf"\r\nContent-Type: application/pdf\r\n\r\n`;
+    const body = Buffer.concat([
+      Buffer.from(parts.join("")),
+      Buffer.from(fileHeader),
+      fakePdf,
+      Buffer.from(`\r\n--${boundary}--\r\n`),
+    ]);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/public/leads",
+      headers: { "content-type": `multipart/form-data; boundary=${boundary}` },
+      payload: body,
+    });
+    expect(res.statusCode).toBe(201);
+
+    await createUser(null, "super_admin", "super-leads3@test.local");
+    const superCookie = await loginCookie(app, "super-leads3@test.local");
+    const listResponse = await app.inject({ method: "GET", url: "/api/admin/leads", headers: { cookie: superCookie } });
+    const leads = listResponse.json() as Array<{ id: string; proofFilePath: string | null; proofOriginalFileName: string | null }>;
+    expect(leads).toHaveLength(1);
+    expect(leads[0].proofFilePath).toBeTruthy();
+    expect(leads[0].proofOriginalFileName).toBe("comprovativo.pdf");
+
+    const proofResponse = await app.inject({ method: "GET", url: `/api/admin/leads/${leads[0].id}/proof`, headers: { cookie: superCookie } });
+    expect(proofResponse.statusCode).toBe(200);
+    expect(proofResponse.headers["content-type"]).toBe("application/pdf");
+  });
+
   it("bloqueia pedidos públicos malformados", async () => {
     const res = await app.inject({ method: "POST", url: "/api/public/leads", payload: { name: "Sem email" } });
     expect(res.statusCode).toBe(400);

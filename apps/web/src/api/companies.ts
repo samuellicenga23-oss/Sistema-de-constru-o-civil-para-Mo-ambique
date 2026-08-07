@@ -82,6 +82,8 @@ export type CommercialLead = {
   planOrPack: string | null;
   billingCycle: string | null;
   notes: string | null;
+  proofFilePath: string | null;
+  proofOriginalFileName: string | null;
   status: "novo" | "contactado" | "resolvido";
   createdAt: string;
 };
@@ -375,4 +377,5 @@ export const companiesApi = {
   listLeads: (status?: CommercialLead["status"]) => request<CommercialLead[]>(`/admin/leads${status ? `?status=${status}` : ""}`),
   updateLeadStatus: (id: string, status: CommercialLead["status"]) =>
     request<CommercialLead>(`/admin/leads/${id}/status`, { method: "PATCH", body: JSON.stringify({ status }) }),
+  leadProofUrl: (id: string) => `/api/admin/leads/${id}/proof`,
 };

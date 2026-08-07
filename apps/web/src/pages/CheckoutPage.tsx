@@ -5,6 +5,7 @@ import { SIGO_CONTACT_EMAIL, findCommercialPlan, formatMzn } from "../commercial
 import { LogoFull } from "../components/Logo";
 import { ApiError } from "../api/http";
 import AlertBanner from "../components/AlertBanner";
+import PaymentDetailsCard from "../components/PaymentDetailsCard";
 
 type CheckoutForm = {
   name: string;
@@ -25,6 +26,7 @@ export default function CheckoutPage() {
   const plan = findCommercialPlan(planSlug);
   const [billingCycle, setBillingCycle] = useState<"mensal" | "anual">(searchParams.get("periodo") === "anual" ? "anual" : "mensal");
   const [form, setForm] = useState(EMPTY_FORM);
+  const [proofFile, setProofFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -58,22 +60,20 @@ export default function CheckoutPage() {
     setError(null);
     setSubmitting(true);
     try {
-      const res = await fetch("/api/public/leads", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: form.name,
-          company: form.company,
-          email: form.email,
-          phone: form.phone,
-          nuit: form.nuit || undefined,
-          city: form.city || undefined,
-          teamSize: form.teamSize || undefined,
-          planOrPack: plan!.name,
-          billingCycle,
-          notes: form.notes || undefined,
-        }),
-      });
+      const body = new FormData();
+      body.append("name", form.name);
+      body.append("company", form.company);
+      body.append("email", form.email);
+      body.append("phone", form.phone);
+      if (form.nuit) body.append("nuit", form.nuit);
+      if (form.city) body.append("city", form.city);
+      if (form.teamSize) body.append("teamSize", form.teamSize);
+      body.append("planOrPack", plan!.name);
+      body.append("billingCycle", billingCycle);
+      if (form.notes) body.append("notes", form.notes);
+      if (proofFile) body.append("file", proofFile);
+
+      const res = await fetch("/api/public/leads", { method: "POST", body });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new ApiError(res.status, typeof body.error === "string" ? body.error : "Não foi possível enviar o pedido");
@@ -107,8 +107,8 @@ export default function CheckoutPage() {
           {submitted ? (
             <div className="p-5 sm:p-7">
               <AlertBanner tone="success">
-                Pedido recebido! A equipa SIGO vai analisar e entrar em contacto por email ou telefone — normalmente em
-                poucas horas.
+                Pedido recebido!{proofFile ? " Recebemos também o comprovativo." : ""} A equipa SIGO vai analisar e entrar
+                em contacto por email ou telefone — normalmente em poucas horas.
               </AlertBanner>
             </div>
           ) : (
@@ -142,6 +142,23 @@ export default function CheckoutPage() {
                   <label className="label">O que pretende organizar primeiro?</label>
                   <textarea className="input min-h-24 resize-y py-3" value={form.notes} onChange={(e) => update("notes", e.target.value)} placeholder="Orçamentos, cronograma, compras, medições..." />
                 </div>
+              </div>
+            </fieldset>
+            <fieldset className="border-t border-slate-200 pt-5">
+              <legend className="mb-1 text-sm font-bold text-slate-900">Já pode pagar agora</legend>
+              <p className="mb-3 text-xs leading-5 text-slate-500">
+                Opcional — pague por transferência ou carteira móvel e anexe o comprovativo. Sem conta ainda: a equipa
+                SIGO cria a empresa e confirma o pagamento a seguir.
+              </p>
+              <PaymentDetailsCard />
+              <div className="mt-4">
+                <label className="label">Comprovativo de pagamento (opcional)</label>
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif,application/pdf"
+                  className="input"
+                  onChange={(e) => setProofFile(e.target.files?.[0] ?? null)}
+                />
               </div>
             </fieldset>
             <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
