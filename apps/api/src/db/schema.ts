@@ -239,6 +239,7 @@ export const labourCategories = pgTable(
     effectiveDate: date("effective_date"),
     isActive: boolean("is_active").notNull().default(true),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    createdBySupplierAccountId: uuid("created_by_supplier_account_id").references((): AnyPgColumn => supplierAccounts.id, { onDelete: "set null" }),
   },
   // Impede duas clonagens em corrida (dois pedidos simultâneos a clonar a mesma categoria
   // partilhada para a mesma empresa) — companyId NULL nunca colide consigo próprio em Postgres
@@ -274,6 +275,7 @@ export const materials = pgTable(
     // de compra (ex: 10 para um camião de 10m3).
     purchasePackageLabel: varchar("purchase_package_label", { length: 100 }),
     purchasePackageQty: numeric("purchase_package_qty", { precision: 14, scale: 4 }),
+    createdBySupplierAccountId: uuid("created_by_supplier_account_id").references((): AnyPgColumn => supplierAccounts.id, { onDelete: "set null" }),
   },
   (table) => [unique().on(table.companyId, table.name)]
 );
@@ -324,6 +326,7 @@ export const equipment = pgTable(
     unit: unitEnum("unit").notNull(),
     hourlyCost: numeric("hourly_cost", { precision: 14, scale: 4 }).notNull(),
     currency: currencyEnum("currency").notNull().default("MZN"),
+    createdBySupplierAccountId: uuid("created_by_supplier_account_id").references((): AnyPgColumn => supplierAccounts.id, { onDelete: "set null" }),
   },
   (table) => [unique().on(table.companyId, table.name)]
 );
@@ -810,6 +813,39 @@ export const invoiceStatusEnum = pgEnum("invoice_status", ["rascunho", "emitida"
 export const contractStatusEnum = pgEnum("contract_status", ["rascunho", "activo", "concluido", "cancelado"]);
 export const contractVariationStatusEnum = pgEnum("contract_variation_status", ["rascunho", "submetida", "aprovada", "rejeitada"]);
 export const creditNoteStatusEnum = pgEnum("credit_note_status", ["rascunho", "emitida", "cancelada"]);
+export const clientPaymentPlanModeEnum = pgEnum("client_payment_plan_mode", ["total", "parcelado"]);
+export const clientPaymentInstallmentStatusEnum = pgEnum("client_payment_installment_status", ["prevista", "parcial", "paga"]);
+
+/** O que o dono da obra pode ver no link público — definido pelo gestor. */
+export const projectClientShareSettings = pgTable("project_client_share_settings", {
+  projectId: uuid("project_id")
+    .primaryKey()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  showProgress: boolean("show_progress").notNull().default(true),
+  showCertifiedValue: boolean("show_certified_value").notNull().default(true),
+  showContractValue: boolean("show_contract_value").notNull().default(true),
+  showSchedule: boolean("show_schedule").notNull().default(true),
+  showCurrentPhase: boolean("show_current_phase").notNull().default(true),
+  showDiaryEvidences: boolean("show_diary_evidences").notNull().default(true),
+  showPaymentSchedule: boolean("show_payment_schedule").notNull().default(true),
+  showNextPayment: boolean("show_next_payment").notNull().default(true),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+/** Plano de pagamentos do cliente à obra (total ou parcelado). */
+export const projectClientPaymentPlans = pgTable("project_client_payment_plans", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" })
+    .unique(),
+  mode: clientPaymentPlanModeEnum("mode").notNull().default("parcelado"),
+  currency: currencyEnum("currency").notNull().default("MZN"),
+  totalAmount: numeric("total_amount", { precision: 14, scale: 2 }).notNull().default("0"),
+  notes: text("notes"),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
 
 // Lançamento financeiro (receita ou despesa) ligado a um projecto — "contas a pagar"/"a receber"
 // são apenas lançamentos com status "pendente" e dueDate preenchida; "pago" com paidDate é o que
@@ -862,6 +898,22 @@ export const projectInvoices = pgTable("project_invoices", {
   unique("project_invoice_certificate_unique").on(table.measurementCertificateId),
   unique("project_invoice_number_unique").on(table.projectId, table.invoiceNumber),
 ]);
+
+export const projectClientPaymentInstallments = pgTable("project_client_payment_installments", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  planId: uuid("plan_id")
+    .notNull()
+    .references(() => projectClientPaymentPlans.id, { onDelete: "cascade" }),
+  sequence: integer("sequence").notNull().default(1),
+  title: varchar("title", { length: 200 }).notNull(),
+  dueDate: date("due_date").notNull(),
+  amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
+  status: clientPaymentInstallmentStatusEnum("status").notNull().default("prevista"),
+  paidAmount: numeric("paid_amount", { precision: 14, scale: 2 }).notNull().default("0"),
+  paidAt: date("paid_at"),
+  invoiceId: uuid("invoice_id").references(() => projectInvoices.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
 
 export const invoiceReceipts = pgTable("invoice_receipts", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -1395,8 +1447,29 @@ export const suppliers = pgTable("suppliers", {
   // aponta sempre à mesma conta global (ver sigoPrices.ts); para um fornecedor do marketplace, é
   // a conta que ele próprio criou ao registar-se — sempre preenchida nesse caso.
   supplierAccountId: uuid("supplier_account_id").references((): AnyPgColumn => supplierAccounts.id, { onDelete: "set null" }),
+  // Marketplace: o fornecedor escolhe o que vende — o painel «Meus preços» só mostra estes tipos.
+  offersMaterials: boolean("offers_materials").notNull().default(false),
+  offersLabour: boolean("offers_labour").notNull().default(false),
+  offersEquipment: boolean("offers_equipment").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
+
+// Produtos do catálogo nacional (ou criados pelo próprio fornecedor) que esta ficha marketplace
+// seleccionou para vender — sem isto, «Meus preços» não lista o catálogo inteiro.
+export const supplierCatalogItems = pgTable(
+  "supplier_catalog_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    supplierId: uuid("supplier_id")
+      .notNull()
+      .references(() => suppliers.id, { onDelete: "cascade" }),
+    kind: varchar("kind", { length: 20 }).notNull(), // material | labour | equipment
+    materialId: uuid("material_id").references(() => materials.id, { onDelete: "cascade" }),
+    labourCategoryId: uuid("labour_category_id").references(() => labourCategories.id, { onDelete: "cascade" }),
+    equipmentId: uuid("equipment_id").references(() => equipment.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+);
 
 export const purchaseOrders = pgTable("purchase_orders", {
   id: uuid("id").primaryKey().defaultRandom(),

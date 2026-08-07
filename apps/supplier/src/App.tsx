@@ -5,6 +5,8 @@ import SupplierAcceptInvitePage from "./pages/SupplierAcceptInvitePage";
 import SupplierDashboardPage from "./pages/SupplierDashboardPage";
 import SupplierQuoteRequestPage from "./pages/SupplierQuoteRequestPage";
 import MarketplacePricesPage from "./pages/MarketplacePricesPage";
+import SupplierOfferingsPage from "./pages/SupplierOfferingsPage";
+import SupplierProfilePage from "./pages/SupplierProfilePage";
 
 // Router próprio, sem qualquer rota do sistema principal — este site só sabe destas páginas.
 export default function App() {
@@ -17,6 +19,8 @@ export default function App() {
       <Route path="/painel" element={<SupplierDashboardPage />} />
       <Route path="/pedidos/:id" element={<SupplierQuoteRequestPage />} />
       <Route path="/precos" element={<MarketplacePricesPage />} />
+      <Route path="/oferta" element={<SupplierOfferingsPage />} />
+      <Route path="/perfil" element={<SupplierProfilePage />} />
       <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>
   );

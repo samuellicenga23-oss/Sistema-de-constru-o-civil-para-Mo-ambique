@@ -2,6 +2,7 @@ import { sql } from "./index.js";
 import { seedCatalog } from "./seedCatalog.js";
 import { seedNationalZonePrices } from "./seedNationalZones.js";
 import { seedCompositions } from "./seedCompositions.js";
+import { reclassifyAllMaterialCategories } from "./reclassifyMaterialCategories.js";
 
 // Já não cria contas de utilizador (super_admin/empresa de demonstração) — fazia-o com
 // passwords fixas e públicas no código-fonte (achado da auditoria). O primeiro super_admin
@@ -12,6 +13,7 @@ import { seedCompositions } from "./seedCompositions.js";
 async function main() {
   await seedCatalog();
   await seedCompositions();
+  await reclassifyAllMaterialCategories();
   await seedNationalZonePrices();
   await sql.end();
 }

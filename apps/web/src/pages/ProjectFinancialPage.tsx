@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { boqApi, type Project } from "../api/boq";
 import { financialApi, type ClientStatement, type FinancialEntry, type FinancialSummary, type ProjectControl, type ProjectContract, type ProjectInvoice } from "../api/financial";
+import { clientPaymentsApi, type ClientPaymentPlan } from "../api/clientPayments";
 import Layout from "../components/Layout";
 import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { MetricCard, SectionHeader } from "../components/WorkspaceUI";
@@ -33,6 +34,14 @@ export default function ProjectFinancialPage() {
   const [invoices, setInvoices] = useState<ProjectInvoice[]>([]);
   const [contract, setContract] = useState<ProjectContract | null>(null);
   const [statement, setStatement] = useState<ClientStatement | null>(null);
+  const [clientPlan, setClientPlan] = useState<ClientPaymentPlan | null>(null);
+  const [planSuggestion, setPlanSuggestion] = useState<{ amount: number; currency: string } | null>(null);
+  const [planMode, setPlanMode] = useState<"total" | "parcelado">("parcelado");
+  const [planTotal, setPlanTotal] = useState("");
+  const [planDueDate, setPlanDueDate] = useState(todayStr());
+  const [newInstTitle, setNewInstTitle] = useState("");
+  const [newInstDue, setNewInstDue] = useState(todayStr());
+  const [newInstAmount, setNewInstAmount] = useState("");
   const [showContractForm, setShowContractForm] = useState(false);
   const [contractNumber, setContractNumber] = useState("");
   const [contractClient, setContractClient] = useState("");
@@ -51,12 +60,26 @@ export default function ProjectFinancialPage() {
 
   async function reload() {
     if (!projectId) return;
-    const [proj, list, sum, controlData, invoiceData] = await Promise.all([boqApi.getProject(projectId), financialApi.list(projectId), financialApi.summary(projectId), financialApi.control(projectId), financialApi.listInvoices(projectId)]);
+    const [proj, list, sum, controlData, invoiceData, paymentData] = await Promise.all([
+      boqApi.getProject(projectId),
+      financialApi.list(projectId),
+      financialApi.summary(projectId),
+      financialApi.control(projectId),
+      financialApi.listInvoices(projectId),
+      clientPaymentsApi.get(projectId).catch(() => ({ plan: null, suggestion: null })),
+    ]);
     setProject(proj);
     setEntries(list);
     setSummary(sum);
     setControl(controlData);
     setInvoices(invoiceData);
+    setClientPlan(paymentData.plan);
+    setPlanSuggestion(paymentData.suggestion);
+    setPlanMode(paymentData.plan?.mode ?? "parcelado");
+    setPlanTotal(String(paymentData.plan?.totalAmount ?? paymentData.suggestion?.amount ?? ""));
+    if (paymentData.plan?.mode === "total" && paymentData.plan.installments[0]) {
+      setPlanDueDate(paymentData.plan.installments[0].dueDate);
+    }
     const contractData = await financialApi.getContract(projectId).catch(() => null);
     setContract(contractData);
     setStatement(contractData ? await financialApi.clientStatement(projectId).catch(() => null) : null);
@@ -166,6 +189,90 @@ export default function ProjectFinancialPage() {
     } catch (err) { setError(err instanceof Error ? err.message : "Não foi possível anexar o comprovativo"); }
   }
 
+  async function handleSaveClientPlan(e: FormEvent) {
+    e.preventDefault();
+    if (!projectId) return;
+    const total = Number(planTotal);
+    if (!(total >= 0)) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const plan = await clientPaymentsApi.savePlan(projectId, {
+        mode: planMode,
+        currency: (project?.currency as "MZN" | "USD") ?? "MZN",
+        totalAmount: total,
+        singleDueDate: planMode === "total" ? planDueDate : undefined,
+        singleTitle: planMode === "total" ? "Pagamento total" : undefined,
+      });
+      setClientPlan(plan);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível guardar o plano de pagamentos");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleAddInstallment(e: FormEvent) {
+    e.preventDefault();
+    if (!projectId) return;
+    const amountNum = Number(newInstAmount);
+    if (!newInstTitle.trim() || !(amountNum > 0)) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await clientPaymentsApi.addInstallment(projectId, {
+        title: newInstTitle.trim(),
+        dueDate: newInstDue,
+        amount: amountNum,
+      });
+      setNewInstTitle("");
+      setNewInstAmount("");
+      setNewInstDue(todayStr());
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível adicionar a parcela");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleMarkInstallmentPaid(id: string, partial?: boolean) {
+    if (!projectId) return;
+    setError(null);
+    try {
+      if (partial) {
+        const raw = window.prompt("Valor pago parcialmente:");
+        if (raw == null) return;
+        const paidAmount = Number(raw);
+        if (!(paidAmount >= 0)) return;
+        await clientPaymentsApi.markPaid(projectId, id, { paidAmount });
+      } else {
+        await clientPaymentsApi.markPaid(projectId, id);
+      }
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível actualizar a parcela");
+    }
+  }
+
+  async function handleDeleteInstallment(id: string) {
+    if (!projectId) return;
+    const ok = await confirm({
+      title: "Eliminar parcela?",
+      message: "A parcela será removida do plano de pagamentos do cliente.",
+      confirmLabel: "Eliminar",
+      danger: true,
+    });
+    if (!ok) return;
+    setError(null);
+    try {
+      await clientPaymentsApi.deleteInstallment(projectId, id);
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível eliminar a parcela");
+    }
+  }
+
   async function handleSaveContract(e: FormEvent) {
     e.preventDefault();
     if (!projectId || !contractNumber.trim() || !contractClient.trim() || !(Number(contractAmount) > 0)) return;
@@ -243,6 +350,116 @@ export default function ProjectFinancialPage() {
           <MetricCard label="Contas a pagar" value={fmt(summary.contasAPagar, currency)} tone="warning" />
         </div>
         <details className="-mt-3 px-1 text-xs text-slate-500"><summary className="cursor-pointer font-semibold text-slate-600">Critério da margem</summary><p className="pt-1 leading-5">Valor recebido menos custo pago; pendências só entram após liquidação.</p></details>
+
+        <section className="card overflow-hidden">
+          <SectionHeader
+            title="Pagamentos do cliente"
+            description="Plano que o dono da obra vê no link público — separado do caixa interno."
+          />
+          <form onSubmit={handleSaveClientPlan} className="space-y-4 border-b border-slate-100 px-5 py-4">
+            <div className="flex flex-wrap gap-2">
+              <button type="button" className={`btn btn-sm ${planMode === "total" ? "btn-primary" : "btn-secondary"}`} onClick={() => setPlanMode("total")}>
+                Total
+              </button>
+              <button type="button" className={`btn btn-sm ${planMode === "parcelado" ? "btn-primary" : "btn-secondary"}`} onClick={() => setPlanMode("parcelado")}>
+                Parcelado
+              </button>
+              {planSuggestion && (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setPlanTotal(String(planSuggestion.amount))}
+                >
+                  Usar valor do contrato ({fmt(planSuggestion.amount, planSuggestion.currency)})
+                </button>
+              )}
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div>
+                <label className="label">Valor total ({currency})</label>
+                <input required min="0" step="0.01" type="number" className="input" value={planTotal} onChange={(e) => setPlanTotal(e.target.value)} />
+              </div>
+              {planMode === "total" && (
+                <div>
+                  <label className="label">Data de vencimento</label>
+                  <input required type="date" className="input" value={planDueDate} onChange={(e) => setPlanDueDate(e.target.value)} />
+                </div>
+              )}
+              <div className="flex items-end">
+                <button disabled={saving} className="btn btn-primary">{clientPlan ? "Actualizar plano" : "Criar plano"}</button>
+              </div>
+            </div>
+          </form>
+
+          {clientPlan && (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[640px] text-sm">
+                <thead>
+                  <tr className="table-head-row">
+                    <th className="px-5 py-2 text-left font-medium">#</th>
+                    <th className="py-2 text-left font-medium">Parcela</th>
+                    <th className="py-2 text-left font-medium">Vencimento</th>
+                    <th className="py-2 text-right font-medium">Valor</th>
+                    <th className="py-2 text-left font-medium">Estado</th>
+                    <th className="py-2 pr-5 text-right font-medium">Acções</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {clientPlan.installments.map((row) => (
+                    <tr key={row.id} className="table-row">
+                      <td className="px-5 py-2 text-slate-400">{row.sequence}</td>
+                      <td className="py-2">{row.title}</td>
+                      <td className="py-2">{row.dueDate}</td>
+                      <td className="py-2 text-right tabular-nums">{fmt(row.amount, clientPlan.currency)}</td>
+                      <td className="py-2">
+                        <span className={row.status === "atrasada" ? "font-semibold text-red-700" : row.status === "paga" ? "text-green-700" : "text-slate-600"}>
+                          {row.status === "paga" ? "Paga" : row.status === "parcial" ? `Parcial (${fmt(row.paidAmount, clientPlan.currency)})` : row.status === "atrasada" ? "Atrasada" : "Prevista"}
+                        </span>
+                      </td>
+                      <td className="py-2 pr-5 text-right">
+                        <div className="flex flex-wrap justify-end gap-1">
+                          {row.status !== "paga" && (
+                            <>
+                              <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleMarkInstallmentPaid(row.id)}>Marcar paga</button>
+                              <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleMarkInstallmentPaid(row.id, true)}>Parcial</button>
+                            </>
+                          )}
+                          {planMode === "parcelado" && (
+                            <button type="button" className="btn btn-ghost btn-sm text-red-700" onClick={() => handleDeleteInstallment(row.id)} aria-label="Eliminar">
+                              <IconTrash className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {planMode === "parcelado" && (
+            <form onSubmit={handleAddInstallment} className="grid gap-3 border-t border-slate-100 px-5 py-4 sm:grid-cols-4">
+              <div className="sm:col-span-2">
+                <label className="label">Nova parcela</label>
+                <input className="input" placeholder="Ex.: 1.ª prestação / Adiantamento" value={newInstTitle} onChange={(e) => setNewInstTitle(e.target.value)} required />
+              </div>
+              <div>
+                <label className="label">Vencimento</label>
+                <input type="date" className="input" value={newInstDue} onChange={(e) => setNewInstDue(e.target.value)} required />
+              </div>
+              <div>
+                <label className="label">Valor</label>
+                <div className="flex gap-2">
+                  <input type="number" min="0.01" step="0.01" className="input" value={newInstAmount} onChange={(e) => setNewInstAmount(e.target.value)} required />
+                  <button disabled={saving} className="btn btn-secondary shrink-0" type="submit">
+                    <IconPlus className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            </form>
+          )}
+        </section>
 
         {control && <section className="card overflow-hidden">
           <SectionHeader title="Controlo da obra" description={`Previsto vs. realizado · referência em ${control.basis.referenceDate}`} />

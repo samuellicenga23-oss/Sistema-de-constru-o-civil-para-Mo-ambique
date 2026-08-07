@@ -36,6 +36,7 @@ import { contractRoutes } from "./routes/contracts.js";
 import { workChapterRoutes } from "./routes/workChapters.js";
 import { practiceRoutes } from "./routes/practice.js";
 import { publicShareRoutes } from "./routes/publicShare.js";
+import { clientPaymentRoutes } from "./routes/clientPayments.js";
 import { leadRoutes } from "./routes/leads.js";
 import { supplierAuthRoutes } from "./routes/supplierAuth.js";
 import { supplierPortalRoutes } from "./routes/supplierPortal.js";
@@ -160,6 +161,7 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   await app.register(workChapterRoutes);
   await app.register(practiceRoutes);
   await app.register(publicShareRoutes);
+  await app.register(clientPaymentRoutes);
   await app.register(leadRoutes);
   await app.register(supplierAuthRoutes);
   await app.register(supplierPortalRoutes);

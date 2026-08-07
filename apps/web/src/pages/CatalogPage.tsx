@@ -96,6 +96,28 @@ export default function CatalogPage() {
     return materials.filter((m) => !q || normalize(`${m.code ?? ""} ${m.name} ${m.category} ${m.specification ?? ""}`).includes(q));
   }, [materials, materialQuery]);
 
+  const materialGroups = useMemo(() => {
+    const map = new Map<string, Material[]>();
+    for (const m of filteredMaterials) {
+      const key = (m.category || "Outros").trim() || "Outros";
+      const list = map.get(key) ?? [];
+      list.push(m);
+      map.set(key, list);
+    }
+    return [...map.entries()]
+      .sort(([a], [b]) => a.localeCompare(b, "pt"))
+      .map(([category, items]) => ({
+        category,
+        items: items.slice().sort((a, b) => a.name.localeCompare(b.name, "pt")),
+      }));
+  }, [filteredMaterials]);
+
+  const [collapsedMaterialGroups, setCollapsedMaterialGroups] = useState<Record<string, boolean>>({});
+
+  function toggleMaterialGroup(category: string) {
+    setCollapsedMaterialGroups((prev) => ({ ...prev, [category]: !prev[category] }));
+  }
+
   const catalogueHealth = useMemo(() => {
     const incompleteMaterials = materials.filter((m) => !m.code || !m.specification || !m.priceSourceName || !m.priceDate).length;
     const staleMaterials = materials.filter((m) => m.priceDate && (Date.now() - new Date(m.priceDate).getTime()) / 86_400_000 > 120).length;
@@ -282,32 +304,79 @@ export default function CatalogPage() {
         )}
 
         {tab === "materiais" && (
-          <section className="card">
-            <div className="px-5 pt-4 pb-3 border-b border-gray-100 space-y-3">
-              <p className="text-xs leading-5 text-gray-500 max-w-3xl">Preço, especificação, perda e unidade de compra de cada material.</p>
-              <div className="flex flex-wrap items-center justify-between gap-3"><input type="search" placeholder="Pesquisar por código, material ou categoria..." value={materialQuery} onChange={(e) => setMaterialQuery(e.target.value)} className="input max-w-sm" /><button type="button" onClick={() => setMaterialEditor({ item: null })} className="btn btn-primary btn-sm"><IconPlus className="w-3.5 h-3.5" /> Novo material</button></div>
+          <section className="card overflow-hidden">
+            <div className="space-y-3 border-b border-gray-100 px-5 pb-3 pt-4">
+              <p className="max-w-3xl text-xs leading-5 text-gray-500">
+                Preço, especificação, perda e unidade de compra — agrupados por tipo (ex. Cimento → Limak, Nacional, Dugongo).
+              </p>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <input
+                  type="search"
+                  placeholder="Pesquisar grupo, marca, código ou especificação..."
+                  value={materialQuery}
+                  onChange={(e) => setMaterialQuery(e.target.value)}
+                  className="input max-w-sm"
+                />
+                <button type="button" onClick={() => setMaterialEditor({ item: null })} className="btn btn-primary btn-sm">
+                  <IconPlus className="h-3.5 w-3.5" /> Novo material
+                </button>
+              </div>
             </div>
-            <div className="grid divide-y divide-slate-100 sm:grid-cols-2 sm:divide-x 2xl:grid-cols-3">
-              {filteredMaterials.map((m) => (
-              <article key={`mobile-${m.id}`} className="p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <span className="font-mono text-[10px] text-slate-400">{m.code || "SEM CÓD."}</span>
-                    <strong className="mt-1 block text-sm text-slate-900">{m.name}</strong>
-                    <p className="mt-1 text-xs text-slate-500">{m.category} · {m.unit}</p>
-                  </div>
-                  <span className="text-right">
-                    <strong className="block text-sm tabular-nums">{money(m.baseUnitCost)} {m.currency}</strong>
-                    <small className="text-[10px] text-slate-500">preço base</small>
-                  </span>
+
+            {materialGroups.length === 0 && (
+              <p className="p-6 text-center text-sm text-slate-500">
+                {materialQuery ? "Nenhum material corresponde à pesquisa." : "Ainda não há materiais no catálogo."}
+              </p>
+            )}
+
+            {materialGroups.map((group) => {
+              const collapsed = collapsedMaterialGroups[group.category];
+              return (
+                <div key={group.category} className="border-b border-slate-100 last:border-b-0">
+                  <button
+                    type="button"
+                    onClick={() => toggleMaterialGroup(group.category)}
+                    className="flex w-full items-center gap-2 bg-slate-50/80 px-5 py-2.5 text-left hover:bg-slate-100/80"
+                  >
+                    <span className="text-xs text-slate-400">{collapsed ? "▸" : "▾"}</span>
+                    <strong className="text-sm text-slate-900">{group.category}</strong>
+                    <span className="text-xs text-slate-500">{group.items.length} {group.items.length === 1 ? "material" : "materiais"}</span>
+                  </button>
+                  {!collapsed && (
+                    <div className="grid divide-y divide-slate-100 sm:grid-cols-2 sm:divide-x 2xl:grid-cols-3">
+                      {group.items.map((m) => (
+                        <article key={m.id} className="p-4">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <span className="font-mono text-[10px] text-slate-400">{m.code || "SEM CÓD."}</span>
+                              <strong className="mt-1 block text-sm text-slate-900">{m.name}</strong>
+                              <p className="mt-1 truncate text-xs text-slate-500">
+                                {m.unit}
+                                {m.specification ? ` · ${m.specification}` : ""}
+                              </p>
+                            </div>
+                            <span className="text-right">
+                              <strong className="block text-sm tabular-nums">
+                                {money(m.baseUnitCost)} {m.currency}
+                              </strong>
+                              <small className="text-[10px] text-slate-500">preço base</small>
+                            </span>
+                          </div>
+                          <div className="mt-3 grid grid-cols-2 gap-2 border-t border-slate-100 pt-3">
+                            <button type="button" onClick={() => setMaterialEditor({ item: m })} className="btn btn-secondary btn-sm">
+                              Editar ficha
+                            </button>
+                            <button type="button" onClick={() => setPricingModalMaterial(m)} className="btn btn-secondary btn-sm">
+                              Preços e fornecedores
+                            </button>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                <div className="mt-3 grid grid-cols-2 gap-2 border-t border-slate-100 pt-3">
-                  <button type="button" onClick={() => setMaterialEditor({ item: m })} className="btn btn-secondary btn-sm">Editar ficha</button>
-                  <button type="button" onClick={() => setPricingModalMaterial(m)} className="btn btn-secondary btn-sm">Preços e fornecedores</button>
-                </div>
-              </article>
-            ))}
-            </div>
+              );
+            })}
           </section>
         )}
 

@@ -10,6 +10,7 @@ import {
   compositionEquipmentLines,
 } from "./schema.js";
 import { computeHourlyRate } from "../services/costEngine.js";
+import { resolveMaterialCategory } from "../services/materialCategories.js";
 
 // Biblioteca completa de composições de custo (catálogo global partilhado, MZN), organizada
 // por categoria — do estaleiro ao acabamento final. Rendimentos de mão-de-obra baseados no
@@ -552,7 +553,7 @@ async function ensureExtraMaterials() {
       .where(and(eq(materials.name, m.name), isNull(materials.companyId)))
       .limit(1);
     const values = {
-      category: m.category ?? existing?.category ?? "Outros",
+      category: resolveMaterialCategory(m.name, m.category, m.specification),
       specification: m.specification ?? existing?.specification ?? null,
       unit: m.unit,
       baseUnitCost: m.baseUnitCost.toString(),

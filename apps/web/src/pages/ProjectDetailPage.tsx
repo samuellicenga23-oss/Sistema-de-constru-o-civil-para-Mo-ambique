@@ -361,7 +361,7 @@ export default function ProjectDetailPage() {
       back={{ label: backLabel, fallbackTo: backTo }}
       actions={
         <div className="flex flex-wrap items-center gap-2">
-          {user?.role === "admin_empresa" && (
+          {(user?.role === "admin_empresa" || user?.role === "orcamentista") && fase !== "gestao" && (
             <button type="button" onClick={() => setShowPublicShare(true)} className="btn btn-secondary btn-sm">
               Partilhar com o dono da obra
             </button>

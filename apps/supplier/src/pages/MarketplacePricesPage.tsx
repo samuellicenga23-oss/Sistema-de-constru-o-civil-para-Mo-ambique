@@ -49,7 +49,7 @@ export default function MarketplacePricesPage() {
   const toast = useToast();
   const [account, setAccount] = useState<SupplierAccount | null>(null);
   const [tab, setTab] = useState<Tab>("materiais");
-  const [catalog, setCatalog] = useState<MarketplaceCatalog | null>(null);
+  const [offers, setOffers] = useState({ materials: true, labour: true, equipment: true });
   const [materialPrices, setMaterialPrices] = useState<MarketplaceMaterialPrice[]>([]);
   const [labourPrices, setLabourPrices] = useState<MarketplaceLabourPrice[]>([]);
   const [equipmentPrices, setEquipmentPrices] = useState<MarketplaceEquipmentPrice[]>([]);
@@ -62,16 +62,31 @@ export default function MarketplacePricesPage() {
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
 
   async function reload() {
-    const [cat, mats, labs, eqs] = await Promise.all([
-      marketplaceApi.catalog(),
+    const [profile, mats, labs, eqs] = await Promise.all([
+      marketplaceApi.profile(),
       marketplaceApi.listMaterials(),
       marketplaceApi.listLabour(),
       marketplaceApi.listEquipment(),
     ]);
-    setCatalog(cat);
+    if (profile.needsOfferSetup) {
+      navigate("/oferta", { replace: true });
+      return;
+    }
+    setOffers({
+      materials: profile.offersMaterials,
+      labour: profile.offersLabour,
+      equipment: profile.offersEquipment,
+    });
     setMaterialPrices(mats);
     setLabourPrices(labs);
     setEquipmentPrices(eqs);
+    const firstTab: Tab = profile.offersMaterials ? "materiais" : profile.offersLabour ? "mao-de-obra" : "maquinas";
+    setTab((current) => {
+      if (current === "materiais" && !profile.offersMaterials) return firstTab;
+      if (current === "mao-de-obra" && !profile.offersLabour) return firstTab;
+      if (current === "maquinas" && !profile.offersEquipment) return firstTab;
+      return current;
+    });
   }
 
   useEffect(() => {
@@ -94,30 +109,38 @@ export default function MarketplacePricesPage() {
   }, []);
 
   const materialOptionsGrouped = useMemo(() => {
-    if (!catalog) return [];
     const needle = query.trim().toLocaleLowerCase("pt");
     const filtered = needle
-      ? catalog.materials.filter((o) => {
-          const name = o.name.toLocaleLowerCase("pt");
-          const spec = o.specification ? String(o.specification).toLocaleLowerCase("pt") : "";
+      ? materialPrices.filter((o) => {
+          const name = o.materialName.toLocaleLowerCase("pt");
+          const spec = (o.specification ?? "").toLocaleLowerCase("pt");
           const cat = (o.category ?? "").toLocaleLowerCase("pt");
           return name.includes(needle) || spec.includes(needle) || cat.includes(needle);
         })
-      : catalog.materials;
-    return groupMaterialsByCategory(filtered);
-  }, [catalog, query]);
+      : materialPrices;
+    return groupMaterialsByCategory(
+      filtered.map((p) => ({
+        id: p.materialId,
+        name: p.materialName,
+        unit: p.unit,
+        category: p.category,
+        specification: p.specification,
+        source: p.source,
+      })),
+    );
+  }, [materialPrices, query]);
 
   const labourOptions = useMemo(() => {
-    if (!catalog) return [];
     const needle = query.trim().toLocaleLowerCase("pt");
-    return needle ? catalog.labourCategories.filter((o) => o.name.toLocaleLowerCase("pt").includes(needle)) : catalog.labourCategories;
-  }, [catalog, query]);
+    const rows = labourPrices.map((p) => ({ id: p.labourCategoryId, name: p.labourName }));
+    return needle ? rows.filter((o) => o.name.toLocaleLowerCase("pt").includes(needle)) : rows;
+  }, [labourPrices, query]);
 
   const equipmentOptions = useMemo(() => {
-    if (!catalog) return [];
     const needle = query.trim().toLocaleLowerCase("pt");
-    return needle ? catalog.equipment.filter((o) => o.name.toLocaleLowerCase("pt").includes(needle)) : catalog.equipment;
-  }, [catalog, query]);
+    const rows = equipmentPrices.map((p) => ({ id: p.equipmentId, name: p.equipmentName }));
+    return needle ? rows.filter((o) => o.name.toLocaleLowerCase("pt").includes(needle)) : rows;
+  }, [equipmentPrices, query]);
 
   const filteredMaterials = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase("pt");
@@ -226,8 +249,13 @@ export default function MarketplacePricesPage() {
             <p className="hero-eyebrow">SIGO Fornecedores</p>
             <h1 className="hero-title">Meus preços</h1>
             <p className="hero-subtitle">
-              Materiais estão organizados por grupo (ex. Cimento → Limak, Cimento Nacional, Dugongo). Cada marca/classe
-              tem o seu preço. Clique numa linha para precificar.
+              Só aparecem os tipos e produtos que escolheu em «O que vendo». Indique o preço de cada item — as empresas da sua zona vêem estes valores
+              antes de pedirem cotação.
+            </p>
+            <p style={{ marginTop: "0.75rem" }}>
+              <a href="/oferta" className="link-strong" onClick={(e) => { e.preventDefault(); navigate("/oferta"); }}>
+                Alterar o que vendo / cadastrar produto novo →
+              </a>
             </p>
           </div>
         </section>
@@ -236,7 +264,9 @@ export default function MarketplacePricesPage() {
 
         <section className="card fade-up delay-1">
           <div style={{ display: "flex", gap: "0.5rem", padding: "1.1rem 1.25rem 0", flexWrap: "wrap" }}>
-            {TABS.map((t) => {
+            {TABS.filter((t) =>
+              t.id === "materiais" ? offers.materials : t.id === "mao-de-obra" ? offers.labour : offers.equipment,
+            ).map((t) => {
               const total = t.id === "materiais" ? materialPrices.length : t.id === "mao-de-obra" ? labourPrices.length : equipmentPrices.length;
               const priced =
                 t.id === "materiais"

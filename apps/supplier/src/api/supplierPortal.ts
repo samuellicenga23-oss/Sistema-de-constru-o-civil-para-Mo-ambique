@@ -24,7 +24,7 @@ export type SupplierAccount = {
   createdAt: string;
 };
 
-export type SupplierPortalCompany = { companyId: string; companyName: string };
+export type SupplierPortalCompany = { companyId: string; companyName: string; brandName?: string | null };
 
 export type SupplierQuoteRequest = {
   id: string;
@@ -53,7 +53,20 @@ export type SupplierQuoteResponseLine = { id: string; unitCost: number; notes?: 
 
 export type PriceZone = { id: string; name: string; province: string | null };
 
-export type RegisterInput = { name: string; email: string; password: string; phone?: string; nuit?: string; zoneId: string };
+export type RegisterInput = {
+  name: string;
+  email: string;
+  password: string;
+  phone?: string;
+  nuit?: string;
+  zoneId: string;
+  offersMaterials: boolean;
+  offersLabour: boolean;
+  offersEquipment: boolean;
+  materialIds?: string[];
+  labourCategoryIds?: string[];
+  equipmentIds?: string[];
+};
 
 export type MarketplaceProfile = {
   id: string;
@@ -62,6 +75,13 @@ export type MarketplaceProfile = {
   nuit: string | null;
   zoneId: string | null;
   location: string | null;
+  offersMaterials: boolean;
+  offersLabour: boolean;
+  offersEquipment: boolean;
+  needsOfferSetup?: boolean;
+  materialIds?: string[];
+  labourCategoryIds?: string[];
+  equipmentIds?: string[];
 };
 
 export type MarketplaceMaterialPrice = {
@@ -92,12 +112,14 @@ export type MarketplaceEquipmentPrice = {
 
 export const publicApi = {
   zones: () => request<PriceZone[]>("/public/price-zones"),
+  marketplaceCatalog: () => request<MarketplaceCatalog>("/public/marketplace-catalog"),
 };
 
 export const supplierPortalAuthApi = {
   me: () => request<SupplierAccount>("/supplier/auth/me"),
   login: (email: string, password: string) => request<SupplierAccount>("/supplier/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }),
   logout: () => request<{ ok: true }>("/supplier/auth/logout", { method: "POST" }),
+  logoutOthers: () => request<{ ok: true }>("/supplier/auth/logout-others", { method: "POST" }),
   acceptInvite: (token: string, password: string) =>
     request<SupplierAccount>("/supplier/auth/accept-invite", { method: "POST", body: JSON.stringify({ token, password }) }),
   register: (data: RegisterInput) => request<SupplierAccount>("/supplier/auth/register", { method: "POST", body: JSON.stringify(data) }),
@@ -123,6 +145,21 @@ export const marketplaceApi = {
   profile: () => request<MarketplaceProfile>("/supplier/marketplace/profile"),
   updateProfile: (data: { name: string; contact?: string; nuit?: string; zoneId: string }) =>
     request<MarketplaceProfile>("/supplier/marketplace/profile", { method: "PUT", body: JSON.stringify(data) }),
+  updateOfferings: (data: {
+    offersMaterials: boolean;
+    offersLabour: boolean;
+    offersEquipment: boolean;
+    materialIds?: string[];
+    labourCategoryIds?: string[];
+    equipmentIds?: string[];
+  }) => request<MarketplaceProfile>("/supplier/marketplace/offerings", { method: "PUT", body: JSON.stringify(data) }),
+
+  createMaterial: (data: { name: string; unit: string; category?: string; specification?: string; unitCost?: number }) =>
+    request<{ id: string }>("/supplier/marketplace/materials/create", { method: "POST", body: JSON.stringify(data) }),
+  createLabour: (data: { name: string; hourlyCost?: number }) =>
+    request<{ id: string }>("/supplier/marketplace/labour/create", { method: "POST", body: JSON.stringify(data) }),
+  createEquipment: (data: { name: string; unit?: string; hourlyCost?: number }) =>
+    request<{ id: string }>("/supplier/marketplace/equipment/create", { method: "POST", body: JSON.stringify(data) }),
 
   listMaterials: () => request<MarketplaceMaterialPrice[]>("/supplier/marketplace/materials"),
   setMaterial: (data: { materialId: string; unitCost: number; currency?: string }) =>

@@ -463,6 +463,20 @@
       "when": 1786119751105,
       "tag": "0065_slippery_sage",
       "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1786122000000,
+      "tag": "0066_supplier_offerings",
+      "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1786128000000,
+      "tag": "0067_client_portal_payments",
+      "breakpoints": true
     }
   ]
 }

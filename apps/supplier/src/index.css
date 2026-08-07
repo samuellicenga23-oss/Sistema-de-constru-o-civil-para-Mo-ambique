@@ -701,6 +701,7 @@ textarea {
   display: flex;
   align-items: center;
   gap: 1.25rem;
+  flex-wrap: wrap;
 }
 
 .app-brand {
@@ -755,6 +756,9 @@ textarea {
   background: #f1f5f9;
   border-radius: 0.75rem;
   padding: 0.25rem;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
 
 .app-nav-link {
@@ -1147,3 +1151,225 @@ textarea {
 .stagger > *:nth-child(4) { animation-delay: 0.14s; }
 .stagger > *:nth-child(5) { animation-delay: 0.18s; }
 .stagger > *:nth-child(6) { animation-delay: 0.22s; }
+
+/* —— Dashboard enriquecido —— */
+
+.action-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 640px) {
+  .action-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 1024px) {
+  .action-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+.action-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 1rem 1.05rem;
+  border-radius: 1rem;
+  border: 1px solid var(--border);
+  background: #fff;
+  text-decoration: none;
+  box-shadow: var(--shadow-card);
+  transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+
+.action-tile:hover {
+  border-color: var(--teal-soft);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-raised);
+}
+
+.action-tile strong {
+  font-family: var(--font-display);
+  font-size: 0.92rem;
+  color: var(--ink);
+}
+
+.action-tile > span:last-child {
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.action-tile-accent {
+  border-color: rgba(237, 108, 34, 0.35);
+  background: linear-gradient(180deg, #fff7ed, #fff);
+}
+
+.action-tile-static {
+  cursor: default;
+}
+
+.action-tile-static:hover {
+  transform: none;
+  box-shadow: var(--shadow-card);
+  border-color: var(--border);
+}
+
+.two-col {
+  display: grid;
+  gap: 0.85rem;
+}
+
+@media (min-width: 900px) {
+  .two-col {
+    grid-template-columns: 1.2fr 0.8fr;
+    align-items: start;
+  }
+}
+
+.checklist {
+  display: flex;
+  flex-direction: column;
+}
+
+.checklist-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.85rem 1.15rem;
+  border-bottom: 1px solid var(--border);
+  text-decoration: none;
+  color: inherit;
+}
+
+.checklist-item:last-child {
+  border-bottom: 0;
+}
+
+.checklist-item:hover {
+  background: #f8fafc;
+}
+
+.checklist-item strong {
+  display: block;
+  font-size: 0.88rem;
+}
+
+.checklist-item span {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-top: 0.1rem;
+}
+
+.checklist-mark {
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 999px;
+  border: 1.5px solid var(--border);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  color: #15803d;
+}
+
+.checklist-item.done .checklist-mark {
+  background: #dcfce7;
+  border-color: #86efac;
+}
+
+.checklist-item.done strong {
+  color: var(--ink-400);
+}
+
+.tips-list {
+  margin: 1rem 0 0;
+  padding-left: 1.1rem;
+  display: grid;
+  gap: 0.55rem;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--ink-soft);
+}
+
+.tips-foot {
+  margin: 1rem 0 0;
+  padding-top: 0.85rem;
+  border-top: 1px dashed var(--border);
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.hero-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0.85rem 0 0;
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.rich-row-static {
+  cursor: default;
+}
+
+.rich-row-static:hover {
+  background: transparent;
+}
+
+.profile-grid {
+  display: grid;
+  gap: 0.85rem;
+}
+
+@media (min-width: 900px) {
+  .profile-grid {
+    grid-template-columns: 1.35fr 0.9fr;
+    align-items: start;
+  }
+}
+
+.profile-side {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.card-inline-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.form-stack {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.detail-list {
+  margin: 1rem 0 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.detail-list > div {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.detail-list dt {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.detail-list dd {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--ink);
+}

@@ -11,6 +11,7 @@ import {
   priceZones,
 } from "./schema.js";
 import { computeHourlyRate } from "../services/costEngine.js";
+import { resolveMaterialCategory } from "../services/materialCategories.js";
 
 // Dados-base extraídos de "ESTUDO DE PRECOS MASTER" e "Lista de quantidades" (UEM) —
 // catálogo global partilhado (companyId nulo), editável por cada empresa depois.
@@ -121,7 +122,7 @@ async function seedMaterials() {
       sourceReference: INE_CONSTRUCTION_REFERENCE,
       priceDate: PRICE_DATE,
       includesVat: false,
-      category: ("category" in m && m.category) ? m.category : "Outros",
+      category: ("category" in m && m.category) ? m.category : resolveMaterialCategory(m.name, undefined, ("specification" in m ? m.specification : null) as string | null),
       specification: ("specification" in m && m.specification) ? m.specification : null,
       purchasePackageLabel: m.purchasePackage?.label ?? null,
       purchasePackageQty: m.purchasePackage ? m.purchasePackage.qty.toString() : null,

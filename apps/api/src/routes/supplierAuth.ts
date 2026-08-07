@@ -3,7 +3,7 @@ import rateLimit from "@fastify/rate-limit";
 import { z } from "zod";
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { supplierAccounts, suppliers, priceZones } from "../db/schema.js";
+import { supplierAccounts, suppliers, priceZones, materials, labourCategories, equipment } from "../db/schema.js";
 import { hashPassword, verifyPassword } from "../auth/password.js";
 import {
   createSupplierSession,
@@ -12,6 +12,7 @@ import {
 } from "../auth/supplierSession.js";
 import { requireSupplierAuth } from "../auth/supplierMiddleware.js";
 import { env } from "../env.js";
+import { hasAnyOffer, setSupplierOffers } from "../services/supplierOfferings.js";
 
 function sessionMetaOf(request: FastifyRequest) {
   return { userAgent: request.headers["user-agent"] ?? null, ipAddress: request.ip };
@@ -96,6 +97,30 @@ export async function supplierAuthRoutes(app: FastifyInstance) {
     phone: z.string().trim().max(60).optional(),
     nuit: z.string().trim().max(30).optional(),
     zoneId: z.string().uuid(),
+    offersMaterials: z.boolean().default(false),
+    offersLabour: z.boolean().default(false),
+    offersEquipment: z.boolean().default(false),
+    materialIds: z.array(z.string().uuid()).optional().default([]),
+    labourCategoryIds: z.array(z.string().uuid()).optional().default([]),
+    equipmentIds: z.array(z.string().uuid()).optional().default([]),
+  });
+
+  // Catálogo nacional (público) para o fornecedor escolher produtos no registo, antes de ter sessão.
+  app.get("/api/public/marketplace-catalog", async () => {
+    const [materialRows, labourRows, equipmentRows] = await Promise.all([
+      db
+        .select({ id: materials.id, name: materials.name, unit: materials.unit, category: materials.category, specification: materials.specification })
+        .from(materials)
+        .where(and(isNull(materials.companyId), eq(materials.isActive, true)))
+        .orderBy(materials.category, materials.name),
+      db
+        .select({ id: labourCategories.id, name: labourCategories.name })
+        .from(labourCategories)
+        .where(and(isNull(labourCategories.companyId), eq(labourCategories.isActive, true)))
+        .orderBy(labourCategories.name),
+      db.select({ id: equipment.id, name: equipment.name }).from(equipment).where(isNull(equipment.companyId)).orderBy(equipment.name),
+    ]);
+    return { materials: materialRows, labourCategories: labourRows, equipment: equipmentRows };
   });
 
   // Registo público — o fornecedor cria a sua própria conta e ficha no SIGO Fornecedores, sem
@@ -107,6 +132,15 @@ export async function supplierAuthRoutes(app: FastifyInstance) {
     async (request, reply) => {
       const parsed = registerSchema.safeParse(request.body);
       if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+
+      const offers = {
+        offersMaterials: parsed.data.offersMaterials,
+        offersLabour: parsed.data.offersLabour,
+        offersEquipment: parsed.data.offersEquipment,
+      };
+      if (!hasAnyOffer(offers)) {
+        return reply.code(400).send({ error: "Indique o que vende: materiais, mão-de-obra e/ou máquinas." });
+      }
 
       const [existing] = await db.select({ id: supplierAccounts.id }).from(supplierAccounts).where(eq(supplierAccounts.email, parsed.data.email)).limit(1);
       if (existing) {
@@ -128,14 +162,26 @@ export async function supplierAuthRoutes(app: FastifyInstance) {
         })
         .returning();
 
-      await db.insert(suppliers).values({
-        companyId: null,
-        name: parsed.data.name,
-        contact: parsed.data.phone || null,
-        location: zone.name,
-        nuit: parsed.data.nuit || null,
-        zoneId: zone.id,
-        supplierAccountId: account.id,
+      const [supplier] = await db
+        .insert(suppliers)
+        .values({
+          companyId: null,
+          name: parsed.data.name,
+          contact: parsed.data.phone || null,
+          location: zone.name,
+          nuit: parsed.data.nuit || null,
+          zoneId: zone.id,
+          supplierAccountId: account.id,
+          offersMaterials: offers.offersMaterials,
+          offersLabour: offers.offersLabour,
+          offersEquipment: offers.offersEquipment,
+        })
+        .returning();
+
+      await setSupplierOffers(supplier.id, offers, {
+        materialIds: offers.offersMaterials ? parsed.data.materialIds : [],
+        labourCategoryIds: offers.offersLabour ? parsed.data.labourCategoryIds : [],
+        equipmentIds: offers.offersEquipment ? parsed.data.equipmentIds : [],
       });
 
       const session = await createSupplierSession(account.id, sessionMetaOf(request));

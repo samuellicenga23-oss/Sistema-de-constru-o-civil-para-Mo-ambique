@@ -439,7 +439,40 @@ export async function projectRoutes(app: FastifyInstance) {
     const companyId = request.currentUser!.companyId!;
     const project = await assertProjectOwned(id, companyId);
     if (!project) return reply.code(404).send({ error: "Projecto não encontrado" });
-    return { enabled: Boolean(project.publicShareToken), token: project.publicShareToken };
+    const { ensureShareSettings } = await import("../services/publicShare.js");
+    const settings = await ensureShareSettings(id);
+    return { enabled: Boolean(project.publicShareToken), token: project.publicShareToken, settings };
+  });
+
+  app.get("/api/projects/:id/public-share/settings", { preHandler: requireCompanyUser }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const companyId = request.currentUser!.companyId!;
+    const project = await assertProjectOwned(id, companyId);
+    if (!project) return reply.code(404).send({ error: "Projecto não encontrado" });
+    const { ensureShareSettings } = await import("../services/publicShare.js");
+    return ensureShareSettings(id);
+  });
+
+  app.put("/api/projects/:id/public-share/settings", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const companyId = request.currentUser!.companyId!;
+    const project = await assertProjectOwned(id, companyId);
+    if (!project) return reply.code(404).send({ error: "Projecto não encontrado" });
+    const parsed = z
+      .object({
+        showProgress: z.boolean().optional(),
+        showCertifiedValue: z.boolean().optional(),
+        showContractValue: z.boolean().optional(),
+        showSchedule: z.boolean().optional(),
+        showCurrentPhase: z.boolean().optional(),
+        showDiaryEvidences: z.boolean().optional(),
+        showPaymentSchedule: z.boolean().optional(),
+        showNextPayment: z.boolean().optional(),
+      })
+      .safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    const { updateShareSettings } = await import("../services/publicShare.js");
+    return updateShareSettings(id, parsed.data);
   });
 
   app.post("/api/projects/:id/public-share", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
@@ -447,9 +480,10 @@ export async function projectRoutes(app: FastifyInstance) {
     const companyId = request.currentUser!.companyId!;
     const project = await assertProjectOwned(id, companyId);
     if (!project) return reply.code(404).send({ error: "Projecto não encontrado" });
-    const { generatePublicShareToken } = await import("../services/publicShare.js");
+    const { generatePublicShareToken, ensureShareSettings } = await import("../services/publicShare.js");
     const token = await generatePublicShareToken(id);
-    return { enabled: true, token };
+    const settings = await ensureShareSettings(id);
+    return { enabled: true, token, settings };
   });
 
   app.delete("/api/projects/:id/public-share", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {

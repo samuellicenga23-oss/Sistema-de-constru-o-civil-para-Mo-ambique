@@ -18,6 +18,7 @@ export async function truncateAll() {
     measurement_certificates, measurement_certificate_lines,
     invoice_credit_notes, invoice_receipts, project_invoices,
     contract_variations, project_contracts,
+    project_client_payment_installments, project_client_payment_plans, project_client_share_settings,
     plants, extracted_rooms, extracted_rebar_schedules,
     financial_entries, audit_events, site_diary_entries, payment_proofs,
     suppliers, supplier_material_prices, supplier_labour_prices, supplier_equipment_prices,

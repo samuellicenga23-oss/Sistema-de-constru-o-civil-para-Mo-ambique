@@ -20,6 +20,7 @@ import { computeHourlyRate } from "../services/costEngine.js";
 import { cloneLabourCategoryForCompany, cloneMaterialForCompany, cloneEquipmentForCompany } from "../services/catalogClone.js";
 import { SIGO_PRICES_SUPPLIER_NAME, syncSigoPricesForCompany } from "../services/sigoPrices.js";
 import { assertSupplierMarketplaceAccess } from "../services/subscriptionEntitlements.js";
+import { resolveMaterialCategory } from "../services/materialCategories.js";
 import { CURRENCIES, UNITS, fixedSigo } from "@sigo/shared";
 
 const CATALOG_ROLES = ["super_admin", "admin_empresa", "orcamentista"] as const;
@@ -334,6 +335,7 @@ export async function catalogRoutes(app: FastifyInstance) {
       .insert(materials)
       .values({
         ...parsed.data,
+        category: resolveMaterialCategory(parsed.data.name, parsed.data.category, parsed.data.specification),
         companyId,
         baseUnitCost: parsed.data.baseUnitCost.toString(),
         importFactor: parsed.data.importFactor.toString(),

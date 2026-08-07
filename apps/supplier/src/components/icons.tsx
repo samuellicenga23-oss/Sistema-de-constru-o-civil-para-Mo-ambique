@@ -128,3 +128,39 @@ export function IconBell({ size = 16, className }: IconProps) {
     </svg>
   );
 }
+
+export function IconUser({ size = 16, className }: IconProps) {
+  return (
+    <svg {...base(size)} className={className}>
+      <circle cx="12" cy="8" r="4" />
+      <path d="M4 20c1.5-3.5 4.2-5 8-5s6.5 1.5 8 5" />
+    </svg>
+  );
+}
+
+export function IconPackage({ size = 16, className }: IconProps) {
+  return (
+    <svg {...base(size)} className={className}>
+      <path d="M12 3 3 7.5 12 12l9-4.5L12 3Z" />
+      <path d="M3 7.5V16.5L12 21l9-4.5V7.5M12 12v9" />
+    </svg>
+  );
+}
+
+export function IconLightbulb({ size = 16, className }: IconProps) {
+  return (
+    <svg {...base(size)} className={className}>
+      <path d="M9 18h6M10 21h4" />
+      <path d="M12 3a6 6 0 0 0-4 10.5V15a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-1.5A6 6 0 0 0 12 3Z" />
+    </svg>
+  );
+}
+
+export function IconMapPin({ size = 16, className }: IconProps) {
+  return (
+    <svg {...base(size)} className={className}>
+      <path d="M12 21s7-5.4 7-11a7 7 0 1 0-14 0c0 5.6 7 11 7 11Z" />
+      <circle cx="12" cy="10" r="2.5" />
+    </svg>
+  );
+}

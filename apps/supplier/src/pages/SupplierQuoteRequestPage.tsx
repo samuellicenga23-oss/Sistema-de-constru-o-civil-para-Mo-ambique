@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ApiError } from "../api/http";
+import { AppShell } from "../components/AppShell";
 import { useToast } from "../components/Toast";
-import { IconArrowLeft, IconCheck, IconClipboard } from "../components/icons";
-import { supplierPortalApi, supplierPortalAuthApi, type SupplierQuoteRequestDetail } from "../api/supplierPortal";
+import { IconCheck, IconClipboard } from "../components/icons";
+import { supplierPortalApi, supplierPortalAuthApi, type SupplierAccount, type SupplierQuoteRequestDetail } from "../api/supplierPortal";
 
 const STATUS_LABELS: Record<string, string> = {
   enviado: "Por responder",
@@ -18,6 +19,7 @@ export default function SupplierQuoteRequestPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const toast = useToast();
+  const [account, setAccount] = useState<SupplierAccount | null>(null);
   const [detail, setDetail] = useState<SupplierQuoteRequestDetail | null>(null);
   const [prices, setPrices] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState<Record<string, string>>({});
@@ -32,7 +34,10 @@ export default function SupplierQuoteRequestPage() {
     document.title = "Pedido de cotação — Portal do Fornecedor SIGO";
     supplierPortalAuthApi
       .me()
-      .then(() => supplierPortalApi.quoteRequest(id))
+      .then((me) => {
+        setAccount(me);
+        return supplierPortalApi.quoteRequest(id);
+      })
       .then((d) => {
         setDetail(d);
         setSupplierNotes(d.supplierNotes ?? "");
@@ -86,32 +91,35 @@ export default function SupplierQuoteRequestPage() {
 
   if (loading) {
     return (
-      <div className="portal-shell">
+      <AppShell accountName={account?.name ?? "…"}>
         <main className="portal-main">
           <div className="skeleton" style={{ height: "5rem", borderRadius: "1rem" }} />
           <div className="skeleton" style={{ height: "18rem" }} />
         </main>
-      </div>
+      </AppShell>
     );
   }
-  if (!detail) return <div className="centered-screen text-error">{error ?? "Pedido não encontrado"}</div>;
+  if (!detail) {
+    return (
+      <AppShell accountName={account?.name ?? "…"}>
+        <div className="centered-screen text-error">{error ?? "Pedido não encontrado"}</div>
+      </AppShell>
+    );
+  }
 
   return (
-    <div className="portal-shell">
-      <header className="app-header">
-        <div className="app-header-inner">
-          <Link to="/painel" className="link-muted" style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem", fontSize: "0.85rem" }}>
-            <IconArrowLeft size={15} /> Painel
-          </Link>
-          <span className={`badge ${detail.status === "enviado" ? "badge-brand" : detail.status === "aceite" ? "badge-success" : "badge-neutral"}`} style={{ marginLeft: "auto" }}>
-            {STATUS_LABELS[detail.status] ?? detail.status}
-          </span>
-        </div>
-      </header>
-
+    <AppShell accountName={account?.name ?? detail.companyName} pendingCount={detail.status === "enviado" ? 1 : 0}>
       <main className="portal-main">
         <section className="hero-panel fade-up">
           <div className="hero-panel-content">
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", alignItems: "center", marginBottom: "0.65rem" }}>
+              <Link to="/painel" className="badge" style={{ background: "rgba(255,255,255,0.14)", color: "#fff", textDecoration: "none" }}>
+                ← Painel
+              </Link>
+              <span className={`badge ${detail.status === "enviado" ? "badge-brand" : detail.status === "aceite" ? "badge-success" : "badge-neutral"}`}>
+                {STATUS_LABELS[detail.status] ?? detail.status}
+              </span>
+            </div>
             <p className="hero-eyebrow">{detail.companyName}{detail.projectName ? ` · ${detail.projectName}` : ""}</p>
             <h1 className="hero-title">{detail.title}</h1>
             {detail.message && <p className="hero-subtitle">{detail.message}</p>}
@@ -223,6 +231,6 @@ export default function SupplierQuoteRequestPage() {
           </div>
         )}
       </main>
-    </div>
+    </AppShell>
   );
 }

@@ -123,7 +123,7 @@ export function MaterialEditor({
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Field label="Código"><input className="input" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} placeholder="MAT-CIM-001" /></Field>
           <Field label="Material"><input required className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Cimento Portland 32,5" /></Field>
-          <Field label="Categoria"><input required className="input" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="Ligantes" /></Field>
+          <Field label="Categoria / grupo"><input required className="input" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} list="material-category-suggestions" placeholder="Cimento, Agregados, Aços, Alvenaria…" /></Field>
           <Field label="Unidade de medição"><select className="input" value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })}>{["m", "m2", "m3", "ml", "kg", "un", "vg", "h"].map((u) => <option key={u}>{u}</option>)}</select></Field>
           <Field label="Preço base (MZN)"><input required min="0" type="number" step="0.01" className="input" value={form.baseUnitCost} onChange={(e) => setForm({ ...form, baseUnitCost: e.target.value })} /></Field>
           <Field label="Data do preço"><input type="date" className="input" value={form.priceDate} onChange={(e) => setForm({ ...form, priceDate: e.target.value })} /></Field>
@@ -133,6 +133,22 @@ export function MaterialEditor({
           <Field label="Unidade de compra"><input className="input" value={form.purchasePackageLabel} onChange={(e) => setForm({ ...form, purchasePackageLabel: e.target.value })} placeholder="Saco 50 kg" /></Field>
           <Field label="Conteúdo da embalagem"><input min="0.0001" type="number" step="0.01" className="input" value={form.purchasePackageQty} onChange={(e) => setForm({ ...form, purchasePackageQty: e.target.value })} placeholder="50" /></Field>
         </div>
+        <datalist id="material-category-suggestions">
+          <option value="Cimento" />
+          <option value="Agregados" />
+          <option value="Aços" />
+          <option value="Alvenaria" />
+          <option value="Madeiras" />
+          <option value="Coberturas" />
+          <option value="Instalações hidráulicas" />
+          <option value="Instalações eléctricas" />
+          <option value="Acabamentos" />
+          <option value="Isolamentos" />
+          <option value="Ferragens" />
+          <option value="Betões preparados" />
+          <option value="Estaleiro e segurança" />
+          <option value="Outros" />
+        </datalist>
         <Field label="Especificação técnica"><textarea className="input min-h-20" value={form.specification} onChange={(e) => setForm({ ...form, specification: e.target.value })} placeholder="Marca e classe (ex. Limak CEM II/A-V 42,5 N), dimensões, norma — use um material distinto por marca/classe quando o preço difere" /></Field>
         <Field label="Referência da fonte"><textarea className="input min-h-16" value={form.sourceReference} onChange={(e) => setForm({ ...form, sourceReference: e.target.value })} placeholder="N.º da cotação, documento, URL ou observação" /></Field>
         <div className="flex flex-wrap gap-5"><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.includesVat} onChange={(e) => setForm({ ...form, includesVat: e.target.checked })} /> Preço inclui IVA</label><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.isActive} onChange={(e) => setForm({ ...form, isActive: e.target.checked })} /> Disponível para novas composições</label></div>

@@ -1,7 +1,9 @@
+import { useState } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { IconHome, IconClipboard, IconUpload, IconChart } from "./icons";
 import { useAuth } from "../auth/AuthContext";
 import { can } from "../permissions";
+import PublicShareModal from "./PublicShareModal";
 
 type NavMode = "measurement" | "budget" | "site";
 
@@ -19,11 +21,13 @@ export default function ProjectWorkspaceNav({
   const location = useLocation();
   const [params] = useSearchParams();
   const { user } = useAuth();
+  const [showPublicShare, setShowPublicShare] = useState(false);
   const fromGestao = params.get("fase") === "gestao";
   const resolvedMode: NavMode =
     mode ?? (measurementOnly ? "measurement" : fromGestao ? "site" : "budget");
 
   const faseQuery = resolvedMode === "site" ? "?fase=gestao" : "";
+  const canShare = user?.role === "admin_empresa" || user?.role === "orcamentista";
 
   const allItems = [
     {
@@ -79,7 +83,14 @@ export default function ProjectWorkspaceNav({
   return (
     <div className="space-y-2">
       {resolvedMode === "site" && (
-        <p className="px-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">Gestão da obra</p>
+        <div className="flex flex-wrap items-center justify-between gap-2 px-0.5">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">Gestão da obra</p>
+          {canShare && (
+            <button type="button" onClick={() => setShowPublicShare(true)} className="btn btn-secondary btn-sm">
+              Partilhar com o dono da obra
+            </button>
+          )}
+        </div>
       )}
       <nav aria-label="Áreas do projecto" className="max-w-full overflow-x-auto pb-1 [scrollbar-width:thin]">
         <div className="flex min-w-max items-center gap-1 rounded-xl border border-slate-200 bg-slate-100 p-1">
@@ -106,6 +117,7 @@ export default function ProjectWorkspaceNav({
           })}
         </div>
       </nav>
+      {showPublicShare && <PublicShareModal projectId={projectId} onClose={() => setShowPublicShare(false)} />}
     </div>
   );
 }
