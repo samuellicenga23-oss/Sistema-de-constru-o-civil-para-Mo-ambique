@@ -1458,6 +1458,18 @@ export const siteDiaryTaskProgress = pgTable("site_diary_task_progress", {
 
 export const purchaseOrderStatusEnum = pgEnum("purchase_order_status", ["rascunho", "aprovado", "recebido", "cancelado"]);
 export const stockMovementTypeEnum = pgEnum("stock_movement_type", ["entrada", "saida"]);
+export const purchaseRequisitionStatusEnum = pgEnum("purchase_requisition_status", [
+  "rascunho", "submetida", "aprovada", "em_cotacao", "adjudicada", "comprada", "fechada", "cancelada",
+]);
+export const procurementRfqStatusEnum = pgEnum("procurement_rfq_status", [
+  "rascunho", "aberta", "em_avaliacao", "adjudicada", "cancelada", "expirada",
+]);
+export const procurementInvitationStatusEnum = pgEnum("procurement_invitation_status", [
+  "convidado", "visualizado", "respondido", "recusado", "expirado",
+]);
+export const procurementSupplierQuoteStatusEnum = pgEnum("procurement_supplier_quote_status", [
+  "rascunho", "submetida", "substituida", "retirada",
+]);
 
 // Duas naturezas de linha nesta tabela, distinguidas por `companyId`:
 // 1) `companyId` preenchido — a ficha «SIGO Preços» de referência dessa empresa (gerida pelo
@@ -1508,6 +1520,158 @@ export const supplierCatalogItems = pgTable(
   },
 );
 
+export const procurementDocumentSequences = pgTable("procurement_document_sequences", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+  kind: varchar("kind", { length: 10 }).notNull(),
+  year: integer("year").notNull(),
+  nextNumber: integer("next_number").notNull().default(1),
+}, (table) => [unique("procurement_document_sequence_unique").on(table.companyId, table.kind, table.year)]);
+
+// ---------- Procurement integrado ----------
+// Requisição interna != cotação != ordem de compra. Estas tabelas fecham a cadeia auditável
+// necessidade -> requisição -> RFQ multi-fornecedor -> proposta -> adjudicação -> OC.
+export const purchaseRequisitions = pgTable("purchase_requisitions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+  projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  reference: varchar("reference", { length: 50 }).notNull(),
+  status: purchaseRequisitionStatusEnum("status").notNull().default("rascunho"),
+  source: varchar("source", { length: 30 }).notNull().default("manual"),
+  priority: varchar("priority", { length: 20 }).notNull().default("normal"),
+  requiredByDate: date("required_by_date"),
+  scheduleTaskId: uuid("schedule_task_id").references(() => scheduleTasks.id, { onDelete: "set null" }),
+  justification: text("justification"),
+  notes: text("notes"),
+  createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  submittedByUserId: uuid("submitted_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  approvedByUserId: uuid("approved_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  submittedAt: timestamp("submitted_at"),
+  approvedAt: timestamp("approved_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => [
+  unique("purchase_requisition_reference_unique").on(table.companyId, table.reference),
+  index("purchase_requisition_project_status_idx").on(table.projectId, table.status),
+]);
+
+export const purchaseRequisitionLines = pgTable("purchase_requisition_lines", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  requisitionId: uuid("requisition_id").notNull().references(() => purchaseRequisitions.id, { onDelete: "cascade" }),
+  materialId: uuid("material_id").notNull().references(() => materials.id),
+  requestedQty: numeric("requested_qty", { precision: 14, scale: 3 }).notNull(),
+  specification: text("specification"),
+  notes: text("notes"),
+  sourceScheduleTaskId: uuid("source_schedule_task_id").references(() => scheduleTasks.id, { onDelete: "set null" }),
+  sortOrder: integer("sort_order").notNull().default(0),
+}, (table) => [unique("purchase_requisition_material_unique").on(table.requisitionId, table.materialId)]);
+
+export const procurementRfqs = pgTable("procurement_rfqs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+  projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  requisitionId: uuid("requisition_id").references(() => purchaseRequisitions.id, { onDelete: "set null" }),
+  reference: varchar("reference", { length: 50 }).notNull(),
+  title: varchar("title", { length: 240 }).notNull(),
+  message: text("message"),
+  status: procurementRfqStatusEnum("status").notNull().default("rascunho"),
+  deadlineDate: date("deadline_date"),
+  deliveryLocation: text("delivery_location"),
+  requiredByDate: date("required_by_date"),
+  currency: currencyEnum("currency").notNull().default("MZN"),
+  allowPartialQuotes: boolean("allow_partial_quotes").notNull().default(false),
+  allowPartialAward: boolean("allow_partial_award").notNull().default(false),
+  paymentRequirements: text("payment_requirements"),
+  commercialTerms: text("commercial_terms"),
+  createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  openedAt: timestamp("opened_at"),
+  closedAt: timestamp("closed_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => [
+  unique("procurement_rfq_reference_unique").on(table.companyId, table.reference),
+  index("procurement_rfq_project_status_idx").on(table.projectId, table.status),
+]);
+
+export const procurementRfqLines = pgTable("procurement_rfq_lines", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  rfqId: uuid("rfq_id").notNull().references(() => procurementRfqs.id, { onDelete: "cascade" }),
+  requisitionLineId: uuid("requisition_line_id").references(() => purchaseRequisitionLines.id, { onDelete: "set null" }),
+  materialId: uuid("material_id").notNull().references(() => materials.id),
+  description: varchar("description", { length: 300 }).notNull(),
+  unit: varchar("unit", { length: 20 }),
+  quantity: numeric("quantity", { precision: 14, scale: 3 }).notNull(),
+  specification: text("specification"),
+  requiredByDate: date("required_by_date"),
+  sortOrder: integer("sort_order").notNull().default(0),
+});
+
+export const procurementRfqInvitations = pgTable("procurement_rfq_invitations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  rfqId: uuid("rfq_id").notNull().references(() => procurementRfqs.id, { onDelete: "cascade" }),
+  supplierId: uuid("supplier_id").notNull().references(() => suppliers.id, { onDelete: "cascade" }),
+  status: procurementInvitationStatusEnum("status").notNull().default("convidado"),
+  invitedAt: timestamp("invited_at").notNull().defaultNow(),
+  viewedAt: timestamp("viewed_at"),
+  respondedAt: timestamp("responded_at"),
+  declinedAt: timestamp("declined_at"),
+}, (table) => [unique("procurement_rfq_supplier_unique").on(table.rfqId, table.supplierId)]);
+
+export const procurementSupplierQuotes = pgTable("procurement_supplier_quotes", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  rfqId: uuid("rfq_id").notNull().references(() => procurementRfqs.id, { onDelete: "cascade" }),
+  invitationId: uuid("invitation_id").notNull().references(() => procurementRfqInvitations.id, { onDelete: "cascade" }),
+  supplierId: uuid("supplier_id").notNull().references(() => suppliers.id, { onDelete: "cascade" }),
+  version: integer("version").notNull().default(1),
+  status: procurementSupplierQuoteStatusEnum("status").notNull().default("rascunho"),
+  currency: currencyEnum("currency").notNull().default("MZN"),
+  validUntil: date("valid_until"),
+  leadTimeDays: integer("lead_time_days"),
+  paymentTerms: text("payment_terms"),
+  transportIncluded: boolean("transport_included").notNull().default(true),
+  transportCost: numeric("transport_cost", { precision: 14, scale: 2 }).notNull().default("0"),
+  supplierNotes: text("supplier_notes"),
+  submittedAt: timestamp("submitted_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [
+  unique("procurement_supplier_quote_version_unique").on(table.rfqId, table.supplierId, table.version),
+  index("procurement_supplier_quote_rfq_status_idx").on(table.rfqId, table.status),
+]);
+
+export const procurementSupplierQuoteLines = pgTable("procurement_supplier_quote_lines", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  quoteId: uuid("quote_id").notNull().references(() => procurementSupplierQuotes.id, { onDelete: "cascade" }),
+  rfqLineId: uuid("rfq_line_id").notNull().references(() => procurementRfqLines.id, { onDelete: "cascade" }),
+  available: boolean("available").notNull().default(true),
+  quantityOffered: numeric("quantity_offered", { precision: 14, scale: 3 }).notNull(),
+  unitCost: numeric("unit_cost", { precision: 14, scale: 4 }).notNull(),
+  discountPct: numeric("discount_pct", { precision: 7, scale: 3 }).notNull().default("0"),
+  brand: varchar("brand", { length: 160 }),
+  leadTimeDays: integer("lead_time_days"),
+  notes: text("notes"),
+}, (table) => [unique("procurement_supplier_quote_line_unique").on(table.quoteId, table.rfqLineId)]);
+
+export const procurementAwards = pgTable("procurement_awards", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  rfqId: uuid("rfq_id").notNull().references(() => procurementRfqs.id, { onDelete: "cascade" }),
+  supplierQuoteId: uuid("supplier_quote_id").notNull().references(() => procurementSupplierQuotes.id),
+  supplierId: uuid("supplier_id").notNull().references(() => suppliers.id),
+  decisionReason: text("decision_reason").notNull(),
+  awardedByUserId: uuid("awarded_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  awardedAt: timestamp("awarded_at").notNull().defaultNow(),
+}, (table) => [unique("procurement_award_quote_unique").on(table.rfqId, table.supplierQuoteId)]);
+
+export const procurementAwardLines = pgTable("procurement_award_lines", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  awardId: uuid("award_id").notNull().references(() => procurementAwards.id, { onDelete: "cascade" }),
+  rfqLineId: uuid("rfq_line_id").notNull().references(() => procurementRfqLines.id),
+  quoteLineId: uuid("quote_line_id").notNull().references(() => procurementSupplierQuoteLines.id),
+  materialId: uuid("material_id").notNull().references(() => materials.id),
+  quantityAwarded: numeric("quantity_awarded", { precision: 14, scale: 3 }).notNull(),
+  unitCost: numeric("unit_cost", { precision: 14, scale: 4 }).notNull(),
+  currency: currencyEnum("currency").notNull().default("MZN"),
+});
+
 export const purchaseOrders = pgTable("purchase_orders", {
   id: uuid("id").primaryKey().defaultRandom(),
   projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
@@ -1516,6 +1680,11 @@ export const purchaseOrders = pgTable("purchase_orders", {
   orderDate: date("order_date").notNull(),
   requiredByDate: date("required_by_date"),
   scheduleTaskId: uuid("schedule_task_id").references(() => scheduleTasks.id, { onDelete: "set null" }),
+  procurementAwardId: uuid("procurement_award_id").references(() => procurementAwards.id, { onDelete: "set null" }),
+  purchaseRequisitionId: uuid("purchase_requisition_id").references(() => purchaseRequisitions.id, { onDelete: "set null" }),
+  // Transporte adjudicado fora dos preços unitários. Mantê-lo separado preserva a proposta
+  // original e garante que OC/Financeiro não perdem este custo. Valor sem IVA.
+  transportCost: numeric("transport_cost", { precision: 14, scale: 2 }).notNull().default("0"),
   notes: text("notes"),
   // Snapshot fiscal da ordem. O total aprovado no Financeiro usa esta taxa, mesmo que a taxa
   // padrão da empresa venha a mudar depois.

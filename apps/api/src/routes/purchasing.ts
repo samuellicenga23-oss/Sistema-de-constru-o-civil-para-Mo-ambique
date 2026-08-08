@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { eq, and, or, isNull, desc, inArray, sql as drizzleSql } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { purchaseOrders, purchaseOrderLines, stockMovements, suppliers, materials, budgetDocuments, financialEntries, scheduleTasks, supplierAccounts, materialZonePrices, supplierMaterialPrices, priceZones } from "../db/schema.js";
+import { purchaseOrders, purchaseOrderLines, purchaseRequisitions, stockMovements, suppliers, materials, budgetDocuments, financialEntries, scheduleTasks, supplierAccounts, materialZonePrices, supplierMaterialPrices, priceZones } from "../db/schema.js";
 import { requireCompanyUser, requirePermission, requireRole } from "../auth/middleware.js";
 import { assertProjectOwned } from "../services/accessControl.js";
 import { assertApprovedOrcamentoForSite } from "../services/siteGate.js";
@@ -505,7 +505,8 @@ export async function purchasingRoutes(app: FastifyInstance) {
       if (parsed.data.status === "aprovado") {
         const lines = await tx.select().from(purchaseOrderLines).where(eq(purchaseOrderLines.purchaseOrderId, id));
         const [supplier] = await tx.select().from(suppliers).where(eq(suppliers.id, lockedOrder.supplierId)).limit(1);
-        const subtotal = lines.reduce((sum, line) => sum + Number(line.quantity) * Number(line.unitCost), 0);
+        const subtotal = lines.reduce((sum, line) => sum + Number(line.quantity) * Number(line.unitCost), 0)
+          + Number(lockedOrder.transportCost ?? 0);
         const amount = calculateVatTotals(subtotal, Number(lockedOrder.ivaRate)).total;
         if (amount > 0) await tx.insert(financialEntries).values({ projectId: lockedOrder.projectId, type: "despesa", category: "Compras e materiais", description: `Compromisso automático da ordem de compra · ${supplier?.name ?? "Fornecedor"}`, amount: amount.toFixed(2), currency: lines[0]?.currency ?? "MZN", dueDate: lockedOrder.requiredByDate ?? lockedOrder.orderDate, status: "pendente", sourceType: "purchase_order", sourceId: id, createdByUserId: request.currentUser!.id }).onConflictDoNothing();
       }
@@ -517,6 +518,25 @@ export async function purchasingRoutes(app: FastifyInstance) {
       if (parsed.data.status === "recebido") {
         const lines = await tx.select().from(purchaseOrderLines).where(eq(purchaseOrderLines.purchaseOrderId, id));
         if (lines.length) await tx.insert(stockMovements).values(lines.map((line) => ({ projectId: lockedOrder.projectId, materialId: line.materialId, type: "entrada" as const, quantity: line.quantity, unitCost: line.unitCost, currency: line.currency, notes: "Entrada automática — recepção da ordem de compra", purchaseOrderId: id, createdByUserId: request.currentUser!.id, date: parsed.data.effectiveDate ?? new Date().toISOString().slice(0, 10) }))).onConflictDoNothing();
+      }
+
+      // Uma adjudicação pode gerar várias OCs (fornecedores diferentes). O estado da requisição
+      // só avança quando TODAS as OCs activas atingem o marco correspondente; nunca ao criar a OC.
+      if (lockedOrder.purchaseRequisitionId) {
+        const linkedOrders = await tx
+          .select({ status: purchaseOrders.status })
+          .from(purchaseOrders)
+          .where(eq(purchaseOrders.purchaseRequisitionId, lockedOrder.purchaseRequisitionId));
+        const activeOrders = linkedOrders.filter((linked) => linked.status !== "cancelado");
+        const requisitionStatus = activeOrders.length > 0 && activeOrders.every((linked) => linked.status === "recebido")
+          ? "fechada"
+          : activeOrders.length > 0 && activeOrders.every((linked) => linked.status === "aprovado" || linked.status === "recebido")
+            ? "comprada"
+            : "adjudicada";
+        await tx
+          .update(purchaseRequisitions)
+          .set({ status: requisitionStatus, updatedAt: new Date() })
+          .where(eq(purchaseRequisitions.id, lockedOrder.purchaseRequisitionId));
       }
       return { row, changed: true } as const;
     });

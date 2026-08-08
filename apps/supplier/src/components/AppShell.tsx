@@ -43,6 +43,9 @@ export function AppShell({ accountName, pendingCount = 0, children }: { accountN
               <IconGrid size={15} /> Painel
               {pendingCount > 0 && <span className="app-nav-dot" aria-label={`${pendingCount} pedido(s) por responder`} />}
             </Link>
+            <Link to="/oportunidades" className={`app-nav-link ${path.includes("/oportunidades") ? "active" : ""}`}>
+              <IconPackage size={15} /> Oportunidades
+            </Link>
             <Link to="/precos" className={`app-nav-link ${path.endsWith("/precos") ? "active" : ""}`}>
               <IconTag size={15} /> Meus preços
             </Link>

@@ -15,6 +15,9 @@ export type PurchaseOrder = {
   id: string;
   projectId: string;
   supplierId: string;
+  procurementAwardId?: string | null;
+  purchaseRequisitionId?: string | null;
+  transportCost?: string;
   supplierName: string;
   supplierContact: string | null;
   status: "rascunho" | "aprovado" | "recebido" | "cancelado";

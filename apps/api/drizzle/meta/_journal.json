@@ -498,6 +498,13 @@
       "when": 1786180312081,
       "tag": "0070_third_the_spike",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1786182750635,
+      "tag": "0071_shiny_slyde",
+      "breakpoints": true
     }
   ]
 }

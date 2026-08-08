@@ -26,7 +26,7 @@ const ProjectFinancialPage = lazy(() => import("./pages/ProjectFinancialPage"));
 const ProjectSiteDiaryPage = lazy(() => import("./pages/ProjectSiteDiaryPage"));
 const QuoteRequestsPage = lazy(() => import("./pages/QuoteRequestsPage"));
 const SuppliersPage = lazy(() => import("./pages/SuppliersPage"));
-const ProjectPurchasingPage = lazy(() => import("./pages/ProjectPurchasingPage"));
+const ProjectProcurementPage = lazy(() => import("./pages/ProjectProcurementPage"));
 const ProjectSchedulePage = lazy(() => import("./pages/ProjectSchedulePage"));
 const PracticeOfficePage = lazy(() => import("./pages/PracticeOfficePage"));
 const SiteManagementPage = lazy(() => import("./pages/SiteManagementPage"));
@@ -173,7 +173,7 @@ function AppRoutes() {
         path="/projectos/:projectId/compras"
         element={
           <ProtectedRoute>
-            <ProjectPurchasingPage />
+            <ProjectProcurementPage />
           </ProtectedRoute>
         }
       />

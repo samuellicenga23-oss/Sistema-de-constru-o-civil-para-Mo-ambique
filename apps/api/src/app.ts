@@ -27,6 +27,7 @@ import { financialRoutes } from "./routes/financial.js";
 import { siteDiaryRoutes } from "./routes/siteDiary.js";
 import { supplierRoutes } from "./routes/suppliers.js";
 import { purchasingRoutes } from "./routes/purchasing.js";
+import { procurementWorkflowRoutes } from "./routes/procurementWorkflow.js";
 import { fileRoutes } from "./routes/files.js";
 import { scheduleRoutes } from "./routes/schedule.js";
 import { auditRoutes } from "./routes/audit.js";
@@ -153,6 +154,7 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   await app.register(siteDiaryRoutes);
   await app.register(supplierRoutes);
   await app.register(purchasingRoutes);
+  await app.register(procurementWorkflowRoutes);
   await app.register(scheduleRoutes);
   await app.register(auditRoutes);
   await app.register(projectControlRoutes);
