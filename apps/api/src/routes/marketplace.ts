@@ -1,10 +1,11 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import { and, count, eq, ilike, isNull, or, sql } from "drizzle-orm";
+import { and, count, eq, ilike, isNull, or, sql, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { suppliers, priceZones, supplierMaterialPrices, supplierLabourPrices, supplierEquipmentPrices, materials } from "../db/schema.js";
 import { requireCompanyUser } from "../auth/middleware.js";
 import { assertSupplierMarketplaceAccess } from "../services/subscriptionEntitlements.js";
 import { SIGO_PRICES_SUPPLIER_NAME } from "../services/sigoPrices.js";
+import { selectedResourceIds } from "../services/supplierOfferings.js";
 
 function companyIdOf(request: FastifyRequest): string {
   return request.currentUser!.companyId!;
@@ -78,6 +79,57 @@ export async function marketplaceRoutes(app: FastifyInstance) {
       locked: false,
       suppliers: suppliersOut,
       materialMatches,
+    };
+  });
+
+  /** Catálogo do que o fornecedor marketplace declara vender — usado ao pedir cotação. */
+  app.get("/api/marketplace/suppliers/:id/catalog", { preHandler: requireCompanyUser }, async (request, reply) => {
+    const companyId = companyIdOf(request);
+    const blocked = await assertSupplierMarketplaceAccess(companyId);
+    if (blocked) return reply.code(402).send(blocked);
+
+    const { id } = request.params as { id: string };
+    const [supplier] = await db
+      .select()
+      .from(suppliers)
+      .where(and(eq(suppliers.id, id), isNull(suppliers.companyId)))
+      .limit(1);
+    if (!supplier) return reply.code(404).send({ error: "Fornecedor do marketplace não encontrado" });
+
+    const materialIds = await selectedResourceIds(id, "material");
+    const materialRows = materialIds.length
+      ? await db
+          .select({
+            id: materials.id,
+            name: materials.name,
+            unit: materials.unit,
+            category: materials.category,
+            specification: materials.specification,
+          })
+          .from(materials)
+          .where(and(inArray(materials.id, materialIds), eq(materials.isActive, true), isNull(materials.companyId)))
+          .orderBy(materials.category, materials.name)
+      : [];
+
+    const prices = materialIds.length
+      ? await db
+          .select({
+            materialId: supplierMaterialPrices.materialId,
+            unitCost: supplierMaterialPrices.unitCost,
+            currency: supplierMaterialPrices.currency,
+          })
+          .from(supplierMaterialPrices)
+          .where(and(eq(supplierMaterialPrices.supplierId, id), inArray(supplierMaterialPrices.materialId, materialIds)))
+      : [];
+    const priceByMaterial = new Map(prices.map((row) => [row.materialId, row]));
+
+    return {
+      supplier: { id: supplier.id, name: supplier.name, location: supplier.location },
+      materials: materialRows.map((row) => ({
+        ...row,
+        unitCost: priceByMaterial.get(row.id)?.unitCost ?? null,
+        currency: priceByMaterial.get(row.id)?.currency ?? "MZN",
+      })),
     };
   });
 }

@@ -25,6 +25,7 @@ import {
   type SupplierQuoteRequest,
 } from "../api/supplierPortal";
 import { fulfillmentApi } from "../api/fulfillment";
+import { supplierProcurementApi } from "../api/procurement";
 
 const STATUS_LABELS: Record<QuoteRequestStatus, string> = {
   enviado: "Por responder",
@@ -91,6 +92,7 @@ export default function SupplierDashboardPage() {
   const [pricedCount, setPricedCount] = useState(0);
   const [catalogCount, setCatalogCount] = useState(0);
   const [pendingOrders, setPendingOrders] = useState(0);
+  const [pendingRfqs, setPendingRfqs] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -130,9 +132,13 @@ export default function SupplierDashboardPage() {
     fulfillmentApi.orders()
       .then((rows) => setPendingOrders(rows.filter((order) => order.status === "aprovado" && order.supplierConfirmationStatus === "pendente").length))
       .catch(() => setPendingOrders(0));
+    supplierProcurementApi.opportunities()
+      .then((rows) => setPendingRfqs(rows.filter((row) => row.status === "aberta" && row.invitationStatus !== "respondido").length))
+      .catch(() => setPendingRfqs(0));
   }, []);
 
   const pending = useMemo(() => requests.filter((r) => r.status === "enviado"), [requests]);
+  const pendingTotal = pending.length + pendingRfqs;
   const rest = useMemo(() => requests.filter((r) => r.status !== "enviado"), [requests]);
   const acceptedCount = useMemo(() => requests.filter((r) => r.status === "aceite").length, [requests]);
   const responseRate = useMemo(() => {
@@ -169,14 +175,14 @@ export default function SupplierDashboardPage() {
     const hasZone = Boolean(profile?.zoneId);
     const hasOffer = Boolean(profile && (profile.offersMaterials || profile.offersLabour || profile.offersEquipment) && !profile.needsOfferSetup);
     const hasPrices = pricedCount > 0;
-    const inboxClear = pending.length === 0;
+    const inboxClear = pending.length === 0 && pendingRfqs === 0;
     return [
       { id: "perfil", done: hasZone, label: "Completar ficha e zona", href: "/perfil", hint: "As empresas filtram por região" },
       { id: "oferta", done: hasOffer, label: "Definir o que vende", href: "/oferta", hint: "Materiais, mão-de-obra ou máquinas" },
-      { id: "precos", done: hasPrices, label: "Publicar pelo menos um preço", href: "/precos", hint: catalogCount ? `${pricedCount}/${catalogCount} com preço` : "Atualize o catálogo" },
-      { id: "pedidos", done: inboxClear, label: pending.length ? `Responder ${pending.length} pedido(s)` : "Caixa de pedidos em dia", href: pending[0] ? `/pedidos/${pending[0].id}` : "/painel", hint: "Respostas rápidas fecham mais negócios" },
+      { id: "precos", done: hasPrices, label: "Publicar pelo menos um preço", href: "/precos", hint: catalogCount ? `${pricedCount}/${catalogCount} com preço` : "Actualize o catálogo" },
+      { id: "pedidos", done: inboxClear, label: pendingTotal ? `Responder ${pendingTotal} pedido(s)` : "Caixa de pedidos em dia", href: "/oportunidades", hint: "Respostas rápidas fecham mais negócios" },
     ];
-  }, [profile, pricedCount, catalogCount, pending]);
+  }, [profile, pricedCount, catalogCount, pending, pendingRfqs, pendingTotal]);
 
   const checklistDone = checklist.filter((c) => c.done).length;
 
@@ -189,16 +195,16 @@ export default function SupplierDashboardPage() {
   }
 
   return (
-    <AppShell accountName={account.name} pendingCount={pending.length}>
+    <AppShell accountName={account.name} pendingCount={pendingTotal}>
       <main className="portal-main">
         <section className="hero-panel fade-up">
           <div className="hero-panel-content">
             <p className="hero-eyebrow">Portal do Fornecedor</p>
             <h1 className="hero-title">Olá, {account.name.split(" ")[0]}</h1>
             <p className="hero-subtitle">
-              {pending.length > 0
-                ? `Tem ${pending.length} pedido${pending.length === 1 ? "" : "s"} de cotação à espera. Responda depressa para não perder a obra.`
-                : "Está tudo em dia — sem pedidos pendentes. Aproveite para reforçar preços e a sua ficha no marketplace."}
+              {pendingTotal > 0
+                ? `Tem ${pendingTotal} pedido${pendingTotal === 1 ? "" : "s"} de cotação à espera.`
+                : "Sem pedidos pendentes. Mantenha o catálogo e os preços actualizados."}
             </p>
             {profile?.location && (
               <p className="hero-meta">
@@ -217,45 +223,32 @@ export default function SupplierDashboardPage() {
         </section>
 
         <div className="action-grid stagger">
+          <Link to="/oportunidades" className={`action-tile ${pendingTotal ? "action-tile-accent" : ""}`}>
+            <span className="stat-tile-icon tone-orange"><IconClipboard size={17} /></span>
+            <strong>Pedidos de cotação</strong>
+            <span>{pendingTotal ? `${pendingTotal} por responder` : "Caixa de entrada unificada"}</span>
+          </Link>
           <Link to="/ordens" className="action-tile">
             <span className="stat-tile-icon tone-orange"><IconClipboard size={17} /></span>
-            <strong>Ordens de Compra</strong>
-            <span>{pendingOrders ? `${pendingOrders} por confirmar` : "Acompanhe preparação, expedição e entrega"}</span>
+            <strong>Ordens de compra</strong>
+            <span>{pendingOrders ? `${pendingOrders} por confirmar` : "Confirmar, expedir e entregar"}</span>
           </Link>
           <Link to="/precos" className="action-tile">
             <span className="stat-tile-icon tone-teal"><IconTag size={17} /></span>
-            <strong>Meus preços</strong>
-            <span>{pricedCount > 0 ? `${pricedCount} preço(s) publicados` : "Publique preços para aparecer nas pesquisas"}</span>
-          </Link>
-          <Link to="/oferta" className="action-tile">
-            <span className="stat-tile-icon tone-orange"><IconPackage size={17} /></span>
-            <strong>O que vendo</strong>
-            <span>Escolha produtos do catálogo nacional ou crie os seus</span>
+            <strong>Catálogo e preços</strong>
+            <span>{pricedCount > 0 ? `${pricedCount} preço(s) publicados` : "Defina o que vende e os preços"}</span>
           </Link>
           <Link to="/perfil" className="action-tile">
             <span className="stat-tile-icon tone-slate"><IconUser size={17} /></span>
-            <strong>Perfil público</strong>
-            <span>Nome, contacto, NUIT e zona de operação</span>
+            <strong>Perfil</strong>
+            <span>Contacto, NUIT e zona</span>
           </Link>
-          {pending[0] ? (
-            <Link to={`/pedidos/${pending[0].id}`} className="action-tile action-tile-accent">
-              <span className="stat-tile-icon tone-orange"><IconClipboard size={17} /></span>
-              <strong>Responder agora</strong>
-              <span>Abrir o pedido mais recente por responder</span>
-            </Link>
-          ) : (
-            <div className="action-tile action-tile-static">
-              <span className="stat-tile-icon tone-green"><IconCheck size={17} /></span>
-              <strong>Sem pendentes</strong>
-              <span>Quando uma empresa pedir cotação, aparece aqui</span>
-            </div>
-          )}
         </div>
 
         <div className="stat-grid stagger">
           <div className="stat-tile">
             <span className="stat-tile-icon tone-orange"><IconClipboard size={17} /></span>
-            <strong className="stat-tile-value">{pending.length}</strong>
+            <strong className="stat-tile-value">{pendingTotal}</strong>
             <span className="stat-tile-label">Por responder</span>
           </div>
           <div className="stat-tile">
@@ -307,7 +300,7 @@ export default function SupplierDashboardPage() {
               <li>Responda a pedidos em menos de 48 h — empresas fecham obras depressa.</li>
               <li>Indique stock e prazo nas notas da cotação (ex.: «disponível em Maputo, 3 dias»).</li>
               <li>Mantenha preços actualizados por zona; o marketplace filtra por região da obra.</li>
-              <li>Use «O que vendo» para criar produtos que faltam no catálogo nacional.</li>
+              <li>Use o catálogo para publicar só o que realmente vende; as empresas pedem a partir dessa lista.</li>
             </ul>
             {responseRate != null && (
               <p className="tips-foot">Taxa de resposta estimada: <strong>{responseRate}%</strong> · {requests.length} pedido(s) no histórico</p>

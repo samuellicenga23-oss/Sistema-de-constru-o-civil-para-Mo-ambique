@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, isNotNull } from "drizzle-orm";
 import { db } from "../db/index.js";
 import {
   suppliers,
@@ -17,6 +17,7 @@ import {
   supplierLabourPrices,
   supplierEquipmentPrices,
   supplierAccounts,
+  supplierCatalogItems,
 } from "../db/schema.js";
 import { requireSupplierAuth } from "../auth/supplierMiddleware.js";
 import { sendEmail, emailLayout, escapeHtml } from "../services/mailer.js";
@@ -78,27 +79,25 @@ async function ensureOwnMarketplaceSupplier(supplierAccountId: string) {
   return row;
 }
 
-/** Materiais seleccionados na oferta (e pedidos de cotação a esta conta). */
-async function marketplaceMaterialCatalog(supplierAccountId: string, marketplaceSupplierId: string) {
+/** Materiais seleccionados na oferta do fornecedor (catálogo nacional). Pedidos não alteram a oferta. */
+async function marketplaceMaterialCatalog(_supplierAccountId: string, marketplaceSupplierId: string) {
   const selectedIds = await selectedResourceIds(marketplaceSupplierId, "material");
+  if (!selectedIds.length) return [];
 
-  const owned = await ownedSupplierIds(supplierAccountId);
-  let rfqIds: string[] = [];
-  if (owned.length) {
-    const rows = await db
-      .selectDistinct({ materialId: quoteRequestLines.materialId })
-      .from(quoteRequestLines)
-      .innerJoin(quoteRequests, eq(quoteRequestLines.quoteRequestId, quoteRequests.id))
-      .where(and(inArray(quoteRequests.supplierId, owned), eq(quoteRequestLines.kind, "material")));
-    rfqIds = rows.map((r) => r.materialId).filter((id): id is string => Boolean(id));
-    // Pedidos novos entraram: passam a fazer parte da oferta deste fornecedor.
-    for (const id of rfqIds) {
-      if (!selectedIds.includes(id)) await addCatalogItem(marketplaceSupplierId, "material", id);
-    }
+  // Remove clones de empresa que tenham entrado por pedidos antigos — só ficam itens nacionais.
+  const stale = await db
+    .select({ id: materials.id })
+    .from(materials)
+    .where(and(inArray(materials.id, selectedIds), isNotNull(materials.companyId)));
+  if (stale.length) {
+    const staleIds = stale.map((row) => row.id);
+    await db
+      .delete(supplierCatalogItems)
+      .where(and(eq(supplierCatalogItems.supplierId, marketplaceSupplierId), inArray(supplierCatalogItems.materialId, staleIds)));
   }
 
-  const ids = [...new Set([...selectedIds, ...rfqIds])];
-  if (!ids.length) return [];
+  const nationalIds = selectedIds.filter((id) => !stale.some((row) => row.id === id));
+  if (!nationalIds.length) return [];
 
   const rows = await db
     .select({
@@ -110,35 +109,15 @@ async function marketplaceMaterialCatalog(supplierAccountId: string, marketplace
       companyId: materials.companyId,
     })
     .from(materials)
-    .where(and(inArray(materials.id, ids), eq(materials.isActive, true)))
+    .where(and(inArray(materials.id, nationalIds), eq(materials.isActive, true), isNull(materials.companyId)))
     .orderBy(materials.category, materials.name);
 
-  const selectedSet = new Set(selectedIds);
-  return rows.map((m) => ({
-    ...m,
-    source: selectedSet.has(m.id) && !m.companyId ? ("nacional" as const) : m.companyId ? ("pedido" as const) : ("nacional" as const),
-  }));
+  return rows.map((m) => ({ ...m, source: "nacional" as const }));
 }
 
-async function materialAllowedForMarketplace(supplierAccountId: string, marketplaceSupplierId: string, materialId: string): Promise<boolean> {
+async function materialAllowedForMarketplace(_supplierAccountId: string, marketplaceSupplierId: string, materialId: string): Promise<boolean> {
   const selected = await selectedResourceIds(marketplaceSupplierId, "material");
-  if (selected.includes(materialId)) return true;
-
-  const owned = await ownedSupplierIds(supplierAccountId);
-  if (!owned.length) return false;
-  const [rfq] = await db
-    .select({ id: quoteRequestLines.id })
-    .from(quoteRequestLines)
-    .innerJoin(quoteRequests, eq(quoteRequestLines.quoteRequestId, quoteRequests.id))
-    .where(
-      and(
-        inArray(quoteRequests.supplierId, owned),
-        eq(quoteRequestLines.kind, "material"),
-        eq(quoteRequestLines.materialId, materialId),
-      ),
-    )
-    .limit(1);
-  return Boolean(rfq);
+  return selected.includes(materialId);
 }
 
 export async function supplierPortalRoutes(app: FastifyInstance) {

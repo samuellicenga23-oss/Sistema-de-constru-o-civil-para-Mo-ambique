@@ -247,14 +247,13 @@ export default function MarketplacePricesPage() {
         <section className="hero-panel fade-up">
           <div className="hero-panel-content">
             <p className="hero-eyebrow">SIGO Fornecedores</p>
-            <h1 className="hero-title">Meus preços</h1>
+            <h1 className="hero-title">Catálogo e preços</h1>
             <p className="hero-subtitle">
-              Só aparecem os tipos e produtos que escolheu em «O que vendo». Indique o preço de cada item — as empresas da sua zona vêem estes valores
-              antes de pedirem cotação.
+              Gerir o que vende e os preços públicos. As empresas pedem cotação a partir desta lista — não a partir de cópias de pedidos.
             </p>
             <p style={{ marginTop: "0.75rem" }}>
               <a href="/oferta" className="link-strong" onClick={(e) => { e.preventDefault(); navigate("/oferta"); }}>
-                Alterar o que vendo / cadastrar produto novo →
+                Escolher ou cadastrar o que vendo →
               </a>
             </p>
           </div>
@@ -309,7 +308,6 @@ export default function MarketplacePricesPage() {
                       {group.rows.map((o) => (
                         <option key={o.id} value={o.id}>
                           {o.name} ({o.unit})
-                          {o.source === "pedido" ? " · pedido" : ""}
                         </option>
                       ))}
                     </optgroup>
@@ -392,9 +390,6 @@ export default function MarketplacePricesPage() {
                             <div className="rich-row-body">
                               <p className="list-row-title">
                                 {price.materialName}
-                                {price.source === "pedido" ? (
-                                  <span style={{ marginLeft: "0.4rem", fontSize: "0.7rem", color: "var(--orange-hover)" }}>pedido</span>
-                                ) : null}
                               </p>
                               <p className="list-row-sub">
                                 {price.unit}

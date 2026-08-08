@@ -109,7 +109,7 @@ async function notifySupplierOfRequest(accountId: string | null, accountEmail: s
       undefined,
     );
   }
-  await notifySupplierAccount(accountId, "Novo pedido de cotação", `${buyer.companyName} pediu-lhe uma cotação: ${title}.`, "/painel");
+  await notifySupplierAccount(accountId, "Novo pedido de cotação", `${buyer.companyName} pediu-lhe uma cotação: ${title}.`, "/oportunidades");
 }
 
 async function supplierAccountOf(supplierId: string): Promise<{ id: string; email: string; name: string } | null> {
@@ -140,7 +140,7 @@ async function notifySupplierOfCancellation(supplierId: string, title: string) {
       undefined,
     );
   }
-  await notifySupplierAccount(account.id, "Pedido de cotação cancelado", `O pedido "${title}" foi cancelado pela empresa — não é preciso responder.`, "/painel");
+  await notifySupplierAccount(account.id, "Pedido de cotação cancelado", `O pedido "${title}" foi cancelado pela empresa — não é preciso responder.`, "/oportunidades");
 }
 
 async function notifySupplierOfAcceptance(supplierId: string, title: string) {
@@ -161,7 +161,7 @@ async function notifySupplierOfAcceptance(supplierId: string, title: string) {
       undefined,
     );
   }
-  await notifySupplierAccount(account.id, "Cotação aceite", `A sua cotação para "${title}" foi aceite. Prepare a entrega conforme os preços indicados.`, "/painel");
+  await notifySupplierAccount(account.id, "Cotação aceite", `A sua cotação para "${title}" foi aceite. Prepare a entrega conforme os preços indicados.`, "/oportunidades");
 }
 
 export async function quoteRequestRoutes(app: FastifyInstance) {

@@ -16,6 +16,19 @@ export type MarketplaceResponse =
   | { locked: true; code: string; error: string; upgradeHint?: string; actionPath?: string; count: number; materialMatches?: unknown[] }
   | { locked: false; suppliers: MarketplaceSupplier[]; materialMatches?: unknown[] };
 
+export type MarketplaceSupplierCatalog = {
+  supplier: { id: string; name: string; location: string | null };
+  materials: Array<{
+    id: string;
+    name: string;
+    unit: string;
+    category: string | null;
+    specification: string | null;
+    unitCost: string | null;
+    currency: string;
+  }>;
+};
+
 export const marketplaceApi = {
   listSuppliers: (zoneId?: string, q?: string) => {
     const params = new URLSearchParams();
@@ -24,4 +37,5 @@ export const marketplaceApi = {
     const qs = params.toString();
     return request<MarketplaceResponse>(`/marketplace/suppliers${qs ? `?${qs}` : ""}`);
   },
+  supplierCatalog: (supplierId: string) => request<MarketplaceSupplierCatalog>(`/marketplace/suppliers/${supplierId}/catalog`),
 };

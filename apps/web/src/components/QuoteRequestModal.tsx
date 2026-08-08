@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import Modal from "./Modal";
 import { catalogApi, type Material, type LabourCategory, type Equipment } from "../api/catalog";
+import { marketplaceApi } from "../api/marketplace";
 import { quoteRequestsApi, type QuoteRequestLineInput, type QuoteRequestLineKind } from "../api/quoteRequests";
 import type { Supplier } from "../api/suppliers";
 import { IconTrash } from "./icons";
 
-type PickedLine = QuoteRequestLineInput & { key: string; description: string; unit: string };
+type PickedLine = QuoteRequestLineInput & { key: string; description: string; unit: string; fromSupplierCatalog?: boolean };
 
 const KIND_LABELS: Record<QuoteRequestLineKind, string> = { material: "Material", labour: "Mão-de-obra", equipment: "Equipamento" };
 
@@ -20,9 +21,11 @@ export default function QuoteRequestModal({
   onClose: () => void;
   onCreated: () => void;
 }) {
+  const isMarketplace = supplier.companyId == null;
   const [materials, setMaterials] = useState<Material[]>([]);
   const [labour, setLabour] = useState<LabourCategory[]>([]);
   const [equipment, setEquipment] = useState<Equipment[]>([]);
+  const [supplierMaterials, setSupplierMaterials] = useState<Array<{ id: string; name: string; unit: string; unitCost: string | null; currency: string }>>([]);
   const [kind, setKind] = useState<QuoteRequestLineKind>("material");
   const [search, setSearch] = useState("");
   const [picked, setPicked] = useState<PickedLine[]>([]);
@@ -31,6 +34,7 @@ export default function QuoteRequestModal({
   const [deadlineDate, setDeadlineDate] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showAllCatalog, setShowAllCatalog] = useState(false);
 
   useEffect(() => {
     Promise.all([catalogApi.listMaterials(), catalogApi.listLabourCategories(), catalogApi.listEquipment()])
@@ -40,7 +44,27 @@ export default function QuoteRequestModal({
         setEquipment(eq);
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Erro ao carregar catálogo"));
-  }, []);
+
+    if (isMarketplace) {
+      marketplaceApi.supplierCatalog(supplier.id)
+        .then((catalog) => setSupplierMaterials(catalog.materials.map((row) => ({
+          id: row.id,
+          name: row.name,
+          unit: row.unit,
+          unitCost: row.unitCost,
+          currency: row.currency,
+        }))))
+        .catch(() => setSupplierMaterials([]));
+    }
+  }, [isMarketplace, supplier.id]);
+
+  const supplierOptions = useMemo(() => {
+    if (kind !== "material") return [];
+    const needle = search.trim().toLocaleLowerCase("pt");
+    return supplierMaterials
+      .filter((item) => !needle || item.name.toLocaleLowerCase("pt").includes(needle))
+      .slice(0, 40);
+  }, [kind, search, supplierMaterials]);
 
   const options = useMemo(() => {
     const needle = search.trim().toLocaleLowerCase("pt");
@@ -51,13 +75,17 @@ export default function QuoteRequestModal({
           ? labour.map((l) => ({ id: l.id, name: l.name, unit: "h" }))
           : equipment.map((e) => ({ id: e.id, name: e.name, unit: "h" }));
     const filtered = needle ? source.filter((s) => s.name.toLocaleLowerCase("pt").includes(needle)) : source;
+    if (isMarketplace && kind === "material" && !showAllCatalog) {
+      const offered = new Set(supplierMaterials.map((row) => row.id));
+      return filtered.filter((item) => offered.has(item.id)).slice(0, 40);
+    }
     return filtered.slice(0, 40);
-  }, [kind, search, materials, labour, equipment]);
+  }, [kind, search, materials, labour, equipment, isMarketplace, showAllCatalog, supplierMaterials]);
 
-  function addLine(item: { id: string; name: string; unit: string }) {
+  function addLine(item: { id: string; name: string; unit: string }, fromSupplierCatalog = false) {
     const key = `${kind}:${item.id}`;
     if (picked.some((p) => p.key === key)) return;
-    setPicked((prev) => [...prev, { key, kind, resourceId: item.id, description: item.name, unit: item.unit, quantity: undefined }]);
+    setPicked((prev) => [...prev, { key, kind, resourceId: item.id, description: item.name, unit: item.unit, quantity: undefined, fromSupplierCatalog }]);
   }
 
   function removeLine(key: string) {
@@ -97,16 +125,24 @@ export default function QuoteRequestModal({
   return (
     <Modal
       title="Pedir cotação"
-      subtitle={`Enviar a «${supplier.name}» — no Profissional+ o SIGO pode juntar fornecedores da zona num PDF ordenado por preço`}
+      subtitle={`Enviar a «${supplier.name}»`}
       onClose={onClose}
       maxWidth="max-w-3xl"
     >
       {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
       <form onSubmit={handleSubmit} className="space-y-4">
-        <div className="rounded-lg border border-teal-200 bg-teal-50/50 px-3 py-2.5 text-[12.5px] leading-relaxed text-teal-950">
-          O pedido lista os materiais/serviços e contacta o fornecedor. Com Profissional ou superior, o sistema destaca
-          quem tem o item na região da obra e organiza do melhor preço ao mais caro (PDF com contactos).
-        </div>
+        {isMarketplace ? (
+          <div className="rounded-lg border border-teal-200 bg-teal-50/50 px-3 py-2.5 text-[12.5px] leading-relaxed text-teal-950">
+            {supplierMaterials.length
+              ? `Este fornecedor tem ${supplierMaterials.length} material(is) no catálogo SIGO. Escolha a partir dessa lista para o pedido ficar ligado ao que ele vende.`
+              : "Este fornecedor ainda não publicou o que vende. Peça-lhe para completar o catálogo no portal, ou use itens da sua empresa com atenção."}
+          </div>
+        ) : (
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-[12.5px] leading-relaxed text-slate-700">
+            Pedido interno aos materiais/serviços do seu catálogo da empresa.
+          </div>
+        )}
+
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <label className="label">Título do pedido</label>
@@ -122,6 +158,29 @@ export default function QuoteRequestModal({
           <textarea value={message} onChange={(e) => setMessage(e.target.value)} className="input" rows={2} />
         </div>
 
+        {isMarketplace && kind === "material" && supplierOptions.length > 0 && (
+          <div className="rounded-lg border border-orange-200">
+            <div className="border-b border-orange-100 bg-orange-50 px-3 py-2 text-xs font-semibold text-orange-950">
+              Materiais que «{supplier.name}» vende
+            </div>
+            <div className="max-h-48 overflow-y-auto divide-y divide-orange-50">
+              {supplierOptions.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => addLine(item, true)}
+                  className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-orange-50/70"
+                >
+                  <span>{item.name}</span>
+                  <span className="shrink-0 text-xs text-slate-500">
+                    {item.unitCost ? `${Number(item.unitCost).toLocaleString("pt-MZ")} ${item.currency}/${item.unit}` : `Sem preço · ${item.unit}`}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="rounded-lg border border-slate-200">
           <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 p-3">
             {(Object.keys(KIND_LABELS) as QuoteRequestLineKind[]).map((k) => (
@@ -136,19 +195,34 @@ export default function QuoteRequestModal({
             ))}
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Pesquisar…" className="input ml-auto max-w-xs" />
           </div>
+          {isMarketplace && kind === "material" && (
+            <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-3 py-2 text-xs text-slate-500">
+              <span>{showAllCatalog ? "A mostrar todo o catálogo da empresa" : "Preferência: só materiais do fornecedor"}</span>
+              <button type="button" className="font-semibold text-teal-700" onClick={() => setShowAllCatalog((value) => !value)}>
+                {showAllCatalog ? "Voltar ao catálogo do fornecedor" : "Ver tudo"}
+              </button>
+            </div>
+          )}
           <div className="max-h-48 overflow-y-auto divide-y divide-slate-100">
-            {options.map((item) => (
+            {(isMarketplace && kind === "material" && !showAllCatalog ? [] : options).map((item) => (
               <button
                 key={item.id}
                 type="button"
-                onClick={() => addLine(item)}
+                onClick={() => addLine(item, supplierMaterials.some((row) => row.id === item.id))}
                 className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-slate-50"
               >
                 <span>{item.name}</span>
                 <span className="text-xs text-slate-400">{item.unit}</span>
               </button>
             ))}
-            {options.length === 0 && <p className="px-3 py-4 text-center text-xs text-slate-400">Nenhum item encontrado</p>}
+            {!(isMarketplace && kind === "material" && !showAllCatalog) && options.length === 0 && (
+              <p className="px-3 py-4 text-center text-xs text-slate-400">Nenhum item encontrado</p>
+            )}
+            {isMarketplace && kind === "material" && !showAllCatalog && supplierOptions.length === 0 && (
+              <p className="px-3 py-4 text-center text-xs text-slate-400">
+                Sem materiais deste fornecedor. Peça-lhe para actualizar o catálogo ou use «Ver tudo».
+              </p>
+            )}
           </div>
         </div>
 
@@ -159,7 +233,10 @@ export default function QuoteRequestModal({
               {picked.map((line) => (
                 <div key={line.key} className="flex items-center gap-3 px-3 py-2 text-sm">
                   <span className="badge badge-neutral shrink-0">{KIND_LABELS[line.kind]}</span>
-                  <span className="min-w-0 flex-1 truncate">{line.description}</span>
+                  <span className="min-w-0 flex-1 truncate">
+                    {line.description}
+                    {line.fromSupplierCatalog ? <span className="ml-2 text-[11px] font-semibold text-orange-700">no catálogo</span> : null}
+                  </span>
                   <input
                     type="number"
                     min="0"

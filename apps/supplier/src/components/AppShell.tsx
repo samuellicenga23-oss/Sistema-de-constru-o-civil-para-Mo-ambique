@@ -25,6 +25,9 @@ export function AppShell({ accountName, pendingCount = 0, children }: { accountN
     .join("") || "SF";
 
   const path = location.pathname;
+  const pedidosActive = path.includes("/oportunidades") || path.includes("/pedidos/");
+  const catalogActive = path.endsWith("/precos") || path.endsWith("/oferta");
+  const moneyActive = path.includes("/facturas") || path.includes("/nao-conformidades");
 
   return (
     <div className="portal-shell">
@@ -39,27 +42,21 @@ export function AppShell({ accountName, pendingCount = 0, children }: { accountN
           </Link>
 
           <nav className="app-nav" aria-label="Navegação principal">
-            <Link to="/painel" className={`app-nav-link ${path.endsWith("/painel") || path.includes("/pedidos/") ? "active" : ""}`}>
+            <Link to="/painel" className={`app-nav-link ${path.endsWith("/painel") ? "active" : ""}`}>
               <IconGrid size={15} /> Painel
-              {pendingCount > 0 && <span className="app-nav-dot" aria-label={`${pendingCount} pedido(s) por responder`} />}
             </Link>
-            <Link to="/oportunidades" className={`app-nav-link ${path.includes("/oportunidades") ? "active" : ""}`}>
-              <IconPackage size={15} /> Oportunidades
+            <Link to="/oportunidades" className={`app-nav-link ${pedidosActive ? "active" : ""}`}>
+              <IconPackage size={15} /> Pedidos
+              {pendingCount > 0 && <span className="app-nav-dot" aria-label={`${pendingCount} pedido(s) por responder`} />}
             </Link>
             <Link to="/ordens" className={`app-nav-link ${path.includes("/ordens") ? "active" : ""}`}>
               <IconClipboard size={15} /> Ordens
             </Link>
-            <Link to="/facturas" className={`app-nav-link ${path.includes("/facturas") ? "active" : ""}`}>
+            <Link to="/facturas" className={`app-nav-link ${moneyActive ? "active" : ""}`}>
               <IconTag size={15} /> Facturas
             </Link>
-            <Link to="/nao-conformidades" className={`app-nav-link ${path.includes("/nao-conformidades") ? "active" : ""}`}>
-              <IconPackage size={15} /> Não-conformidades
-            </Link>
-            <Link to="/precos" className={`app-nav-link ${path.endsWith("/precos") ? "active" : ""}`}>
-              <IconTag size={15} /> Meus preços
-            </Link>
-            <Link to="/oferta" className={`app-nav-link ${path.endsWith("/oferta") ? "active" : ""}`}>
-              <IconPackage size={15} /> O que vendo
+            <Link to="/precos" className={`app-nav-link ${catalogActive ? "active" : ""}`}>
+              <IconTag size={15} /> Catálogo
             </Link>
             <Link to="/perfil" className={`app-nav-link ${path.endsWith("/perfil") ? "active" : ""}`}>
               <IconUser size={15} /> Perfil
