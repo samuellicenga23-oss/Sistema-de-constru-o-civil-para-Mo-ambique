@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { budgetDocuments, projects } from "../db/schema.js";
 import { getBudgetDocumentSummary, type LineItemNode } from "./boqEngine.js";
-import { getCompositionMaterialQuantities } from "./costEngine.js";
+import { getCompositionMaterialQuantitiesV2 as getCompositionMaterialQuantities } from "./costEngineV2.js";
 import { CONSTRUCTION_PHASES, mapToPhase, phaseLabel, type PhaseKey } from "./phaseMapping.js";
 
 export type PhaseMaterialLine = {

@@ -1,8 +1,8 @@
 import { request } from "./http";
 
 export type ScheduleTaskStatus = "nao_iniciado" | "em_curso" | "bloqueado" | "concluido";
-export type ScheduleDurationBasis = "horas" | "valor" | "minimo" | "soma" | "manual";
-export type ScheduleWeightBasis = "horas" | "valor" | "minimo" | "manual" | "misto";
+export type ScheduleDurationBasis = "produtividade" | "horas" | "valor" | "minimo" | "soma" | "manual";
+export type ScheduleWeightBasis = "produtividade" | "horas" | "valor" | "minimo" | "manual" | "misto";
 export type PlanningTrade = "earthworks" | "structure" | "masonry" | "mep" | "finishes" | "roofing" | "external";
 
 export type ScheduleGenerationWarning = {
@@ -89,6 +89,7 @@ export type SchedulePlanningPreview = {
     crewSizes: Record<PlanningTrade, number | null>;
     cureLags: SchedulePlanningProfile["cureLags"];
     zones: SchedulePlanningProfile["zones"];
+    physicalScope: { source: "plants" | "measurements" | "budget"; footings: number; slabs: number; rooms: number };
   };
   naturalDurationDays: number;
   targetDurationDays: number | null;
@@ -151,6 +152,7 @@ export type ScheduleTask = {
   executedValue: number;
   progressSource: "autos" | "diario" | "manual" | "planeamento" | "subactividades";
   isSummary: boolean;
+  isMilestone?: boolean;
   wbsDepth?: number;
   predecessorTaskId: string | null;
   predecessorTaskIds?: string[];

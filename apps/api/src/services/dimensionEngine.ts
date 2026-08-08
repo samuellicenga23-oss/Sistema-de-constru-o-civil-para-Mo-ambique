@@ -1,41 +1,66 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { measurementLines, lineItems } from "../db/schema.js";
+import { calculateMeasurementPartial, roundMeasurement, type MeasurementFormulaType } from "./measurementFormulaEngine.js";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-// Parcial de uma linha de medição: nº × comprimento × largura × altura.
-// Dimensões vazias contam como 1 (ex: um item medido só em comprimento usa Comp. e deixa Larg./Alt. vazios).
 export function computePartial(line: {
+  formulaType?: string | null;
+  sign?: number | null;
   count: string | number;
   length: string | number | null;
   width: string | number | null;
   height: string | number | null;
+  directQuantity?: string | number | null;
+  coefficient?: string | number | null;
+  unitWeight?: string | number | null;
+  diameterMm?: string | number | null;
+  baseQuantity?: string | number | null;
+  percentage?: string | number | null;
 }): number {
-  const count = Number(line.count);
-  const length = line.length !== null && line.length !== undefined ? Number(line.length) : 1;
-  const width = line.width !== null && line.width !== undefined ? Number(line.width) : 1;
-  const height = line.height !== null && line.height !== undefined ? Number(line.height) : 1;
-  return count * length * width * height;
+  const calculation = calculateMeasurementPartial({
+    formulaType: (line.formulaType ?? "legacy_product") as MeasurementFormulaType,
+    sign: Number(line.sign ?? 1),
+    count: Number(line.count),
+    length: line.length == null ? null : Number(line.length),
+    width: line.width == null ? null : Number(line.width),
+    height: line.height == null ? null : Number(line.height),
+    directQuantity: line.directQuantity == null ? null : Number(line.directQuantity),
+    coefficient: line.coefficient == null ? 1 : Number(line.coefficient),
+    unitWeight: line.unitWeight == null ? null : Number(line.unitWeight),
+    diameterMm: line.diameterMm == null ? null : Number(line.diameterMm),
+    baseQuantity: line.baseQuantity == null ? null : Number(line.baseQuantity),
+    percentage: line.percentage == null ? null : Number(line.percentage),
+  });
+  return calculation.partial;
 }
 
 export async function getMeasurementLines(lineItemId: string, dbOrTx: Tx | typeof db = db) {
   const rows = await dbOrTx
     .select()
     .from(measurementLines)
-    .where(eq(measurementLines.lineItemId, lineItemId))
-    .orderBy(measurementLines.sortOrder);
-  return rows.map((r) => ({ ...r, partial: computePartial(r) }));
+    .where(and(eq(measurementLines.lineItemId, lineItemId), eq(measurementLines.isActive, true)))
+    .orderBy(measurementLines.sortOrder, measurementLines.createdAt);
+  return rows.map((row) => ({ ...row, partial: computePartial(row) }));
 }
 
-// Recalcula a quantidade do item como a soma dos parciais e grava-a no line_item —
-// gravada (não on-the-fly) para que exportações e autos de medição continuem a funcionar
-// sem conhecer as linhas de medição. Se não restarem linhas, a quantidade fica como está
-// (o utilizador pode voltar a editá-la manualmente).
+/**
+ * A quantidade do item passa a ter uma única verdade: soma das linhas activas da memória.
+ * Quando a última linha é removida, o valor anterior NÃO permanece órfão — fica null.
+ * Cálculo interno usa 6 casas; line_items guarda 4, coerente com o schema do BOQ.
+ */
 export async function recomputeItemQuantity(lineItemId: string, dbOrTx: Tx | typeof db = db): Promise<number | null> {
   const lines = await getMeasurementLines(lineItemId, dbOrTx);
-  if (lines.length === 0) return null;
-  const total = lines.reduce((sum, l) => sum + l.partial, 0);
-  await dbOrTx.update(lineItems).set({ quantity: total.toFixed(2) }).where(eq(lineItems.id, lineItemId));
+  if (lines.length === 0) {
+    await dbOrTx.update(lineItems).set({ quantity: null, quantitySource: "manual" }).where(eq(lineItems.id, lineItemId));
+    return null;
+  }
+  const total = roundMeasurement(lines.reduce((sum, line) => sum + line.partial, 0), 6);
+  const sources = new Set(lines.map((line) => line.source));
+  const quantitySource = sources.size === 1
+    ? ({ plant: "plant", import: "import", bim: "bim", manual: "measurement", field: "measurement" } as const)[lines[0].source]
+    : "measurement";
+  await dbOrTx.update(lineItems).set({ quantity: total.toFixed(4), quantitySource }).where(eq(lineItems.id, lineItemId));
   return total;
 }

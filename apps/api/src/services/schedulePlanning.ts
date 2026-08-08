@@ -1,7 +1,7 @@
 import { DEFAULT_ASSUMED_FRONT_COUNT, DEFAULT_FALLBACK_CREW_SIZE, type PlanningContext, type PlanningTrade, type SchedulePlanningProfile } from "./schedulePlanningProfile.js";
 import { executionActivityName } from "./scheduleActivityNames.js";
 
-export type DurationBasis = "horas" | "valor" | "minimo";
+export type DurationBasis = "produtividade" | "horas" | "valor" | "minimo";
 export type DependencyType = "FS" | "SS" | "FF" | "SF";
 
 export type PlanningSourceNode = {
@@ -38,10 +38,27 @@ export type PlanningWarning = {
     | "CREW_SIZE_DEFAULT"
     | "FRONT_COUNT_DEFAULT"
     | "FRONT_CAPACITY_APPLIED"
-    | "PROFILE_SCOPE_FALLBACK";
+    | "PROFILE_SCOPE_FALLBACK"
+    | "PHYSICAL_SCOPE_FROM_PLANTS"
+    | "PHYSICAL_SCOPE_FALLBACK";
   message: string;
   sourceCode?: string | null;
   activityName?: string;
+};
+
+export type SchedulePhysicalElement = {
+  key: string;
+  label: string;
+  floorLabel: string | null;
+  /** Peso relativo para repartir uma linha agregada sem alterar o total do BOQ. */
+  weight: number;
+};
+
+export type SchedulePhysicalContext = {
+  source: "plants" | "measurements" | "budget";
+  footings: SchedulePhysicalElement[];
+  slabs: SchedulePhysicalElement[];
+  rooms: SchedulePhysicalElement[];
 };
 
 export type PlannedNode = {
@@ -158,7 +175,7 @@ export function computeSuccessorDates(
   return { startDate, endDate: addWorkingDays(startDate, duration - 1) };
 }
 
-type FloorScope = "project" | "floor" | "deck" | "roof";
+type FloorScope = "project" | "floor" | "deck" | "roof" | "footing" | "room_wall";
 
 export type StandardRule = {
   scope: FloorScope;
@@ -185,21 +202,21 @@ export const STANDARD_RULES: Record<string, StandardRule> = {
   "1.1": { scope: "project", stage: "prelim" },
   "1.2": { scope: "project", stage: "prelim" },
   "1.3": { scope: "project", stage: "prelim" },
-  "2.1": { scope: "project", stage: "earth" },
+  "2.1": { scope: "footing", stage: "earth" },
   "2.2": { scope: "project", stage: "earth" },
   "2.3": { scope: "project", stage: "earth" },
   "2.4": { scope: "project", stage: "earth" },
   "2.5": { scope: "project", stage: "earth" },
-  "3.1": { scope: "project", stage: "foundation" },
-  "3.2": { scope: "project", stage: "foundation" },
+  "3.1": { scope: "footing", stage: "foundation" },
+  "3.2": { scope: "footing", stage: "foundation" },
   "3.3": { scope: "floor", stage: "structure" },
   "3.4": { scope: "floor", stage: "structure" },
   "3.5": { scope: "deck", stage: "structure" },
   "3.6": { scope: "floor", stage: "structure" },
   "3.7": { scope: "roof", stage: "structure" },
   "3.8": { scope: "floor", stage: "structure" },
-  "4.1": { scope: "floor", stage: "masonry" },
-  "4.2": { scope: "floor", stage: "masonry" },
+  "4.1": { scope: "room_wall", stage: "masonry" },
+  "4.2": { scope: "room_wall", stage: "masonry" },
   "5.1": { scope: "floor", stage: "screed" },
   "5.2": { scope: "floor", stage: "plaster" },
   "5.3": { scope: "floor", stage: "plaster" },
@@ -429,6 +446,78 @@ function makeSummary(key: string, name: string, source: PlanningSourceNode | nul
   };
 }
 
+function makeControlActivity(key: string, name: string, durationDays: number, stage: string, floorIndex: number | null = null): PlannedNode {
+  return {
+    key,
+    wbsCode: "",
+    name,
+    kind: "activity",
+    sourceLineItemId: null,
+    sourceCode: null,
+    valueShare: 0,
+    durationDays: Math.max(1, Math.round(durationDays)),
+    durationBasis: "minimo",
+    floorIndex,
+    zoneId: null,
+    zoneLabel: null,
+    allocationBasis: "informado",
+    executionStage: stage,
+    children: [],
+    startDate: "",
+    endDate: "",
+    sortOrder: 0,
+  };
+}
+
+function addLifecycleControls(roots: PlannedNode[], slabCureDays: number) {
+  const walk = (node: PlannedNode) => {
+    const expanded: PlannedNode[] = [];
+    for (const child of node.children) {
+      walk(child);
+      expanded.push(child);
+      if (child.kind === "activity" && child.sourceCode === "3.5") {
+        const location = child.name.includes("—") ? child.name.split("—").slice(1).join("—").trim() : child.zoneLabel ?? "laje";
+        const cure = makeControlActivity(`control:cure:${child.key}`, `Curar e proteger a laje — ${location}`, slabCureDays, "structure", child.floorIndex);
+        const milestone = makeControlActivity(`control:milestone:slab:${child.key}`, `◆ Marco — laje curada e piso libertado — ${location}`, 1, "milestone", child.floorIndex);
+        expanded.push(cure, milestone);
+      }
+    }
+    node.children = expanded;
+  };
+  roots.forEach(walk);
+
+  if (activityNodes(roots).some((node) => node.sourceCode === "3.2")) {
+    const foundationMilestone = makeControlActivity("control:milestone:foundations", "◆ Marco — fundações concluídas e libertadas", 1, "milestone");
+    roots.push(makeSummary("control:milestones", "Marcos de controlo", null, [foundationMilestone]));
+  }
+}
+
+function wireLifecycleControls(roots: PlannedNode[], dependencies: PlannedDependency[]): PlannedDependency[] {
+  const leaves = activityNodes(roots);
+  const deps = [...dependencies];
+  const seen = new Set(deps.map((dep) => `${dep.predecessorKey}>${dep.successorKey}>${dep.type}>${dep.lagDays}`));
+  const foundations = leaves.filter((node) => node.sourceCode === "3.2");
+  const foundationMilestone = leaves.find((node) => node.key === "control:milestone:foundations");
+  for (const foundation of foundations) addUniqueDependency(deps, seen, foundation, foundationMilestone);
+
+  for (const slab of leaves.filter((node) => node.sourceCode === "3.5")) {
+    const cure = leaves.find((node) => node.key === `control:cure:${slab.key}`);
+    const milestone = leaves.find((node) => node.key === `control:milestone:slab:${slab.key}`);
+    if (!cure || !milestone) continue;
+    const outgoing = deps.filter((dep) => dep.predecessorKey === slab.key && dep.successorKey !== cure.key);
+    for (const dep of outgoing) {
+      const index = deps.indexOf(dep);
+      if (index >= 0) deps.splice(index, 1);
+      seen.delete(`${dep.predecessorKey}>${dep.successorKey}>${dep.type}>${dep.lagDays}`);
+      const successor = leaves.find((node) => node.key === dep.successorKey);
+      addUniqueDependency(deps, seen, milestone, successor, dep.type, 0);
+    }
+    addUniqueDependency(deps, seen, slab, cure);
+    addUniqueDependency(deps, seen, cure, milestone);
+  }
+  return deps;
+}
+
 function buildFallbackNode(node: PlanningSourceNode, path: string): PlannedNode | null {
   if (node.kind === "nota") return null;
   if (node.kind === "item") {
@@ -449,6 +538,7 @@ function splitLeafByRule(
   roofKind: "sheet" | "slab" | "unknown",
   warnings: PlanningWarning[],
   profile: SchedulePlanningProfile,
+  physical: SchedulePhysicalContext | null,
 ): PlannedNode[] {
   type Location = {
     floorIndex: number | null;
@@ -462,6 +552,15 @@ function splitLeafByRule(
   const floorLabels = profile.floorLabels.length === floors
     ? profile.floorLabels
     : defaultFloorLabels(floors);
+  const plain = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+  const floorIndexFor = (label: string | null) => {
+    if (!label) return null;
+    const normalized = plain(label);
+    const exact = floorLabels.findIndex((candidate) => plain(candidate) === normalized);
+    if (exact >= 0) return exact;
+    if (/cobertura|telhado|roof/.test(normalized)) return Math.max(0, floors - 1);
+    return null;
+  };
   const floorShareSet = normalizeShares(profile.floorShares, floors);
   const informedZoneShares = profile.zones.length && profile.zones.every((zone) => zone.share !== null)
     ? profile.zones.map((zone) => Number(zone.share))
@@ -479,7 +578,25 @@ function splitLeafByRule(
     allocationBasis: "boq",
   }];
 
-  if (rule.scope === "floor" && profile.locationStrategy !== "boq") {
+  const physicalElements = rule.scope === "footing"
+    ? physical?.footings ?? []
+    : rule.scope === "room_wall"
+      ? physical?.rooms ?? []
+      : rule.scope === "deck"
+        ? physical?.slabs ?? []
+        : [];
+
+  if (physicalElements.length && profile.locationStrategy !== "boq") {
+    const elementShares = normalizeShares(physicalElements.map((element) => element.weight), physicalElements.length);
+    locations = physicalElements.map((element, index) => ({
+      floorIndex: floorIndexFor(element.floorLabel) ?? (rule.scope === "deck" ? Math.min(index, Math.max(0, floors - 1)) : null),
+      zoneId: `physical:${element.key}`,
+      zoneLabel: element.label,
+      label: ` — ${element.label}${element.floorLabel ? ` / ${element.floorLabel}` : ""}`,
+      share: elementShares.shares[index],
+      allocationBasis: physical?.source === "plants" ? "informado" : "assumido",
+    }));
+  } else if ((rule.scope === "floor" || rule.scope === "room_wall") && profile.locationStrategy !== "boq") {
     locations = [];
     for (let floorIndex = 0; floorIndex < floors; floorIndex++) {
       if (profile.locationStrategy === "floors_zones" && profile.zones.length) {
@@ -504,7 +621,7 @@ function splitLeafByRule(
         });
       }
     }
-  } else if (rule.scope === "deck" && profile.locationStrategy !== "boq") {
+  } else if ((rule.scope === "deck") && profile.locationStrategy !== "boq") {
     const deckCount = Math.max(0, floors - 1 + (roofKind === "slab" ? 1 : 0));
     if (deckCount > 0) {
       const rawDeckShares = floorShareSet.shares.slice(0, deckCount);
@@ -577,16 +694,10 @@ function splitLeafByRule(
   }
 
   const normalizedLocationShares = normalizeShares(locations.map((location) => location.share), locations.length);
-  const durations = allocateDurationByShares(source.durationDays, normalizedLocationShares.shares);
-  if (!durations) {
-    warnings.push({
-      code: "UNSPLIT_FLOOR_ACTIVITY",
-      sourceCode: source.code,
-      activityName: source.name,
-      message: `${source.code ?? "Item"} — ${source.name}: ${source.durationDays} dia(s) não permitem repartir por ${locations.length} pacote(s) sem inflacionar a duração; o item foi mantido como pacote único.`,
-    });
-    return [makeActivity(source, `src:${source.id}`, executionActivityName(source), source.durationDays, 1, null, { executionStage: rule.stage })];
-  }
+  // Uma EAP física deve mostrar cada elemento mesmo quando o cálculo agregado tinha menos dias.
+  // Nesses casos cada pacote recebe o mínimo executável de um dia e as frentes controlam o prazo.
+  const durations = allocateDurationByShares(source.durationDays, normalizedLocationShares.shares)
+    ?? locations.map(() => 1);
 
   if (source.durationDays < locations.length) {
     warnings.push({
@@ -640,6 +751,7 @@ function buildStandardChapter(
   roofKind: "sheet" | "slab" | "unknown",
   warnings: PlanningWarning[],
   profile: SchedulePlanningProfile,
+  physical: SchedulePhysicalContext | null,
 ): PlannedNode | null {
   if (!hasMeasuredDescendant(root)) return null;
   // O template SIGO padrão é capítulo → itens. Se houver grupos personalizados, preservamos
@@ -663,11 +775,11 @@ function buildStandardChapter(
       directActivities.push(makeActivity(child, `src:${child.id}`, child.name, child.durationDays, 1, null));
       continue;
     }
-    const activities = splitLeafByRule(child, rule, floors, roofKind, warnings, profile);
+    const activities = splitLeafByRule(child, rule, floors, roofKind, warnings, profile, physical);
     for (const activity of activities) {
       if (rule.scope === "roof") {
         roofBucket.push(activity);
-      } else if (activity.floorIndex !== null && (rule.scope === "floor" || rule.scope === "deck")) {
+      } else if (activity.floorIndex !== null && ["floor", "deck", "room_wall"].includes(rule.scope)) {
         const bucket = floorBuckets.get(activity.floorIndex) ?? [];
         bucket.push(activity);
         floorBuckets.set(activity.floorIndex, bucket);
@@ -867,6 +979,14 @@ function buildStandardDependencies(
       ?? (floors === 1 ? rows.find((node) => node.floorIndex === null && node.zoneId === null) : null)
       ?? null;
   };
+  const atMany = (code: string, floor: number, zoneId: string | null) => {
+    const rows = all(code).filter((node) => node.floorIndex === floor);
+    if (zoneId !== null) {
+      const exact = rows.filter((node) => node.zoneId === zoneId);
+      if (exact.length) return exact;
+    }
+    return rows.length ? rows : (floors === 1 ? all(code).filter((node) => node.floorIndex === null) : []);
+  };
   const roofAt = (code: string, zoneId: string | null) => {
     const rows = all(code);
     return rows.find((node) => node.zoneId === zoneId)
@@ -884,11 +1004,16 @@ function buildStandardDependencies(
   addUniqueDependency(deps, seen, one("1.1"), one("1.2"));
   addUniqueDependency(deps, seen, preferredExisting(one("1.2"), one("1.1")), one("1.3"));
   const prelimEnd = preferredExisting(one("1.3"), one("1.2"), one("1.1"));
-  addUniqueDependency(deps, seen, prelimEnd, one("2.1"));
-  addUniqueDependency(deps, seen, preferredExisting(one("2.1"), prelimEnd), one("3.1"));
-  addUniqueDependency(deps, seen, preferredExisting(one("3.1"), one("2.1"), prelimEnd), one("3.2"));
+  const footingExcavations = all("2.1");
+  const footingBlinding = all("3.1");
+  const footingConcrete = all("3.2");
+  const samePhysicalElement = (rows: PlannedNode[], task: PlannedNode) => rows.find((row) => row.zoneId && row.zoneId === task.zoneId) ?? rows[0];
+  for (const excavation of footingExcavations) addUniqueDependency(deps, seen, prelimEnd, excavation);
+  for (const blinding of footingBlinding) addUniqueDependency(deps, seen, samePhysicalElement(footingExcavations, blinding) ?? prelimEnd, blinding);
+  for (const concrete of footingConcrete) addUniqueDependency(deps, seen, samePhysicalElement(footingBlinding, concrete) ?? samePhysicalElement(footingExcavations, concrete) ?? prelimEnd, concrete);
 
-  const foundationEnd = preferredExisting(one("3.2"), one("3.1"), one("2.1"), prelimEnd);
+  const foundationMilestone = leaves.find((node) => node.key === "control:milestone:foundations");
+  const foundationEnd = preferredExisting(foundationMilestone, footingConcrete.at(-1), footingBlinding.at(-1), footingExcavations.at(-1), prelimEnd);
   const deckCount = Math.max(0, floors - 1 + (roofKind === "slab" ? 1 : 0));
   const finalStructuralByZone = new Map<string | null, PlannedNode>();
   const masonryStarts: PlannedNode[] = [];
@@ -897,17 +1022,21 @@ function buildStandardDependencies(
     for (const zoneId of zones) {
       const columns = at("3.3", floor, zoneId);
       const beams = at("3.4", floor, zoneId);
-      const slab = floor < deckCount ? at("3.5", floor, zoneId) : null;
+      const slabs = floor < deckCount ? atMany("3.5", floor, zoneId) : [];
+      const slab = slabs.at(-1) ?? null;
       const reinforcement = at("3.6", floor, zoneId);
       const formwork = at("3.8", floor, zoneId);
-      const structuralSupport = floor === 0
-        ? foundationEnd
-        : at("3.5", floor - 1, zoneId) ?? at("3.4", floor - 1, zoneId);
+      const structuralSupports = floor === 0
+        ? [foundationEnd].filter(Boolean) as PlannedNode[]
+        : (atMany("3.5", floor - 1, zoneId).length ? atMany("3.5", floor - 1, zoneId) : [at("3.4", floor - 1, zoneId)].filter(Boolean) as PlannedNode[]);
+      const structuralSupport = structuralSupports.at(-1) ?? null;
       const supportLag = floor === 0
         ? (one("3.2") ? foundationLag : 0)
         : (structuralSupport?.sourceCode === "3.5" ? slabLag : 0);
-      addUniqueDependency(deps, seen, structuralSupport, reinforcement, "FS", supportLag);
-      addUniqueDependency(deps, seen, structuralSupport, formwork, "FS", supportLag);
+      for (const support of structuralSupports) {
+        addUniqueDependency(deps, seen, support, reinforcement, "FS", supportLag);
+        addUniqueDependency(deps, seen, support, formwork, "FS", supportLag);
+      }
       if (reinforcement || formwork) {
         addUniqueDependency(deps, seen, reinforcement, columns);
         addUniqueDependency(deps, seen, formwork, columns);
@@ -915,23 +1044,30 @@ function buildStandardDependencies(
         addUniqueDependency(deps, seen, structuralSupport, columns, "FS", supportLag);
       }
       addUniqueDependency(deps, seen, columns ?? (floor === 0 ? foundationEnd : null), beams, "FS", columns ? columnLag : 0);
-      addUniqueDependency(deps, seen, beams ?? columns, slab);
+      for (const slabTask of slabs) addUniqueDependency(deps, seen, beams ?? columns, slabTask);
 
       const structureEnd = slab ?? beams ?? columns ?? (floor === 0 ? foundationEnd : null);
       if (structureEnd) finalStructuralByZone.set(zoneId, structureEnd);
 
-      const masonry = [at("4.1", floor, zoneId), at("4.2", floor, zoneId)].filter(Boolean) as PlannedNode[];
-      if (masonry[0]) {
-        addUniqueDependency(deps, seen, structureEnd, masonry[0]);
-        masonryStarts.push(masonry[0]);
+      const masonryFirst = atMany("4.1", floor, zoneId);
+      const masonrySecond = atMany("4.2", floor, zoneId);
+      for (const masonry of masonryFirst) {
+        addUniqueDependency(deps, seen, structureEnd, masonry);
+        masonryStarts.push(masonry);
       }
-      if (masonry[1]) addUniqueDependency(deps, seen, masonry[0] ?? structureEnd, masonry[1]);
-      const masonryEnd = masonry.at(-1) ?? structureEnd;
+      for (const masonry of masonrySecond) {
+        addUniqueDependency(deps, seen, samePhysicalElement(masonryFirst, masonry) ?? structureEnd, masonry);
+      }
+      const masonryEnds = masonrySecond.length ? masonrySecond : masonryFirst;
+      const masonryEnd = masonryEnds.at(-1) ?? structureEnd;
 
       const mepRough = ["8.1", "8.2", "11.6", "13.2", "13.3"]
         .map((code) => at(code, floor, zoneId))
         .filter(Boolean) as PlannedNode[];
-      for (const task of mepRough) addUniqueDependency(deps, seen, masonryEnd, task);
+      for (const task of mepRough) {
+        if (masonryEnds.length) for (const predecessor of masonryEnds) addUniqueDependency(deps, seen, predecessor, task);
+        else addUniqueDependency(deps, seen, masonryEnd, task);
+      }
 
       const lintels = at("15.4", floor, zoneId);
       addUniqueDependency(deps, seen, masonryEnd, lintels);
@@ -981,10 +1117,11 @@ function buildStandardDependencies(
   if (roofKind === "slab") {
     for (const zoneId of zones) {
       const roofMesh = roofAt("3.7", zoneId);
-      const roofSlab = at("3.5", Math.max(0, deckCount - 1), zoneId);
+      const roofSlabs = atMany("3.5", Math.max(0, deckCount - 1), zoneId);
+      const roofSlab = roofSlabs.at(-1) ?? null;
       const roofBeams = at("3.4", floors - 1, zoneId);
       addUniqueDependency(deps, seen, roofBeams ?? at("3.3", floors - 1, zoneId), roofMesh);
-      addUniqueDependency(deps, seen, roofMesh, roofSlab);
+      for (const slabTask of roofSlabs) addUniqueDependency(deps, seen, roofMesh, slabTask);
       if (roofSlab) finalStructuralByZone.set(zoneId, roofSlab);
     }
   }
@@ -1001,7 +1138,7 @@ function buildStandardDependencies(
   const roofEnds: PlannedNode[] = [];
   for (const zoneId of zones) {
     const topStructure = roofKind === "slab"
-      ? at("3.5", Math.max(0, deckCount - 1), zoneId)
+      ? atMany("3.5", Math.max(0, deckCount - 1), zoneId).at(-1) ?? null
       : preferredExisting(
           at("4.2", floors - 1, zoneId),
           at("4.1", floors - 1, zoneId),
@@ -1058,6 +1195,7 @@ function buildStandardDependencies(
   for (const root of roots) {
     const rootActivities = flattenNodes([root]).filter((node) => node.kind === "activity");
     for (const activity of rootActivities) {
+      if (!activity.sourceLineItemId) continue;
       if (targeted.has(activity.key)) continue;
       const localized = activity.floorIndex !== null || activity.zoneId !== null;
       const previousInChapter = previousMeasuredActivityInTree(root, activity.key, localized);
@@ -1208,7 +1346,8 @@ function projectSpan(roots: PlannedNode[]): { startDate: string; endDate: string
 
 function applyDurationFactor(roots: PlannedNode[], factor: number) {
   for (const node of flattenNodes(roots)) {
-    if (node.kind === "activity") node.durationDays = Math.max(1, Math.round(node.durationDays * factor));
+    // Cura e marcos são tempos técnicos fixos; comprimir o prazo contratual não os encurta.
+    if (node.kind === "activity" && node.sourceLineItemId) node.durationDays = Math.max(1, Math.round(node.durationDays * factor));
   }
 }
 
@@ -1275,6 +1414,7 @@ export function buildExecutionPlan(args: {
   startDate: string;
   totalDurationDays?: number;
   profile: SchedulePlanningProfile;
+  physicalContext?: SchedulePhysicalContext | null;
 }): ExecutionPlan {
   const floors = Math.max(1, Math.min(20, Math.round(args.floors)));
   const warnings: PlanningWarning[] = [];
@@ -1319,17 +1459,27 @@ export function buildExecutionPlan(args: {
     }
     for (const root of [...section.roots].sort((a, b) => a.sortOrder - b.sortOrder)) {
       const planned = structuredPlanning && sigo && root.kind === "capitulo"
-        ? buildStandardChapter(root, floors, roofKind, warnings, args.profile)
+        ? buildStandardChapter(root, floors, roofKind, warnings, args.profile, args.physicalContext ?? null)
         : buildFallbackNode(root, root.code ?? "root");
       if (planned) roots.push(planned);
     }
   }
   if (!roots.length) throw new Error("O Mapa de Quantidades ainda não tem capítulos com quantidade para gerar a WBS");
 
+  if (structuredPlanning) {
+    addLifecycleControls(roots, args.profile.cureLags.slabs ?? DEFAULT_SLAB_CURE_LAG_DAYS);
+    if (args.physicalContext?.source === "plants") {
+      warnings.push({ code: "PHYSICAL_SCOPE_FROM_PLANTS", message: "A EAP foi detalhada por sapatas, lajes e compartimentos confirmados nas plantas; cada item mantém 100% do valor do BOQ." });
+    } else {
+      warnings.push({ code: "PHYSICAL_SCOPE_FALLBACK", message: "Sem elementos suficientes nas plantas, a EAP usa os pisos, medições e capítulos do orçamento como base física." });
+    }
+  }
+
   assignWbsCodes(roots);
   let dependencies = allMeasuredSectionsSigo && standardGraphSafe && structuredPlanning
     ? buildStandardDependencies(roots, floors, roofKind, args.profile)
     : buildFallbackDependencies(roots);
+  if (structuredPlanning) dependencies = wireLifecycleControls(roots, dependencies);
   if (allMeasuredSectionsSigo && standardGraphSafe && structuredPlanning) {
     dependencies = applyFrontCapacityDependencies(roots, dependencies, args.profile, warnings);
   }
@@ -1375,6 +1525,8 @@ export function buildExecutionPlan(args: {
     "Calendário de obra: segunda-feira a sábado; domingo não útil.",
     `Tempos tecnológicos usados: fundações ${foundationLag} d.u.; pilares ${columnLag} d.u.; lajes ${slabLag} d.u.`,
   ];
+  if (args.physicalContext?.source === "plants") assumptions.push(`EAP física baseada nas plantas: ${args.physicalContext.footings.length} sapata(s), ${args.physicalContext.slabs.length} laje(s) e ${args.physicalContext.rooms.length} compartimento(s) identificados.`);
+  else assumptions.push("Sem plantas estruturadas suficientes: a EAP usa medições e orçamento, preservando a hierarquia e as quantidades disponíveis.");
   if (args.profile.floorShares === null && structuredPlanning && floors > 1) assumptions.push("Distribuição por piso não informada: o SIGO usa fracções uniformes e identifica-as como assumidas.");
   if (args.profile.locationStrategy === "floors_zones") assumptions.push(`Planeamento repartido por ${args.profile.zones.length} zona(s) física(s) informada(s) pelo utilizador.`);
   if (args.profile.sequencePolicy === "structure_complete_first") assumptions.push("Sequência escolhida: concluir toda a estrutura antes de libertar as alvenarias.");

@@ -28,6 +28,9 @@ export const currencyEnum = pgEnum("currency", ["MZN", "USD"]);
 export const unitEnum = pgEnum("unit", ["m", "m2", "m3", "ml", "kg", "un", "vg", "h"]);
 export const lineItemKindEnum = pgEnum("line_item_kind", ["capitulo", "grupo", "item", "nota"]);
 export const lineItemOriginEnum = pgEnum("line_item_origin", ["manual", "planta", "composicao", "estimativa"]);
+export const lineItemQuantitySourceEnum = pgEnum("line_item_quantity_source", ["manual", "measurement", "plant", "import", "bim", "estimate"]);
+export const measurementFormulaTypeEnum = pgEnum("measurement_formula_type", ["legacy_product", "direct", "count", "length", "area", "wall_area", "perimeter", "volume", "section_length", "weight", "reinforcement", "percentage"]);
+export const measurementSourceEnum = pgEnum("measurement_source", ["manual", "plant", "import", "bim", "field"]);
 export const documentStatusEnum = pgEnum("document_status", ["rascunho", "submetido", "aprovado"]);
 export const scheduleTaskStatusEnum = pgEnum("schedule_task_status", ["nao_iniciado", "em_curso", "bloqueado", "concluido"]);
 export const scheduleDependencyTypeEnum = pgEnum("schedule_dependency_type", ["FS", "SS", "FF", "SF"]);
@@ -225,6 +228,7 @@ export const labourCategories = pgTable(
   "labour_categories",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    familyKey: uuid("family_key").notNull().defaultRandom(),
     companyId: uuid("company_id").references(() => companies.id, { onDelete: "cascade" }),
     code: varchar("code", { length: 50 }),
     name: varchar("name", { length: 150 }).notNull(),
@@ -252,6 +256,7 @@ export const materials = pgTable(
   "materials",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    familyKey: uuid("family_key").notNull().defaultRandom(),
     companyId: uuid("company_id").references(() => companies.id, { onDelete: "cascade" }),
     code: varchar("code", { length: 50 }),
     name: varchar("name", { length: 200 }).notNull(),
@@ -321,6 +326,7 @@ export const equipment = pgTable(
   "equipment",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    familyKey: uuid("family_key").notNull().defaultRandom(),
     companyId: uuid("company_id").references(() => companies.id, { onDelete: "cascade" }),
     name: varchar("name", { length: 200 }).notNull(),
     unit: unitEnum("unit").notNull(),
@@ -340,6 +346,12 @@ export const costCompositions = pgTable("cost_compositions", {
   description: text("description"),
   measurementCriteria: text("measurement_criteria"),
   executionNotes: text("execution_notes"),
+  crewSize: integer("crew_size"),
+  productiveHoursPerDay: numeric("productive_hours_per_day", { precision: 6, scale: 2 }),
+  outputPerDay: numeric("output_per_day", { precision: 14, scale: 4 }),
+  productivitySource: varchar("productivity_source", { length: 180 }),
+  productivityNotes: text("productivity_notes"),
+  defaultMeasurementFormula: measurementFormulaTypeEnum("default_measurement_formula"),
   outputUnit: unitEnum("output_unit").notNull(),
   currency: currencyEnum("currency").notNull().default("MZN"),
   auxiliaryCostPct: numeric("auxiliary_cost_pct", { precision: 7, scale: 3 }).notNull().default("0"),
@@ -374,6 +386,22 @@ export const compositionEquipmentLines = pgTable("composition_equipment_lines", 
   compositionId: uuid("composition_id").notNull().references(() => costCompositions.id, { onDelete: "cascade" }),
   equipmentId: uuid("equipment_id").notNull().references(() => equipment.id),
   qtyPerUnit: numeric("qty_per_unit", { precision: 14, scale: 6 }).notNull(),
+  notes: text("notes"),
+});
+export const compositionSubcompositionLines = pgTable("composition_subcomposition_lines", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  compositionId: uuid("composition_id").notNull().references(() => costCompositions.id, { onDelete: "cascade" }),
+  subcompositionId: uuid("subcomposition_id").notNull().references(() => costCompositions.id, { onDelete: "restrict" }),
+  qtyPerUnit: numeric("qty_per_unit", { precision: 14, scale: 6 }).notNull(),
+  notes: text("notes"),
+}, (table) => [unique("composition_subcomposition_pair_unique").on(table.compositionId, table.subcompositionId)]);
+
+export const compositionDerivedCostLines = pgTable("composition_derived_cost_lines", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  compositionId: uuid("composition_id").notNull().references(() => costCompositions.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 160 }).notNull(),
+  basis: varchar("basis", { length: 30 }).notNull(),
+  percentage: numeric("percentage", { precision: 7, scale: 3 }).notNull(),
   notes: text("notes"),
 });
 
@@ -622,6 +650,7 @@ export const lineItems = pgTable("line_items", {
   description: text("description").notNull(),
   unit: unitEnum("unit"),
   quantity: numeric("quantity", { precision: 16, scale: 4 }),
+  quantitySource: lineItemQuantitySourceEnum("quantity_source").notNull().default("manual"),
   unitPrice: numeric("unit_price", { precision: 16, scale: 4 }),
   compositionId: uuid("composition_id").references(() => costCompositions.id),
   origin: lineItemOriginEnum("origin").notNull().default("manual"),
@@ -636,12 +665,54 @@ export const measurementLines = pgTable("measurement_lines", {
   id: uuid("id").primaryKey().defaultRandom(),
   lineItemId: uuid("line_item_id").notNull().references(() => lineItems.id, { onDelete: "cascade" }),
   description: varchar("description", { length: 300 }).notNull().default(""),
+  formulaType: measurementFormulaTypeEnum("formula_type").notNull().default("legacy_product"),
+  sign: integer("sign").notNull().default(1),
   count: numeric("count", { precision: 10, scale: 2 }).notNull().default("1"),
   length: numeric("length", { precision: 12, scale: 3 }),
   width: numeric("width", { precision: 12, scale: 3 }),
   height: numeric("height", { precision: 12, scale: 3 }),
+  directQuantity: numeric("direct_quantity", { precision: 16, scale: 6 }),
+  coefficient: numeric("coefficient", { precision: 16, scale: 6 }).notNull().default("1"),
+  unitWeight: numeric("unit_weight", { precision: 16, scale: 6 }),
+  diameterMm: numeric("diameter_mm", { precision: 10, scale: 3 }),
+  baseQuantity: numeric("base_quantity", { precision: 16, scale: 6 }),
+  percentage: numeric("percentage", { precision: 10, scale: 4 }),
+  block: varchar("block", { length: 100 }),
+  floor: varchar("floor", { length: 100 }),
+  zone: varchar("zone", { length: 120 }),
+  room: varchar("room", { length: 160 }),
+  axis: varchar("axis", { length: 120 }),
+  element: varchar("element", { length: 160 }),
+  source: measurementSourceEnum("source").notNull().default("manual"),
+  sourceRef: varchar("source_ref", { length: 300 }),
+  revisionNo: integer("revision_no").notNull().default(1),
+  supersedesLineId: uuid("supersedes_line_id").references((): AnyPgColumn => measurementLines.id, { onDelete: "set null" }),
+  isActive: boolean("is_active").notNull().default(true),
   sortOrder: integer("sort_order").notNull().default(0),
-});
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => [
+  index("measurement_lines_active_item_idx").on(table.lineItemId, table.isActive, table.sortOrder),
+  index("measurement_lines_location_idx").on(table.block, table.floor, table.zone),
+]);
+
+export const lineItemCostSnapshots = pgTable("line_item_cost_snapshots", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  lineItemId: uuid("line_item_id").notNull().references(() => lineItems.id, { onDelete: "cascade" }),
+  compositionId: uuid("composition_id").references(() => costCompositions.id, { onDelete: "set null" }),
+  compositionVersion: integer("composition_version"),
+  zoneId: uuid("zone_id").references(() => priceZones.id, { onDelete: "set null" }),
+  currency: currencyEnum("currency").notNull(),
+  unitCost: numeric("unit_cost", { precision: 16, scale: 4 }).notNull(),
+  labourCost: numeric("labour_cost", { precision: 16, scale: 4 }).notNull().default("0"),
+  materialCost: numeric("material_cost", { precision: 16, scale: 4 }).notNull().default("0"),
+  equipmentCost: numeric("equipment_cost", { precision: 16, scale: 4 }).notNull().default("0"),
+  subcompositionCost: numeric("subcomposition_cost", { precision: 16, scale: 4 }).notNull().default("0"),
+  derivedCost: numeric("derived_cost", { precision: 16, scale: 4 }).notNull().default("0"),
+  resourceSnapshot: jsonb("resource_snapshot").$type<Record<string, unknown> | null>(),
+  reason: varchar("reason", { length: 30 }).notNull().default("attached"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [index("line_item_cost_snapshot_item_idx").on(table.lineItemId, table.createdAt)]);
 
 // ---------- Autos de Medição ----------
 
@@ -671,6 +742,26 @@ export const measurementCertificateLines = pgTable("measurement_certificate_line
   notes: text("notes"),
   overrunReason: text("overrun_reason"),
 });
+export const measurementCertificateFieldLines = pgTable("measurement_certificate_field_lines", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  certificateLineId: uuid("certificate_line_id").notNull().references(() => measurementCertificateLines.id, { onDelete: "cascade" }),
+  description: varchar("description", { length: 300 }).notNull().default(""),
+  formulaType: measurementFormulaTypeEnum("formula_type").notNull(),
+  sign: integer("sign").notNull().default(1),
+  count: numeric("count", { precision: 10, scale: 2 }).notNull().default("1"),
+  length: numeric("length", { precision: 12, scale: 3 }), width: numeric("width", { precision: 12, scale: 3 }), height: numeric("height", { precision: 12, scale: 3 }),
+  directQuantity: numeric("direct_quantity", { precision: 16, scale: 6 }), coefficient: numeric("coefficient", { precision: 16, scale: 6 }).notNull().default("1"),
+  unitWeight: numeric("unit_weight", { precision: 16, scale: 6 }), diameterMm: numeric("diameter_mm", { precision: 10, scale: 3 }),
+  baseQuantity: numeric("base_quantity", { precision: 16, scale: 6 }), percentage: numeric("percentage", { precision: 10, scale: 4 }),
+  block: varchar("block", { length: 100 }), floor: varchar("floor", { length: 100 }), zone: varchar("zone", { length: 120 }), room: varchar("room", { length: 160 }), axis: varchar("axis", { length: 120 }), element: varchar("element", { length: 160 }),
+  evidenceUrls: jsonb("evidence_urls").$type<string[]>().notNull().default([]), notes: text("notes"),
+  revisionNo: integer("revision_no").notNull().default(1),
+  supersedesLineId: uuid("supersedes_line_id").references((): AnyPgColumn => measurementCertificateFieldLines.id, { onDelete: "set null" }),
+  isActive: boolean("is_active").notNull().default(true), sortOrder: integer("sort_order").notNull().default(0),
+  createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(), updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => [index("measurement_certificate_field_active_idx").on(table.certificateLineId, table.isActive, table.sortOrder)]);
+
 
 // ---------- Cronograma de obra ----------
 
@@ -2346,6 +2437,8 @@ export const costCompositionsRelations = relations(costCompositions, ({ many }) 
   labourLines: many(compositionLabourLines),
   materialLines: many(compositionMaterialLines),
   equipmentLines: many(compositionEquipmentLines),
+  subcompositionLines: many(compositionSubcompositionLines),
+  derivedCostLines: many(compositionDerivedCostLines),
 }));
 
 export const plantsRelations = relations(plants, ({ one, many }) => ({

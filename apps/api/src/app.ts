@@ -21,6 +21,7 @@ import { measurementCertificateRoutes } from "./routes/measurementCertificates.j
 import { plantRoutes } from "./routes/plants.js";
 import { dashboardRoutes } from "./routes/dashboard.js";
 import { measurementLineRoutes } from "./routes/measurementLines.js";
+import { certificateFieldMeasurementRoutes } from "./routes/certificateFieldMeasurements.js";
 import { quickEstimateRoutes } from "./routes/quickEstimate.js";
 import { materialsByPhaseRoutes } from "./routes/materialsByPhase.js";
 import { financialRoutes } from "./routes/financial.js";
@@ -152,6 +153,7 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   await app.register(fileRoutes);
   await app.register(dashboardRoutes);
   await app.register(measurementLineRoutes);
+  await app.register(certificateFieldMeasurementRoutes);
   await app.register(quickEstimateRoutes);
   await app.register(materialsByPhaseRoutes);
   await app.register(financialRoutes);

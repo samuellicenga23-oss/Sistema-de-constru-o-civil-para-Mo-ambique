@@ -11,6 +11,8 @@ import {
   budgetSections,
   companies,
   compositionEquipmentLines,
+  compositionSubcompositionLines,
+  compositionDerivedCostLines,
   compositionLabourLines,
   compositionMaterialLines,
   contractVariations,
@@ -25,8 +27,10 @@ import {
   invoiceReceipts,
   labourCategories,
   lineItems,
+  lineItemCostSnapshots,
   materialZonePrices,
   materials,
+  measurementCertificateFieldLines,
   measurementCertificateLines,
   measurementCertificates,
   measurementImportJobsTable,
@@ -275,6 +279,8 @@ export async function collectCompanyFullBackup(companyId: string) {
     compositionLabour,
     compositionMaterial,
     compositionEquipment,
+    compositionSubcomposition,
+    compositionDerived,
     plantRows,
     documentRows,
     specRows,
@@ -298,6 +304,12 @@ export async function collectCompanyFullBackup(companyId: string) {
       : Promise.resolve([]),
     compositionIds.length
       ? db.select().from(compositionEquipmentLines).where(inArray(compositionEquipmentLines.compositionId, compositionIds))
+      : Promise.resolve([]),
+    compositionIds.length
+      ? db.select().from(compositionSubcompositionLines).where(inArray(compositionSubcompositionLines.compositionId, compositionIds))
+      : Promise.resolve([]),
+    compositionIds.length
+      ? db.select().from(compositionDerivedCostLines).where(inArray(compositionDerivedCostLines.compositionId, compositionIds))
       : Promise.resolve([]),
     projectIds.length ? db.select().from(plants).where(inArray(plants.projectId, projectIds)) : Promise.resolve([]),
     projectIds.length ? db.select().from(budgetDocuments).where(inArray(budgetDocuments.projectId, projectIds)) : Promise.resolve([]),
@@ -469,6 +481,11 @@ export async function collectCompanyFullBackup(companyId: string) {
       : Promise.resolve([]),
   ]);
 
+  const certificateLineIdsForField = idsOf(certificateLineRows);
+  const certificateFieldRows = certificateLineIdsForField.length
+    ? await db.select().from(measurementCertificateFieldLines).where(inArray(measurementCertificateFieldLines.certificateLineId, certificateLineIdsForField))
+    : [];
+
   const sectionIds = idsOf(sectionRows);
   const lineItemRows = sectionIds.length
     ? await db.select().from(lineItems).where(inArray(lineItems.sectionId, sectionIds))
@@ -476,6 +493,9 @@ export async function collectCompanyFullBackup(companyId: string) {
   const lineItemIds = idsOf(lineItemRows);
   const measurementLineRows = lineItemIds.length
     ? await db.select().from(measurementLines).where(inArray(measurementLines.lineItemId, lineItemIds))
+    : [];
+  const costSnapshotRows = lineItemIds.length
+    ? await db.select().from(lineItemCostSnapshots).where(inArray(lineItemCostSnapshots.lineItemId, lineItemIds))
     : [];
 
   const files: BackupFileEntry[] = [];
@@ -581,6 +601,8 @@ export async function collectCompanyFullBackup(companyId: string) {
       compositionLabourLines: compositionLabour,
       compositionMaterialLines: compositionMaterial,
       compositionEquipmentLines: compositionEquipment,
+      compositionSubcompositionLines: compositionSubcomposition,
+      compositionDerivedCostLines: compositionDerived,
       workItemTemplates: workTemplateRows,
       importCompositionMappings: mappingRows,
     },
@@ -594,9 +616,11 @@ export async function collectCompanyFullBackup(companyId: string) {
     budgetSections: sectionRows,
     lineItems: lineItemRows,
     measurementLines: measurementLineRows,
+    lineItemCostSnapshots: costSnapshotRows,
     measurementImportJobs: importJobRows,
     measurementCertificates: certificateRows,
     measurementCertificateLines: certificateLineRows,
+    measurementCertificateFieldLines: certificateFieldRows,
     scheduleTasks: scheduleTaskRows,
     scheduleDependencies: scheduleDepRows,
     financialEntries: financialRows,

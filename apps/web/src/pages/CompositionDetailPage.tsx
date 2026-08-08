@@ -6,6 +6,7 @@ import LoadingState from "../components/LoadingState";
 import AlertBanner from "../components/AlertBanner";
 import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { IconTrash, IconPlus, IconBack } from "../components/icons";
+import CompositionTechnicalV2Panel from "../components/CompositionTechnicalV2Panel";
 
 function money(value: string | number) {
   return Number(value).toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -463,6 +464,7 @@ export default function CompositionDetailPage() {
             fallback={equipmentFallback}
             hint={(refId) => formatSupplierHint(supplierSummaryByEquipment, refId)}
           />
+          <CompositionTechnicalV2Panel compositionId={detail.id} onChanged={() => void reload(detail.id)} />
           <div className="flex justify-end">
             <button onClick={handleDelete} className="btn btn-ghost btn-sm text-red-600 hover:bg-red-50"><IconTrash className="h-3.5 w-3.5" /> Eliminar composição</button>
           </div>

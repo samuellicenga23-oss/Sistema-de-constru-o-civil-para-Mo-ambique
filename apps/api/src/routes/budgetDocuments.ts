@@ -6,7 +6,8 @@ import { db } from "../db/index.js";
 import { budgetDocuments, budgetSections, lineItems, measurementLines, measurementCertificates, projects, users } from "../db/schema.js";
 import { requireCompanyUser, requireRole } from "../auth/middleware.js";
 import { getBudgetDocumentSummary, hideInternalPricing } from "../services/boqEngine.js";
-import { computeCompositionUnitCost } from "../services/costEngine.js";
+import { computeCompositionUnitCostV2 } from "../services/costEngineV2.js";
+import { createLineItemCostSnapshot, copyLatestLineItemCostSnapshot } from "../services/costSnapshotService.js";
 import {
   assertProjectOwned,
   assertDocumentOwned,
@@ -382,7 +383,7 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
         continue;
       }
       try {
-        const breakdown = await computeCompositionUnitCost(item.compositionId, companyId, project.zoneId);
+        const breakdown = await computeCompositionUnitCostV2(item.compositionId, companyId, project.zoneId);
         computedPrices.set(item.id, breakdown.unitCost);
       } catch {
         computedPrices.set(item.id, null);
@@ -435,12 +436,16 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
                 description: item.description,
                 unit: item.unit,
                 quantity: item.quantity,
+                quantitySource: item.quantitySource,
                 unitPrice: unitPrice !== null ? fixedSigo(unitPrice) : null,
                 compositionId: item.compositionId,
                 origin: item.compositionId ? "composicao" : item.origin,
                 sortOrder: item.sortOrder,
               })
               .returning();
+            if (item.compositionId) {
+              await createLineItemCostSnapshot({ lineItemId: targetItem.id, compositionId: item.compositionId, companyId, zoneId: project.zoneId, currency: created.currency, reason: "generated" }, tx);
+            }
             await copyLevel(item.id, targetItem.id);
           }
         };
@@ -558,12 +563,14 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
                 description: item.description,
                 unit: item.unit,
                 quantity: item.quantity,
+                quantitySource: item.quantitySource,
                 unitPrice: item.unitPrice,
                 compositionId: item.compositionId,
                 origin: item.origin,
                 sortOrder: item.sortOrder,
               })
               .returning();
+            await copyLatestLineItemCostSnapshot({ sourceLineItemId: item.id, targetLineItemId: targetItem.id, reason: "revision_copy" }, tx);
             await copyLevel(item.id, targetItem.id);
           }
         };
@@ -624,7 +631,7 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
       ? await db
           .select()
           .from(measurementLines)
-          .where(inArray(measurementLines.lineItemId, sourceItems.map((item) => item.id)))
+          .where(and(inArray(measurementLines.lineItemId, sourceItems.map((item) => item.id)), eq(measurementLines.isActive, true)))
           .orderBy(measurementLines.sortOrder)
       : [];
 
@@ -671,6 +678,7 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
                 description: item.description,
                 unit: item.unit,
                 quantity: item.quantity,
+                quantitySource: item.quantitySource,
                 unitPrice: item.unitPrice,
                 compositionId: item.compositionId,
                 origin: item.origin,
@@ -684,10 +692,28 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
                 itemMeasurementLines.map((ml) => ({
                   lineItemId: targetItem.id,
                   description: ml.description,
+                  formulaType: ml.formulaType,
+                  sign: ml.sign,
                   count: ml.count,
                   length: ml.length,
                   width: ml.width,
                   height: ml.height,
+                  directQuantity: ml.directQuantity,
+                  coefficient: ml.coefficient,
+                  unitWeight: ml.unitWeight,
+                  diameterMm: ml.diameterMm,
+                  baseQuantity: ml.baseQuantity,
+                  percentage: ml.percentage,
+                  block: ml.block,
+                  floor: ml.floor,
+                  zone: ml.zone,
+                  room: ml.room,
+                  axis: ml.axis,
+                  element: ml.element,
+                  source: ml.source,
+                  sourceRef: ml.sourceRef,
+                  revisionNo: 1,
+                  isActive: true,
                   sortOrder: ml.sortOrder,
                 })),
               );
@@ -756,7 +782,7 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
         continue;
       }
       try {
-        const breakdown = await computeCompositionUnitCost(item.compositionId, companyId, project.zoneId);
+        const breakdown = await computeCompositionUnitCostV2(item.compositionId, companyId, project.zoneId);
         computed.push({
           id: item.id,
           previousUnitPrice: item.unitPrice !== null ? Number(item.unitPrice) : null,
@@ -791,6 +817,8 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
           .update(lineItems)
           .set({ unitPrice: fixedSigo(item.nextUnitPrice), origin: "composicao" })
           .where(eq(lineItems.id, item.id));
+        const source = compositionItems.find((candidate) => candidate.id === item.id);
+        if (source?.compositionId) await createLineItemCostSnapshot({ lineItemId: item.id, compositionId: source.compositionId, companyId, zoneId: project.zoneId, currency: document.currency, reason: "reprice" }, tx);
       }
     });
 
@@ -1036,12 +1064,14 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
       const composition = await assertCompositionVisible(data.compositionId, companyId);
       if (!composition) return reply.code(400).send({ error: "Composição de custo não encontrada" });
       const zoneId = await getZoneIdForSection(id);
-      const breakdown = await computeCompositionUnitCost(data.compositionId, companyId, zoneId);
+      const breakdown = await computeCompositionUnitCostV2(data.compositionId, companyId, zoneId);
       unitPrice = breakdown.unitCost;
       origin = "composicao";
     }
 
-    const [item] = await db
+    const zoneIdForSnapshot = data.compositionId ? await getZoneIdForSection(id) : null;
+    const item = await db.transaction(async (tx) => {
+      const [created] = await tx
       .insert(lineItems)
       .values({
         ...data,
@@ -1051,6 +1081,9 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
         origin,
       })
       .returning();
+      if (data.compositionId) await createLineItemCostSnapshot({ lineItemId: created.id, compositionId: data.compositionId, companyId, zoneId: zoneIdForSnapshot, currency: document.currency, reason: "attached" }, tx);
+      return created;
+    });
     return reply.code(201).send(item);
   });
 
@@ -1078,24 +1111,30 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
       const composition = await assertCompositionVisible(data.compositionId, companyId);
       if (!composition) return reply.code(400).send({ error: "Composição de custo não encontrada" });
       const zoneId = await getZoneIdForSection(existing.sectionId);
-      const breakdown = await computeCompositionUnitCost(data.compositionId, companyId, zoneId);
+      const breakdown = await computeCompositionUnitCostV2(data.compositionId, companyId, zoneId);
       unitPrice = breakdown.unitCost;
       origin = "composicao";
     } else if (data.compositionId === null) {
       origin = "manual";
     }
 
-    const [row] = await db
+    const zoneIdForSnapshot = data.compositionId ? await getZoneIdForSection(existing.sectionId) : null;
+    const row = await db.transaction(async (tx) => {
+      const [updated] = await tx
       .update(lineItems)
       .set({
         ...data,
         ...(description !== undefined ? { description } : {}),
         unitPrice: unitPrice !== undefined ? (unitPrice !== null ? fixedSigo(unitPrice) : null) : undefined,
         quantity: data.quantity !== undefined ? (data.quantity !== null ? fixedSigo(data.quantity) : null) : undefined,
+        quantitySource: data.quantity !== undefined ? "manual" : undefined,
         origin,
       })
       .where(eq(lineItems.id, id))
       .returning();
+      if (data.compositionId) await createLineItemCostSnapshot({ lineItemId: updated.id, compositionId: data.compositionId, companyId, zoneId: zoneIdForSnapshot, currency: document.currency, reason: "attached" }, tx);
+      return updated;
+    });
     return row;
   });
 

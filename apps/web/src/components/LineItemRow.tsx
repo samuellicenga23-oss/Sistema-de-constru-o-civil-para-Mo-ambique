@@ -416,6 +416,7 @@ export default function LineItemRow({
             <MeasurementGrid
               lineItemId={node.id}
               itemCode={node.code}
+              itemUnit={node.unit}
               hasPlantRooms={hasPlantRooms}
               onQuantityChange={onChange}
             />

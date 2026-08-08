@@ -17,7 +17,7 @@ import {
   siteDiaryTaskProgress,
 } from "../db/schema.js";
 import { getBudgetDocumentSummary, type LineItemNode } from "./boqEngine.js";
-import { getCompositionLabourQuantities } from "./costEngine.js";
+import { computeCompositionUnitCostV2, getCompositionLabourQuantitiesV2 as getCompositionLabourQuantities } from "./costEngineV2.js";
 import {
   addWorkingDays,
   buildExecutionPlan,
@@ -33,6 +33,7 @@ import {
   type PlannedNode,
   type PlanningSourceNode,
   type PlanningSourceSection,
+  type SchedulePhysicalContext,
   type PlanningWarning,
 } from "./schedulePlanning.js";
 import {
@@ -64,8 +65,11 @@ export function computeItemDurationDays(
   item: LineItemNode,
   hoursCache: Map<string, number>,
   maxCrewSize: number = DEFAULT_FALLBACK_CREW_SIZE,
+  productivityCache: Map<string, number> = new Map(),
 ): { days: number; basis: DurationBasis } {
   if (item.compositionId && (item.quantity ?? 0) > 0) {
+    const outputPerDay = productivityCache.get(item.compositionId) ?? 0;
+    if (outputPerDay > 0) return { days: Math.max(1, Math.ceil((item.quantity ?? 0) / outputPerDay)), basis: "produtividade" };
     const hoursPerUnit = hoursCache.get(item.compositionId) ?? 0;
     const totalHours = hoursPerUnit * (item.quantity ?? 0);
     if (totalHours > 0) {
@@ -98,14 +102,15 @@ export function computeNodeDurations(
   node: LineItemNode,
   hoursCache: Map<string, number>,
   maxCrewSize: number = DEFAULT_FALLBACK_CREW_SIZE,
+  productivityCache: Map<string, number> = new Map(),
 ): ScheduledNode | null {
   if (node.kind === "nota") return null;
   if (node.kind === "item") {
-    const result = computeItemDurationDays(node, hoursCache, maxCrewSize);
+    const result = computeItemDurationDays(node, hoursCache, maxCrewSize, productivityCache);
     return { node, durationDays: result.days, basis: result.basis, children: [] };
   }
   const children = node.children
-    .map((child) => computeNodeDurations(child, hoursCache, maxCrewSize))
+    .map((child) => computeNodeDurations(child, hoursCache, maxCrewSize, productivityCache))
     .filter((child): child is ScheduledNode => child !== null);
   return {
     node,
@@ -131,6 +136,7 @@ async function buildLabourHoursPerUnitCache(
 function toPlanningSourceNode(
   node: LineItemNode,
   hoursCache: Map<string, number>,
+  productivityCache: Map<string, number>,
   fallbackCrewSize: number,
   profile: SchedulePlanningProfile | null,
   standardCodes: boolean,
@@ -142,7 +148,7 @@ function toPlanningSourceNode(
     if ((node.quantity ?? 0) <= 0) return null;
     const trade = standardCodes ? planningTradeForCode(node.code) : null;
     const crewSize = trade && profile?.crewSizes[trade] ? profile.crewSizes[trade]! : fallbackCrewSize;
-    const { days, basis } = computeItemDurationDays(node, hoursCache, crewSize);
+    const { days, basis } = computeItemDurationDays(node, hoursCache, crewSize, productivityCache);
     return {
       id: node.id,
       kind: node.kind,
@@ -157,7 +163,7 @@ function toPlanningSourceNode(
   }
 
   const children = node.children
-    .map((child) => toPlanningSourceNode(child, hoursCache, fallbackCrewSize, profile, standardCodes))
+    .map((child) => toPlanningSourceNode(child, hoursCache, productivityCache, fallbackCrewSize, profile, standardCodes))
     .filter((child): child is PlanningSourceNode => child !== null);
   if (!children.length) return null;
   return {
@@ -176,6 +182,7 @@ function toPlanningSourceNode(
 function planningSections(
   summary: NonNullable<Awaited<ReturnType<typeof getBudgetDocumentSummary>>>,
   hoursCache: Map<string, number>,
+  productivityCache: Map<string, number>,
   fallbackCrewSize: number,
   profile: SchedulePlanningProfile | null = null,
 ): PlanningSourceSection[] {
@@ -187,7 +194,7 @@ function planningSections(
       sortOrder: section.sortOrder,
       templateKey: section.templateKey,
       roots: section.items
-        .map((root) => toPlanningSourceNode(root, hoursCache, fallbackCrewSize, profile, standardCodes))
+        .map((root) => toPlanningSourceNode(root, hoursCache, productivityCache, fallbackCrewSize, profile, standardCodes))
         .filter((root): root is PlanningSourceNode => root !== null),
     };
   });
@@ -203,7 +210,7 @@ function flattenPlannedNodes(roots: PlannedNode[]): PlannedNode[] {
   return result;
 }
 
-function weightBasisFromPlanned(roots: PlannedNode[]): "horas" | "valor" | "minimo" | "misto" {
+function weightBasisFromPlanned(roots: PlannedNode[]): "produtividade" | "horas" | "valor" | "minimo" | "misto" {
   const bases = new Set(
     flattenPlannedNodes(roots)
       .filter((node) => node.kind === "activity")
@@ -259,6 +266,7 @@ type PlanningPrepared = {
   context: PlanningContext;
   floors: number;
   fallbackCrewSize: number;
+  physicalContext: SchedulePhysicalContext;
 };
 
 async function preparePlanning(args: {
@@ -275,11 +283,18 @@ async function preparePlanning(args: {
 
   const hoursCache = new Map<string, number>();
   for (const root of allRoots) await buildLabourHoursPerUnitCache(root, args.companyId ?? null, args.zoneId ?? null, hoursCache);
+  const productivityCache = new Map<string, number>();
+  for (const compositionId of hoursCache.keys()) {
+    try {
+      const breakdown = await computeCompositionUnitCostV2(compositionId, args.companyId ?? null, args.zoneId ?? null);
+      if (Number(breakdown.productivity.outputPerDay) > 0) productivityCache.set(compositionId, Number(breakdown.productivity.outputPerDay));
+    } catch { /* mantém horas/valor/mínimo como fallback auditável */ }
+  }
 
   const fallbackCrewSize = DEFAULT_FALLBACK_CREW_SIZE;
   const [[project], roomRows, plantRows, measurementRows] = await Promise.all([
     db.select({ floors: projects.floors }).from(projects).where(eq(projects.id, args.projectId)).limit(1),
-    db.select({ floor: extractedRooms.floor })
+    db.select({ id: extractedRooms.id, name: extractedRooms.name, number: extractedRooms.number, floor: extractedRooms.floor, areaM2: extractedRooms.areaM2, perimeterM: extractedRooms.perimeterM })
       .from(extractedRooms)
       .innerJoin(plants, eq(extractedRooms.plantId, plants.id))
       .where(eq(plants.projectId, args.projectId)),
@@ -290,7 +305,7 @@ async function preparePlanning(args: {
       .from(measurementLines)
       .innerJoin(lineItems, eq(measurementLines.lineItemId, lineItems.id))
       .innerJoin(budgetSections, eq(lineItems.sectionId, budgetSections.id))
-      .where(eq(budgetSections.documentId, args.budgetDocumentId)),
+      .where(and(eq(budgetSections.documentId, args.budgetDocumentId), eq(measurementLines.isActive, true))),
   ]);
   const structuralLabels = plantRows.flatMap((row) => row.structuralSummary?.slabs?.map((slab) => slab.floor) ?? []);
   const resolvedFloors = resolveProjectFloors(project?.floors ?? 1, [
@@ -299,13 +314,52 @@ async function preparePlanning(args: {
     ...measurementRows.map((row) => row.description),
   ]);
   const floors = resolvedFloors.floors;
-  const sections = planningSections(summary, hoursCache, fallbackCrewSize, args.profile ?? null);
+  const roomKeys = new Set<string>();
+  const rooms = roomRows.flatMap((row) => {
+    const label = `${row.name}${row.number ? ` ${row.number}` : ""}`.trim();
+    const identity = `${label.toLowerCase()}|${row.floor ?? ""}|${Number(row.areaM2).toFixed(2)}`;
+    if (roomKeys.has(identity)) return [];
+    roomKeys.add(identity);
+    return [{
+      key: row.id,
+      label,
+      floorLabel: row.floor,
+      weight: Math.max(0.01, Number(row.perimeterM ?? row.areaM2 ?? 1)),
+    }];
+  });
+  const footingCount = plantRows.reduce((max, row) => Math.max(max, row.structuralSummary?.footingsCount ?? 0), 0);
+  const footings = Array.from({ length: Math.min(footingCount, 250) }, (_, index) => ({
+    key: `footing-${index + 1}`,
+    label: `Sapata S${String(index + 1).padStart(2, "0")}`,
+    floorLabel: null,
+    weight: 1,
+  }));
+  const slabKeys = new Set<string>();
+  const slabs = plantRows.flatMap((row) => row.structuralSummary?.slabs ?? []).flatMap((slab, index) => {
+    const label = slab.name?.trim() || `Laje ${index + 1}`;
+    const identity = `${label.toLowerCase()}|${slab.floor ?? ""}|${slab.areaM2 ?? ""}|${slab.thicknessCm}`;
+    if (slabKeys.has(identity)) return [];
+    slabKeys.add(identity);
+    return [{
+      key: `slab-${slabKeys.size}`,
+      label: `${label}${slab.thicknessCm ? ` (${slab.thicknessCm.toFixed(2)} cm)` : ""}`,
+      floorLabel: slab.floor,
+      weight: Math.max(0.01, slab.areaM2 ?? 1),
+    }];
+  });
+  const physicalContext: SchedulePhysicalContext = {
+    source: footings.length || slabs.length || rooms.length ? "plants" : measurementRows.length ? "measurements" : "budget",
+    footings,
+    slabs,
+    rooms,
+  };
+  const sections = planningSections(summary, hoursCache, productivityCache, fallbackCrewSize, args.profile ?? null);
   const context = {
     ...buildPlanningContext(sections, floors, resolvedFloors.labels),
     configuredFloors: resolvedFloors.configuredFloors,
     floorSource: resolvedFloors.source,
   };
-  return { summary, sections, context, floors, fallbackCrewSize };
+  return { summary, sections, context, floors, fallbackCrewSize, physicalContext };
 }
 
 function hashJson(value: unknown): string {
@@ -432,6 +486,7 @@ export async function getSchedulePlanningSetup(args: {
         floors: prepared.floors,
         startDate: profile.startDate,
         profile,
+        physicalContext: prepared.physicalContext,
       });
       const currentFingerprint = planningPlanFingerprint({
         budgetDocumentId: args.budgetDocumentId,
@@ -507,6 +562,7 @@ async function buildPersistedPlanningPlan(args: {
     floors: prepared.floors,
     startDate: profile.startDate,
     profile,
+    physicalContext: prepared.physicalContext,
   });
   const shareRows = validateValueShares(plan.roots);
   const shareIssues = shareRows.filter((item) => Math.abs(item.totalShare - 1) > 0.0001);
@@ -559,6 +615,12 @@ export async function previewSchedulePlanning(args: {
       crewSizes: built.profile.crewSizes,
       cureLags: built.profile.cureLags,
       zones: built.profile.zones,
+      physicalScope: {
+        source: built.prepared.physicalContext.source,
+        footings: built.prepared.physicalContext.footings.length,
+        slabs: built.prepared.physicalContext.slabs.length,
+        rooms: built.prepared.physicalContext.rooms.length,
+      },
     },
     naturalDurationDays: built.plan.naturalDurationDays,
     targetDurationDays: built.plan.targetDurationDays,
@@ -775,6 +837,7 @@ export async function getProjectSchedule(projectId: string) {
       dependencyCount: predecessorRows.length,
       dependencyType: predecessor?.type ?? null,
       lagDays: predecessor?.lagDays ?? 0,
+      isMilestone: task.name.startsWith("◆ Marco"),
     };
   });
 

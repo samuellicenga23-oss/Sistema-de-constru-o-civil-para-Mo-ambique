@@ -1,7 +1,7 @@
 import { eq, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { budgetDocuments, lineItems, measurementCertificates, projects } from "../db/schema.js";
-import { getCompositionLabourQuantities } from "./costEngine.js";
+import { getCompositionLabourQuantitiesV2 as getCompositionLabourQuantities } from "./costEngineV2.js";
 import { getCertificateDetail } from "./measurementEngine.js";
 import { CONSTRUCTION_PHASES, mapToPhase, phaseLabel, type PhaseKey } from "./phaseMapping.js";
 

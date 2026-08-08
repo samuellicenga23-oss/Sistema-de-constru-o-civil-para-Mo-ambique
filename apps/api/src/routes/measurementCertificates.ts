@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { budgetDocuments, financialEntries, measurementCertificateLines, measurementCertificates, users } from "../db/schema.js";
+import { budgetDocuments, financialEntries, measurementCertificateFieldLines, measurementCertificateLines, measurementCertificates, users } from "../db/schema.js";
 import { requireCompanyUser, requireRole } from "../auth/middleware.js";
 import { assertCertificateOwned, assertDocumentOwned, assertProjectOwned } from "../services/accessControl.js";
 import {
@@ -249,6 +249,13 @@ export async function measurementCertificateRoutes(app: FastifyInstance) {
     const [line] = await db.select().from(measurementCertificateLines).where(eq(measurementCertificateLines.id, id)).limit(1);
     if (!line || !(await assertCertificateOwned(line.certificateId, request.currentUser!.companyId!))) {
       return reply.code(404).send({ error: "Linha não encontrada" });
+    }
+    const [fieldMemory] = await db.select({ id: measurementCertificateFieldLines.id })
+      .from(measurementCertificateFieldLines)
+      .where(and(eq(measurementCertificateFieldLines.certificateLineId, id), eq(measurementCertificateFieldLines.isActive, true)))
+      .limit(1);
+    if (fieldMemory && Math.abs(Number(line.periodQty) - parsed.data.periodQty) > 0.0001) {
+      return reply.code(409).send({ error: "Este item tem memória de campo. Altere as linhas da memória; a quantidade do período é calculada automaticamente." });
     }
     try {
       return await updateCertificateLinePeriod(id, parsed.data);
