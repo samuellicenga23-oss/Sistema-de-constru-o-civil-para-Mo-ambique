@@ -142,8 +142,10 @@ export default function ProjectSchedulePage() {
     if (!projectId || !schedule || !selectedId) return;
     const selected = schedule.tasks.find((task) => task.id === selectedId);
     if (!selected) return;
-    const parent = selected.parentId ? schedule.tasks.find((task) => task.id === selected.parentId) : selected;
-    if (!parent) return;
+    // Subactividade fica sob a linha seleccionada (WBS multi-nível), excepto no nível mais fundo.
+    const parent = (selected.wbsDepth ?? 0) >= 3 && selected.parentId
+      ? schedule.tasks.find((task) => task.id === selected.parentId) ?? selected
+      : selected;
     const siblings = schedule.tasks.filter((task) => task.parentId === parent.id);
     const previous = siblings.at(-1);
     const start = previous ? nextWorkingDay(previous.endDate) : parent.startDate;
@@ -179,16 +181,28 @@ export default function ProjectSchedulePage() {
   const visibleTasks = useMemo(() => {
     const tasks = schedule?.tasks ?? [];
     const needle = taskQuery.trim().toLocaleLowerCase("pt");
-    if (!needle) return tasks.filter((task) => !task.parentId || !collapsed.has(task.parentId));
+    function ancestorCollapsed(task: (typeof tasks)[number]) {
+      let parentId = task.parentId;
+      while (parentId) {
+        if (collapsed.has(parentId)) return true;
+        parentId = taskById.get(parentId)?.parentId ?? null;
+      }
+      return false;
+    }
+    if (!needle) return tasks.filter((task) => !ancestorCollapsed(task));
     const visibleIds = new Set<string>();
     tasks.forEach((task) => {
       const text = `${task.code} ${task.name} ${task.status} ${task.notes ?? ""}`.toLocaleLowerCase("pt");
       if (!text.includes(needle)) return;
       visibleIds.add(task.id);
-      if (task.parentId) visibleIds.add(task.parentId);
+      let parentId = task.parentId;
+      while (parentId) {
+        visibleIds.add(parentId);
+        parentId = taskById.get(parentId)?.parentId ?? null;
+      }
     });
     return tasks.filter((task) => visibleIds.has(task.id));
-  }, [schedule?.tasks, collapsed, taskQuery]);
+  }, [schedule?.tasks, collapsed, taskQuery, taskById]);
 
   function toggleCollapse(taskId: string) {
     setCollapsed((current) => {
@@ -631,7 +645,16 @@ function TaskEditor({
     }
   }
 
-  const parentOptions = tasks.filter((item) => !item.parentId && item.id !== task.id);
+  const parentOptions = tasks.filter((item) => {
+    if (item.id === task.id) return false;
+    if ((item.wbsDepth ?? 0) >= 3) return false;
+    let parentId = item.parentId;
+    while (parentId) {
+      if (parentId === task.id) return false;
+      parentId = tasks.find((t) => t.id === parentId)?.parentId ?? null;
+    }
+    return true;
+  });
   return (
     <Modal
       title={task.name}

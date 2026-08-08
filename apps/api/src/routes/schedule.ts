@@ -46,15 +46,44 @@ async function ownedTask(id: string, companyId: string) {
   return task;
 }
 
+const MAX_WBS_DEPTH = 4; // raiz = 0; permite até 4 níveis (ex.: capítulo → piso → pacote → subtarefa)
+
+async function taskDepth(taskId: string): Promise<number> {
+  let depth = 0;
+  let cursorId: string | null = taskId;
+  const seen = new Set<string>();
+  while (cursorId) {
+    if (seen.has(cursorId)) break;
+    seen.add(cursorId);
+    const [row] = await db.select({ parentId: scheduleTasks.parentId }).from(scheduleTasks).where(eq(scheduleTasks.id, cursorId)).limit(1);
+    if (!row?.parentId) break;
+    depth += 1;
+    cursorId = row.parentId;
+    if (depth > MAX_WBS_DEPTH) break;
+  }
+  return depth;
+}
+
 async function validateParentTask(parentId: string | null | undefined, projectId: string, companyId: string, taskId?: string) {
   if (!parentId) return null;
   if (parentId === taskId) throw new Error("Uma actividade não pode ser subactividade de si própria");
   const parent = await ownedTask(parentId, companyId);
   if (!parent || parent.projectId !== projectId) throw new Error("A actividade principal não pertence a este cronograma");
-  if (parent.parentId) throw new Error("O cronograma permite um nível de subactividades para manter a WBS clara");
+  const parentDepth = await taskDepth(parent.id);
+  if (parentDepth >= MAX_WBS_DEPTH - 1) {
+    throw new Error(`A WBS permite no máximo ${MAX_WBS_DEPTH} níveis de detalhe`);
+  }
   if (taskId) {
-    const [{ value: childCount }] = await db.select({ value: count() }).from(scheduleTasks).where(eq(scheduleTasks.parentId, taskId));
-    if (childCount > 0) throw new Error("Uma actividade principal com subactividades não pode ser movida para outro nível");
+    // Impede ciclos: o novo pai não pode ser descendente da própria tarefa.
+    let cursorId: string | null = parentId;
+    const seen = new Set<string>();
+    while (cursorId) {
+      if (cursorId === taskId) throw new Error("Não pode tornar uma actividade subactividade de uma das suas próprias filhas");
+      if (seen.has(cursorId)) break;
+      seen.add(cursorId);
+      const [row] = await db.select({ parentId: scheduleTasks.parentId }).from(scheduleTasks).where(eq(scheduleTasks.id, cursorId)).limit(1);
+      cursorId = row?.parentId ?? null;
+    }
   }
   return parent;
 }

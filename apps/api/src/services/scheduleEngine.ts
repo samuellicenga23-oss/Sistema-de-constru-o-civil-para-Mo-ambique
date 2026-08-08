@@ -13,6 +13,7 @@ import {
 } from "../db/schema.js";
 import { getBudgetDocumentSummary, type LineItemNode } from "./boqEngine.js";
 import { getCompositionLabourQuantities } from "./costEngine.js";
+import { mapToPhase, type PhaseKey } from "./phaseMapping.js";
 
 const DAY_MS = 86_400_000;
 
@@ -313,6 +314,17 @@ function buildFloorAwareStructuralPlan(root: ScheduledNode, floors: number): Sch
       if (stage.limpeza.length) children.push(relabelLeaf(stage.limpeza[0], "Betão de limpeza", sum(stage.limpeza), 1));
       if (stage.sapatas.length) children.push(relabelLeaf(stage.sapatas[0], "Sapatas de fundação", sum(stage.sapatas), 1));
     }
+    // Cofragem/aço primeiro (preparação), depois betonagem — ordem real de obra no piso.
+    stage.apoio.forEach((apoioSource, apoioIndex) => {
+      const perFloor = apoioPerFloorByItem[apoioIndex];
+      const totalForItem = perFloor.reduce((a, b) => a + b, 0) || 1;
+      children.push(relabelLeaf(
+        apoioSource,
+        `${apoioSource.node.description}${floorCount > 1 ? ` — Piso ${floor}` : ""}`,
+        perFloor[floor],
+        perFloor[floor] / totalForItem,
+      ));
+    });
     children.push(relabelLeaf(
       source,
       isGround ? "Arranque dos pilares" : floorCount > 1 ? `Pilares — Piso ${floor}` : "Pilares",
@@ -331,16 +343,6 @@ function buildFloorAwareStructuralPlan(root: ScheduledNode, floors: number): Sch
       lajesPerFloor[floor],
       lajesPerFloor[floor] / (lajesPerFloor.reduce((a, b) => a + b, 0) || 1),
     ));
-    stage.apoio.forEach((apoioSource, apoioIndex) => {
-      const perFloor = apoioPerFloorByItem[apoioIndex];
-      const totalForItem = perFloor.reduce((a, b) => a + b, 0) || 1;
-      children.push(relabelLeaf(
-        apoioSource,
-        `${apoioSource.node.description}${floorCount > 1 ? ` — Piso ${floor}` : ""}`,
-        perFloor[floor],
-        perFloor[floor] / totalForItem,
-      ));
-    });
     const label = floorCount > 1 ? `Estrutura — Piso ${floor}` : "Estrutura";
     floorGroups.push(makeGroup(root, label, children));
   }
@@ -364,6 +366,174 @@ function buildFloorAwareWallsPlan(root: ScheduledNode, floors: number): Schedule
     floorGroups.push(makeGroup(root, `Alvenarias — Piso ${floor}`, children));
   }
   return makeGroup(root, root.node.description, floorGroups);
+}
+
+/** Repete folhas planas por piso (rebocos, revestimentos, pinturas…). */
+function buildFloorAwareFinishesPlan(root: ScheduledNode, floors: number, groupPrefix: string): ScheduledNode | null {
+  const floorCount = Math.max(1, Math.min(20, Math.round(floors)));
+  if (floorCount <= 1) return null;
+  const leaves = collectFlatLeaves(root);
+  if (!leaves.length) return null;
+  // Só aplica quando o capítulo é "plano" (filhos = folhas) ou só tem um nível de grupos a achatar.
+  if (root.children.some((c) => c.children.some((g) => g.children.length))) return null;
+
+  const flatLeaves = leaves;
+  const totalPerLeaf = flatLeaves.map((leaf) => splitEvenly(leaf.durationDays, floorCount));
+  const floorGroups: ScheduledNode[] = [];
+  for (let floor = 0; floor < floorCount; floor++) {
+    const children = flatLeaves.map((leaf, leafIndex) =>
+      relabelLeaf(
+        leaf,
+        `${leaf.node.description} — Piso ${floor}`,
+        totalPerLeaf[leafIndex][floor],
+        totalPerLeaf[leafIndex][floor] / (totalPerLeaf[leafIndex].reduce((a, b) => a + b, 0) || 1),
+      ),
+    );
+    floorGroups.push(makeGroup(root, `${groupPrefix} — Piso ${floor}`, children));
+  }
+  return makeGroup(root, root.node.description, floorGroups);
+}
+
+function collectFlatLeaves(node: ScheduledNode): ScheduledNode[] {
+  if (!node.children.length) return [node];
+  return node.children.flatMap((child) => collectFlatLeaves(child));
+}
+
+/** Reordena folhas por prioridade de palavras-chave (sequência de obra), agrupando reconhecíveis. */
+function reorderLeavesByKeywords(root: ScheduledNode, stages: Array<{ label: string; keywords: string[] }>): ScheduledNode | null {
+  const leaves = root.children.filter((c) => !c.children.length);
+  if (!leaves.length || leaves.length !== root.children.length) return null;
+
+  const used = new Set<string>();
+  const groups: ScheduledNode[] = [];
+  for (const stage of stages) {
+    const matched = leaves.filter((leaf) => {
+      if (used.has(leaf.node.id)) return false;
+      const text = normalizeText(leaf.node.description);
+      return stage.keywords.some((k) => text.includes(normalizeText(k)));
+    });
+    if (!matched.length) continue;
+    matched.forEach((m) => used.add(m.node.id));
+    if (matched.length === 1) groups.push({ ...matched[0], node: { ...matched[0].node, description: `${stage.label}: ${matched[0].node.description}` } });
+    else groups.push(makeGroup(root, stage.label, matched));
+  }
+  const rest = leaves.filter((leaf) => !used.has(leaf.node.id));
+  if (!groups.length) return null;
+  return makeGroup(root, root.node.description, [...groups, ...rest]);
+}
+
+function applyChapterConstructionPlan(root: ScheduledNode, floors: number): ScheduledNode {
+  const name = normalizeText(root.node.description);
+  if (name.includes("betoe") || name.includes("acos e cofrage") || (name.includes("aco") && name.includes("cofragem"))) {
+    return buildFloorAwareStructuralPlan(root, floors) ?? reorderLeavesByKeywords(root, [
+      { label: "Fundações", keywords: ["limpeza", "sapata", "fundac"] },
+      { label: "Pilares", keywords: ["pilar"] },
+      { label: "Vigas e lintéis", keywords: ["viga", "lintel", "linteis"] },
+      { label: "Lajes", keywords: ["laje"] },
+      { label: "Aço e cofragem", keywords: ["aco", "malha", "cofragem"] },
+    ]) ?? root;
+  }
+  if (name.includes("alvenaria")) {
+    return buildFloorAwareWallsPlan(root, floors)
+      ?? reorderLeavesByKeywords(root, [
+        { label: "Paredes exteriores", keywords: ["exterior", "fachada"] },
+        { label: "Paredes interiores", keywords: ["interior", "divis"] },
+        { label: "Cintas e reforços", keywords: ["cinta", "lintel", "verga"] },
+      ])
+      ?? root;
+  }
+  if (name.includes("movimento") || name.includes("terra") || name.includes("terraplen")) {
+    return reorderLeavesByKeywords(root, [
+      { label: "Limpeza do terreno", keywords: ["limpeza", "desmat", "regulariz"] },
+      { label: "Escavação", keywords: ["escav"] },
+      { label: "Aterros e compactação", keywords: ["aterro", "compact", "enchimento"] },
+      { label: "Drenagem provisória", keywords: ["drenagem", "esgot"] },
+    ]) ?? root;
+  }
+  if (name.includes("preliminar") || name.includes("estaleiro") || name.includes("instalacao de estaleiro")) {
+    return reorderLeavesByKeywords(root, [
+      { label: "Implantação e demolições", keywords: ["implant", "demoli", "vedacao", "tapume"] },
+      { label: "Estaleiro e logística", keywords: ["estaleiro", "armazem", "sanitario", "electricidade provis"] },
+      { label: "Replanteio", keywords: ["replanteio", "piquet", "marcacao"] },
+    ]) ?? root;
+  }
+  if (name.includes("betonilha") || name.includes("reboco")) {
+    return buildFloorAwareFinishesPlan(root, floors, "Rebocos e betonilhas")
+      ?? reorderLeavesByKeywords(root, [
+        { label: "Betonilhas", keywords: ["betonilha"] },
+        { label: "Rebocos", keywords: ["reboco"] },
+      ])
+      ?? root;
+  }
+  if (name.includes("revestimento") || name.includes("pavimento") || name.includes("rodape")) {
+    return buildFloorAwareFinishesPlan(root, floors, "Revestimentos")
+      ?? reorderLeavesByKeywords(root, [
+        { label: "Pavimentos", keywords: ["piso", "pavimento", "ceramica chao", "lajeta"] },
+        { label: "Paredes", keywords: ["azulejo", "parede", "revest"] },
+        { label: "Rodapés e remates", keywords: ["rodape", "remate"] },
+      ])
+      ?? root;
+  }
+  if (name.includes("pintura")) {
+    return buildFloorAwareFinishesPlan(root, floors, "Pinturas")
+      ?? reorderLeavesByKeywords(root, [
+        { label: "Preparação", keywords: ["prepar", "massa", "lixag", "primario"] },
+        { label: "Interiores", keywords: ["interior", "teto", "tecto"] },
+        { label: "Exteriores", keywords: ["exterior", "fachada"] },
+      ])
+      ?? root;
+  }
+  if (name.includes("cobertura")) {
+    return reorderLeavesByKeywords(root, [
+      { label: "Estrutura de cobertura", keywords: ["asna", "madre", "estrutura", "madeira", "metal"] },
+      { label: "Impermeabilização", keywords: ["impermeab", "manta"] },
+      { label: "Cobertura e remates", keywords: ["chapa", "telha", "cumeeira", "remate", "beiral"] },
+    ]) ?? root;
+  }
+  if (name.includes("hidraul") || name.includes("saneamento") || name.includes("esgoto") || name.includes("pluvial")) {
+    return reorderLeavesByKeywords(root, [
+      { label: "Redes enterradas", keywords: ["enterrada", "coletor", "colector", "ramal"] },
+      { label: "Distribuição de água", keywords: ["agua", "tubagem", "pcd", "ppr", "pressao"] },
+      { label: "Drenagem e esgotos", keywords: ["esgoto", "drenagem", "pluvial", "caixa"] },
+      { label: "Aparelhos e acessórios", keywords: ["sanit", "torneira", "lavatorio", "autoclismo", "duche", "pia"] },
+    ]) ?? root;
+  }
+  if (name.includes("electric") || name.includes("eletric")) {
+    return buildFloorAwareFinishesPlan(root, floors, "Instalações eléctricas")
+      ?? reorderLeavesByKeywords(root, [
+        { label: "Tubagem e cablagem", keywords: ["tubo", "cabo", "electroduto", "canaliz"] },
+        { label: "Quadros e protecções", keywords: ["quadro", "disjuntor", "diferencial"] },
+        { label: "Pontos de utilização", keywords: ["tomada", "interrup", "luminar", "ponto"] },
+      ])
+      ?? root;
+  }
+  if (name.includes("esquadri") || name.includes("portal") || name.includes("janela") || name.includes("serralh")) {
+    return reorderLeavesByKeywords(root, [
+      { label: "Caixilharias", keywords: ["janela", "caixilh", "aluminio", "pvc"] },
+      { label: "Portas", keywords: ["porta", "portal"] },
+      { label: "Protecções e gradis", keywords: ["grade", "protec", "guanicho"] },
+    ]) ?? root;
+  }
+  return root;
+}
+
+const PHASE_RANK: Record<PhaseKey, number> = {
+  mobilizacao: 0,
+  terraplenagem_fundacoes: 1,
+  estrutura: 2,
+  alvenaria: 3,
+  cobertura: 4,
+  instalacoes: 4,
+  revestimentos: 5,
+  esquadrias: 5,
+  acabamentos: 6,
+  obras_exteriores: 6,
+  entrega_garantia: 7,
+  nao_classificado: 50,
+};
+
+function chapterPhaseRank(description: string): number {
+  return PHASE_RANK[mapToPhase(description, [], "")] ?? 50;
 }
 
 // Gera o cronograma directamente do que foi medido: cada pacote de trabalho (item do Mapa de
@@ -399,23 +569,11 @@ export async function generateSchedule(args: {
     .filter((node): node is ScheduledNode => node !== null);
   if (!scheduledRoots.length) throw new Error("O Mapa de Quantidades ainda não tem itens medidos para gerar a WBS");
 
-  // Sequência real de obra: quando o capítulo de Betões/Aços/Cofragens (ou de Alvenarias) é
-  // reconhecível pela descrição dos seus itens, substitui-se a ordem "tal como está no mapa" por
-  // uma sequência de construção (limpeza → sapatas → pilares → viga → laje) e, em edifícios de
-  // mais de um piso, repete-a piso a piso (térreo primeiro). Documentos que não seguem o modelo
-  // padrão do SIGO mantêm-se exactamente como antes — a transformação nunca é forçada.
+  // Sequência real de obra por capítulo (fundações→estrutura por piso, redes antes de aparelhos,
+  // acabamentos por piso, …). Capítulos sem padrões reconhecíveis mantêm a árvore do mapa.
   const [project] = await db.select({ floors: projects.floors }).from(projects).where(eq(projects.id, args.projectId)).limit(1);
   const floors = project?.floors ?? 1;
-  scheduledRoots = scheduledRoots.map((root) => {
-    const name = normalizeText(root.node.description);
-    if (name.includes("betoe") || name.includes("acos e cofrage") || (name.includes("aco") && name.includes("cofragem"))) {
-      return buildFloorAwareStructuralPlan(root, floors) ?? root;
-    }
-    if (name.includes("alvenaria")) {
-      return buildFloorAwareWallsPlan(root, floors) ?? root;
-    }
-    return root;
-  });
+  scheduledRoots = scheduledRoots.map((root) => applyChapterConstructionPlan(root, floors));
 
   if (args.totalDurationDays) {
     const naturalTotal = scheduledRoots.reduce((sum, root) => sum + root.durationDays, 0) || 1;
@@ -424,22 +582,54 @@ export async function generateSchedule(args: {
   }
 
   await db.delete(scheduleTasks).where(eq(scheduleTasks.projectId, args.projectId));
-  let cursor = args.startDate;
   const sortOrderRef = { value: 0 };
-  const rootTasks: Array<typeof scheduleTasks.$inferSelect> = [];
+  const rootTasks: Array<typeof scheduleTasks.$inferSelect & { phaseRank: number }> = [];
   const dependencyValues: Array<typeof scheduleDependencies.$inferInsert> = [];
+
+  // Capítulos na mesma fase de obra avançam em paralelo (SS); fases seguintes começam após a
+  // fase anterior (FS). Alvenaria / instalações podem arrancar com avanço sobre a estrutura
+  // (SS + lag), evitando o encadeamento ingénuo capítulo-a-capítulo que alongava a obra irrealisticamente.
   for (let index = 0; index < scheduledRoots.length; index += 1) {
-    const rootTask = await insertScheduledNode(scheduledRoots[index], args, null, String(index + 1), cursor, sortOrderRef, dependencyValues);
-    rootTasks.push(rootTask);
-    cursor = addWorkingDays(rootTask.endDate, 1);
-  }
-  if (rootTasks.length > 1) {
-    dependencyValues.push(...rootTasks.slice(1).map((task, index) => ({
-      predecessorTaskId: rootTasks[index].id,
-      successorTaskId: task.id,
-      type: "FS" as const,
-      lagDays: 0,
-    })));
+    const root = scheduledRoots[index];
+    const rank = chapterPhaseRank(root.node.description);
+    const priorPhase = [...rootTasks].reverse().find((t) => t.phaseRank < rank);
+    const samePhase = [...rootTasks].reverse().find((t) => t.phaseRank === rank);
+
+    let startDate = args.startDate;
+    let predecessor: (typeof rootTasks)[number] | undefined;
+    let depType: "FS" | "SS" = "FS";
+    let lagDays = 0;
+
+    if (samePhase) {
+      predecessor = samePhase;
+      depType = "SS";
+      lagDays = 0;
+      startDate = samePhase.startDate;
+    } else if (priorPhase) {
+      predecessor = priorPhase;
+      // Estrutura → alvenaria/instalações: começa depois de ~1/3 da estrutura (piso térreo tipicamente pronto).
+      const earlyStart = (rank === 3 || rank === 4) && priorPhase.phaseRank === 2;
+      if (earlyStart) {
+        depType = "SS";
+        lagDays = Math.max(1, Math.floor(priorPhase.durationDays * 0.35));
+        startDate = shiftWorkingDays(priorPhase.startDate, lagDays);
+      } else {
+        depType = "FS";
+        lagDays = 0;
+        startDate = addWorkingDays(priorPhase.endDate, 1);
+      }
+    }
+
+    const rootTask = await insertScheduledNode(root, args, null, String(index + 1), startDate, sortOrderRef, dependencyValues);
+    if (predecessor) {
+      dependencyValues.push({
+        predecessorTaskId: predecessor.id,
+        successorTaskId: rootTask.id,
+        type: depType,
+        lagDays,
+      });
+    }
+    rootTasks.push({ ...rootTask, phaseRank: rank });
   }
   if (dependencyValues.length) await db.insert(scheduleDependencies).values(dependencyValues);
   const schedule = await getProjectSchedule(args.projectId);
@@ -542,40 +732,75 @@ export async function getProjectSchedule(projectId: string) {
     };
   });
   const childrenByParent = new Map<string, typeof baseEnriched>();
+  const byId = new Map(baseEnriched.map((task) => [task.id, task]));
   for (const task of baseEnriched) {
     if (!task.parentId) continue;
     const children = childrenByParent.get(task.parentId) ?? [];
     children.push(task);
     childrenByParent.set(task.parentId, children);
   }
-  const enriched = baseEnriched.map((task) => {
-    const children = childrenByParent.get(task.id) ?? [];
-    if (!children.length) return { ...task, isSummary: false as const };
-    const childrenPlannedValue = children.reduce((sum, child) => sum + child.plannedValue, 0);
+  for (const [, children] of childrenByParent) {
+    children.sort((a, b) => a.sortOrder - b.sortOrder);
+  }
+
+  function wbsDepth(taskId: string): number {
+    let depth = 0;
+    let cursor = byId.get(taskId);
+    const seen = new Set<string>();
+    while (cursor?.parentId) {
+      if (seen.has(cursor.id)) break;
+      seen.add(cursor.id);
+      depth += 1;
+      cursor = byId.get(cursor.parentId);
+    }
+    return depth;
+  }
+
+  // Roll-up de baixo para cima (netos → pais → avós) — crítico com WBS multi-nível por piso.
+  type EnrichedTask = Omit<(typeof baseEnriched)[number], "progressSource"> & {
+    isSummary: boolean;
+    wbsDepth: number;
+    progressSource: "autos" | "diario" | "manual" | "planeamento" | "subactividades";
+  };
+  const rolled = new Map<string, EnrichedTask>();
+
+  function rollup(taskId: string): EnrichedTask {
+    const cached = rolled.get(taskId);
+    if (cached) return cached;
+    const task = byId.get(taskId)!;
+    const children = childrenByParent.get(taskId) ?? [];
+    if (!children.length) {
+      const leaf = { ...task, isSummary: false as const, wbsDepth: wbsDepth(taskId) };
+      rolled.set(taskId, leaf);
+      return leaf;
+    }
+    const rolledChildren = children.map((child) => rollup(child.id));
+    const childrenPlannedValue = rolledChildren.reduce((sum, child) => sum + child.plannedValue, 0);
     const plannedValue = childrenPlannedValue > 0 ? childrenPlannedValue : task.plannedValue;
-    const executedValue = childrenPlannedValue > 0 ? children.reduce((sum, child) => sum + child.executedValue, 0) : task.executedValue;
+    const executedValue = childrenPlannedValue > 0 ? rolledChildren.reduce((sum, child) => sum + child.executedValue, 0) : task.executedValue;
     const progress = childrenPlannedValue > 0
-      ? children.reduce((sum, child) => sum + child.plannedValue * child.progress / 100, 0) / childrenPlannedValue * 100
-      : children.reduce((sum, child) => sum + child.progress, 0) / children.length;
-    const status = children.some((child) => child.status === "bloqueado")
+      ? rolledChildren.reduce((sum, child) => sum + child.plannedValue * child.progress / 100, 0) / childrenPlannedValue * 100
+      : rolledChildren.reduce((sum, child) => sum + child.progress, 0) / rolledChildren.length;
+    const status = rolledChildren.some((child) => child.status === "bloqueado")
       ? "bloqueado" as const
-      : children.every((child) => child.status === "concluido")
+      : rolledChildren.every((child) => child.status === "concluido")
         ? "concluido" as const
-        : children.some((child) => child.status === "em_curso" || child.progress > 0)
+        : rolledChildren.some((child) => child.status === "em_curso" || child.progress > 0)
           ? "em_curso" as const
           : "nao_iniciado" as const;
-    const startDate = children.reduce((min, child) => child.startDate < min ? child.startDate : min, children[0].startDate);
-    const endDate = children.reduce((max, child) => child.endDate > max ? child.endDate : max, children[0].endDate);
-    const baselineChildren = children.filter((child) => child.baselineStartDate && child.baselineEndDate);
+    const startDate = rolledChildren.reduce((min, child) => child.startDate < min ? child.startDate : min, rolledChildren[0].startDate);
+    const endDate = rolledChildren.reduce((max, child) => child.endDate > max ? child.endDate : max, rolledChildren[0].endDate);
+    const baselineChildren = rolledChildren.filter((child) => child.baselineStartDate && child.baselineEndDate);
     const baselineStartDate = baselineChildren.length
       ? baselineChildren.reduce((min, child) => child.baselineStartDate! < min ? child.baselineStartDate! : min, baselineChildren[0].baselineStartDate!)
       : task.baselineStartDate;
     const baselineEndDate = baselineChildren.length
       ? baselineChildren.reduce((max, child) => child.baselineEndDate! > max ? child.baselineEndDate! : max, baselineChildren[0].baselineEndDate!)
       : task.baselineEndDate;
-    return {
+    const summary: EnrichedTask = {
       ...task,
-      isSummary: true as const,
+      isSummary: true,
+      wbsDepth: wbsDepth(taskId),
       startDate,
       endDate,
       baselineStartDate,
@@ -587,13 +812,23 @@ export async function getProjectSchedule(projectId: string) {
       status,
       progressSource: "subactividades" as const,
     };
-  });
-  const orderedEnriched = enriched
-    .filter((task) => !task.parentId)
-    .flatMap((task) => [task, ...enriched.filter((child) => child.parentId === task.id)]);
+    rolled.set(taskId, summary);
+    return summary;
+  }
+
+  for (const task of baseEnriched) rollup(task.id);
+
+  function walk(taskId: string): EnrichedTask[] {
+    const task = rolled.get(taskId)!;
+    const kids = childrenByParent.get(taskId) ?? [];
+    return [task, ...kids.flatMap((child) => walk(child.id))];
+  }
+
+  const roots = baseEnriched.filter((task) => !task.parentId).sort((a, b) => a.sortOrder - b.sortOrder);
+  const orderedEnriched = roots.flatMap((root) => walk(root.id));
   // Os totais usam apenas o primeiro nível: cada actividade principal já agrega as suas
   // subactividades. Assim, uma WBS detalhada nunca duplica o valor do orçamento.
-  const topLevelTasks = enriched.filter((task) => !task.parentId);
+  const topLevelTasks = roots.map((root) => rolled.get(root.id)!);
   const plannedValue = topLevelTasks.reduce((sum, task) => sum + task.plannedValue, 0);
   const executedValue = topLevelTasks.reduce((sum, task) => sum + task.executedValue, 0);
   return {

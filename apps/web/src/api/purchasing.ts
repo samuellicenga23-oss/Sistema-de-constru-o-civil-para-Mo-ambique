@@ -146,6 +146,8 @@ export const purchasingApi = {
       method: "POST",
       body: JSON.stringify(data),
     }),
+  suggestMissingPrices: (projectId: string) =>
+    request<{ updated: number }>(`/projects/${projectId}/purchase-orders/suggest-missing-prices`, { method: "POST" }),
   updateOrderStatus: (id: string, status: PurchaseOrder["status"]) =>
     request<PurchaseOrder>(`/purchase-orders/${id}/status`, { method: "PUT", body: JSON.stringify({ status }) }),
   deleteOrder: (id: string) => request<{ ok: true }>(`/purchase-orders/${id}`, { method: "DELETE" }),

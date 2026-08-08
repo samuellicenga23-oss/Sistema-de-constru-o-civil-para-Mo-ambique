@@ -377,11 +377,11 @@ export default function ScheduleWorkspace({
                       </SheetCell>
                       <SheetCell onEdit={() => startEdit(task, "name", onSelect)} className="!whitespace-normal">
                         {cell === "name" ? (
-                          <div style={{ paddingLeft: task.parentId ? 16 : 0 }}>
+                          <div style={{ paddingLeft: (task.wbsDepth ?? (task.parentId ? 1 : 0)) * 16 }}>
                             <CellInput value={task.name} onCommit={(v) => void commitCell(task, "name", v)} onCancel={() => setEditing(null)} />
                           </div>
                         ) : (
-                          <div className="flex min-w-0 items-center gap-1" style={{ paddingLeft: task.parentId ? 16 : 0 }}>
+                          <div className="flex min-w-0 items-center gap-1" style={{ paddingLeft: (task.wbsDepth ?? (task.parentId ? 1 : 0)) * 16 }}>
                             {task.isSummary ? (
                               <button
                                 type="button"

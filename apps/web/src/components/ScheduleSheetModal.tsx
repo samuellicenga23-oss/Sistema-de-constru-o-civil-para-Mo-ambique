@@ -176,11 +176,11 @@ export default function ScheduleSheetModal({ tasks, byId, onClose, onChanged, on
                     </SheetCell>
                     <SheetCell onEdit={() => startEdit(task, "name")} className="!whitespace-normal" rowH={40}>
                       {cell === "name" ? (
-                        <div style={{ paddingLeft: task.parentId ? 16 : 0 }}>
+                        <div style={{ paddingLeft: (task.wbsDepth ?? (task.parentId ? 1 : 0)) * 16 }}>
                           <CellInput value={task.name} onCommit={(v) => void commitCell(task, "name", v)} onCancel={() => setEditing(null)} />
                         </div>
                       ) : (
-                        <span className={task.isSummary ? "font-semibold text-slate-900" : "text-slate-700"} style={{ paddingLeft: task.parentId ? 16 : 0 }}>
+                        <span className={task.isSummary ? "font-semibold text-slate-900" : "text-slate-700"} style={{ paddingLeft: (task.wbsDepth ?? (task.parentId ? 1 : 0)) * 16 }}>
                           {task.name}
                         </span>
                       )}

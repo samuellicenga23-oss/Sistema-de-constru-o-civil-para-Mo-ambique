@@ -1,15 +1,18 @@
 import { useMemo, useState } from "react";
 import type { PurchaseOrder } from "../api/purchasing";
+import { purchasingApi } from "../api/purchasing";
 import { usePurchaseSheet, type PurchaseRow } from "../hooks/usePurchaseSheet";
 import { CellInput, SheetCell } from "./ScheduleSheetCells";
 import ModalPortal from "./ModalPortal";
-import { IconClose } from "./icons";
+import { IconClose, IconPlus } from "./icons";
 
 type Props = {
+  projectId: string;
   orders: PurchaseOrder[];
   onClose: () => void;
   onChanged: () => Promise<void>;
   onError: (message: string | null) => void;
+  onRequestMaterials: () => void;
 };
 
 function money(value: number) {
@@ -19,14 +22,19 @@ function money(value: number) {
 // Popup de ecrã inteiro com todas as linhas das ordens de compra em RASCUNHO — a única fase em
 // que quantidade e preço ainda se podem corrigir antes de a ordem gerar compromisso financeiro.
 // Mesmo padrão do "Abrir como folha" do Cronograma: edição célula-a-célula + acções em massa.
-export default function PurchaseSheetModal({ orders, onClose, onChanged, onError }: Props) {
+export default function PurchaseSheetModal({ projectId, orders, onClose, onChanged, onError, onRequestMaterials }: Props) {
   const [query, setQuery] = useState("");
   const [bulkPercent, setBulkPercent] = useState("5");
+  const [suggestBusy, setSuggestBusy] = useState(false);
 
   const draftOrders = useMemo(() => orders.filter((o) => o.status === "rascunho"), [orders]);
   const rows: PurchaseRow[] = useMemo(
     () => draftOrders.flatMap((order) => order.lines.map((line) => ({ order, lineId: line.id }))),
     [draftOrders],
+  );
+  const missingPriceCount = useMemo(
+    () => rows.filter((r) => Number(r.order.lines.find((l) => l.id === r.lineId)?.unitCost ?? 0) === 0).length,
+    [rows],
   );
 
   const {
@@ -54,15 +62,46 @@ export default function PurchaseSheetModal({ orders, onClose, onChanged, onError
 
   const allSelected = filteredRows.length > 0 && filteredRows.every((r) => selected.has(r.lineId));
 
+  async function handleSuggestPrices() {
+    setSuggestBusy(true);
+    onError(null);
+    try {
+      const result = await purchasingApi.suggestMissingPrices(projectId);
+      await onChanged();
+      if (!result.updated) onError("Não há preços de catálogo/cotação para preencher automaticamente.");
+    } catch (cause) {
+      onError(cause instanceof Error ? cause.message : "Não foi possível sugerir preços");
+    } finally {
+      setSuggestBusy(false);
+    }
+  }
+
   return (
     <ModalPortal>
       <div className="fixed inset-0 z-50 flex flex-col bg-white">
         <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3">
           <div>
             <h2 className="font-display text-base font-bold text-slate-900">Compras — folha de rascunhos</h2>
-            <p className="text-xs text-slate-500">{rows.length} linha(s) em {draftOrders.length} ordem(ns) por aprovar · duplo clique para editar</p>
+            <p className="text-xs text-slate-500">
+              {rows.length} linha(s) em {draftOrders.length} ordem(ns) por aprovar · duplo clique para editar
+            </p>
           </div>
-          <div className="flex flex-1 items-center justify-end gap-2">
+          <div className="flex flex-1 flex-wrap items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                onClose();
+                onRequestMaterials();
+              }}
+              className="btn btn-primary btn-sm"
+            >
+              <IconPlus className="h-3.5 w-3.5" /> Pedir materiais
+            </button>
+            {missingPriceCount > 0 && (
+              <button type="button" disabled={suggestBusy} onClick={() => void handleSuggestPrices()} className="btn btn-secondary btn-sm">
+                {suggestBusy ? "A preencher…" : `Sugerir preços (${missingPriceCount})`}
+              </button>
+            )}
             <input
               type="search"
               value={query}
@@ -167,7 +206,23 @@ export default function PurchaseSheetModal({ orders, onClose, onChanged, onError
               {filteredRows.length === 0 && (
                 <tr>
                   <td colSpan={7} className="px-4 py-10 text-center text-sm text-slate-400">
-                    {query ? "Nenhuma linha corresponde à pesquisa." : "Sem ordens em rascunho para editar."}
+                    {query ? (
+                      "Nenhuma linha corresponde à pesquisa."
+                    ) : (
+                      <span className="inline-flex flex-col items-center gap-3">
+                        Sem ordens em rascunho. Peça materiais para começar.
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          onClick={() => {
+                            onClose();
+                            onRequestMaterials();
+                          }}
+                        >
+                          <IconPlus className="h-3.5 w-3.5" /> Pedir materiais
+                        </button>
+                      </span>
+                    )}
                   </td>
                 </tr>
               )}

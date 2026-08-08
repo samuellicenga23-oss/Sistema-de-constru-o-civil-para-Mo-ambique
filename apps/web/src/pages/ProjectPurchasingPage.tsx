@@ -185,10 +185,10 @@ export default function ProjectPurchasingPage() {
 
   async function reload() {
     if (!projectId) return;
-    const [proj, sups, mats, ords, movs, summary, plan, schedule] = await Promise.all([
-      boqApi.getProject(projectId),
+    const proj = await boqApi.getProject(projectId);
+    const [sups, mats, ords, movs, summary, plan, schedule] = await Promise.all([
       suppliersApi.list(),
-      catalogApi.listMaterials(),
+      catalogApi.listMaterials(proj.zoneId ?? undefined),
       purchasingApi.listOrders(projectId),
       purchasingApi.listStockMovements(projectId),
       purchasingApi.stockSummary(projectId),
@@ -334,6 +334,21 @@ export default function ProjectPurchasingPage() {
       await reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao actualizar preço");
+    }
+  }
+
+  async function handleSuggestMissingPrices() {
+    if (!projectId) return;
+    setError(null);
+    setSaving(true);
+    try {
+      const result = await purchasingApi.suggestMissingPrices(projectId);
+      await reload();
+      if (!result.updated) setError("Não há preços de catálogo/cotação para preencher automaticamente.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível sugerir preços");
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -624,9 +639,14 @@ export default function ProjectPurchasingPage() {
                   <IconPlus className="w-3.5 h-3.5" /> Ordem com fornecedor
                 </button>
               )}
-              {canRequest && orders.some((o) => o.status === "rascunho") && (
+              {canRequest && (
                 <button onClick={() => setShowSheetModal(true)} className="btn btn-secondary btn-sm">
                   Abrir como folha
+                </button>
+              )}
+              {canRequest && orders.some((o) => o.status === "rascunho" && o.lines.some((l) => Number(l.unitCost) === 0)) && (
+                <button type="button" disabled={saving} onClick={() => void handleSuggestMissingPrices()} className="btn btn-secondary btn-sm">
+                  {saving ? "A preencher…" : "Sugerir preços"}
                 </button>
               )}
             </div>
@@ -977,7 +997,7 @@ export default function ProjectPurchasingPage() {
                 <div className="mt-3 divide-y divide-slate-100 rounded-lg border border-slate-100 sm:hidden">{o.lines.map((line) => <div key={`mobile-order-${line.id}`} className="p-3"><strong className="block text-sm text-slate-800">{line.materialName}</strong><div className="mt-1 flex justify-between gap-3 text-xs text-slate-500"><span>{Number(line.quantity).toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {line.unit} × {Number(line.unitCost).toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span><span className="font-semibold text-slate-800">{(Number(line.quantity) * Number(line.unitCost)).toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {line.currency}</span></div></div>)}</div>
                 {o.status === "rascunho" && o.lines.some((l) => Number(l.unitCost) === 0) && (
                   <p className="mt-2 text-xs font-medium text-orange-700">
-                    Preço por confirmar antes de aprovar — edite os valores a 0,00 abaixo.
+                    Preço por confirmar — use «Sugerir preços» ou edite os valores a 0,00 abaixo.
                   </p>
                 )}
                 <table className="mt-2 hidden w-full text-sm sm:table">
@@ -1066,8 +1086,18 @@ export default function ProjectPurchasingPage() {
       </div>
     </Layout>
     {dialog}
-    {showSheetModal && (
-      <PurchaseSheetModal orders={orders} onClose={() => setShowSheetModal(false)} onChanged={reload} onError={setError} />
+    {showSheetModal && projectId && (
+      <PurchaseSheetModal
+        projectId={projectId}
+        orders={orders}
+        onClose={() => setShowSheetModal(false)}
+        onChanged={reload}
+        onError={setError}
+        onRequestMaterials={() => {
+          setRequestLines([{ materialId: materials[0]?.id ?? "", quantity: "1" }]);
+          setShowRequestForm(true);
+        }}
+      />
     )}
     </>
   );

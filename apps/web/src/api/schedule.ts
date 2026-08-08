@@ -25,6 +25,7 @@ export type ScheduleTask = {
   executedValue: number;
   progressSource: "autos" | "diario" | "manual" | "planeamento" | "subactividades";
   isSummary: boolean;
+  wbsDepth?: number;
   predecessorTaskId: string | null;
   dependencyType: "FS" | "SS" | "FF" | "SF" | null;
   lagDays: number;

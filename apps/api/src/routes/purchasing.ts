@@ -1,8 +1,8 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { eq, and, or, isNull, desc, sql as drizzleSql } from "drizzle-orm";
+import { eq, and, or, isNull, desc, inArray, sql as drizzleSql } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { purchaseOrders, purchaseOrderLines, stockMovements, suppliers, materials, budgetDocuments, financialEntries, scheduleTasks, supplierAccounts } from "../db/schema.js";
+import { purchaseOrders, purchaseOrderLines, stockMovements, suppliers, materials, budgetDocuments, financialEntries, scheduleTasks, supplierAccounts, materialZonePrices, supplierMaterialPrices, priceZones } from "../db/schema.js";
 import { requireCompanyUser, requirePermission, requireRole } from "../auth/middleware.js";
 import { assertProjectOwned } from "../services/accessControl.js";
 import { assertApprovedOrcamentoForSite } from "../services/siteGate.js";
@@ -31,6 +31,81 @@ async function findVisibleMaterial(materialId: string, companyId: string) {
     .where(and(eq(materials.id, materialId), or(isNull(materials.companyId), eq(materials.companyId, companyId))))
     .limit(1);
   return material ?? null;
+}
+
+/** Preço sugerido para um pedido rápido: cotação de fornecedor na zona → preço de zona → catálogo. */
+async function suggestMaterialUnitCosts(
+  materialIds: string[],
+  companyId: string,
+  zoneId: string | null,
+): Promise<Map<string, number>> {
+  const unique = [...new Set(materialIds)];
+  const result = new Map<string, number>();
+  if (!unique.length) return result;
+
+  const materialRows = await db
+    .select({
+      id: materials.id,
+      baseUnitCost: materials.baseUnitCost,
+      importFactor: materials.importFactor,
+    })
+    .from(materials)
+    .where(and(inArray(materials.id, unique), or(isNull(materials.companyId), eq(materials.companyId, companyId))));
+
+  let zoneFactor = 1;
+  if (zoneId) {
+    const [zone] = await db.select().from(priceZones).where(eq(priceZones.id, zoneId)).limit(1);
+    if (zone) zoneFactor = 1 + Number(zone.materialAdjustmentPct) / 100;
+  }
+
+  const zonePrices = zoneId
+    ? await db
+        .select({ materialId: materialZonePrices.materialId, unitCost: materialZonePrices.unitCost })
+        .from(materialZonePrices)
+        .where(and(eq(materialZonePrices.zoneId, zoneId), inArray(materialZonePrices.materialId, unique)))
+    : [];
+  const zoneByMaterial = new Map(zonePrices.map((r) => [r.materialId, Number(r.unitCost)]));
+
+  const quoteRows = await db
+    .select({
+      materialId: supplierMaterialPrices.materialId,
+      unitCost: supplierMaterialPrices.unitCost,
+      zoneId: supplierMaterialPrices.zoneId,
+      supplierZoneId: suppliers.zoneId,
+      supplierCompanyId: suppliers.companyId,
+    })
+    .from(supplierMaterialPrices)
+    .innerJoin(suppliers, eq(supplierMaterialPrices.supplierId, suppliers.id))
+    .where(
+      and(
+        or(eq(suppliers.companyId, companyId), isNull(suppliers.companyId)),
+        inArray(supplierMaterialPrices.materialId, unique),
+      ),
+    );
+
+  const bestQuote = new Map<string, number>();
+  for (const row of quoteRows) {
+    const effectiveZone = row.supplierCompanyId === null ? row.supplierZoneId : row.zoneId;
+    if (zoneId && effectiveZone != null && effectiveZone !== zoneId) continue;
+    const cost = Number(row.unitCost);
+    const current = bestQuote.get(row.materialId);
+    if (current == null || cost < current) bestQuote.set(row.materialId, cost);
+  }
+
+  for (const mat of materialRows) {
+    const quote = bestQuote.get(mat.id);
+    if (quote != null && quote > 0) {
+      result.set(mat.id, quote);
+      continue;
+    }
+    const zoneCost = zoneByMaterial.get(mat.id);
+    if (zoneCost != null && zoneCost > 0) {
+      result.set(mat.id, zoneCost * Number(mat.importFactor));
+      continue;
+    }
+    result.set(mat.id, Number(mat.baseUnitCost) * Number(mat.importFactor) * zoneFactor);
+  }
+  return result;
 }
 
 const lineSchema = z.object({
@@ -287,6 +362,12 @@ export async function purchasingRoutes(app: FastifyInstance) {
       if (!material) return reply.code(404).send({ error: "Material não encontrado no Catálogo" });
     }
 
+    const suggestedCosts = await suggestMaterialUnitCosts(
+      parsed.data.lines.map((l) => l.materialId),
+      companyId,
+      project.zoneId,
+    );
+
     let [supplier] = await db
       .select()
       .from(suppliers)
@@ -321,7 +402,7 @@ export async function purchasingRoutes(app: FastifyInstance) {
           purchaseOrderId: created.id,
           materialId: line.materialId,
           quantity: line.quantity.toString(),
-          unitCost: "0",
+          unitCost: (suggestedCosts.get(line.materialId) ?? 0).toFixed(4),
           currency: project.currency,
         })),
       );
@@ -339,6 +420,41 @@ export async function purchasingRoutes(app: FastifyInstance) {
       after: { status: order.status, lineCount: lines.length },
     });
     return reply.code(201).send({ ...order, supplierName: supplier.name, supplierContact: supplier.contact, lines });
+  });
+
+  /** Preenche preços a 0 em rascunhos com catálogo / cotações da zona. */
+  app.post("/api/projects/:projectId/purchase-orders/suggest-missing-prices", { preHandler: canRequestMaterials }, async (request, reply) => {
+    const { projectId } = request.params as { projectId: string };
+    const companyId = companyIdOf(request);
+    const project = await assertProjectOwned(projectId, companyId);
+    if (!project) return reply.code(404).send({ error: "Projecto não encontrado" });
+
+    const draftRows = await db
+      .select({ line: purchaseOrderLines, orderId: purchaseOrders.id })
+      .from(purchaseOrderLines)
+      .innerJoin(purchaseOrders, eq(purchaseOrderLines.purchaseOrderId, purchaseOrders.id))
+      .where(and(eq(purchaseOrders.projectId, projectId), eq(purchaseOrders.status, "rascunho")));
+
+    const zeroLines = draftRows.filter((r) => Number(r.line.unitCost) === 0);
+    if (!zeroLines.length) return { updated: 0 };
+
+    const costs = await suggestMaterialUnitCosts(
+      zeroLines.map((r) => r.line.materialId),
+      companyId,
+      project.zoneId,
+    );
+
+    let updated = 0;
+    for (const row of zeroLines) {
+      const cost = costs.get(row.line.materialId) ?? 0;
+      if (!(cost > 0)) continue;
+      await db
+        .update(purchaseOrderLines)
+        .set({ unitCost: cost.toFixed(4) })
+        .where(eq(purchaseOrderLines.id, row.line.id));
+      updated += 1;
+    }
+    return { updated };
   });
 
   // Mudar de estado — "recebido" gera automaticamente as entradas de stock (uma por linha), tal
