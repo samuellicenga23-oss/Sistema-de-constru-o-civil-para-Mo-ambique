@@ -8,6 +8,7 @@ import {
   goodsReceipts,
   materials,
   procurementDocumentSequences,
+  procurementNonconformities,
   purchaseOrderLines,
   purchaseOrderShipmentLines,
   purchaseOrderShipments,
@@ -45,7 +46,7 @@ function dateOnly() {
   return new Date().toISOString().slice(0, 10);
 }
 
-async function nextReference(tx: any, companyId: string, kind: "REC" | "EXP") {
+async function nextReference(tx: any, companyId: string, kind: "REC" | "EXP" | "NCR") {
   const year = new Date().getUTCFullYear();
   const [row] = await tx
     .insert(procurementDocumentSequences)
@@ -655,6 +656,26 @@ export async function procurementFulfillmentRoutes(app: FastifyInstance) {
           createdByUserId: request.currentUser!.id,
           date: row.receipt.receiptDate,
         }).onConflictDoNothing();
+      }
+      // Toda rejeição confirmada vira uma não-conformidade formal. O texto de inspecção já
+      // existia na recepção; agora ganha referência, workflow e resposta do fornecedor.
+      for (const line of lines) {
+        if (Number(line.rejectedQty) <= 0) continue;
+        const existing = await tx.select({ id: procurementNonconformities.id }).from(procurementNonconformities).where(eq(procurementNonconformities.goodsReceiptLineId, line.id)).limit(1);
+        if (existing.length) continue;
+        const reference = await nextReference(tx, companyId, "NCR");
+        await tx.insert(procurementNonconformities).values({
+          companyId,
+          projectId: row.order.projectId,
+          purchaseOrderId: row.order.id,
+          goodsReceiptLineId: line.id,
+          materialId: line.materialId,
+          reference,
+          rejectedQty: line.rejectedQty,
+          status: "aguarda_fornecedor",
+          description: line.rejectionReason ?? line.conditionNotes ?? `Material rejeitado na recepção ${row.receipt.reference}`,
+          createdByUserId: request.currentUser!.id,
+        });
       }
       const [confirmed] = await tx.update(goodsReceipts).set({ status: "confirmado", confirmedAt: new Date(), confirmedByUserId: request.currentUser!.id }).where(eq(goodsReceipts.id, id)).returning();
       if (row.receipt.shipmentId) await tx.update(purchaseOrderShipments).set({ status: "entregue", deliveredAt: new Date(), updatedAt: new Date() }).where(eq(purchaseOrderShipments.id, row.receipt.shipmentId));

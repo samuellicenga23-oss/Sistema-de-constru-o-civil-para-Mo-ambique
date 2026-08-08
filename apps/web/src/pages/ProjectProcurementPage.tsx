@@ -16,8 +16,9 @@ import { marketplaceApi, type MarketplaceSupplier } from "../api/marketplace";
 import { useAuth } from "../auth/AuthContext";
 import { can } from "../permissions";
 import ProcurementFulfillmentPanel from "../components/ProcurementFulfillmentPanel";
+import ProcurementAccountsPayablePanel from "../components/ProcurementAccountsPayablePanel";
 
-type View = "necessidades" | "requisicoes" | "cotacoes" | "ordens" | "recepcoes" | "stock";
+type View = "necessidades" | "requisicoes" | "cotacoes" | "ordens" | "recepcoes" | "facturas" | "stock";
 type DraftRequisitionLine = { materialId: string; materialName: string; unit: string; quantity: number; specification?: string };
 
 type AwardDraft = Record<string, Array<{ quoteId: string; quantity: string }>>;
@@ -301,8 +302,9 @@ export default function ProjectProcurementPage() {
               ["cotacoes", "3. Cotações", rfqs.length],
               ["ordens", "4. Ordens de compra", orders.length],
               ["recepcoes", "5. Entregas e recepções", orders.filter((order) => order.status === "aprovado" || order.status === "recebido").length],
-              ["stock", "6. Stock", stock.length],
-            ] as Array<[View, string, number]>).map(([id, label, count]) => (
+              ["facturas", "6. Facturas e AP", null],
+              ["stock", "7. Stock", stock.length],
+            ] as Array<[View, string, number | null]>).map(([id, label, count]) => (
               <button key={id} type="button" onClick={() => { setView(id); setQuery(""); }} className={`flex items-center justify-between rounded-lg px-3 py-3 text-sm font-semibold ${view === id ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-100"}`}>
                 <span>{label}</span><span className={`rounded-full px-2 py-0.5 text-xs ${view === id ? "bg-white/15" : "bg-slate-100 text-slate-500"}`}>{count}</span>
               </button>
@@ -349,6 +351,14 @@ export default function ProjectProcurementPage() {
           <ProcurementFulfillmentPanel
             projectId={projectId!}
             canReceive={Boolean(canRequest || canApprove)}
+            onChanged={reload}
+          />
+        )}
+
+        {view === "facturas" && (
+          <ProcurementAccountsPayablePanel
+            projectId={projectId!}
+            canApprove={Boolean(canApprove)}
             onChanged={reload}
           />
         )}

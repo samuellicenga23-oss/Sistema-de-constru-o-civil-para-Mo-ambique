@@ -107,6 +107,13 @@ export default function SupplierOrderDetailPage() {
           })}
         </div>
 
+        {(order.summary.lines.some((line) => line.acceptedQty > 0)) && (
+          <div className="card card-pad" style={{ display: "flex", justifyContent: "space-between", gap: "1rem", alignItems: "center" }}>
+            <div><h2 style={{ margin: 0 }}>Facturação</h2><p className="text-muted-sm">Facture apenas as quantidades já aceites pela obra.</p></div>
+            <Link to={`/facturas?orderId=${order.id}`} className="btn btn-primary">Emitir factura</Link>
+          </div>
+        )}
+
         {order.status === "aprovado" && (order.supplierConfirmationStatus === "pendente" || order.supplierConfirmationStatus === "alteracao_solicitada") && (
           <div className="card card-pad">
             <h2 style={{ marginTop: 0 }}>{order.supplierConfirmationStatus === "alteracao_solicitada" ? "Reconfirmar após alinhamento" : "Responder à ordem"}</h2>

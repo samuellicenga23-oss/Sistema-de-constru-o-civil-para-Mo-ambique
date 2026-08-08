@@ -49,6 +49,12 @@ export function AppShell({ accountName, pendingCount = 0, children }: { accountN
             <Link to="/ordens" className={`app-nav-link ${path.includes("/ordens") ? "active" : ""}`}>
               <IconClipboard size={15} /> Ordens
             </Link>
+            <Link to="/facturas" className={`app-nav-link ${path.includes("/facturas") ? "active" : ""}`}>
+              <IconTag size={15} /> Facturas
+            </Link>
+            <Link to="/nao-conformidades" className={`app-nav-link ${path.includes("/nao-conformidades") ? "active" : ""}`}>
+              <IconPackage size={15} /> Não-conformidades
+            </Link>
             <Link to="/precos" className={`app-nav-link ${path.endsWith("/precos") ? "active" : ""}`}>
               <IconTag size={15} /> Meus preços
             </Link>

@@ -11,7 +11,7 @@ export type FinancialEntry = {
   dueDate: string | null;
   paidDate: string | null;
   status: "pendente" | "pago";
-  sourceType: "purchase_order" | "measurement_certificate" | null;
+  sourceType: "purchase_order" | "supplier_invoice" | "measurement_certificate" | "invoice" | "practice_invoice" | null;
   sourceId: string | null;
   createdByUserId: string | null;
   createdAt: string;
@@ -35,6 +35,7 @@ export type FinancialSummary = {
   custoRealizado: number;
   contasAReceber: number;
   contasAPagar: number;
+  compromissosCompra: number;
   saldo: number;
   margemRealizada: number;
   fluxoCaixaMensal: { month: string; receitas: number; despesas: number; saldo: number }[];

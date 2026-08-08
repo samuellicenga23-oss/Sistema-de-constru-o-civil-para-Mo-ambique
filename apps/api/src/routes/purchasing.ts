@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { eq, and, or, isNull, desc, inArray, sql as drizzleSql } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { purchaseOrders, purchaseOrderLines, purchaseRequisitions, purchaseOrderShipments, goodsReceipts, stockMovements, suppliers, materials, budgetDocuments, financialEntries, scheduleTasks, supplierAccounts, materialZonePrices, supplierMaterialPrices, priceZones } from "../db/schema.js";
+import { purchaseOrders, purchaseOrderLines, purchaseRequisitions, purchaseOrderShipments, goodsReceipts, supplierInvoices, stockMovements, suppliers, materials, budgetDocuments, financialEntries, scheduleTasks, supplierAccounts, materialZonePrices, supplierMaterialPrices, priceZones } from "../db/schema.js";
 import { requireCompanyUser, requirePermission, requireRole } from "../auth/middleware.js";
 import { assertProjectOwned } from "../services/accessControl.js";
 import { assertApprovedOrcamentoForSite } from "../services/siteGate.js";
@@ -506,12 +506,16 @@ export async function purchasingRoutes(app: FastifyInstance) {
       }
 
       if (parsed.data.status === "cancelado" && lockedOrder.procurementAwardId) {
-        const [shipmentRows, receiptRows] = await Promise.all([
+        const [shipmentRows, receiptRows, invoiceRows] = await Promise.all([
           tx.select({ id: purchaseOrderShipments.id, status: purchaseOrderShipments.status }).from(purchaseOrderShipments).where(eq(purchaseOrderShipments.purchaseOrderId, id)),
           tx.select({ id: goodsReceipts.id, status: goodsReceipts.status }).from(goodsReceipts).where(eq(goodsReceipts.purchaseOrderId, id)),
+          tx.select({ id: supplierInvoices.id, status: supplierInvoices.status }).from(supplierInvoices).where(eq(supplierInvoices.purchaseOrderId, id)),
         ]);
         if (shipmentRows.some((shipment) => shipment.status === "expedido" || shipment.status === "entregue") || receiptRows.some((receipt) => receipt.status === "confirmado")) {
           return { error: "Não é possível cancelar uma OC com material já expedido/recebido; regularize a entrega e o Financeiro" } as const;
+        }
+        if (invoiceRows.some((invoice) => !["rascunho", "rejeitada", "cancelada"].includes(invoice.status))) {
+          return { error: "Não é possível cancelar uma OC com factura activa; rejeite/cancele primeiro a factura do fornecedor" } as const;
         }
         const cancellableShipmentIds = shipmentRows.filter((shipment) => shipment.status === "rascunho" || shipment.status === "pronto").map((shipment) => shipment.id);
         if (cancellableShipmentIds.length) {

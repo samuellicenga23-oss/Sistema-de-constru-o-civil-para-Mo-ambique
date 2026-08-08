@@ -10,6 +10,9 @@ import {
   practiceInvoices,
   practiceReceipts,
   projectInvoices,
+  supplierInvoiceCreditNotes,
+  supplierInvoicePayments,
+  supplierInvoices,
 } from "../db/schema.js";
 import { requireCompanyUser, requireRole } from "../auth/middleware.js";
 import { assertProjectOwned } from "../services/accessControl.js";
@@ -81,6 +84,9 @@ export async function financialRoutes(app: FastifyInstance) {
 
     const parsed = entryUpdateSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    if (entry.sourceType === "supplier_invoice" && (parsed.data.status !== undefined || parsed.data.paidDate !== undefined)) {
+      return reply.code(409).send({ error: "Registe pagamentos na factura do fornecedor; este lançamento é apenas o reflexo da conta a pagar" });
+    }
     if (parsed.data.status === "pago" && entry.status !== "pago") {
       if (request.currentUser!.role !== "admin_empresa") {
         return reply.code(403).send({ error: "A baixa de um pagamento exige um administrador da empresa" });
@@ -142,14 +148,16 @@ export async function financialRoutes(app: FastifyInstance) {
     const summary = latestDocument ? await getBudgetDocumentSummary(latestDocument.id) : null;
     const valorContratado = summary?.total ?? 0;
 
-    const [entries, invoices, commercialInvoices] = await Promise.all([
+    const [entries, invoices, commercialInvoices, supplierBills] = await Promise.all([
       db.select().from(financialEntries).where(eq(financialEntries.projectId, projectId)),
       db.select().from(projectInvoices).where(eq(projectInvoices.projectId, projectId)),
       db.select().from(practiceInvoices).where(eq(practiceInvoices.projectId, projectId)),
+      db.select().from(supplierInvoices).where(eq(supplierInvoices.projectId, projectId)),
     ]);
     const invoiceIds = invoices.map((invoice) => invoice.id);
     const commercialIds = commercialInvoices.map((invoice) => invoice.id);
-    const [receipts, creditNotes, commercialReceipts] = await Promise.all([
+    const supplierBillIds = supplierBills.map((invoice) => invoice.id);
+    const [receipts, creditNotes, commercialReceipts, supplierPayments, supplierCredits] = await Promise.all([
       invoiceIds.length
         ? db.select().from(invoiceReceipts).where(inArray(invoiceReceipts.invoiceId, invoiceIds))
         : Promise.resolve([]),
@@ -159,12 +167,19 @@ export async function financialRoutes(app: FastifyInstance) {
       commercialIds.length
         ? db.select().from(practiceReceipts).where(inArray(practiceReceipts.invoiceId, commercialIds))
         : Promise.resolve([]),
+      supplierBillIds.length
+        ? db.select().from(supplierInvoicePayments).where(inArray(supplierInvoicePayments.supplierInvoiceId, supplierBillIds))
+        : Promise.resolve([]),
+      supplierBillIds.length
+        ? db.select().from(supplierInvoiceCreditNotes).where(inArray(supplierInvoiceCreditNotes.supplierInvoiceId, supplierBillIds))
+        : Promise.resolve([]),
     ]);
 
     let valorRecebido = 0;
     let custoRealizado = 0;
     let contasAReceber = 0;
     let contasAPagar = 0;
+    let compromissosCompra = 0;
     const cashFlowByMonth = new Map<string, { receitas: number; despesas: number }>();
 
     for (const e of entries) {
@@ -182,6 +197,9 @@ export async function financialRoutes(app: FastifyInstance) {
           contasAReceber += amount;
         }
       } else {
+        // Fase 3: OC = compromisso; factura aprovada = conta a pagar. Os dois documentos não
+        // podem entrar juntos nas contas a pagar/custo realizado, senão duplicam a mesma compra.
+        if (e.sourceType === "purchase_order" || e.sourceType === "supplier_invoice") continue;
         if (e.status === "pago") {
           custoRealizado += amount;
           const month = (e.paidDate ?? e.createdAt.toISOString().slice(0, 10)).slice(0, 7);
@@ -191,6 +209,54 @@ export async function financialRoutes(app: FastifyInstance) {
         } else {
           contasAPagar += amount;
         }
+      }
+    }
+
+    // Facturas de fornecedor aprovadas têm pagamentos parciais próprios, tal como as facturas
+    // ao cliente têm recibos. O tracking em financial_entries é ignorado no cálculo para não
+    // transformar uma factura parcialmente paga num lançamento binário.
+    const supplierPaymentsByInvoice = new Map<string, number>();
+    const supplierCreditsByInvoice = new Map<string, number>();
+    const approvedInvoiceNetByOrder = new Map<string, number>();
+    for (const payment of supplierPayments) {
+      supplierPaymentsByInvoice.set(payment.supplierInvoiceId, (supplierPaymentsByInvoice.get(payment.supplierInvoiceId) ?? 0) + Number(payment.amount));
+      const invoice = supplierBills.find((row) => row.id === payment.supplierInvoiceId);
+      if (!invoice || invoice.currency !== project.currency || ["rejeitada", "cancelada", "rascunho"].includes(invoice.status)) continue;
+      const amount = Number(payment.amount);
+      custoRealizado += amount;
+      const month = payment.paymentDate.slice(0, 7);
+      const bucket = cashFlowByMonth.get(month) ?? { receitas: 0, despesas: 0 };
+      bucket.despesas += amount;
+      cashFlowByMonth.set(month, bucket);
+    }
+    for (const credit of supplierCredits) {
+      if (credit.status !== "aceite") continue;
+      supplierCreditsByInvoice.set(credit.supplierInvoiceId, (supplierCreditsByInvoice.get(credit.supplierInvoiceId) ?? 0) + Number(credit.amount));
+    }
+    for (const invoice of supplierBills) {
+      if (invoice.currency !== project.currency || !["aprovada", "parcialmente_paga", "paga"].includes(invoice.status)) continue;
+      const net = Math.max(0, Number(invoice.totalAmount) - (supplierCreditsByInvoice.get(invoice.id) ?? 0));
+      approvedInvoiceNetByOrder.set(invoice.purchaseOrderId, (approvedInvoiceNetByOrder.get(invoice.purchaseOrderId) ?? 0) + net);
+      const paid = supplierPaymentsByInvoice.get(invoice.id) ?? 0;
+      contasAPagar += Math.max(0, net - paid);
+    }
+
+    // Mantém o valor ainda comprometido por OCs mas não transformado em factura aprovada.
+    // OCs legadas já marcadas como pagas continuam a contar como custo real apenas quando não
+    // existe uma factura de fornecedor no novo fluxo para a mesma OC.
+    for (const entry of entries.filter((row) => row.type === "despesa" && row.sourceType === "purchase_order")) {
+      const orderId = entry.sourceId;
+      if (!orderId) continue;
+      const invoiced = approvedInvoiceNetByOrder.get(orderId) ?? 0;
+      if (entry.status === "pendente") {
+        compromissosCompra += Math.max(0, Number(entry.amount) - invoiced);
+      } else if (entry.status === "pago" && invoiced <= 0) {
+        const amount = Number(entry.amount);
+        custoRealizado += amount;
+        const month = (entry.paidDate ?? entry.createdAt.toISOString().slice(0, 10)).slice(0, 7);
+        const bucket = cashFlowByMonth.get(month) ?? { receitas: 0, despesas: 0 };
+        bucket.despesas += amount;
+        cashFlowByMonth.set(month, bucket);
       }
     }
     const invoiceById = new Map(invoices.map((invoice) => [invoice.id, invoice]));
@@ -245,6 +311,7 @@ export async function financialRoutes(app: FastifyInstance) {
       custoRealizado,
       contasAReceber,
       contasAPagar,
+      compromissosCompra,
       saldo: valorRecebido - custoRealizado,
       margemRealizada: valorRecebido - custoRealizado,
       fluxoCaixaMensal,

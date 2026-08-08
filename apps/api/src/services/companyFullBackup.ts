@@ -58,6 +58,8 @@ import {
   procurementAwards,
   procurementAwardLines,
   procurementDocumentSequences,
+  procurementGoodsReturns,
+  procurementNonconformities,
   procurementRfqInvitations,
   procurementRfqLines,
   procurementRfqs,
@@ -65,6 +67,10 @@ import {
   procurementSupplierQuotes,
   purchaseRequisitionLines,
   purchaseRequisitions,
+  supplierInvoiceCreditNotes,
+  supplierInvoiceLines,
+  supplierInvoicePayments,
+  supplierInvoices,
   purchaseOrderLines,
   purchaseOrderShipmentLines,
   purchaseOrderShipments,
@@ -313,6 +319,19 @@ export async function collectCompanyFullBackup(companyId: string) {
   const contractIds = idsOf(contractRows);
   const diaryIds = idsOf(diaryRows);
   const purchaseOrderIds = idsOf(purchaseOrderRows);
+
+  const [supplierInvoiceRows, nonconformityRows] = await Promise.all([
+    projectIds.length ? db.select().from(supplierInvoices).where(inArray(supplierInvoices.projectId, projectIds)) : Promise.resolve([]),
+    projectIds.length ? db.select().from(procurementNonconformities).where(inArray(procurementNonconformities.projectId, projectIds)) : Promise.resolve([]),
+  ]);
+  const supplierInvoiceIds = idsOf(supplierInvoiceRows);
+  const nonconformityIds = idsOf(nonconformityRows);
+  const [supplierInvoiceLineRows, supplierInvoicePaymentRows, supplierInvoiceCreditRows, goodsReturnRows] = await Promise.all([
+    supplierInvoiceIds.length ? db.select().from(supplierInvoiceLines).where(inArray(supplierInvoiceLines.supplierInvoiceId, supplierInvoiceIds)) : Promise.resolve([]),
+    supplierInvoiceIds.length ? db.select().from(supplierInvoicePayments).where(inArray(supplierInvoicePayments.supplierInvoiceId, supplierInvoiceIds)) : Promise.resolve([]),
+    supplierInvoiceIds.length ? db.select().from(supplierInvoiceCreditNotes).where(inArray(supplierInvoiceCreditNotes.supplierInvoiceId, supplierInvoiceIds)) : Promise.resolve([]),
+    nonconformityIds.length ? db.select().from(procurementGoodsReturns).where(inArray(procurementGoodsReturns.nonconformityId, nonconformityIds)) : Promise.resolve([]),
+  ]);
 
   const [shipmentRows, goodsReceiptRows, supplierEventRows] = await Promise.all([
     purchaseOrderIds.length
@@ -577,6 +596,12 @@ export async function collectCompanyFullBackup(companyId: string) {
       goodsReceipts: goodsReceiptRows,
       goodsReceiptLines: goodsReceiptLineRows,
       supplierEvents: supplierEventRows,
+      nonconformities: nonconformityRows,
+      goodsReturns: goodsReturnRows,
+      supplierInvoices: supplierInvoiceRows,
+      supplierInvoiceLines: supplierInvoiceLineRows,
+      supplierInvoicePayments: supplierInvoicePaymentRows,
+      supplierInvoiceCreditNotes: supplierInvoiceCreditRows,
     },
     purchaseOrders: purchaseOrderRows,
     purchaseOrderLines: purchaseLineRows,

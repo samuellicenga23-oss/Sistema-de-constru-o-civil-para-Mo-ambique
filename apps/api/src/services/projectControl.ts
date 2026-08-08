@@ -1,6 +1,6 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { budgetDocuments, financialEntries, materials, purchaseOrders, stockMovements } from "../db/schema.js";
+import { budgetDocuments, financialEntries, materials, purchaseOrders, stockMovements, supplierInvoiceCreditNotes, supplierInvoicePayments, supplierInvoices } from "../db/schema.js";
 import { getBudgetDocumentSummary } from "./boqEngine.js";
 import { getProjectSchedule } from "./scheduleEngine.js";
 
@@ -24,7 +24,7 @@ function plannedPercent(start: string, end: string, referenceDate: string) {
 // diário não traz custo próprio, valoriza-a pelo custo médio das entradas efectivamente registadas
 // para aquele material na mesma obra e identifica-a como estimativa no consumidor da API.
 export async function getProjectControl(projectId: string, currency: string) {
-  const [documents, entries, movements, orders, schedule] = await Promise.all([
+  const [documents, entries, movements, orders, supplierBills, schedule] = await Promise.all([
     db.select().from(budgetDocuments).where(eq(budgetDocuments.projectId, projectId)),
     db.select().from(financialEntries).where(eq(financialEntries.projectId, projectId)),
     db.select({ movement: stockMovements, materialName: materials.name, unit: materials.unit })
@@ -32,7 +32,14 @@ export async function getProjectControl(projectId: string, currency: string) {
       .innerJoin(materials, eq(stockMovements.materialId, materials.id))
       .where(eq(stockMovements.projectId, projectId)),
     db.select().from(purchaseOrders).where(eq(purchaseOrders.projectId, projectId)),
+    db.select().from(supplierInvoices).where(eq(supplierInvoices.projectId, projectId)),
     getProjectSchedule(projectId),
+  ]);
+
+  const supplierBillIds = supplierBills.map((invoice) => invoice.id);
+  const [supplierPayments, supplierCredits] = await Promise.all([
+    supplierBillIds.length ? db.select().from(supplierInvoicePayments).where(inArray(supplierInvoicePayments.supplierInvoiceId, supplierBillIds)) : Promise.resolve([]),
+    supplierBillIds.length ? db.select().from(supplierInvoiceCreditNotes).where(inArray(supplierInvoiceCreditNotes.supplierInvoiceId, supplierBillIds)) : Promise.resolve([]),
   ]);
 
   const approvedDocument = documents.filter((document) => document.status === "aprovado" && document.documentType === "orcamento")
@@ -49,11 +56,32 @@ export async function getProjectControl(projectId: string, currency: string) {
       else acc.receivable += amount;
       if (entry.sourceType === "measurement_certificate") acc.certified += amount;
     } else {
+      if (entry.sourceType === "purchase_order" || entry.sourceType === "supplier_invoice") return acc;
       if (entry.status === "pago") acc.paidCost += amount;
       else acc.committedCost += amount;
     }
     return acc;
   }, { received: 0, receivable: 0, certified: 0, paidCost: 0, committedCost: 0 });
+
+  const paidByInvoice = new Map<string, number>();
+  const creditByInvoice = new Map<string, number>();
+  for (const payment of supplierPayments) paidByInvoice.set(payment.supplierInvoiceId, (paidByInvoice.get(payment.supplierInvoiceId) ?? 0) + Number(payment.amount));
+  for (const credit of supplierCredits) if (credit.status === "aceite") creditByInvoice.set(credit.supplierInvoiceId, (creditByInvoice.get(credit.supplierInvoiceId) ?? 0) + Number(credit.amount));
+  const invoicedNetByOrder = new Map<string, number>();
+  for (const invoice of supplierBills) {
+    if (invoice.currency !== currency || !["aprovada", "parcialmente_paga", "paga"].includes(invoice.status)) continue;
+    const net = Math.max(0, Number(invoice.totalAmount) - (creditByInvoice.get(invoice.id) ?? 0));
+    const paid = paidByInvoice.get(invoice.id) ?? 0;
+    financial.paidCost += paid;
+    financial.committedCost += Math.max(0, net - paid);
+    invoicedNetByOrder.set(invoice.purchaseOrderId, (invoicedNetByOrder.get(invoice.purchaseOrderId) ?? 0) + net);
+  }
+  for (const entry of entries.filter((row) => row.type === "despesa" && row.sourceType === "purchase_order" && row.currency === currency)) {
+    if (!entry.sourceId) continue;
+    const invoiced = invoicedNetByOrder.get(entry.sourceId) ?? 0;
+    if (entry.status === "pendente") financial.committedCost += Math.max(0, Number(entry.amount) - invoiced);
+    else if (entry.status === "pago" && invoiced <= 0) financial.paidCost += Number(entry.amount);
+  }
 
   const stockByMaterial = new Map<string, { name: string; unit: string; incomingQty: number; incomingValue: number; outgoingQty: number; outgoingValue: number; estimatedOutgoingQty: number; outgoingEstimated: boolean }>();
   for (const { movement, materialName, unit } of movements) {

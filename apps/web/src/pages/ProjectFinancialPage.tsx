@@ -341,13 +341,14 @@ export default function ProjectFinancialPage() {
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-blue-100 bg-blue-50/70 px-4 py-2.5 text-xs text-blue-900"><strong>Compras e autos sincronizados.</strong><span>Registe aqui apenas movimentos fora desses fluxos.</span></div>
 
         {/* Indicadores */}
-        <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-7">
           <MetricCard label="Valor contratado" value={fmt(summary.valorContratado, currency)} />
           <MetricCard label="Valor recebido" value={fmt(summary.valorRecebido, currency)} tone="positive" />
           <MetricCard label="Custo realizado" value={fmt(summary.custoRealizado, currency)} tone="negative" />
           <MetricCard label="Margem realizada" value={fmt(summary.saldo, currency)} tone={summary.saldo >= 0 ? "positive" : "negative"} />
           <MetricCard label="Contas a receber" value={fmt(summary.contasAReceber, currency)} tone="info" />
           <MetricCard label="Contas a pagar" value={fmt(summary.contasAPagar, currency)} tone="warning" />
+          <MetricCard label="Compromissos de compra" value={fmt(summary.compromissosCompra, currency)} tone="info" />
         </div>
         <details className="-mt-3 px-1 text-xs text-slate-500"><summary className="cursor-pointer font-semibold text-slate-600">Critério da margem</summary><p className="pt-1 leading-5">Valor recebido menos custo pago; pendências só entram após liquidação.</p></details>
 

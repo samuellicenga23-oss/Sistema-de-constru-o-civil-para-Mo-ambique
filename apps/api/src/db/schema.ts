@@ -1480,6 +1480,21 @@ export const purchaseOrderShipmentStatusEnum = pgEnum("purchase_order_shipment_s
   "rascunho", "pronto", "expedido", "entregue", "cancelado",
 ]);
 export const goodsReceiptStatusEnum = pgEnum("goods_receipt_status", ["rascunho", "confirmado", "cancelado"]);
+export const supplierInvoiceStatusEnum = pgEnum("supplier_invoice_status", [
+  "rascunho", "submetida", "em_revisao", "divergente", "aprovada", "rejeitada", "parcialmente_paga", "paga", "cancelada",
+]);
+export const supplierInvoiceCreditNoteStatusEnum = pgEnum("supplier_invoice_credit_note_status", [
+  "submetida", "aceite", "rejeitada", "cancelada",
+]);
+export const procurementNonconformityStatusEnum = pgEnum("procurement_nonconformity_status", [
+  "aberta", "aguarda_fornecedor", "solucao_proposta", "aguarda_substituicao", "aguarda_credito", "devolucao_pendente", "resolvida", "cancelada",
+]);
+export const procurementNonconformityResolutionEnum = pgEnum("procurement_nonconformity_resolution", [
+  "substituicao", "nota_credito", "devolucao", "aceite_com_desconto", "outro",
+]);
+export const procurementGoodsReturnStatusEnum = pgEnum("procurement_goods_return_status", [
+  "rascunho", "expedida", "recebida_fornecedor", "cancelada",
+]);
 
 // Duas naturezas de linha nesta tabela, distinguidas por `companyId`:
 // 1) `companyId` preenchido — a ficha «SIGO Preços» de referência dessa empresa (gerida pelo
@@ -1810,6 +1825,147 @@ export const goodsReceiptLines = pgTable("goods_receipt_lines", {
   unitCost: numeric("unit_cost", { precision: 14, scale: 4 }).notNull(),
   currency: currencyEnum("currency").notNull().default("MZN"),
 }, (table) => [unique("goods_receipt_order_line_unique").on(table.goodsReceiptId, table.purchaseOrderLineId)]);
+
+// Não-conformidade formal criada quando a inspecção rejeita material. A quantidade rejeitada
+// nunca entra no stock, mas permanece fisicamente/rastreavelmente ligada à recepção e à OC.
+export const procurementNonconformities = pgTable("procurement_nonconformities", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+  projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  purchaseOrderId: uuid("purchase_order_id").notNull().references(() => purchaseOrders.id, { onDelete: "cascade" }),
+  goodsReceiptLineId: uuid("goods_receipt_line_id").notNull().references(() => goodsReceiptLines.id, { onDelete: "cascade" }),
+  materialId: uuid("material_id").notNull().references(() => materials.id),
+  reference: varchar("reference", { length: 50 }).notNull(),
+  rejectedQty: numeric("rejected_qty", { precision: 14, scale: 3 }).notNull(),
+  status: procurementNonconformityStatusEnum("status").notNull().default("aguarda_fornecedor"),
+  description: text("description").notNull(),
+  resolutionType: procurementNonconformityResolutionEnum("resolution_type"),
+  proposedReplacementQty: numeric("proposed_replacement_qty", { precision: 14, scale: 3 }),
+  proposedCreditAmount: numeric("proposed_credit_amount", { precision: 14, scale: 2 }),
+  supplierResponse: text("supplier_response"),
+  buyerResolutionNotes: text("buyer_resolution_notes"),
+  createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  respondedBySupplierAccountId: uuid("responded_by_supplier_account_id").references(() => supplierAccounts.id, { onDelete: "set null" }),
+  respondedAt: timestamp("responded_at"),
+  resolvedByUserId: uuid("resolved_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  resolvedAt: timestamp("resolved_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => [
+  unique("procurement_nonconformity_receipt_line_unique").on(table.goodsReceiptLineId),
+  unique("procurement_nonconformity_reference_unique").on(table.companyId, table.reference),
+  index("procurement_nonconformity_project_status_idx").on(table.projectId, table.status),
+  index("procurement_nonconformity_supplier_order_idx").on(table.purchaseOrderId, table.status),
+]);
+
+// Devolução física de material rejeitado na recepção. Não cria saída de stock porque a
+// quantidade rejeitada nunca entrou no armazém; serve para cadeia de custódia e confirmação do fornecedor.
+export const procurementGoodsReturns = pgTable("procurement_goods_returns", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+  nonconformityId: uuid("nonconformity_id").notNull().references(() => procurementNonconformities.id, { onDelete: "cascade" }),
+  purchaseOrderId: uuid("purchase_order_id").notNull().references(() => purchaseOrders.id, { onDelete: "cascade" }),
+  goodsReceiptLineId: uuid("goods_receipt_line_id").notNull().references(() => goodsReceiptLines.id),
+  reference: varchar("reference", { length: 50 }).notNull(),
+  quantity: numeric("quantity", { precision: 14, scale: 3 }).notNull(),
+  status: procurementGoodsReturnStatusEnum("status").notNull().default("rascunho"),
+  returnDate: date("return_date"),
+  reason: text("reason"),
+  trackingReference: varchar("tracking_reference", { length: 160 }),
+  createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  confirmedBySupplierAccountId: uuid("confirmed_by_supplier_account_id").references(() => supplierAccounts.id, { onDelete: "set null" }),
+  supplierConfirmedAt: timestamp("supplier_confirmed_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => [
+  unique("procurement_goods_return_reference_unique").on(table.companyId, table.reference),
+  index("procurement_goods_return_ncr_status_idx").on(table.nonconformityId, table.status),
+]);
+
+// Factura do fornecedor: obrigação financeira distinta do compromisso da OC. A aprovação só
+// acontece depois de refazer o three-way match OC × recepção aceite × factura sob lock.
+export const supplierInvoices = pgTable("supplier_invoices", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+  projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  purchaseOrderId: uuid("purchase_order_id").notNull().references(() => purchaseOrders.id, { onDelete: "cascade" }),
+  supplierId: uuid("supplier_id").notNull().references(() => suppliers.id),
+  invoiceNumber: varchar("invoice_number", { length: 120 }).notNull(),
+  issueDate: date("issue_date").notNull(),
+  dueDate: date("due_date"),
+  status: supplierInvoiceStatusEnum("status").notNull().default("rascunho"),
+  currency: currencyEnum("currency").notNull().default("MZN"),
+  ivaRate: numeric("iva_rate", { precision: 5, scale: 4 }).notNull(),
+  transportCost: numeric("transport_cost", { precision: 14, scale: 2 }).notNull().default("0"),
+  subtotal: numeric("subtotal", { precision: 14, scale: 2 }).notNull().default("0"),
+  vatAmount: numeric("vat_amount", { precision: 14, scale: 2 }).notNull().default("0"),
+  totalAmount: numeric("total_amount", { precision: 14, scale: 2 }).notNull().default("0"),
+  supplierNotes: text("supplier_notes"),
+  buyerNotes: text("buyer_notes"),
+  matchStatus: varchar("match_status", { length: 30 }).notNull().default("pendente"),
+  matchSnapshot: jsonb("match_snapshot").$type<Record<string, unknown> | null>(),
+  matchedAt: timestamp("matched_at"),
+  varianceReason: text("variance_reason"),
+  varianceApprovedByUserId: uuid("variance_approved_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  varianceApprovedAt: timestamp("variance_approved_at"),
+  submittedBySupplierAccountId: uuid("submitted_by_supplier_account_id").references(() => supplierAccounts.id, { onDelete: "set null" }),
+  createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  submittedAt: timestamp("submitted_at"),
+  reviewedByUserId: uuid("reviewed_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  reviewedAt: timestamp("reviewed_at"),
+  approvedByUserId: uuid("approved_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  approvedAt: timestamp("approved_at"),
+  rejectedByUserId: uuid("rejected_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  rejectedAt: timestamp("rejected_at"),
+  rejectionReason: text("rejection_reason"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => [
+  unique("supplier_invoice_supplier_number_unique").on(table.supplierId, table.invoiceNumber),
+  index("supplier_invoice_project_status_idx").on(table.projectId, table.status),
+  index("supplier_invoice_order_status_idx").on(table.purchaseOrderId, table.status),
+]);
+
+export const supplierInvoiceLines = pgTable("supplier_invoice_lines", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  supplierInvoiceId: uuid("supplier_invoice_id").notNull().references(() => supplierInvoices.id, { onDelete: "cascade" }),
+  purchaseOrderLineId: uuid("purchase_order_line_id").notNull().references(() => purchaseOrderLines.id),
+  materialId: uuid("material_id").notNull().references(() => materials.id),
+  description: varchar("description", { length: 300 }).notNull(),
+  quantity: numeric("quantity", { precision: 14, scale: 3 }).notNull(),
+  unitCost: numeric("unit_cost", { precision: 14, scale: 4 }).notNull(),
+  lineTotal: numeric("line_total", { precision: 14, scale: 2 }).notNull(),
+}, (table) => [unique("supplier_invoice_order_line_unique").on(table.supplierInvoiceId, table.purchaseOrderLineId)]);
+
+export const supplierInvoicePayments = pgTable("supplier_invoice_payments", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  supplierInvoiceId: uuid("supplier_invoice_id").notNull().references(() => supplierInvoices.id, { onDelete: "cascade" }),
+  amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
+  paymentDate: date("payment_date").notNull(),
+  method: varchar("method", { length: 50 }).notNull().default("transferencia"),
+  reference: varchar("reference", { length: 160 }),
+  notes: text("notes"),
+  createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [index("supplier_invoice_payment_invoice_date_idx").on(table.supplierInvoiceId, table.paymentDate)]);
+
+export const supplierInvoiceCreditNotes = pgTable("supplier_invoice_credit_notes", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  supplierInvoiceId: uuid("supplier_invoice_id").notNull().references(() => supplierInvoices.id, { onDelete: "cascade" }),
+  nonconformityId: uuid("nonconformity_id").references(() => procurementNonconformities.id, { onDelete: "set null" }),
+  creditNumber: varchar("credit_number", { length: 120 }).notNull(),
+  issueDate: date("issue_date").notNull(),
+  amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
+  reason: text("reason").notNull(),
+  status: supplierInvoiceCreditNoteStatusEnum("status").notNull().default("submetida"),
+  submittedBySupplierAccountId: uuid("submitted_by_supplier_account_id").references(() => supplierAccounts.id, { onDelete: "set null" }),
+  reviewedByUserId: uuid("reviewed_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  reviewedAt: timestamp("reviewed_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [
+  unique("supplier_invoice_credit_number_unique").on(table.supplierInvoiceId, table.creditNumber),
+  index("supplier_invoice_credit_invoice_status_idx").on(table.supplierInvoiceId, table.status),
+]);
 
 // Movimento de stock por projecto (um "armazém" simples por obra, não multi-armazém ainda) —
 // "entrada" acontece automaticamente quando uma ordem de compra passa a "recebido" (ver

@@ -512,6 +512,13 @@
       "when": 1786189681719,
       "tag": "0072_glossy_professor_monster",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1786199601234,
+      "tag": "0073_quiet_eternity",
+      "breakpoints": true
     }
   ]
 }
