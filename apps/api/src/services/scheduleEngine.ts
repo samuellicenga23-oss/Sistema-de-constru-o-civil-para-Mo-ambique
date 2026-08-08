@@ -1,11 +1,12 @@
+import { createHash } from "node:crypto";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import {
-  budgetDocuments,
   lineItems,
   measurementCertificateLines,
   measurementCertificates,
   projects,
+  projectSchedulePlanningProfiles,
   scheduleDependencies,
   scheduleTasks,
   siteDiaryEntries,
@@ -16,9 +17,12 @@ import { getCompositionLabourQuantities } from "./costEngine.js";
 import {
   addWorkingDays,
   buildExecutionPlan,
+  buildPlanningContext,
   computeSuccessorDates,
   isWorkingDay,
+  planningTradeForCode,
   shiftWorkingDays,
+  validatePlanCoverage,
   validateValueShares,
   workingDaysInclusive,
   type DurationBasis,
@@ -27,12 +31,19 @@ import {
   type PlanningSourceSection,
   type PlanningWarning,
 } from "./schedulePlanning.js";
+import {
+  buildPlanningQuestions,
+  DEFAULT_FALLBACK_CREW_SIZE,
+  mergeSchedulePlanningProfile,
+  validateSchedulePlanningProfile,
+  type PlanningContext,
+  type SchedulePlanningProfile,
+} from "./schedulePlanningProfile.js";
 
 export { addWorkingDays, computeSuccessorDates, isWorkingDay, shiftWorkingDays, workingDaysInclusive } from "./schedulePlanning.js";
 
 const HOURS_PER_WORKING_DAY = 8;
 const GENERIC_MZN_PER_DAY = 12_000;
-const DEFAULT_CREW_SIZE_PER_FRONT = 12;
 
 /**
  * Duração de uma folha executável.
@@ -47,7 +58,7 @@ const DEFAULT_CREW_SIZE_PER_FRONT = 12;
 export function computeItemDurationDays(
   item: LineItemNode,
   hoursCache: Map<string, number>,
-  maxCrewSize: number = DEFAULT_CREW_SIZE_PER_FRONT,
+  maxCrewSize: number = DEFAULT_FALLBACK_CREW_SIZE,
 ): { days: number; basis: DurationBasis } {
   if (item.compositionId && (item.quantity ?? 0) > 0) {
     const hoursPerUnit = hoursCache.get(item.compositionId) ?? 0;
@@ -81,7 +92,7 @@ type ScheduledNode = {
 export function computeNodeDurations(
   node: LineItemNode,
   hoursCache: Map<string, number>,
-  maxCrewSize: number = DEFAULT_CREW_SIZE_PER_FRONT,
+  maxCrewSize: number = DEFAULT_FALLBACK_CREW_SIZE,
 ): ScheduledNode | null {
   if (node.kind === "nota") return null;
   if (node.kind === "item") {
@@ -115,14 +126,18 @@ async function buildLabourHoursPerUnitCache(
 function toPlanningSourceNode(
   node: LineItemNode,
   hoursCache: Map<string, number>,
-  maxCrewSize: number,
+  fallbackCrewSize: number,
+  profile: SchedulePlanningProfile | null,
+  standardCodes: boolean,
 ): PlanningSourceNode | null {
   if (node.kind === "nota") return null;
   if (node.kind === "item") {
     // O cronograma contém todas as linhas aprovadas realmente medidas; linhas de catálogo com 0
     // ficam no BOQ, mas não são trabalhos a executar.
     if ((node.quantity ?? 0) <= 0) return null;
-    const { days, basis } = computeItemDurationDays(node, hoursCache, maxCrewSize);
+    const trade = standardCodes ? planningTradeForCode(node.code) : null;
+    const crewSize = trade && profile?.crewSizes[trade] ? profile.crewSizes[trade]! : fallbackCrewSize;
+    const { days, basis } = computeItemDurationDays(node, hoursCache, crewSize);
     return {
       id: node.id,
       kind: node.kind,
@@ -137,7 +152,7 @@ function toPlanningSourceNode(
   }
 
   const children = node.children
-    .map((child) => toPlanningSourceNode(child, hoursCache, maxCrewSize))
+    .map((child) => toPlanningSourceNode(child, hoursCache, fallbackCrewSize, profile, standardCodes))
     .filter((child): child is PlanningSourceNode => child !== null);
   if (!children.length) return null;
   return {
@@ -156,17 +171,21 @@ function toPlanningSourceNode(
 function planningSections(
   summary: NonNullable<Awaited<ReturnType<typeof getBudgetDocumentSummary>>>,
   hoursCache: Map<string, number>,
-  maxCrewSize: number,
+  fallbackCrewSize: number,
+  profile: SchedulePlanningProfile | null = null,
 ): PlanningSourceSection[] {
-  return summary.sections.map((section) => ({
-    id: section.id,
-    name: section.name,
-    sortOrder: section.sortOrder,
-    templateKey: section.templateKey,
-    roots: section.items
-      .map((root) => toPlanningSourceNode(root, hoursCache, maxCrewSize))
-      .filter((root): root is PlanningSourceNode => root !== null),
-  }));
+  return summary.sections.map((section) => {
+    const standardCodes = Boolean(section.templateKey?.startsWith("sigo_"));
+    return {
+      id: section.id,
+      name: section.name,
+      sortOrder: section.sortOrder,
+      templateKey: section.templateKey,
+      roots: section.items
+        .map((root) => toPlanningSourceNode(root, hoursCache, fallbackCrewSize, profile, standardCodes))
+        .filter((root): root is PlanningSourceNode => root !== null),
+    };
+  });
 }
 
 function flattenPlannedNodes(roots: PlannedNode[]): PlannedNode[] {
@@ -227,84 +246,337 @@ function plannerValidationWarnings(planWarnings: PlanningWarning[]) {
   }));
 }
 
-/**
- * Gera uma EAP de execução a partir do BOQ aprovado.
- *
- * - template SIGO: semântica por `templateKey + código exacto`, nunca por descrição;
- * - mapa importado: preserva árvore/ordem e não inventa pisos/fases;
- * - calendário: segunda–sábado;
- * - dependências: grafo FS/SS/FF explícito, com múltiplas predecessoras;
- * - prazo manual: ajustado pela duração real do grafo (span/caminho de precedências), não pela
- *   soma dos capítulos;
- * - valueShare: validado em 100% por linha do BOQ.
- */
-export async function generateSchedule(args: {
+
+
+type PlanningPrepared = {
+  summary: NonNullable<Awaited<ReturnType<typeof getBudgetDocumentSummary>>>;
+  sections: PlanningSourceSection[];
+  context: PlanningContext;
+  floors: number;
+  fallbackCrewSize: number;
+};
+
+async function preparePlanning(args: {
   projectId: string;
   budgetDocumentId: string;
-  startDate: string;
-  totalDurationDays?: number;
   companyId?: string | null;
   zoneId?: string | null;
-  maxCrewSize?: number;
-}) {
+  profile?: SchedulePlanningProfile | null;
+}): Promise<PlanningPrepared> {
   const summary = await getBudgetDocumentSummary(args.budgetDocumentId);
   if (!summary) throw new Error("Mapa de Quantidades não encontrado");
-
   const allRoots = summary.sections.flatMap((section) => section.items);
   if (!allRoots.length) throw new Error("O Mapa de Quantidades ainda não tem capítulos para gerar a WBS");
 
   const hoursCache = new Map<string, number>();
   for (const root of allRoots) await buildLabourHoursPerUnitCache(root, args.companyId ?? null, args.zoneId ?? null, hoursCache);
 
-  const crewSize = Math.max(1, Math.min(60, Math.round(args.maxCrewSize ?? DEFAULT_CREW_SIZE_PER_FRONT)));
+  const fallbackCrewSize = DEFAULT_FALLBACK_CREW_SIZE;
   const [project] = await db.select({ floors: projects.floors }).from(projects).where(eq(projects.id, args.projectId)).limit(1);
   const floors = Math.max(1, project?.floors ?? 1);
-  const sections = planningSections(summary, hoursCache, crewSize);
-  const plan = buildExecutionPlan({
-    sections,
-    floors,
-    startDate: args.startDate,
-    totalDurationDays: args.totalDurationDays,
-  });
+  const sections = planningSections(summary, hoursCache, fallbackCrewSize, args.profile ?? null);
+  const context = buildPlanningContext(sections, floors);
+  return { summary, sections, context, floors, fallbackCrewSize };
+}
 
+function hashJson(value: unknown): string {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+async function readPlanningRow(projectId: string, budgetDocumentId: string) {
+  const [row] = await db.select().from(projectSchedulePlanningProfiles).where(and(
+    eq(projectSchedulePlanningProfiles.projectId, projectId),
+    eq(projectSchedulePlanningProfiles.budgetDocumentId, budgetDocumentId),
+  )).limit(1);
+  return row ?? null;
+}
+
+function planningSourceFingerprint(sections: PlanningSourceSection[]) {
+  const serializeNode = (node: PlanningSourceNode): unknown => ({
+    id: node.id,
+    kind: node.kind,
+    code: node.code,
+    name: node.name,
+    quantity: node.quantity,
+    durationDays: node.durationDays,
+    durationBasis: node.durationBasis,
+    sortOrder: node.sortOrder,
+    children: node.children.map(serializeNode),
+  });
+  return sections.map((section) => ({
+    id: section.id,
+    name: section.name,
+    sortOrder: section.sortOrder,
+    templateKey: section.templateKey,
+    roots: section.roots.map(serializeNode),
+  }));
+}
+
+function planningPlanFingerprint(args: {
+  budgetDocumentId: string;
+  profile: SchedulePlanningProfile;
+  sections: PlanningSourceSection[];
+  plan: ReturnType<typeof buildExecutionPlan>;
+}) {
+  const leaves = flattenPlannedNodes(args.plan.roots)
+    .filter((node) => node.kind === "activity")
+    .map((node) => ({
+      key: node.key,
+      wbsCode: node.wbsCode,
+      name: node.name,
+      sourceLineItemId: node.sourceLineItemId,
+      sourceCode: node.sourceCode,
+      valueShare: node.valueShare,
+      durationDays: node.durationDays,
+      durationBasis: node.durationBasis,
+      floorIndex: node.floorIndex,
+      zoneId: node.zoneId,
+      allocationBasis: node.allocationBasis,
+      startDate: node.startDate,
+      endDate: node.endDate,
+    }));
+  return hashJson({
+    budgetDocumentId: args.budgetDocumentId,
+    profile: args.profile,
+    source: planningSourceFingerprint(args.sections),
+    leaves,
+    dependencies: args.plan.dependencies,
+  });
+}
+
+export async function saveSchedulePlanningProfile(args: {
+  projectId: string;
+  budgetDocumentId: string;
+  profile: SchedulePlanningProfile;
+  companyId?: string | null;
+  zoneId?: string | null;
+}) {
+  const firstPass = await preparePlanning({ ...args, profile: null });
+  const profile = mergeSchedulePlanningProfile(firstPass.context, args.profile.startDate, args.profile);
+  const errors = validateSchedulePlanningProfile(profile, firstPass.context);
+  if (errors.length) throw new Error(errors.join(" "));
+  const profileFingerprint = hashJson(profile);
+
+  const existing = await readPlanningRow(args.projectId, args.budgetDocumentId);
+  const values = {
+    profile,
+    profileFingerprint,
+    status: "draft",
+    lastPreviewFingerprint: null,
+    lastPreviewStartDate: null,
+    previewedAt: null,
+    updatedAt: new Date(),
+  };
+  if (existing) {
+    await db.update(projectSchedulePlanningProfiles).set(values).where(eq(projectSchedulePlanningProfiles.id, existing.id));
+  } else {
+    await db.insert(projectSchedulePlanningProfiles).values({
+      projectId: args.projectId,
+      budgetDocumentId: args.budgetDocumentId,
+      ...values,
+    });
+  }
+  return profile;
+}
+
+export async function getSchedulePlanningSetup(args: {
+  projectId: string;
+  budgetDocumentId: string;
+  startDate: string;
+  companyId?: string | null;
+  zoneId?: string | null;
+}) {
+  const prepared = await preparePlanning(args);
+  const saved = await readPlanningRow(args.projectId, args.budgetDocumentId);
+  const savedProfile = saved?.profile ? saved.profile as Partial<SchedulePlanningProfile> : null;
+  const profile = mergeSchedulePlanningProfile(prepared.context, args.startDate, savedProfile);
+  return {
+    context: prepared.context,
+    questions: buildPlanningQuestions(prepared.context),
+    profile,
+    status: saved?.status ?? "draft",
+    previewFingerprint: saved?.lastPreviewFingerprint ?? null,
+    previewedAt: saved?.previewedAt ?? null,
+    generatedAt: saved?.generatedAt ?? null,
+    validationErrors: validateSchedulePlanningProfile(profile, prepared.context),
+  };
+}
+
+function planPreviewRows(roots: PlannedNode[]) {
+  const leaves = flattenPlannedNodes(roots).filter((node) => node.kind === "activity");
+  const durationBasis = { horas: 0, valor: 0, minimo: 0 };
+  const allocationBasis = { boq: 0, informado: 0, assumido: 0 };
+  for (const task of leaves) {
+    if (task.durationBasis === "horas" || task.durationBasis === "valor" || task.durationBasis === "minimo") durationBasis[task.durationBasis] += 1;
+    allocationBasis[task.allocationBasis] += 1;
+  }
+  return {
+    activityCount: leaves.length,
+    durationBasis,
+    allocationBasis,
+    sampleActivities: leaves.slice(0, 40).map((task) => ({
+      code: task.wbsCode,
+      name: task.name,
+      durationDays: task.durationDays,
+      durationBasis: task.durationBasis,
+      startDate: task.startDate,
+      endDate: task.endDate,
+      sourceCode: task.sourceCode,
+      valueShare: task.valueShare,
+      allocationBasis: task.allocationBasis,
+    })),
+  };
+}
+
+async function buildPersistedPlanningPlan(args: {
+  projectId: string;
+  budgetDocumentId: string;
+  startDate: string;
+  companyId?: string | null;
+  zoneId?: string | null;
+}) {
+  const firstPass = await preparePlanning(args);
+  const row = await readPlanningRow(args.projectId, args.budgetDocumentId);
+  if (!row?.profile) throw new Error("Complete e guarde o Assistente de Planeamento antes de pré-visualizar a EAP");
+  const profile = mergeSchedulePlanningProfile(firstPass.context, args.startDate, row.profile as Partial<SchedulePlanningProfile>);
+  const errors = validateSchedulePlanningProfile(profile, firstPass.context);
+  if (errors.length) throw new Error(errors.join(" "));
+  const prepared = await preparePlanning({ ...args, profile });
+  const plan = buildExecutionPlan({
+    sections: prepared.sections,
+    floors: prepared.floors,
+    startDate: profile.startDate,
+    profile,
+  });
   const shareRows = validateValueShares(plan.roots);
-  const shareIssues = shareRows.filter((row) => Math.abs(row.totalShare - 1) > 0.0001);
-  if (shareIssues.length) {
-    throw new Error(`Falha de auditoria valueShare: ${shareIssues.length} item(ns) do orçamento não fecham em 100%`);
+  const shareIssues = shareRows.filter((item) => Math.abs(item.totalShare - 1) > 0.0001);
+  const coverage = validatePlanCoverage(prepared.sections, plan.roots);
+  return { row, profile, prepared, plan, shareRows, shareIssues, coverage };
+}
+
+export async function previewSchedulePlanning(args: {
+  projectId: string;
+  budgetDocumentId: string;
+  startDate: string;
+  companyId?: string | null;
+  zoneId?: string | null;
+}) {
+  const built = await buildPersistedPlanningPlan(args);
+  const errors: string[] = [];
+  if (built.shareIssues.length) errors.push(`${built.shareIssues.length} linha(s) do BOQ não fecham valueShare em 100%.`);
+  if (built.coverage.missingSourceLineItemIds.length) errors.push(`${built.coverage.missingSourceLineItemIds.length} linha(s) medidas do BOQ ficaram fora da EAP.`);
+  if (built.coverage.unexpectedSourceLineItemIds.length) errors.push(`${built.coverage.unexpectedSourceLineItemIds.length} actividade(s) não têm origem no BOQ aprovado.`);
+
+  const previewFingerprint = errors.length ? null : planningPlanFingerprint({
+    budgetDocumentId: args.budgetDocumentId,
+    profile: built.profile,
+    sections: built.prepared.sections,
+    plan: built.plan,
+  });
+  await db.update(projectSchedulePlanningProfiles).set({
+    status: errors.length ? "draft" : "previewed",
+    lastPreviewFingerprint: previewFingerprint,
+    lastPreviewStartDate: errors.length ? null : built.profile.startDate,
+    previewedAt: errors.length ? null : new Date(),
+    updatedAt: new Date(),
+  }).where(eq(projectSchedulePlanningProfiles.id, built.row.id));
+
+  const rows = planPreviewRows(built.plan.roots);
+  return {
+    valid: errors.length === 0,
+    readyToGenerate: errors.length === 0,
+    errors,
+    previewFingerprint,
+    context: built.prepared.context,
+    profile: built.profile,
+    strategy: {
+      floors: built.prepared.floors,
+      locationStrategy: built.profile.locationStrategy,
+      sequencePolicy: built.profile.sequencePolicy,
+      roofKind: built.plan.roofKind,
+      activeTrades: built.prepared.context.activeTrades,
+      tradeFronts: built.profile.tradeFronts,
+      crewSizes: built.profile.crewSizes,
+      cureLags: built.profile.cureLags,
+      zones: built.profile.zones,
+    },
+    naturalDurationDays: built.plan.naturalDurationDays,
+    targetDurationDays: built.plan.targetDurationDays,
+    plannedDurationDays: built.plan.durationDays,
+    startDate: built.plan.startDate,
+    endDate: built.plan.endDate,
+    warnings: plannerValidationWarnings(built.plan.warnings),
+    assumptions: built.plan.assumptions,
+    validation: {
+      valueSharesValid: built.shareIssues.length === 0,
+      checkedBudgetItems: built.shareRows.length,
+      coverage: built.coverage,
+      dependencyCount: built.plan.dependencies.length,
+      ...rows,
+    },
+  };
+}
+
+/**
+ * Gera a EAP apenas quando existe uma pré-visualização válida da MESMA estratégia.
+ * O fingerprint inclui perfil, linhas BOQ repartidas, durações, datas e dependências.
+ */
+export async function generateSchedule(args: {
+  projectId: string;
+  budgetDocumentId: string;
+  startDate: string;
+  previewFingerprint: string;
+  companyId?: string | null;
+  zoneId?: string | null;
+}) {
+  const built = await buildPersistedPlanningPlan(args);
+  if (built.shareIssues.length || built.coverage.missingSourceLineItemIds.length || built.coverage.unexpectedSourceLineItemIds.length) {
+    throw new Error("A validação automática falhou. Reveja a pré-visualização antes de gerar a EAP.");
+  }
+  const currentFingerprint = planningPlanFingerprint({
+    budgetDocumentId: args.budgetDocumentId,
+    profile: built.profile,
+    sections: built.prepared.sections,
+    plan: built.plan,
+  });
+  if (built.row.status !== "previewed" || !built.row.lastPreviewFingerprint) {
+    throw new Error("Faça a pré-visualização da estratégia antes de gerar a EAP");
+  }
+  if (args.previewFingerprint !== currentFingerprint || built.row.lastPreviewFingerprint !== currentFingerprint) {
+    throw new Error("A estratégia, a data de início ou o plano calculado mudou desde a pré-visualização. Gere uma nova pré-visualização.");
   }
 
-  // Delete só depois de todo o plano ter sido construído/validado em memória. Assim uma falha de
-  // semântica não destrói a linha de base existente.
+  // Só apaga a linha de base antiga depois de toda a nova EAP estar construída e auditada em memória.
   await db.delete(scheduleTasks).where(eq(scheduleTasks.projectId, args.projectId));
-
   const idByPlanKey = new Map<string, string>();
-  for (const root of plan.roots) await insertPlannedNode(root, args, null, idByPlanKey);
-
-  const dependencyRows = plan.dependencies.flatMap((dependency) => {
+  for (const root of built.plan.roots) await insertPlannedNode(root, args, null, idByPlanKey);
+  const dependencyRows = built.plan.dependencies.flatMap((dependency) => {
     const predecessorTaskId = idByPlanKey.get(dependency.predecessorKey);
     const successorTaskId = idByPlanKey.get(dependency.successorKey);
     if (!predecessorTaskId || !successorTaskId) return [];
-    return [{
-      predecessorTaskId,
-      successorTaskId,
-      type: dependency.type,
-      lagDays: dependency.lagDays,
-    } satisfies typeof scheduleDependencies.$inferInsert];
+    return [{ predecessorTaskId, successorTaskId, type: dependency.type, lagDays: dependency.lagDays } satisfies typeof scheduleDependencies.$inferInsert];
   });
   if (dependencyRows.length) await db.insert(scheduleDependencies).values(dependencyRows);
+
+  await db.update(projectSchedulePlanningProfiles).set({
+    status: "generated",
+    generatedAt: new Date(),
+    updatedAt: new Date(),
+  }).where(eq(projectSchedulePlanningProfiles.id, built.row.id));
 
   const schedule = await getProjectSchedule(args.projectId);
   return {
     ...schedule,
-    weightBasis: weightBasisFromPlanned(plan.roots),
-    roofKind: plan.roofKind,
-    generationWarnings: plannerValidationWarnings(plan.warnings),
-    planningAssumptions: plan.assumptions,
+    weightBasis: weightBasisFromPlanned(built.plan.roots),
+    roofKind: built.plan.roofKind,
+    generationWarnings: plannerValidationWarnings(built.plan.warnings),
+    planningAssumptions: built.plan.assumptions,
+    planningProfile: built.profile,
     validation: {
       ...schedule.validation,
       valueSharesValid: true,
-      checkedBudgetItems: shareRows.length,
-      crewSizePerFront: crewSize,
+      checkedBudgetItems: built.shareRows.length,
+      coverage: built.coverage,
     },
   };
 }

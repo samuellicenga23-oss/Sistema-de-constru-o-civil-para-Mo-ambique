@@ -1,0 +1,324 @@
+export type RoofKind = "sheet" | "slab" | "unknown";
+
+export type PlanningTrade =
+  | "earthworks"
+  | "structure"
+  | "masonry"
+  | "mep"
+  | "finishes"
+  | "roofing"
+  | "external";
+
+export const PLANNING_TRADES: PlanningTrade[] = [
+  "earthworks",
+  "structure",
+  "masonry",
+  "mep",
+  "finishes",
+  "roofing",
+  "external",
+];
+
+export const DEFAULT_ASSUMED_FRONT_COUNT = 1;
+export const DEFAULT_FALLBACK_CREW_SIZE = 12;
+
+export type SchedulePlanningZone = {
+  id: string;
+  label: string;
+  /** null = o SIGO distribui uniformemente e marca como hipótese. */
+  share: number | null;
+};
+
+export type SchedulePlanningProfile = {
+  schemaVersion: 1;
+  startDate: string;
+  /** boq = não decompor além da hierarquia contratual. */
+  locationStrategy: "boq" | "floors" | "floors_zones";
+  floorLabels: string[];
+  /** null = distribuição uniforme assumida. Valores 0..1 = distribuição informada. */
+  floorShares: number[] | null;
+  zones: SchedulePlanningZone[];
+  sequencePolicy: "floor_by_floor" | "structure_complete_first";
+  tradeFronts: Record<PlanningTrade, number | null>;
+  /** null = usar fallback técnico e sinalizar no preview. */
+  crewSizes: Record<PlanningTrade, number | null>;
+  cureLags: {
+    foundations: number | null;
+    columns: number | null;
+    slabs: number | null;
+  };
+  roofKindOverride: Exclude<RoofKind, "unknown"> | null;
+  targetDurationDays: number | null;
+  notes: string | null;
+};
+
+export type PlanningContext = {
+  floors: number;
+  floorLabels: string[];
+  measuredItemCount: number;
+  hasSigoTemplate: boolean;
+  hasImportedScope: boolean;
+  supportsFloorPlanning: boolean;
+  detectedRoofKind: RoofKind;
+  hasStructure: boolean;
+  hasMasonry: boolean;
+  hasMep: boolean;
+  hasFinishes: boolean;
+  hasRoof: boolean;
+  hasExternal: boolean;
+  activeTrades: PlanningTrade[];
+  /** Códigos medidos cujo volume está agregado e pode ser repartido por localização. */
+  aggregatedFloorCodes: string[];
+  /** Recursos estruturais agregados que não podem ser inventados por elemento. */
+  aggregatedStructuralCodes: string[];
+};
+
+export type PlanningQuestion = {
+  key: string;
+  group: "organizacao" | "recursos" | "sequencia" | "prazo";
+  label: string;
+  help: string;
+  required: boolean;
+  kind: "choice" | "integer" | "floor_labels" | "shares" | "zones" | "trade_matrix" | "lags" | "notice";
+  options?: Array<{ value: string; label: string }>;
+};
+
+const DEFAULT_FRONTS: Record<PlanningTrade, number | null> = {
+  earthworks: null,
+  structure: null,
+  masonry: null,
+  mep: null,
+  finishes: null,
+  roofing: null,
+  external: null,
+};
+
+const DEFAULT_CREWS: Record<PlanningTrade, number | null> = {
+  earthworks: null,
+  structure: null,
+  masonry: null,
+  mep: null,
+  finishes: null,
+  roofing: null,
+  external: null,
+};
+
+export function defaultSchedulePlanningProfile(context: PlanningContext, startDate: string): SchedulePlanningProfile {
+  return {
+    schemaVersion: 1,
+    startDate,
+    locationStrategy: context.supportsFloorPlanning ? "floors" : "boq",
+    floorLabels: context.floorLabels,
+    // null é deliberado: uniforme é uma hipótese, não uma resposta do cliente.
+    floorShares: context.floors === 1 ? [1] : null,
+    zones: [],
+    sequencePolicy: "floor_by_floor",
+    tradeFronts: { ...DEFAULT_FRONTS },
+    crewSizes: { ...DEFAULT_CREWS },
+    cureLags: { foundations: null, columns: null, slabs: null },
+    roofKindOverride: context.detectedRoofKind === "unknown" ? null : context.detectedRoofKind,
+    targetDurationDays: null,
+    notes: null,
+  };
+}
+
+export function mergeSchedulePlanningProfile(
+  context: PlanningContext,
+  startDate: string,
+  saved: Partial<SchedulePlanningProfile> | null | undefined,
+): SchedulePlanningProfile {
+  const base = defaultSchedulePlanningProfile(context, startDate);
+  if (!saved || saved.schemaVersion !== 1) return base;
+
+  const floorLabels = Array.isArray(saved.floorLabels) && saved.floorLabels.length === context.floors
+    ? saved.floorLabels.map((label, index) => String(label || context.floorLabels[index]))
+    : base.floorLabels;
+  const floorShares = Array.isArray(saved.floorShares) && saved.floorShares.length === context.floors
+    ? saved.floorShares.map(Number)
+    : saved.floorShares === null
+      ? null
+      : base.floorShares;
+
+  return {
+    ...base,
+    ...saved,
+    schemaVersion: 1,
+    startDate: startDate || saved.startDate || base.startDate,
+    floorLabels,
+    floorShares,
+    zones: Array.isArray(saved.zones)
+      ? saved.zones.map((zone, index) => ({
+          id: String(zone.id || `zona-${index + 1}`),
+          label: String(zone.label || `Zona ${index + 1}`),
+          share: zone.share === null || zone.share === undefined ? null : Number(zone.share),
+        }))
+      : [],
+    tradeFronts: { ...base.tradeFronts, ...(saved.tradeFronts ?? {}) },
+    crewSizes: { ...base.crewSizes, ...(saved.crewSizes ?? {}) },
+    cureLags: { ...base.cureLags, ...(saved.cureLags ?? {}) },
+  };
+}
+
+function closeEnoughToOne(values: number[]) {
+  return Math.abs(values.reduce((sum, value) => sum + value, 0) - 1) <= 0.0001;
+}
+
+export function validateSchedulePlanningProfile(profile: SchedulePlanningProfile, context: PlanningContext): string[] {
+  const errors: string[] = [];
+  if (profile.schemaVersion !== 1) errors.push("Versão do perfil de planeamento não suportada.");
+  if (!profile.startDate) errors.push("Indique a data de início planeada.");
+  if (profile.floorLabels.length !== context.floors) errors.push(`O perfil deve conter ${context.floors} piso(s).`);
+  if (profile.floorLabels.some((label) => !label.trim())) errors.push("Cada piso/nível deve ter uma designação.");
+  if (profile.floorShares) {
+    if (profile.floorShares.length !== context.floors) errors.push(`A distribuição deve conter ${context.floors} fracção(ões) de piso.`);
+    if (profile.floorShares.some((share) => !Number.isFinite(share) || share < 0)) errors.push("As fracções por piso não podem ser negativas.");
+    if (!closeEnoughToOne(profile.floorShares)) errors.push("As fracções por piso devem somar exactamente 100%.");
+  }
+  if (profile.locationStrategy === "floors_zones") {
+    if (!profile.zones.length) errors.push("Adicione pelo menos uma zona/frente física.");
+    if (profile.zones.some((zone) => !zone.label.trim())) errors.push("Cada zona deve ter um nome.");
+    const zoneShares = profile.zones.map((zone) => zone.share);
+    const informed = zoneShares.some((share) => share !== null);
+    if (informed) {
+      if (zoneShares.some((share) => share === null || !Number.isFinite(share) || (share ?? 0) <= 0)) {
+        errors.push("Quando informar percentagens por zona, todas as zonas devem ter uma fracção positiva.");
+      } else if (!closeEnoughToOne(zoneShares as number[])) {
+        errors.push("As fracções das zonas devem somar exactamente 100%.");
+      }
+    }
+  }
+  for (const [trade, fronts] of Object.entries(profile.tradeFronts)) {
+    if (fronts !== null && (!Number.isInteger(fronts) || fronts < 1 || fronts > 20)) errors.push(`Número de frentes inválido em ${trade}.`);
+  }
+  for (const [trade, crew] of Object.entries(profile.crewSizes)) {
+    if (crew !== null && (!Number.isInteger(crew) || crew < 1 || crew > 60)) errors.push(`Equipa inválida em ${trade}.`);
+  }
+  for (const [label, lag] of Object.entries(profile.cureLags)) {
+    if (lag !== null && (!Number.isInteger(lag) || lag < 0 || lag > 60)) errors.push(`Tempo tecnológico inválido em ${label}.`);
+  }
+  if (profile.targetDurationDays !== null && (!Number.isInteger(profile.targetDurationDays) || profile.targetDurationDays < 7 || profile.targetDurationDays > 3650)) {
+    errors.push("O prazo contratual deve estar entre 7 e 3650 dias úteis.");
+  }
+  if (profile.roofKindOverride && context.detectedRoofKind !== "unknown" && profile.roofKindOverride !== context.detectedRoofKind) {
+    errors.push("A tipologia de cobertura indicada contradiz os itens medidos do Mapa de Quantidades.");
+  }
+  if (!context.supportsFloorPlanning && profile.locationStrategy !== "boq") {
+    errors.push("Este mapa não tem metadados estruturados suficientes para uma repartição automática por piso/zona; preserve a organização do BOQ.");
+  }
+  return errors;
+}
+
+export function buildPlanningQuestions(context: PlanningContext): PlanningQuestion[] {
+  const questions: PlanningQuestion[] = [];
+  if (context.supportsFloorPlanning) {
+    questions.push({
+      key: "locationStrategy",
+      group: "organizacao",
+      label: "Como pretende organizar as frentes de trabalho?",
+      help: "O âmbito continua a ser o BOQ; esta escolha define apenas localização e sequência de execução.",
+      required: true,
+      kind: "choice",
+      options: [
+        { value: "floors", label: context.floors > 1 ? "Por piso" : "Por piso / nível principal" },
+        { value: "floors_zones", label: "Por piso e zona/frente física" },
+        { value: "boq", label: "Manter exactamente os grupos do mapa" },
+      ],
+    });
+    questions.push({
+      key: "floorLabels",
+      group: "organizacao",
+      label: context.floors > 1 ? "Como devem ser identificados os pisos?" : "Como deve ser identificado o nível principal?",
+      help: "Use os nomes usados em obra e nas peças desenhadas, por exemplo Piso 0, Piso 1, Cobertura, Bloco A ou Rés-do-chão.",
+      required: true,
+      kind: "floor_labels",
+    });
+    if (context.floors > 1 && context.aggregatedFloorCodes.length) {
+      questions.push({
+        key: "floorShares",
+        group: "organizacao",
+        label: "Como se distribui o volume de trabalho entre os pisos?",
+        help: "Se não souber, mantenha distribuição uniforme. O SIGO marcará essa distribuição como hipótese, não como dado do BOQ.",
+        required: false,
+        kind: "shares",
+      });
+    }
+    questions.push({
+      key: "zones",
+      group: "organizacao",
+      label: "A obra terá zonas ou frentes físicas dentro do mesmo piso?",
+      help: "Só é usada quando escolher planeamento por piso e zona; por exemplo Bloco A/B, Ala Norte/Sul ou Fachada 1/2.",
+      required: false,
+      kind: "zones",
+    });
+  }
+
+  if (context.activeTrades.length) {
+    questions.push({
+      key: "tradeResources",
+      group: "recursos",
+      label: "Quantas frentes e trabalhadores existem por especialidade?",
+      help: "As durações usam mão-de-obra das composições e a equipa indicada; o nº de frentes limita paralelismo entre localizações. Campos vazios usam fallback explícito e ficam marcados como hipótese.",
+      required: false,
+      kind: "trade_matrix",
+    });
+  }
+
+  if (context.aggregatedStructuralCodes.length) {
+    questions.push({
+      key: "aggregatedStructureNotice",
+      group: "recursos",
+      label: "Aço/cofragem estão agregados no BOQ.",
+      help: `Itens ${context.aggregatedStructuralCodes.join(", ")} serão mantidos como pacotes transversais. O SIGO não os repartirá artificialmente por sapata/pilar/viga/laje.`,
+      required: false,
+      kind: "notice",
+    });
+  }
+
+  if (context.floors > 1 && context.supportsFloorPlanning && (context.hasStructure || context.hasMasonry || context.hasMep || context.hasFinishes)) {
+    questions.push({
+      key: "sequencePolicy",
+      group: "sequencia",
+      label: "A obra avança piso a piso ou fecha primeiro a estrutura?",
+      help: "Piso a piso permite iniciar alvenarias/instalações inferiores quando o suporte desse piso está disponível.",
+      required: true,
+      kind: "choice",
+      options: [
+        { value: "floor_by_floor", label: "Avançar piso a piso" },
+        { value: "structure_complete_first", label: "Concluir toda a estrutura primeiro" },
+      ],
+    });
+  }
+  if (context.hasStructure) {
+    questions.push({
+      key: "cureLags",
+      group: "sequencia",
+      label: "Quais tempos tecnológicos devem ser respeitados?",
+      help: "Fundações, pilares e lajes. Se não indicar, o SIGO usa valores de planeamento e identifica-os como assumidos.",
+      required: false,
+      kind: "lags",
+    });
+  }
+  if (context.hasRoof && context.detectedRoofKind === "unknown") {
+    questions.push({
+      key: "roofKindOverride",
+      group: "sequencia",
+      label: "Qual é o sistema de cobertura previsto?",
+      help: "Esta resposta só organiza itens já existentes no BOQ; nunca cria cobertura que não esteja orçamentada.",
+      required: true,
+      kind: "choice",
+      options: [
+        { value: "sheet", label: "Chapa / cobertura leve" },
+        { value: "slab", label: "Laje de cobertura" },
+      ],
+    });
+  }
+  questions.push({
+    key: "targetDurationDays",
+    group: "prazo",
+    label: "Existe prazo contratual obrigatório?",
+    help: "O SIGO calcula primeiro o prazo natural e compara com o prazo indicado antes de ajustar durações.",
+    required: false,
+    kind: "integer",
+  });
+  return questions;
+}

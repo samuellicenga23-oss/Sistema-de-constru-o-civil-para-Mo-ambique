@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   buildExecutionPlan,
+  buildPlanningContext,
   validateValueShares,
   type PlanningSourceNode,
   type PlanningSourceSection,
 } from "../src/services/schedulePlanning.js";
+import { buildPlanningQuestions, defaultSchedulePlanningProfile, validateSchedulePlanningProfile, type SchedulePlanningProfile } from "../src/services/schedulePlanningProfile.js";
 
 function leaf(code: string, name: string, durationDays = 6, quantity = 10): PlanningSourceNode {
   return {
@@ -38,6 +40,12 @@ function standardSection(roots: PlanningSourceNode[]): PlanningSourceSection {
   return { id: "section-1", name: "Edifício Principal", sortOrder: 0, templateKey: "sigo_padrao_v2", roots };
 }
 
+function makePlan(args: Omit<Parameters<typeof buildExecutionPlan>[0], "profile"> & { profile?: SchedulePlanningProfile }) {
+  const context = buildPlanningContext(args.sections, args.floors);
+  const profile = args.profile ?? defaultSchedulePlanningProfile(context, args.startDate);
+  return buildExecutionPlan({ ...args, profile });
+}
+
 function activities(plan: ReturnType<typeof buildExecutionPlan>) {
   const result: ReturnType<typeof buildExecutionPlan>["roots"] = [];
   const walk = (nodes: ReturnType<typeof buildExecutionPlan>["roots"]) => {
@@ -64,7 +72,7 @@ function expectSharesClose(plan: ReturnType<typeof buildExecutionPlan>) {
 
 describe("Motor profissional de WBS", () => {
   it("gera chapa de 1 piso sem inventar estrutura de cobertura", () => {
-    const plan = buildExecutionPlan({
+    const plan = makePlan({
       sections: [standardSection([
         chapter("1", "TRABALHOS PRELIMINARES", [leaf("1.1", "Limpeza"), leaf("1.2", "Implantação")]),
         chapter("2", "MOVIMENTOS DE TERRA", [leaf("2.1", "Escavação")]),
@@ -94,7 +102,7 @@ describe("Motor profissional de WBS", () => {
   });
 
   it("gera chapa multi-piso com suporte vertical e valueShare = 100%", () => {
-    const plan = buildExecutionPlan({
+    const plan = makePlan({
       sections: [standardSection([
         chapter("2", "MOVIMENTOS DE TERRA", [leaf("2.1", "Escavação", 4)]),
         chapter("3", "BETÕES, AÇOS E COFRAGENS", [
@@ -126,7 +134,7 @@ describe("Motor profissional de WBS", () => {
   });
 
   it("gera laje de cobertura em 1 piso e impermeabilização após a laje", () => {
-    const plan = buildExecutionPlan({
+    const plan = makePlan({
       sections: [standardSection([
         chapter("2", "MOVIMENTOS DE TERRA", [leaf("2.1", "Escavação", 3)]),
         chapter("3", "BETÕES, AÇOS E COFRAGENS", [
@@ -155,7 +163,7 @@ describe("Motor profissional de WBS", () => {
 
 
   it("reconhece laje de cobertura pelo código explícito 3.7 mesmo sem impermeabilização", () => {
-    const plan = buildExecutionPlan({
+    const plan = makePlan({
       sections: [standardSection([chapter("3", "BETÕES, AÇOS E COFRAGENS", [
         leaf("3.3", "Betão estrutural B25 em pilares", 4),
         leaf("3.4", "Betão B25 em vigas e lintéis", 4),
@@ -172,7 +180,7 @@ describe("Motor profissional de WBS", () => {
   });
 
   it("gera laje multi-piso: laje intermédia suporta piso superior e última laje é cobertura", () => {
-    const plan = buildExecutionPlan({
+    const plan = makePlan({
       sections: [standardSection([
         chapter("2", "MOVIMENTOS DE TERRA", [leaf("2.1", "Escavação", 3)]),
         chapter("3", "BETÕES, AÇOS E COFRAGENS", [
@@ -210,7 +218,7 @@ describe("Motor profissional de WBS", () => {
         { ...leaf("A.2", "Trabalho Y", 5), sortOrder: 1 },
       ])],
     };
-    const plan = buildExecutionPlan({ sections: [imported], floors: 5, startDate: "2026-08-10" });
+    const plan = makePlan({ sections: [imported], floors: 5, startDate: "2026-08-10" });
     expect(activities(plan).map((node) => node.name)).toEqual(["Trabalho X", "Trabalho Y"]);
     expect(activities(plan).every((node) => node.floorIndex === null)).toBe(true);
     expect(plan.dependencies).toHaveLength(1);
@@ -218,7 +226,7 @@ describe("Motor profissional de WBS", () => {
   });
 
   it("não infla dias quando um item agregado é curto demais para repartir por pisos", () => {
-    const plan = buildExecutionPlan({
+    const plan = makePlan({
       sections: [standardSection([chapter("4", "ALVENARIAS", [leaf("4.1", "Alvenaria", 2)])])],
       floors: 4,
       startDate: "2026-08-10",
@@ -234,15 +242,15 @@ describe("Motor profissional de WBS", () => {
       chapter("3", "BETÕES, AÇOS E COFRAGENS", [leaf("3.3", "Pilares", 24), leaf("3.4", "Vigas", 24)]),
       chapter("4", "ALVENARIAS", [leaf("4.1", "Alvenaria", 24)]),
     ]);
-    const natural = buildExecutionPlan({ sections: [base], floors: 1, startDate: "2026-08-10" });
+    const natural = makePlan({ sections: [base], floors: 1, startDate: "2026-08-10" });
     const target = natural.durationDays + 12;
-    const scaled = buildExecutionPlan({ sections: [base], floors: 1, startDate: "2026-08-10", totalDurationDays: target });
+    const scaled = makePlan({ sections: [base], floors: 1, startDate: "2026-08-10", totalDurationDays: target });
     expect(scaled.durationDays).toBeGreaterThanOrEqual(natural.durationDays);
     expect(Math.abs(scaled.durationDays - target)).toBeLessThanOrEqual(2);
     expect(scaled.warnings.some((warning) => warning.code === "LONG_ACTIVITY")).toBe(true);
   });
   it("valueShare é fracção do item e não proporção dos dias", () => {
-    const plan = buildExecutionPlan({
+    const plan = makePlan({
       sections: [standardSection([chapter("4", "ALVENARIAS", [leaf("4.1", "Alvenaria", 10)])])],
       floors: 3,
       startDate: "2026-08-10",
@@ -255,7 +263,7 @@ describe("Motor profissional de WBS", () => {
   });
 
   it("mantém aço/cofragem agregados como pacotes transversais, sem fingir elemento/piso", () => {
-    const plan = buildExecutionPlan({
+    const plan = makePlan({
       sections: [standardSection([
         chapter("2", "MOVIMENTOS DE TERRA", [leaf("2.1", "Escavação", 4)]),
         chapter("3", "BETÕES, AÇOS E COFRAGENS", [
@@ -277,6 +285,129 @@ describe("Motor profissional de WBS", () => {
     expect(byCode(plan, "3.6")[0].floorIndex).toBeNull();
     expect(plan.warnings.some((warning) => warning.code === "GENERIC_STRUCTURAL_RESOURCE")).toBe(true);
     expectSharesClose(plan);
+  });
+
+
+  it("o assistente trata distribuição uniforme como hipótese, não como dado informado", () => {
+    const sections = [standardSection([chapter("4", "ALVENARIAS", [leaf("4.1", "Alvenaria", 12)])])];
+    const context = buildPlanningContext(sections, 3);
+    const profile = defaultSchedulePlanningProfile(context, "2026-08-10");
+    expect(profile.floorShares).toBeNull();
+    const plan = buildExecutionPlan({ sections, floors: 3, startDate: profile.startDate, profile });
+    expect(byCode(plan, "4.1").map((node) => node.valueShare)).toEqual([0.3334, 0.3333, 0.3333]);
+    expect(byCode(plan, "4.1").every((node) => node.allocationBasis === "assumido")).toBe(true);
+    expect(plan.assumptions.some((text) => text.includes("Distribuição por piso não informada"))).toBe(true);
+  });
+
+  it("usa percentagens por piso informadas sem relacionar valueShare com a duração", () => {
+    const sections = [standardSection([chapter("4", "ALVENARIAS", [leaf("4.1", "Alvenaria", 10)])])];
+    const context = buildPlanningContext(sections, 3);
+    const profile = defaultSchedulePlanningProfile(context, "2026-08-10");
+    profile.floorShares = [0.5, 0.3, 0.2];
+    const plan = buildExecutionPlan({ sections, floors: 3, startDate: profile.startDate, profile });
+    expect(byCode(plan, "4.1").map((node) => node.valueShare)).toEqual([0.5, 0.3, 0.2]);
+    expect(byCode(plan, "4.1").map((node) => node.durationDays)).toEqual([5, 3, 2]);
+    expect(byCode(plan, "4.1").every((node) => node.allocationBasis === "informado")).toBe(true);
+    expectSharesClose(plan);
+  });
+
+  it("permite zonas sem percentagens conhecidas e marca a repartição como assumida", () => {
+    const sections = [standardSection([chapter("4", "ALVENARIAS", [leaf("4.1", "Alvenaria", 12)])])];
+    const context = buildPlanningContext(sections, 2);
+    const profile = defaultSchedulePlanningProfile(context, "2026-08-10");
+    profile.locationStrategy = "floors_zones";
+    profile.zones = [
+      { id: "a", label: "Bloco A", share: null },
+      { id: "b", label: "Bloco B", share: null },
+    ];
+    expect(validateSchedulePlanningProfile(profile, context)).toEqual([]);
+    const plan = buildExecutionPlan({ sections, floors: 2, startDate: profile.startDate, profile });
+    const split = byCode(plan, "4.1");
+    expect(split).toHaveLength(4);
+    expect(split.map((node) => node.valueShare)).toEqual([0.25, 0.25, 0.25, 0.25]);
+    expect(split.every((node) => node.allocationBasis === "assumido")).toBe(true);
+    expect(split.some((node) => node.name.includes("Bloco A"))).toBe(true);
+    expectSharesClose(plan);
+  });
+
+  it("marca número de frentes não informado como hipótese explícita", () => {
+    const sections = [standardSection([chapter("4", "ALVENARIAS", [leaf("4.1", "Alvenaria", 12)])])];
+    const context = buildPlanningContext(sections, 3);
+    const profile = defaultSchedulePlanningProfile(context, "2026-08-10");
+    expect(profile.tradeFronts.masonry).toBeNull();
+    const plan = buildExecutionPlan({ sections, floors: 3, startDate: profile.startDate, profile });
+    expect(plan.warnings.some((warning) => warning.code === "FRONT_COUNT_DEFAULT")).toBe(true);
+    expect(plan.warnings.some((warning) => warning.code === "FRONT_CAPACITY_APPLIED")).toBe(true);
+  });
+
+  it("aplica capacidade de frentes entre localizações da mesma especialidade", () => {
+    const sections = [standardSection([chapter("4", "ALVENARIAS", [leaf("4.1", "Alvenaria", 12)])])];
+    const context = buildPlanningContext(sections, 3);
+    const oneFront = defaultSchedulePlanningProfile(context, "2026-08-10");
+    oneFront.tradeFronts.masonry = 1;
+    const serial = buildExecutionPlan({ sections, floors: 3, startDate: oneFront.startDate, profile: oneFront });
+    expect(serial.warnings.some((warning) => warning.code === "FRONT_CAPACITY_APPLIED")).toBe(true);
+    const serialFloors = byCode(serial, "4.1");
+    expect(depExists(serial, serialFloors[0].key, serialFloors[1].key)).toBe(true);
+    expect(depExists(serial, serialFloors[1].key, serialFloors[2].key)).toBe(true);
+
+    const threeFronts = defaultSchedulePlanningProfile(context, "2026-08-10");
+    threeFronts.tradeFronts.masonry = 3;
+    const parallel = buildExecutionPlan({ sections, floors: 3, startDate: threeFronts.startDate, profile: threeFronts });
+    const parallelFloors = byCode(parallel, "4.1");
+    expect(parallel.warnings.some((warning) => warning.code === "FRONT_CAPACITY_APPLIED")).toBe(false);
+    expect(depExists(parallel, parallelFloors[0].key, parallelFloors[1].key)).toBe(false);
+    expect(depExists(parallel, parallelFloors[1].key, parallelFloors[2].key)).toBe(false);
+    expect(parallel.durationDays).toBeLessThanOrEqual(serial.durationDays);
+  });
+
+  it("faz perguntas adaptativas a partir do BOQ e não por palavras da descrição", () => {
+    const sections = [standardSection([
+      chapter("3", "QUALQUER TÍTULO", [leaf("3.3", "Descrição arbitrária", 8), leaf("3.4", "Outra descrição", 8), leaf("3.8", "Pacote", 4)]),
+      chapter("10", "OUTRO TÍTULO", [leaf("10.2", "Item X", 4)]),
+    ])];
+    const context = buildPlanningContext(sections, 2);
+    const questions = buildPlanningQuestions(context);
+    expect(context.activeTrades).toContain("structure");
+    expect(context.activeTrades).toContain("roofing");
+    expect(context.detectedRoofKind).toBe("sheet");
+    expect(context.aggregatedStructuralCodes).toContain("3.8");
+    expect(questions.some((question) => question.key === "locationStrategy")).toBe(true);
+    expect(questions.some((question) => question.key === "tradeResources")).toBe(true);
+    expect(questions.some((question) => question.key === "roofKindOverride")).toBe(false);
+    expect(questions.some((question) => question.key === "aggregatedStructureNotice")).toBe(true);
+  });
+
+  it("num mapa importado preserva o BOQ e o assistente não oferece falsa precisão por piso", () => {
+    const imported: PlanningSourceSection = {
+      id: "imp-2",
+      name: "Importado",
+      sortOrder: 0,
+      templateKey: null,
+      roots: [chapter("A", "Capítulo", [{ ...leaf("A.1", "Trabalho", 5), sortOrder: 0 }])],
+    };
+    const context = buildPlanningContext([imported], 4);
+    const questions = buildPlanningQuestions(context);
+    const profile = defaultSchedulePlanningProfile(context, "2026-08-10");
+    expect(context.supportsFloorPlanning).toBe(false);
+    expect(profile.locationStrategy).toBe("boq");
+    expect(questions.some((question) => question.key === "locationStrategy")).toBe(false);
+    expect(questions.some((question) => question.key === "tradeResources")).toBe(false);
+  });
+
+  it("expõe prazo natural separadamente do prazo contratual ajustado", () => {
+    const sections = [standardSection([
+      chapter("3", "ESTRUTURA", [leaf("3.3", "Pilares", 18), leaf("3.4", "Vigas", 18)]),
+      chapter("4", "ALVENARIA", [leaf("4.1", "Alvenaria", 18)]),
+    ])];
+    const context = buildPlanningContext(sections, 1);
+    const profile = defaultSchedulePlanningProfile(context, "2026-08-10");
+    const natural = buildExecutionPlan({ sections, floors: 1, startDate: profile.startDate, profile });
+    const targetProfile = { ...profile, targetDurationDays: natural.durationDays + 10 };
+    const adjusted = buildExecutionPlan({ sections, floors: 1, startDate: profile.startDate, profile: targetProfile });
+    expect(adjusted.naturalDurationDays).toBe(natural.durationDays);
+    expect(adjusted.targetDurationDays).toBe(natural.durationDays + 10);
+    expect(adjusted.durationDays).toBeGreaterThanOrEqual(natural.durationDays);
   });
 
 });

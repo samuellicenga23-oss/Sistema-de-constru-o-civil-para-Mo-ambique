@@ -6,7 +6,21 @@ import { scheduleTasks } from "../db/schema.js";
 import { requireCompanyUser, requireRole } from "../auth/middleware.js";
 import { assertDocumentOwned, assertProjectOwned } from "../services/accessControl.js";
 import { assertApprovedOrcamentoForSite } from "../services/siteGate.js";
-import { addWorkingDays, cascadeSuccessorDates, computeSuccessorDates, generateSchedule, getProjectSchedule, getTaskDependency, isWorkingDay, upsertTaskDependency, validateTaskDependency, workingDaysInclusive } from "../services/scheduleEngine.js";
+import {
+  addWorkingDays,
+  cascadeSuccessorDates,
+  computeSuccessorDates,
+  generateSchedule,
+  getProjectSchedule,
+  getSchedulePlanningSetup,
+  getTaskDependency,
+  isWorkingDay,
+  previewSchedulePlanning,
+  saveSchedulePlanningProfile,
+  upsertTaskDependency,
+  validateTaskDependency,
+  workingDaysInclusive,
+} from "../services/scheduleEngine.js";
 import { buildSchedulePdf } from "../services/schedulePdf.js";
 import { loadCompanyBrand, logoDataUri } from "../services/companyBrand.js";
 import { brandDisplayName, brandFooterText } from "../services/documentChrome.js";
@@ -34,6 +48,59 @@ const taskInput = z.object({
   predecessorTaskId: z.string().uuid().nullable().optional(),
   dependencyType: z.enum(["FS", "SS", "FF", "SF"]).default("FS"),
   lagDays: z.number().int().min(-365).max(365).default(0),
+});
+
+const tradeFrontsSchema = z.object({
+  earthworks: z.number().int().min(1).max(20).nullable(),
+  structure: z.number().int().min(1).max(20).nullable(),
+  masonry: z.number().int().min(1).max(20).nullable(),
+  mep: z.number().int().min(1).max(20).nullable(),
+  finishes: z.number().int().min(1).max(20).nullable(),
+  roofing: z.number().int().min(1).max(20).nullable(),
+  external: z.number().int().min(1).max(20).nullable(),
+});
+const crewSizesSchema = z.object({
+  earthworks: z.number().int().min(1).max(60).nullable(),
+  structure: z.number().int().min(1).max(60).nullable(),
+  masonry: z.number().int().min(1).max(60).nullable(),
+  mep: z.number().int().min(1).max(60).nullable(),
+  finishes: z.number().int().min(1).max(60).nullable(),
+  roofing: z.number().int().min(1).max(60).nullable(),
+  external: z.number().int().min(1).max(60).nullable(),
+});
+const planningProfileSchema = z.object({
+  schemaVersion: z.literal(1),
+  startDate: z.string().refine(isWorkingDay, { message: "A obra não trabalha ao domingo — escolha uma data de segunda a sábado" }),
+  locationStrategy: z.enum(["boq", "floors", "floors_zones"]),
+  floorLabels: z.array(z.string().min(1).max(100)).min(1).max(20),
+  floorShares: z.array(z.number().min(0).max(1)).min(1).max(20).nullable(),
+  zones: z.array(z.object({
+    id: z.string().min(1).max(80),
+    label: z.string().min(1).max(100),
+    share: z.number().min(0).max(1).nullable(),
+  })).max(20),
+  sequencePolicy: z.enum(["floor_by_floor", "structure_complete_first"]),
+  tradeFronts: tradeFrontsSchema,
+  crewSizes: crewSizesSchema,
+  cureLags: z.object({
+    foundations: z.number().int().min(0).max(60).nullable(),
+    columns: z.number().int().min(0).max(60).nullable(),
+    slabs: z.number().int().min(0).max(60).nullable(),
+  }),
+  roofKindOverride: z.enum(["sheet", "slab"]).nullable(),
+  targetDurationDays: z.number().int().min(7).max(3650).nullable(),
+  notes: z.string().max(4000).nullable(),
+});
+const planningSetupInput = z.object({
+  budgetDocumentId: z.string().uuid(),
+  startDate: z.string().refine(isWorkingDay, { message: "A obra não trabalha ao domingo — escolha uma data de segunda a sábado" }),
+});
+const planningProfileInput = z.object({
+  budgetDocumentId: z.string().uuid(),
+  profile: planningProfileSchema,
+});
+const generateInput = planningSetupInput.extend({
+  previewFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
 });
 
 function companyIdOf(request: FastifyRequest) {
@@ -95,19 +162,66 @@ export async function scheduleRoutes(app: FastifyInstance) {
     return getProjectSchedule(projectId);
   });
 
+  async function planningGate(projectId: string, budgetDocumentId: string, companyId: string) {
+    const gate = await assertApprovedOrcamentoForSite(projectId, companyId);
+    if (!gate.ok) return { ok: false as const, status: gate.status, error: gate.error };
+    const document = await assertDocumentOwned(budgetDocumentId, companyId);
+    if (!document || document.projectId !== projectId) return { ok: false as const, status: 404, error: "Mapa de Quantidades não encontrado" };
+    if (document.documentType !== "orcamento" || document.status !== "aprovado") {
+      return { ok: false as const, status: 409, error: "Seleccione um orçamento aprovado para planear a EAP" };
+    }
+    return { ok: true as const, gate };
+  }
+
+  app.post("/api/projects/:projectId/schedule/planning/setup", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
+    const { projectId } = request.params as { projectId: string };
+    const companyId = companyIdOf(request);
+    const parsed = planningSetupInput.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    const access = await planningGate(projectId, parsed.data.budgetDocumentId, companyId);
+    if (!access.ok) return reply.code(access.status).send({ error: access.error });
+    try {
+      return await getSchedulePlanningSetup({ projectId, ...parsed.data, companyId, zoneId: access.gate.project.zoneId ?? null });
+    } catch (error) {
+      return reply.code(409).send({ error: error instanceof Error ? error.message : "Não foi possível preparar o Assistente de Planeamento" });
+    }
+  });
+
+  app.put("/api/projects/:projectId/schedule/planning/profile", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
+    const { projectId } = request.params as { projectId: string };
+    const companyId = companyIdOf(request);
+    const parsed = planningProfileInput.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    const access = await planningGate(projectId, parsed.data.budgetDocumentId, companyId);
+    if (!access.ok) return reply.code(access.status).send({ error: access.error });
+    try {
+      const profile = await saveSchedulePlanningProfile({ projectId, ...parsed.data, companyId, zoneId: access.gate.project.zoneId ?? null });
+      return { profile, status: "draft" };
+    } catch (error) {
+      return reply.code(409).send({ error: error instanceof Error ? error.message : "Perfil de planeamento inválido" });
+    }
+  });
+
+  app.post("/api/projects/:projectId/schedule/planning/preview", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
+    const { projectId } = request.params as { projectId: string };
+    const companyId = companyIdOf(request);
+    const parsed = planningSetupInput.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    const access = await planningGate(projectId, parsed.data.budgetDocumentId, companyId);
+    if (!access.ok) return reply.code(access.status).send({ error: access.error });
+    try {
+      return await previewSchedulePlanning({ projectId, ...parsed.data, companyId, zoneId: access.gate.project.zoneId ?? null });
+    } catch (error) {
+      return reply.code(409).send({ error: error instanceof Error ? error.message : "Não foi possível pré-visualizar a estratégia" });
+    }
+  });
+
   app.post("/api/projects/:projectId/schedule/generate", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
     const { projectId } = request.params as { projectId: string };
     const companyId = companyIdOf(request);
     const gate = await assertApprovedOrcamentoForSite(projectId, companyId);
     if (!gate.ok) return reply.code(gate.status).send({ error: gate.error });
-    const parsed = z.object({
-      budgetDocumentId: z.string().uuid(),
-      startDate: z.string().refine(isWorkingDay, { message: "A obra não trabalha ao domingo — escolha uma data de segunda a sábado" }),
-      totalDurationDays: z.number().int().min(7).max(3650).optional(),
-      // Equipa disponível por frente. A duração por composição é:
-      // horas/unidade × quantidade ÷ (equipa × 8 h/dia). Não há factor oculto de produtividade.
-      maxCrewSize: z.number().int().min(1).max(60).optional(),
-    }).safeParse(request.body);
+    const parsed = generateInput.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     const document = await assertDocumentOwned(parsed.data.budgetDocumentId, companyId);
     if (!document || document.projectId !== projectId) return reply.code(404).send({ error: "Mapa de Quantidades não encontrado" });

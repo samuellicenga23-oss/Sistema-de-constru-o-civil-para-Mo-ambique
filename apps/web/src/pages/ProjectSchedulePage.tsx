@@ -12,6 +12,7 @@ import Modal from "../components/Modal";
 import PageSearch from "../components/PageSearch";
 import ScheduleWorkspace from "../components/ScheduleWorkspace";
 import ScheduleSheetModal from "../components/ScheduleSheetModal";
+import SchedulePlanningWizard from "../components/SchedulePlanningWizard";
 import { IconBack, IconChart, IconDownload, IconPlus, IconRefresh, IconTrash } from "../components/icons";
 
 const STATUS_LABELS: Record<ScheduleTaskStatus, string> = {
@@ -46,9 +47,6 @@ export default function ProjectSchedulePage() {
   const [sheetModalOpen, setSheetModalOpen] = useState(false);
   const [documentId, setDocumentId] = useState("");
   const [startDate, setStartDate] = useState(today());
-  const [duration, setDuration] = useState("");
-  const [manualDuration, setManualDuration] = useState(false);
-  const [crewSize, setCrewSize] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [printPaper, setPrintPaper] = useState<SchedulePaper>("auto");
@@ -81,37 +79,22 @@ export default function ProjectSchedulePage() {
     reload().catch((cause) => setError(cause instanceof Error ? cause.message : "Erro ao carregar cronograma"));
   }, [projectId]);
 
-  async function handleGenerate(event: FormEvent) {
-    event.preventDefault();
-    if (!projectId || !documentId) return;
-    if (schedule?.tasks.length) {
-      const ok = await confirm({
-        title: "Recriar cronograma?",
-        message: "A linha de base actual, subactividades e dependências serão substituídas.",
-        confirmLabel: "Recriar",
-        danger: true,
-        details: ["WBS gerada de novo a partir do mapa", "Progresso manual pode perder-se"],
-      });
-      if (!ok) return;
-    }
-    setSaving(true);
-    setError(null);
-    try {
-      const next = await scheduleApi.generate(projectId, {
-        budgetDocumentId: documentId,
-        startDate,
-        ...(manualDuration && duration ? { totalDurationDays: Number(duration) } : {}),
-        ...(crewSize ? { maxCrewSize: Number(crewSize) } : {}),
-      });
-      setSchedule(next);
-      setSetupOpen(false);
-      setSelectedId(next.tasks[0]?.id ?? null);
-      setCollapsed(new Set());
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Erro ao gerar cronograma");
-    } finally {
-      setSaving(false);
-    }
+  async function confirmReplaceSchedule() {
+    if (!schedule?.tasks.length) return true;
+    return confirm({
+      title: "Recriar EAP e cronograma?",
+      message: "A linha de base actual, subactividades e dependências serão substituídas pela estratégia validada no Assistente de Planeamento.",
+      confirmLabel: "Recriar EAP",
+      danger: true,
+      details: ["O BOQ aprovado continua a definir o âmbito", "Progresso manual da linha de base actual pode perder-se"],
+    });
+  }
+
+  function handlePlanningGenerated(next: ProjectSchedule) {
+    setSchedule(next);
+    setSetupOpen(false);
+    setSelectedId(next.tasks[0]?.id ?? null);
+    setCollapsed(new Set());
   }
 
   async function handleAddRoot() {
@@ -349,68 +332,19 @@ export default function ProjectSchedulePage() {
           )}
         </div>
 
-        {setupOpen && (
-          <form onSubmit={handleGenerate} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
-            <div className="grid gap-4 md:grid-cols-[minmax(260px,1fr)_180px_auto] items-end">
-              <div>
-                <label className="label">Mapa de Quantidades</label>
-                <select className="input" required value={documentId} onChange={(e) => setDocumentId(e.target.value)}>
-                  <option value="">Seleccionar...</option>
-                  {documents.map((document) => (
-                    <option key={document.id} value={document.id}>
-                      {document.title} · {document.status}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="label">Início planeado</label>
-                <input className="input" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-              </div>
-              <button className="btn btn-primary" disabled={saving || !documentId}>
-                <IconChart className="h-4 w-4" />
-                {schedule.tasks.length ? "Recriar WBS" : "Gerar cronograma"}
-              </button>
-            </div>
-            <p className="text-xs text-slate-500">A duração é calculada pelas composições; use prazo próprio apenas quando necessário.</p>
-            <div className="max-w-xs">
-              <label className="label">Trabalhadores disponíveis por frente (opcional)</label>
-              <input
-                className="input"
-                type="number"
-                min="1"
-                max="60"
-                placeholder="Automático (até 12)"
-                value={crewSize}
-                onChange={(e) => setCrewSize(e.target.value)}
-              />
-              <p className="mt-1 text-xs text-slate-500">
-                Mais trabalhadores só acelera tarefas que já pedem uma equipa grande (muitas horas) — uma tarefa pequena não ganha gente a mais só porque há disponibilidade.
-              </p>
-            </div>
-            {!manualDuration ? (
-              <button type="button" className="text-xs font-semibold text-blue-700 hover:underline" onClick={() => setManualDuration(true)}>
-                Substituir por prazo próprio
-              </button>
-            ) : (
-              <div className="flex flex-wrap items-end gap-3">
-                <div>
-                  <label className="label">Prazo total (dias úteis)</label>
-                  <input className="input w-40" type="number" min="7" value={duration} onChange={(e) => setDuration(e.target.value)} />
-                </div>
-                <button
-                  type="button"
-                  className="text-xs font-semibold text-slate-500 hover:underline"
-                  onClick={() => {
-                    setManualDuration(false);
-                    setDuration("");
-                  }}
-                >
-                  Voltar ao automático
-                </button>
-              </div>
-            )}
-          </form>
+        {setupOpen && projectId && (
+          <SchedulePlanningWizard
+            projectId={projectId}
+            documents={documents}
+            documentId={documentId}
+            startDate={startDate}
+            hasExistingSchedule={schedule.tasks.length > 0}
+            onDocumentIdChange={setDocumentId}
+            onStartDateChange={setStartDate}
+            beforeGenerate={confirmReplaceSchedule}
+            onGenerated={handlePlanningGenerated}
+            onClose={() => setSetupOpen(false)}
+          />
         )}
 
         {schedule.tasks.length > 0 && schedule.startDate && schedule.endDate && (

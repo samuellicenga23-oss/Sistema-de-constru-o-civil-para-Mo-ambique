@@ -674,6 +674,28 @@ export const measurementCertificateLines = pgTable("measurement_certificate_line
 
 // ---------- Cronograma de obra ----------
 
+// Perfil persistente do Assistente de Planeamento. É guardado por projecto + versão do BOQ para
+// que uma revisão futura do orçamento não reutilize silenciosamente respostas de outra versão.
+// O fingerprint fecha o circuito "perfil guardado → preview validado → geração".
+export const projectSchedulePlanningProfiles = pgTable("project_schedule_planning_profiles", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  budgetDocumentId: uuid("budget_document_id").notNull().references(() => budgetDocuments.id, { onDelete: "cascade" }),
+  schemaVersion: integer("schema_version").notNull().default(1),
+  profile: jsonb("profile").$type<Record<string, unknown>>().notNull(),
+  profileFingerprint: varchar("profile_fingerprint", { length: 64 }).notNull(),
+  status: varchar("status", { length: 20 }).notNull().default("draft"),
+  lastPreviewFingerprint: varchar("last_preview_fingerprint", { length: 64 }),
+  lastPreviewStartDate: date("last_preview_start_date"),
+  previewedAt: timestamp("previewed_at"),
+  generatedAt: timestamp("generated_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => [
+  unique("project_schedule_planning_profile_unique").on(table.projectId, table.budgetDocumentId),
+  index("project_schedule_planning_profile_document_idx").on(table.budgetDocumentId),
+]);
+
 // O cronograma usa a mesma WBS do orçamento. `budgetLineItemId` é a ligação auditável exacta;
 // `budgetChapterCode` mantém códigos WBS/prefixos e compatibilidade com linhas de base antigas.
 // `valueShare` reparte uma linha agregada sem duplicar valor/progresso.
