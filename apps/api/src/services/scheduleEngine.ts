@@ -13,7 +13,6 @@ import {
 } from "../db/schema.js";
 import { getBudgetDocumentSummary, type LineItemNode } from "./boqEngine.js";
 import { getCompositionLabourQuantities } from "./costEngine.js";
-import { mapToPhase, type PhaseKey } from "./phaseMapping.js";
 
 const DAY_MS = 86_400_000;
 
@@ -230,27 +229,33 @@ function normalizeText(s: string): string {
   return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 }
 
-// Divide um total de dias em N partes o mais iguais possível, sem nenhuma parte cair a 0.
-function splitEvenly(total: number, parts: number): number[] {
+// Divide um total de dias em N partes cuja SOMA = total (nunca inflacionar).
+// Devolve null se não há dias suficientes para repartir sem inventar duração.
+function splitEvenly(total: number, parts: number): number[] | null {
   const safeParts = Math.max(1, Math.round(parts));
-  const base = Math.floor(total / safeParts);
-  const remainder = total - base * safeParts;
-  return Array.from({ length: safeParts }, (_, i) => Math.max(1, base + (i < remainder ? 1 : 0)));
+  const safeTotal = Math.max(0, Math.round(total));
+  if (safeTotal < safeParts) return null;
+  const base = Math.floor(safeTotal / safeParts);
+  const remainder = safeTotal - base * safeParts;
+  return Array.from({ length: safeParts }, (_, i) => base + (i < remainder ? 1 : 0));
 }
 
 type StructuralStage = "limpeza" | "sapatas" | "pilares" | "vigas" | "lajes" | "apoio";
 
-// Reconhece o papel de um item de "Betões, Aços e Cofragens" pela descrição (estável mesmo
-// quando o código do item muda) — permite reordenar/repartir por piso sem depender de que o
-// utilizador tenha usado exactamente os códigos 3.1..3.8 do modelo SIGO.
+// Reconhece o papel de um item de "Betões, Aços e Cofragens" pela descrição.
 function classifyStructuralLeaf(description: string): StructuralStage | null {
   const d = normalizeText(description);
   if (d.includes("limpeza") && d.includes("bet")) return "limpeza";
   if (d.includes("sapata")) return "sapatas";
-  if (d.includes("aco") || d.includes("malhasol") || d.includes("malha") || d.includes("cofragem")) return "apoio";
+  // "apoio" só se não for claramente um elemento estrutural (ex.: "aço em pilares").
+  if ((d.includes("aco") || d.includes("malhasol") || d.includes("malha") || d.includes("cofragem"))
+    && !d.includes("pilar") && !d.includes("viga") && !d.includes("laje") && !d.includes("sapata")) {
+    return "apoio";
+  }
   if (d.includes("pilar")) return "pilares";
   if (d.includes("viga") || d.includes("lintel") || d.includes("linteis")) return "vigas";
   if (d.includes("laje")) return "lajes";
+  if (d.includes("aco") || d.includes("malhasol") || d.includes("malha") || d.includes("cofragem")) return "apoio";
   return null;
 }
 
@@ -275,13 +280,16 @@ function makeGroup(source: ScheduledNode, description: string, children: Schedul
   };
 }
 
-// Reordena e, quando a edificação tem mais de um piso, repete a estrutura (Betões/Aços/
-// Cofragens) piso a piso — sequência real de obra: limpeza → sapatas → arranque dos pilares →
-// viga de fundação → laje de pavimento (térreo); depois, por cada piso seguinte: pilares → viga/
-// cinta → laje, terminando em "laje de cobertura" no último piso. Devolve null quando o capítulo
-// não tem os itens mínimos reconhecíveis (pilares, vigas e lajes) — nesse caso o chamador mantém
-// o comportamento genérico anterior, sem arriscar perder âmbito do mapa.
-function buildFloorAwareStructuralPlan(root: ScheduledNode, floors: number): ScheduledNode | null {
+function withReorderedChildren(root: ScheduledNode, children: ScheduledNode[]): ScheduledNode {
+  return {
+    ...root,
+    children,
+    durationDays: children.reduce((sum, c) => sum + c.durationDays, 0) || 1,
+    basis: "soma",
+  };
+}
+
+function classifyStructuralChildren(root: ScheduledNode): Record<StructuralStage, ScheduledNode[]> | null {
   const stage: Record<StructuralStage, ScheduledNode[]> = { limpeza: [], sapatas: [], pilares: [], vigas: [], lajes: [], apoio: [] };
   for (const child of root.children) {
     if (child.children.length) return null;
@@ -290,98 +298,106 @@ function buildFloorAwareStructuralPlan(root: ScheduledNode, floors: number): Sch
     stage[key].push(child);
   }
   if (!stage.pilares.length || !stage.vigas.length || !stage.lajes.length) return null;
-  // Só sabemos repartir um item por piso — se o mapa tiver mais do que um item por etapa (ex:
-  // duas linhas de "pilares"), não arriscamos perder o valor de nenhuma; mantém-se o genérico.
   if (stage.limpeza.length > 1 || stage.sapatas.length > 1 || stage.pilares.length > 1 || stage.vigas.length > 1 || stage.lajes.length > 1) return null;
+  return stage;
+}
+
+/** Ordem de execução sem inventar nomes — mantém as descrições do mapa. */
+function reorderStructuralFlat(root: ScheduledNode): ScheduledNode | null {
+  const stage = classifyStructuralChildren(root);
+  if (!stage) return null;
+  const ordered = [
+    ...stage.limpeza,
+    ...stage.sapatas,
+    ...stage.apoio,
+    ...stage.pilares,
+    ...stage.vigas,
+    ...stage.lajes,
+  ];
+  return withReorderedChildren(root, ordered);
+}
+
+/**
+ * Em edifícios multi-piso: estrutura piso a piso.
+ * Mantém a descrição do mapa + sufixo "— Piso N" (sem renomear para rótulos inventados).
+ * Só aplica se cada etapa tiver dias suficientes para não inflacionar a duração.
+ */
+function buildFloorAwareStructuralPlan(root: ScheduledNode, floors: number): ScheduledNode | null {
+  const floorCount = Math.max(1, Math.min(20, Math.round(floors)));
+  if (floorCount <= 1) return reorderStructuralFlat(root);
+
+  const stage = classifyStructuralChildren(root);
+  if (!stage) return null;
 
   const sum = (nodes: ScheduledNode[]) => nodes.reduce((s, n) => s + n.durationDays, 0);
-  const floorCount = Math.max(1, Math.min(20, Math.round(floors)));
   const pilaresPerFloor = splitEvenly(sum(stage.pilares), floorCount);
   const vigasPerFloor = splitEvenly(sum(stage.vigas), floorCount);
   const lajesPerFloor = splitEvenly(sum(stage.lajes), floorCount);
-  // Cada item de apoio (aço, malhasol, cofragem...) é repartido pela SUA PRÓPRIA duração — nunca
-  // pela soma de todos, senão cada item ficaria com a duração combinada dos outros também.
-  const apoioPerFloorByItem = stage.apoio.map((item) => splitEvenly(item.durationDays, floorCount));
+  if (!pilaresPerFloor || !vigasPerFloor || !lajesPerFloor) return reorderStructuralFlat(root);
+
+  const apoioPerFloorByItem: number[][] = [];
+  for (const item of stage.apoio) {
+    const split = splitEvenly(item.durationDays, floorCount);
+    if (!split) return reorderStructuralFlat(root);
+    apoioPerFloorByItem.push(split);
+  }
 
   const floorGroups: ScheduledNode[] = [];
   for (let floor = 0; floor < floorCount; floor++) {
-    const isGround = floor === 0;
-    const isTop = floor === floorCount - 1;
     const children: ScheduledNode[] = [];
-    const source = stage.pilares[0];
-
-    if (isGround) {
-      if (stage.limpeza.length) children.push(relabelLeaf(stage.limpeza[0], "Betão de limpeza", sum(stage.limpeza), 1));
-      if (stage.sapatas.length) children.push(relabelLeaf(stage.sapatas[0], "Sapatas de fundação", sum(stage.sapatas), 1));
+    if (floor === 0) {
+      for (const n of stage.limpeza) children.push(n);
+      for (const n of stage.sapatas) children.push(n);
     }
-    // Cofragem/aço primeiro (preparação), depois betonagem — ordem real de obra no piso.
     stage.apoio.forEach((apoioSource, apoioIndex) => {
       const perFloor = apoioPerFloorByItem[apoioIndex];
       const totalForItem = perFloor.reduce((a, b) => a + b, 0) || 1;
       children.push(relabelLeaf(
         apoioSource,
-        `${apoioSource.node.description}${floorCount > 1 ? ` — Piso ${floor}` : ""}`,
+        `${apoioSource.node.description} — Piso ${floor}`,
         perFloor[floor],
         perFloor[floor] / totalForItem,
       ));
     });
     children.push(relabelLeaf(
-      source,
-      isGround ? "Arranque dos pilares" : floorCount > 1 ? `Pilares — Piso ${floor}` : "Pilares",
+      stage.pilares[0],
+      `${stage.pilares[0].node.description} — Piso ${floor}`,
       pilaresPerFloor[floor],
       pilaresPerFloor[floor] / (pilaresPerFloor.reduce((a, b) => a + b, 0) || 1),
     ));
     children.push(relabelLeaf(
       stage.vigas[0],
-      isGround ? "Viga de fundação" : floorCount > 1 ? `Viga/cinta — Piso ${floor}` : "Vigas e lintéis",
+      `${stage.vigas[0].node.description} — Piso ${floor}`,
       vigasPerFloor[floor],
       vigasPerFloor[floor] / (vigasPerFloor.reduce((a, b) => a + b, 0) || 1),
     ));
     children.push(relabelLeaf(
       stage.lajes[0],
-      isGround && floorCount === 1 ? "Laje de pavimento" : isGround ? "Laje de pavimento térreo" : isTop ? "Laje de cobertura" : `Laje — Piso ${floor}`,
+      `${stage.lajes[0].node.description} — Piso ${floor}`,
       lajesPerFloor[floor],
       lajesPerFloor[floor] / (lajesPerFloor.reduce((a, b) => a + b, 0) || 1),
     ));
-    const label = floorCount > 1 ? `Estrutura — Piso ${floor}` : "Estrutura";
-    floorGroups.push(makeGroup(root, label, children));
+    floorGroups.push(makeGroup(root, `Estrutura — Piso ${floor}`, children));
   }
-  return makeGroup(root, root.node.description, floorGroups);
+  return withReorderedChildren(root, floorGroups);
 }
 
-// Mesma lógica de repetição por piso para Alvenarias — paredes de cada piso só fazem sentido
-// depois da estrutura desse piso estar de pé, por isso seguem a mesma ordem "térreo primeiro".
 function buildFloorAwareWallsPlan(root: ScheduledNode, floors: number): ScheduledNode | null {
   const floorCount = Math.max(1, Math.min(20, Math.round(floors)));
   if (floorCount <= 1) return null;
   const leaves = root.children.filter((c) => !c.children.length);
   if (leaves.length !== root.children.length || !leaves.length) return null;
 
-  const totalPerLeaf = leaves.map((leaf) => splitEvenly(leaf.durationDays, floorCount));
+  const totalPerLeaf: number[][] = [];
+  for (const leaf of leaves) {
+    const split = splitEvenly(leaf.durationDays, floorCount);
+    if (!split) return null;
+    totalPerLeaf.push(split);
+  }
+
   const floorGroups: ScheduledNode[] = [];
   for (let floor = 0; floor < floorCount; floor++) {
     const children = leaves.map((leaf, leafIndex) =>
-      relabelLeaf(leaf, `${leaf.node.description} — Piso ${floor}`, totalPerLeaf[leafIndex][floor], totalPerLeaf[leafIndex][floor] / (totalPerLeaf[leafIndex].reduce((a, b) => a + b, 0) || 1)),
-    );
-    floorGroups.push(makeGroup(root, `Alvenarias — Piso ${floor}`, children));
-  }
-  return makeGroup(root, root.node.description, floorGroups);
-}
-
-/** Repete folhas planas por piso (rebocos, revestimentos, pinturas…). */
-function buildFloorAwareFinishesPlan(root: ScheduledNode, floors: number, groupPrefix: string): ScheduledNode | null {
-  const floorCount = Math.max(1, Math.min(20, Math.round(floors)));
-  if (floorCount <= 1) return null;
-  const leaves = collectFlatLeaves(root);
-  if (!leaves.length) return null;
-  // Só aplica quando o capítulo é "plano" (filhos = folhas) ou só tem um nível de grupos a achatar.
-  if (root.children.some((c) => c.children.some((g) => g.children.length))) return null;
-
-  const flatLeaves = leaves;
-  const totalPerLeaf = flatLeaves.map((leaf) => splitEvenly(leaf.durationDays, floorCount));
-  const floorGroups: ScheduledNode[] = [];
-  for (let floor = 0; floor < floorCount; floor++) {
-    const children = flatLeaves.map((leaf, leafIndex) =>
       relabelLeaf(
         leaf,
         `${leaf.node.description} — Piso ${floor}`,
@@ -389,151 +405,26 @@ function buildFloorAwareFinishesPlan(root: ScheduledNode, floors: number, groupP
         totalPerLeaf[leafIndex][floor] / (totalPerLeaf[leafIndex].reduce((a, b) => a + b, 0) || 1),
       ),
     );
-    floorGroups.push(makeGroup(root, `${groupPrefix} — Piso ${floor}`, children));
+    floorGroups.push(makeGroup(root, `Alvenarias — Piso ${floor}`, children));
   }
-  return makeGroup(root, root.node.description, floorGroups);
+  return withReorderedChildren(root, floorGroups);
 }
 
-function collectFlatLeaves(node: ScheduledNode): ScheduledNode[] {
-  if (!node.children.length) return [node];
-  return node.children.flatMap((child) => collectFlatLeaves(child));
-}
-
-/** Reordena folhas por prioridade de palavras-chave (sequência de obra), agrupando reconhecíveis. */
-function reorderLeavesByKeywords(root: ScheduledNode, stages: Array<{ label: string; keywords: string[] }>): ScheduledNode | null {
-  const leaves = root.children.filter((c) => !c.children.length);
-  if (!leaves.length || leaves.length !== root.children.length) return null;
-
-  const used = new Set<string>();
-  const groups: ScheduledNode[] = [];
-  for (const stage of stages) {
-    const matched = leaves.filter((leaf) => {
-      if (used.has(leaf.node.id)) return false;
-      const text = normalizeText(leaf.node.description);
-      return stage.keywords.some((k) => text.includes(normalizeText(k)));
-    });
-    if (!matched.length) continue;
-    matched.forEach((m) => used.add(m.node.id));
-    if (matched.length === 1) groups.push({ ...matched[0], node: { ...matched[0].node, description: `${stage.label}: ${matched[0].node.description}` } });
-    else groups.push(makeGroup(root, stage.label, matched));
-  }
-  const rest = leaves.filter((leaf) => !used.has(leaf.node.id));
-  if (!groups.length) return null;
-  return makeGroup(root, root.node.description, [...groups, ...rest]);
-}
-
-function applyChapterConstructionPlan(root: ScheduledNode, floors: number): ScheduledNode {
+/**
+ * Afina um capítulo sem inventar WBS falsa.
+ * - Estrutura: reordena (ou reparte por piso se floors>1 e houver dias suficientes)
+ * - Alvenarias: reparte por piso só com floors>1
+ * - Restantes capítulos: mantém exactamente a árvore do mapa
+ */
+function refineChapterForSchedule(root: ScheduledNode, floors: number): ScheduledNode {
   const name = normalizeText(root.node.description);
   if (name.includes("betoe") || name.includes("acos e cofrage") || (name.includes("aco") && name.includes("cofragem"))) {
-    return buildFloorAwareStructuralPlan(root, floors) ?? reorderLeavesByKeywords(root, [
-      { label: "Fundações", keywords: ["limpeza", "sapata", "fundac"] },
-      { label: "Pilares", keywords: ["pilar"] },
-      { label: "Vigas e lintéis", keywords: ["viga", "lintel", "linteis"] },
-      { label: "Lajes", keywords: ["laje"] },
-      { label: "Aço e cofragem", keywords: ["aco", "malha", "cofragem"] },
-    ]) ?? root;
+    return buildFloorAwareStructuralPlan(root, floors) ?? root;
   }
   if (name.includes("alvenaria")) {
-    return buildFloorAwareWallsPlan(root, floors)
-      ?? reorderLeavesByKeywords(root, [
-        { label: "Paredes exteriores", keywords: ["exterior", "fachada"] },
-        { label: "Paredes interiores", keywords: ["interior", "divis"] },
-        { label: "Cintas e reforços", keywords: ["cinta", "lintel", "verga"] },
-      ])
-      ?? root;
-  }
-  if (name.includes("movimento") || name.includes("terra") || name.includes("terraplen")) {
-    return reorderLeavesByKeywords(root, [
-      { label: "Limpeza do terreno", keywords: ["limpeza", "desmat", "regulariz"] },
-      { label: "Escavação", keywords: ["escav"] },
-      { label: "Aterros e compactação", keywords: ["aterro", "compact", "enchimento"] },
-      { label: "Drenagem provisória", keywords: ["drenagem", "esgot"] },
-    ]) ?? root;
-  }
-  if (name.includes("preliminar") || name.includes("estaleiro") || name.includes("instalacao de estaleiro")) {
-    return reorderLeavesByKeywords(root, [
-      { label: "Implantação e demolições", keywords: ["implant", "demoli", "vedacao", "tapume"] },
-      { label: "Estaleiro e logística", keywords: ["estaleiro", "armazem", "sanitario", "electricidade provis"] },
-      { label: "Replanteio", keywords: ["replanteio", "piquet", "marcacao"] },
-    ]) ?? root;
-  }
-  if (name.includes("betonilha") || name.includes("reboco")) {
-    return buildFloorAwareFinishesPlan(root, floors, "Rebocos e betonilhas")
-      ?? reorderLeavesByKeywords(root, [
-        { label: "Betonilhas", keywords: ["betonilha"] },
-        { label: "Rebocos", keywords: ["reboco"] },
-      ])
-      ?? root;
-  }
-  if (name.includes("revestimento") || name.includes("pavimento") || name.includes("rodape")) {
-    return buildFloorAwareFinishesPlan(root, floors, "Revestimentos")
-      ?? reorderLeavesByKeywords(root, [
-        { label: "Pavimentos", keywords: ["piso", "pavimento", "ceramica chao", "lajeta"] },
-        { label: "Paredes", keywords: ["azulejo", "parede", "revest"] },
-        { label: "Rodapés e remates", keywords: ["rodape", "remate"] },
-      ])
-      ?? root;
-  }
-  if (name.includes("pintura")) {
-    return buildFloorAwareFinishesPlan(root, floors, "Pinturas")
-      ?? reorderLeavesByKeywords(root, [
-        { label: "Preparação", keywords: ["prepar", "massa", "lixag", "primario"] },
-        { label: "Interiores", keywords: ["interior", "teto", "tecto"] },
-        { label: "Exteriores", keywords: ["exterior", "fachada"] },
-      ])
-      ?? root;
-  }
-  if (name.includes("cobertura")) {
-    return reorderLeavesByKeywords(root, [
-      { label: "Estrutura de cobertura", keywords: ["asna", "madre", "estrutura", "madeira", "metal"] },
-      { label: "Impermeabilização", keywords: ["impermeab", "manta"] },
-      { label: "Cobertura e remates", keywords: ["chapa", "telha", "cumeeira", "remate", "beiral"] },
-    ]) ?? root;
-  }
-  if (name.includes("hidraul") || name.includes("saneamento") || name.includes("esgoto") || name.includes("pluvial")) {
-    return reorderLeavesByKeywords(root, [
-      { label: "Redes enterradas", keywords: ["enterrada", "coletor", "colector", "ramal"] },
-      { label: "Distribuição de água", keywords: ["agua", "tubagem", "pcd", "ppr", "pressao"] },
-      { label: "Drenagem e esgotos", keywords: ["esgoto", "drenagem", "pluvial", "caixa"] },
-      { label: "Aparelhos e acessórios", keywords: ["sanit", "torneira", "lavatorio", "autoclismo", "duche", "pia"] },
-    ]) ?? root;
-  }
-  if (name.includes("electric") || name.includes("eletric")) {
-    return buildFloorAwareFinishesPlan(root, floors, "Instalações eléctricas")
-      ?? reorderLeavesByKeywords(root, [
-        { label: "Tubagem e cablagem", keywords: ["tubo", "cabo", "electroduto", "canaliz"] },
-        { label: "Quadros e protecções", keywords: ["quadro", "disjuntor", "diferencial"] },
-        { label: "Pontos de utilização", keywords: ["tomada", "interrup", "luminar", "ponto"] },
-      ])
-      ?? root;
-  }
-  if (name.includes("esquadri") || name.includes("portal") || name.includes("janela") || name.includes("serralh")) {
-    return reorderLeavesByKeywords(root, [
-      { label: "Caixilharias", keywords: ["janela", "caixilh", "aluminio", "pvc"] },
-      { label: "Portas", keywords: ["porta", "portal"] },
-      { label: "Protecções e gradis", keywords: ["grade", "protec", "guanicho"] },
-    ]) ?? root;
+    return buildFloorAwareWallsPlan(root, floors) ?? root;
   }
   return root;
-}
-
-const PHASE_RANK: Record<PhaseKey, number> = {
-  mobilizacao: 0,
-  terraplenagem_fundacoes: 1,
-  estrutura: 2,
-  alvenaria: 3,
-  cobertura: 4,
-  instalacoes: 4,
-  revestimentos: 5,
-  esquadrias: 5,
-  acabamentos: 6,
-  obras_exteriores: 6,
-  entrega_garantia: 7,
-  nao_classificado: 50,
-};
-
-function chapterPhaseRank(description: string): number {
-  return PHASE_RANK[mapToPhase(description, [], "")] ?? 50;
 }
 
 // Gera o cronograma directamente do que foi medido: cada pacote de trabalho (item do Mapa de
@@ -569,11 +460,11 @@ export async function generateSchedule(args: {
     .filter((node): node is ScheduledNode => node !== null);
   if (!scheduledRoots.length) throw new Error("O Mapa de Quantidades ainda não tem itens medidos para gerar a WBS");
 
-  // Sequência real de obra por capítulo (fundações→estrutura por piso, redes antes de aparelhos,
-  // acabamentos por piso, …). Capítulos sem padrões reconhecíveis mantêm a árvore do mapa.
+  // Princípio: WBS = árvore do mapa. Só se afina estrutura/alvenaria (ordem e pisos).
+  // Nunca inventar fases por palavras-chave nem reescrever datas fora da ordem do BOQ.
   const [project] = await db.select({ floors: projects.floors }).from(projects).where(eq(projects.id, args.projectId)).limit(1);
   const floors = project?.floors ?? 1;
-  scheduledRoots = scheduledRoots.map((root) => applyChapterConstructionPlan(root, floors));
+  scheduledRoots = scheduledRoots.map((root) => refineChapterForSchedule(root, floors));
 
   if (args.totalDurationDays) {
     const naturalTotal = scheduledRoots.reduce((sum, root) => sum + root.durationDays, 0) || 1;
@@ -582,54 +473,24 @@ export async function generateSchedule(args: {
   }
 
   await db.delete(scheduleTasks).where(eq(scheduleTasks.projectId, args.projectId));
+  let cursor = args.startDate;
   const sortOrderRef = { value: 0 };
-  const rootTasks: Array<typeof scheduleTasks.$inferSelect & { phaseRank: number }> = [];
+  const rootTasks: Array<typeof scheduleTasks.$inferSelect> = [];
   const dependencyValues: Array<typeof scheduleDependencies.$inferInsert> = [];
 
-  // Capítulos na mesma fase de obra avançam em paralelo (SS); fases seguintes começam após a
-  // fase anterior (FS). Alvenaria / instalações podem arrancar com avanço sobre a estrutura
-  // (SS + lag), evitando o encadeamento ingénuo capítulo-a-capítulo que alongava a obra irrealisticamente.
+  // Capítulos na ordem do mapa, encadeados FS (Finish-to-Start) — sequência previsível e auditável.
   for (let index = 0; index < scheduledRoots.length; index += 1) {
-    const root = scheduledRoots[index];
-    const rank = chapterPhaseRank(root.node.description);
-    const priorPhase = [...rootTasks].reverse().find((t) => t.phaseRank < rank);
-    const samePhase = [...rootTasks].reverse().find((t) => t.phaseRank === rank);
-
-    let startDate = args.startDate;
-    let predecessor: (typeof rootTasks)[number] | undefined;
-    let depType: "FS" | "SS" = "FS";
-    let lagDays = 0;
-
-    if (samePhase) {
-      predecessor = samePhase;
-      depType = "SS";
-      lagDays = 0;
-      startDate = samePhase.startDate;
-    } else if (priorPhase) {
-      predecessor = priorPhase;
-      // Estrutura → alvenaria/instalações: começa depois de ~1/3 da estrutura (piso térreo tipicamente pronto).
-      const earlyStart = (rank === 3 || rank === 4) && priorPhase.phaseRank === 2;
-      if (earlyStart) {
-        depType = "SS";
-        lagDays = Math.max(1, Math.floor(priorPhase.durationDays * 0.35));
-        startDate = shiftWorkingDays(priorPhase.startDate, lagDays);
-      } else {
-        depType = "FS";
-        lagDays = 0;
-        startDate = addWorkingDays(priorPhase.endDate, 1);
-      }
-    }
-
-    const rootTask = await insertScheduledNode(root, args, null, String(index + 1), startDate, sortOrderRef, dependencyValues);
-    if (predecessor) {
-      dependencyValues.push({
-        predecessorTaskId: predecessor.id,
-        successorTaskId: rootTask.id,
-        type: depType,
-        lagDays,
-      });
-    }
-    rootTasks.push({ ...rootTask, phaseRank: rank });
+    const rootTask = await insertScheduledNode(scheduledRoots[index], args, null, String(index + 1), cursor, sortOrderRef, dependencyValues);
+    rootTasks.push(rootTask);
+    cursor = addWorkingDays(rootTask.endDate, 1);
+  }
+  if (rootTasks.length > 1) {
+    dependencyValues.push(...rootTasks.slice(1).map((task, index) => ({
+      predecessorTaskId: rootTasks[index].id,
+      successorTaskId: task.id,
+      type: "FS" as const,
+      lagDays: 0,
+    })));
   }
   if (dependencyValues.length) await db.insert(scheduleDependencies).values(dependencyValues);
   const schedule = await getProjectSchedule(args.projectId);

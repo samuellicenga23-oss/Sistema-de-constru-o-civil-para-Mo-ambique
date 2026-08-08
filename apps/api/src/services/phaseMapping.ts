@@ -75,6 +75,11 @@ const CHAPTER_TO_PHASE: Record<string, PhaseKey> = {
   cobertura: "cobertura",
   "instalacao hidraulica": "instalacoes",
   "saneamento autonomo (fossa septica)": "instalacoes",
+  "instalacoes electricas": "instalacoes",
+  "instalacao electrica": "instalacoes",
+  "portas janelas e caixilharias": "esquadrias",
+  "portas e janelas": "esquadrias",
+  caixilharias: "esquadrias",
 };
 
 // Dentro de um capítulo classificado como "estrutura", uma destas palavras no item ou num dos seus
