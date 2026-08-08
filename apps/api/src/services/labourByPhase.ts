@@ -1,9 +1,34 @@
 import { eq, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { budgetDocuments, lineItems, measurementCertificates, projects } from "../db/schema.js";
-import { getCompositionLabourQuantitiesV2 as getCompositionLabourQuantities } from "./costEngineV2.js";
+import { getCompositionLabourQuantitiesV2 as getCompositionLabourQuantities, type CompositionLabourQuantityLineV2 } from "./costEngineV2.js";
 import { getCertificateDetail } from "./measurementEngine.js";
+import { listLineItemCostSnapshots } from "./costSnapshotService.js";
 import { CONSTRUCTION_PHASES, mapToPhase, phaseLabel, type PhaseKey } from "./phaseMapping.js";
+
+// Mesma lógica de materialsByPhase.ts: um auto já aprovado não pode reportar mão-de-obra que
+// muda sozinha porque alguém editou o custo/hora no Catálogo depois — usa o snapshot congelado
+// da própria linha quando existe, só cai para a composição ao vivo se ainda não há snapshot.
+async function resolveLabourQuantities(
+  lineItemId: string,
+  compositionId: string,
+  companyId: string,
+  zoneId: string | null,
+): Promise<CompositionLabourQuantityLineV2[]> {
+  const snapshots = await listLineItemCostSnapshots(lineItemId);
+  const latest = snapshots[0];
+  if (latest?.resourceSnapshot?.labour?.length) {
+    return latest.resourceSnapshot.labour.map((line: any) => ({
+      labourCategoryId: line.labourCategoryId,
+      familyKey: line.familyKey,
+      name: line.name,
+      hoursPerUnit: line.hoursPerUnit,
+      hourlyRate: line.hourlyRate,
+      currency: line.currency,
+    }));
+  }
+  return getCompositionLabourQuantities(compositionId, companyId, zoneId);
+}
 
 export type PhaseLabourLine = {
   labourCategoryId: string;
@@ -68,11 +93,11 @@ export async function computeLabourByPhase(certificateId: string, companyId: str
       }
       continue;
     }
-    if (!resourceCache.has(compositionId)) {
-      resourceCache.set(compositionId, await getCompositionLabourQuantities(compositionId, companyId, context.project.zoneId));
+    if (!resourceCache.has(line.lineItemId)) {
+      resourceCache.set(line.lineItemId, await resolveLabourQuantities(line.lineItemId, compositionId, companyId, context.project.zoneId));
     }
     const bucket = buckets.get(phaseKey) ?? new Map<string, PhaseLabourLine>();
-    for (const resource of resourceCache.get(compositionId)!) {
+    for (const resource of resourceCache.get(line.lineItemId)!) {
       const plannedHours = (line.budgetedQty ?? 0) * resource.hoursPerUnit;
       const periodHours = line.periodQty * resource.hoursPerUnit;
       const cumulativeHours = line.cumulativeQty * resource.hoursPerUnit;

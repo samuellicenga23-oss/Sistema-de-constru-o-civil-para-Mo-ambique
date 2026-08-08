@@ -241,7 +241,7 @@ export async function markInstallmentPaid(
 
   const amount = Number(owned.amount);
   const paidAmount = input.paidAmount != null ? Math.min(Math.max(0, input.paidAmount), amount) : amount;
-  const status = paidAmount <= 0 ? "prevista" : paidAmount + 0.009 >= amount ? "paga" : "parcial";
+  const status = paidAmount <= 0 ? "prevista" : paidAmount + 0.01 >= amount ? "paga" : "parcial";
   const [row] = await db
     .update(projectClientPaymentInstallments)
     .set({

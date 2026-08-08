@@ -41,7 +41,7 @@ const taskInput = z.object({
   budgetChapterCode: z.string().max(30).nullable().optional(),
   startDate: z.string().refine(isWorkingDay, { message: "A obra não trabalha ao domingo — escolha uma data de segunda a sábado" }),
   endDate: z.string().optional(),
-  durationDays: z.number().int().positive().optional(),
+  durationDays: z.number().int().nonnegative().optional(),
   manualProgress: z.number().min(0).max(100).nullable().optional(),
   status: z.enum(["nao_iniciado", "em_curso", "bloqueado", "concluido"]).default("nao_iniciado"),
   notes: z.string().nullable().optional(),
@@ -261,9 +261,11 @@ export async function scheduleRoutes(app: FastifyInstance) {
     const durationDays = parsed.data.durationDays ?? (parsed.data.endDate ? workingDaysInclusive(parsed.data.startDate, parsed.data.endDate) : 1);
     // Com predecessora definida, as datas são sempre calculadas a partir dela (FS/SS/FF/SF +
     // folga) — nunca da data escrita manualmente, para nunca ficarem inconsistentes.
+    // Marco (duração 0): fim == início, nunca um dia útil ANTES do início.
     const { startDate, endDate } = predecessorTask
       ? computeSuccessorDates(predecessorTask, parsed.data.dependencyType, parsed.data.lagDays, durationDays)
-      : { startDate: parsed.data.startDate, endDate: parsed.data.endDate ?? addWorkingDays(parsed.data.startDate, durationDays - 1) };
+      : { startDate: parsed.data.startDate, endDate: parsed.data.endDate ?? (durationDays > 0 ? addWorkingDays(parsed.data.startDate, durationDays - 1) : parsed.data.startDate) };
+    if (endDate < startDate) return reply.code(400).send({ error: "A data final não pode ser anterior ao início" });
     const { predecessorTaskId, dependencyType, lagDays, manualProgress, startDate: _startDate, endDate: _endDate, ...values } = parsed.data;
     const [task] = await db.insert(scheduleTasks).values({
       ...values,
@@ -307,7 +309,7 @@ export async function scheduleRoutes(app: FastifyInstance) {
     let startDate = parsed.data.startDate ?? current.startDate;
     let endDate = parsed.data.endDate ?? current.endDate;
     let durationDays = parsed.data.durationDays ?? current.durationDays;
-    if (parsed.data.durationDays !== undefined && parsed.data.endDate === undefined) endDate = addWorkingDays(startDate, durationDays - 1);
+    if (parsed.data.durationDays !== undefined && parsed.data.endDate === undefined) endDate = durationDays > 0 ? addWorkingDays(startDate, durationDays - 1) : startDate;
     if (parsed.data.endDate !== undefined && parsed.data.durationDays === undefined) durationDays = workingDaysInclusive(startDate, endDate);
     // Com predecessora definida, as datas nunca vêm do que foi escrito à mão — são sempre
     // recalculadas a partir dela (FS/SS/FF/SF + folga), tal como na criação da tarefa.

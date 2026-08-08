@@ -158,21 +158,23 @@ export function computeSuccessorDates(
   lagDays: number,
   durationDays: number,
 ): { startDate: string; endDate: string } {
-  const duration = Math.max(1, Math.round(durationDays));
+  const duration = Math.max(0, Math.round(durationDays));
+  const endFromStart = (startDate: string) => duration === 0 ? startDate : addWorkingDays(startDate, duration - 1);
+  const startFromEnd = (endDate: string) => duration === 0 ? endDate : shiftWorkingDays(endDate, -(duration - 1));
   if (type === "SS") {
     const startDate = shiftWorkingDays(predecessor.startDate, lagDays);
-    return { startDate, endDate: addWorkingDays(startDate, duration - 1) };
+    return { startDate, endDate: endFromStart(startDate) };
   }
   if (type === "FF") {
     const endDate = shiftWorkingDays(predecessor.endDate, lagDays);
-    return { startDate: shiftWorkingDays(endDate, -(duration - 1)), endDate };
+    return { startDate: startFromEnd(endDate), endDate };
   }
   if (type === "SF") {
     const endDate = shiftWorkingDays(predecessor.startDate, lagDays);
-    return { startDate: shiftWorkingDays(endDate, -(duration - 1)), endDate };
+    return { startDate: startFromEnd(endDate), endDate };
   }
   const startDate = shiftWorkingDays(predecessor.endDate, 1 + lagDays);
-  return { startDate, endDate: addWorkingDays(startDate, duration - 1) };
+  return { startDate, endDate: endFromStart(startDate) };
 }
 
 type FloorScope = "project" | "floor" | "deck" | "roof" | "footing" | "room_wall";
@@ -455,7 +457,7 @@ function makeControlActivity(key: string, name: string, durationDays: number, st
     sourceLineItemId: null,
     sourceCode: null,
     valueShare: 0,
-    durationDays: Math.max(1, Math.round(durationDays)),
+    durationDays: stage === "milestone" ? 0 : Math.max(1, Math.round(durationDays)),
     durationBasis: "minimo",
     floorIndex,
     zoneId: null,
@@ -498,7 +500,7 @@ function wireLifecycleControls(roots: PlannedNode[], dependencies: PlannedDepend
   const seen = new Set(deps.map((dep) => `${dep.predecessorKey}>${dep.successorKey}>${dep.type}>${dep.lagDays}`));
   const foundations = leaves.filter((node) => node.sourceCode === "3.2");
   const foundationMilestone = leaves.find((node) => node.key === "control:milestone:foundations");
-  for (const foundation of foundations) addUniqueDependency(deps, seen, foundation, foundationMilestone);
+  for (const foundation of foundations) addUniqueDependency(deps, seen, foundation, foundationMilestone, "FF");
 
   for (const slab of leaves.filter((node) => node.sourceCode === "3.5")) {
     const cure = leaves.find((node) => node.key === `control:cure:${slab.key}`);
@@ -513,7 +515,7 @@ function wireLifecycleControls(roots: PlannedNode[], dependencies: PlannedDepend
       addUniqueDependency(deps, seen, milestone, successor, dep.type, 0);
     }
     addUniqueDependency(deps, seen, slab, cure);
-    addUniqueDependency(deps, seen, cure, milestone);
+    addUniqueDependency(deps, seen, cure, milestone, "FF");
   }
   return deps;
 }
@@ -819,7 +821,11 @@ function buildStandardChapter(
           ? [makeSummary(`group:${root.id}:floor:${floorIndex}:zone:${zone.id}`, `${zone.label}`, null, zoneTasks)]
           : [];
       });
-      const floorChildren = [...noZone, ...zoneGroups];
+      const configuredZoneIds = new Set(profile.zones.map((zone) => zone.id));
+      const physicalGroups = [...byZone.entries()].flatMap(([zoneId, zoneTasks]) => configuredZoneIds.has(zoneId)
+        ? []
+        : [makeSummary(`group:${root.id}:floor:${floorIndex}:zone:${zoneId}`, zoneTasks[0]?.zoneLabel ?? "Elemento", null, zoneTasks)]);
+      const floorChildren = [...noZone, ...zoneGroups, ...physicalGroups];
       children.push(makeSummary(
         `group:${root.id}:floor:${floorIndex}`,
         `${groupLabel ?? root.name} — ${locationLabel}`,
@@ -1211,6 +1217,7 @@ function buildStandardDependencies(
 function tradeForActivity(activity: PlannedNode): PlanningTrade {
   const explicit = planningTradeForCode(activity.sourceCode);
   if (explicit) return explicit;
+  if (activity.executionStage === "structure" || activity.executionStage === "milestone") return "structure";
   return activity.executionStage === "external" ? "external" : "finishes";
 }
 
@@ -1223,7 +1230,7 @@ function applyFrontCapacityDependencies(
   if (profile.locationStrategy === "boq") return dependencies;
   const deps = [...dependencies];
   const seen = new Set(deps.map((dep) => `${dep.predecessorKey}>${dep.successorKey}>${dep.type}>${dep.lagDays}`));
-  const activities = activityNodes(roots).filter((activity) => activity.floorIndex !== null || activity.zoneId !== null);
+  const activities = activityNodes(roots).filter((activity) => activity.sourceLineItemId && (activity.floorIndex !== null || activity.zoneId !== null));
   let constraintsAdded = 0;
 
   for (const trade of Object.keys(profile.tradeFronts) as PlanningTrade[]) {
@@ -1312,7 +1319,7 @@ function scheduleDates(roots: PlannedNode[], dependencies: PlannedDependency[], 
       activityStart = maxDate(activityStart, candidate.startDate);
     }
     activity.startDate = activityStart;
-    activity.endDate = addWorkingDays(activityStart, activity.durationDays - 1);
+    activity.endDate = activity.durationDays === 0 ? activityStart : addWorkingDays(activityStart, activity.durationDays - 1);
   }
 
   const rollup = (node: PlannedNode) => {

@@ -61,6 +61,7 @@ export async function contractRoutes(app: FastifyInstance) {
     const parsed = z.object({ title: z.string().trim().min(1).max(200), reason: z.string().trim().min(1).max(3000), amount: z.number() }).safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     const [variation] = await db.insert(contractVariations).values({ contractId: id, ...parsed.data, amount: parsed.data.amount.toFixed(2) }).returning();
+    await recordAuditEvent({ companyId: request.currentUser!.companyId!, projectId: contract.projectId, actorUserId: request.currentUser!.id, entityType: "contract_variation", entityId: variation.id, action: "created", after: { title: variation.title, amount: variation.amount } });
     return reply.code(201).send(variation);
   });
 
@@ -73,6 +74,7 @@ export async function contractRoutes(app: FastifyInstance) {
     const parsed = z.object({ status: z.enum(["submetida", "aprovada", "rejeitada"]), decisionNote: z.string().max(1000).optional() }).safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     const [updated] = await db.update(contractVariations).set({ status: parsed.data.status, submittedByUserId: parsed.data.status === "submetida" ? request.currentUser!.id : variation.submittedByUserId, approvedByUserId: parsed.data.status === "aprovada" ? request.currentUser!.id : variation.approvedByUserId, decisionNote: parsed.data.decisionNote }).where(eq(contractVariations.id, id)).returning();
+    await recordAuditEvent({ companyId: request.currentUser!.companyId!, projectId: contract.projectId, actorUserId: request.currentUser!.id, entityType: "contract_variation", entityId: id, action: `status.${updated.status}` });
     return updated;
   });
 

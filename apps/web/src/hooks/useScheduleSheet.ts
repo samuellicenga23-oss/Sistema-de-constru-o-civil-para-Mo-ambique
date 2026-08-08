@@ -58,7 +58,9 @@ export function useScheduleSheet(tasks: ScheduleTask[], onChanged: () => Promise
       }
       if (cell === "duration") {
         const days = Number(value);
-        if (!Number.isFinite(days) || days < 1) throw new Error("Duração deve ser ≥ 1 dia útil");
+        if (!Number.isFinite(days) || days < (task.isMilestone ? 0 : 1)) {
+          throw new Error(task.isMilestone ? "O marco deve ter duração igual ou superior a 0" : "Duração deve ser ≥ 1 dia útil");
+        }
         if (days === task.durationDays) return setEditing(null);
         return void savePatch(task, { startDate: task.startDate, durationDays: days });
       }

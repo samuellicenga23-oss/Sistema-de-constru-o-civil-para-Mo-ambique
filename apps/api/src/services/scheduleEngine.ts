@@ -327,8 +327,11 @@ async function preparePlanning(args: {
       weight: Math.max(0.01, Number(row.perimeterM ?? row.areaM2 ?? 1)),
     }];
   });
-  const footingCount = plantRows.reduce((max, row) => Math.max(max, row.structuralSummary?.footingsCount ?? 0), 0);
-  const footings = Array.from({ length: Math.min(footingCount, 250) }, (_, index) => ({
+  // footingsCount vem de leitura por IA da planta — sem tecto, uma leitura errada (escala mal
+  // interpretada, um número de divisão confundido com contagem de sapatas) gera um array gigante
+  // e um WBS com milhares de linhas, ou um RangeError se ultrapassar o limite de um array em JS.
+  const footingCount = Math.min(300, plantRows.reduce((max, row) => Math.max(max, row.structuralSummary?.footingsCount ?? 0), 0));
+  const footings = Array.from({ length: footingCount }, (_, index) => ({
     key: `footing-${index + 1}`,
     label: `Sapata S${String(index + 1).padStart(2, "0")}`,
     floorLabel: null,

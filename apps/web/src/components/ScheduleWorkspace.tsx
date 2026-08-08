@@ -351,7 +351,7 @@ export default function ScheduleWorkspace({
                       id={`sched-row-${task.id}`}
                       onClick={() => onSelect(task.id)}
                       className={`${savingId === task.id ? "opacity-50" : ""} ${
-                        rowActive ? "bg-brand-50" : task.isSummary ? "bg-slate-50" : "bg-white hover:bg-slate-50/80"
+                        rowActive ? "bg-brand-50" : task.isSummary ? "bg-slate-50" : task.isMilestone ? "bg-amber-50" : "bg-white hover:bg-slate-50/80"
                       } ${rowActive ? "shadow-[inset_3px_0_0_#3b82f6]" : ""}`}
                     >
                       <SheetCell align="right" className="w-7">
@@ -396,7 +396,7 @@ export default function ScheduleWorkspace({
                             ) : (
                               <span className="inline-block h-5 w-5 shrink-0" />
                             )}
-                            <span className={`min-w-0 truncate ${task.isSummary ? "font-semibold text-slate-900" : "text-slate-700"}`} title={task.name}>
+                            <span className={`min-w-0 truncate ${task.isSummary || task.isMilestone ? "font-semibold text-slate-900" : "text-slate-700"}`} title={task.name}>
                               {task.name}
                             </span>
                           </div>
@@ -406,7 +406,7 @@ export default function ScheduleWorkspace({
                         {cell === "duration" ? (
                           <CellInput type="number" step="1" value={String(task.durationDays)} onCommit={(v) => void commitCell(task, "duration", v)} onCancel={() => setEditing(null)} />
                         ) : (
-                          <span className="tabular-nums text-slate-600">{task.durationDays}d</span>
+                          <span className="tabular-nums text-slate-600">{task.isMilestone ? "Marco" : `${task.durationDays}d`}</span>
                         )}
                       </SheetCell>
                       <SheetCell onEdit={() => startEdit(task, "start", onSelect)}>
@@ -511,7 +511,7 @@ export default function ScheduleWorkspace({
                     type="button"
                     onClick={() => onSelect(task.id)}
                     className={`relative block w-full border-b border-slate-100 text-left transition ${
-                      rowActive ? "bg-brand-50/70" : task.isSummary ? "bg-slate-50/50" : "bg-white hover:bg-slate-50/60"
+                      rowActive ? "bg-brand-50/70" : task.isSummary ? "bg-slate-50/50" : task.isMilestone ? "bg-amber-50/70" : "bg-white hover:bg-slate-50/60"
                     }`}
                     style={{ height: ROW_H }}
                     aria-label={`Seleccionar ${task.name}`}
@@ -530,7 +530,9 @@ export default function ScheduleWorkspace({
                       className="absolute h-1 rounded-sm bg-slate-300"
                       style={{ left: `${baselineLeft}%`, width: `${baselineWidth}%`, top: task.isSummary ? 12 : 10 }}
                     />
-                    {task.isSummary ? (
+                    {task.isMilestone ? (
+                      <span className="absolute h-3.5 w-3.5 rotate-45 bg-brand-500 ring-2 ring-white" style={{ left: `${left}%`, top: 11 }} />
+                    ) : task.isSummary ? (
                       <span
                         className="absolute h-2.5 bg-slate-500"
                         style={{ left: `${left}%`, width: `${width}%`, top: 16 }}

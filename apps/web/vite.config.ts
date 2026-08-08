@@ -26,7 +26,8 @@ export default defineConfig({
             urlPattern: /^\/assets\//,
             handler: "StaleWhileRevalidate",
             options: {
-              cacheName: "sigo-versioned-assets",
+              // Nome versionado: ao mudar, o SW abandona caches antigos (cleanupOutdatedCaches).
+              cacheName: "sigo-versioned-assets-20260808",
               expiration: { maxEntries: 80, maxAgeSeconds: 7 * 24 * 60 * 60 },
             },
           },

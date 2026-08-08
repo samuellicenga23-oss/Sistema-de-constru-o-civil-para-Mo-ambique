@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { and, desc, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, or } from "drizzle-orm";
 import { db } from "../db/index.js";
 import {
   suppliers,
@@ -183,6 +183,26 @@ export async function quoteRequestRoutes(app: FastifyInstance) {
     }
     if (!supplier.supplierAccountId) {
       return reply.code(409).send({ error: "Este fornecedor ainda não tem conta activa no Portal do Fornecedor" });
+    }
+
+    // Sem constraint única no schema — um duplo clique ou reenvio da mesma cotação em segundos
+    // gerava dois RFQs idênticos, confundindo o fornecedor. Bloqueia repetição do mesmo título
+    // para o mesmo fornecedor enquanto ainda estiver "enviado" há menos de 2 minutos.
+    const recentDuplicate = await db
+      .select({ id: quoteRequests.id })
+      .from(quoteRequests)
+      .where(
+        and(
+          eq(quoteRequests.companyId, companyId),
+          eq(quoteRequests.supplierId, parsed.data.supplierId),
+          eq(quoteRequests.title, parsed.data.title),
+          eq(quoteRequests.status, "enviado"),
+          gt(quoteRequests.createdAt, new Date(Date.now() - 2 * 60 * 1000)),
+        ),
+      )
+      .limit(1);
+    if (recentDuplicate.length > 0) {
+      return reply.code(409).send({ error: "Já foi enviado um pedido de cotação igual a este fornecedor há instantes" });
     }
 
     if (parsed.data.projectId) {

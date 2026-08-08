@@ -3,9 +3,43 @@ import { db } from "../db/index.js";
 import { budgetDocuments, lineItems, projects } from "../db/schema.js";
 import { DEFAULT_REBAR_LENGTH_M, rebarWeightPerMeter } from "@sigo/shared";
 import { getBudgetDocumentSummary, type LineItemNode } from "./boqEngine.js";
-import { getCompositionMaterialQuantitiesV2 as getCompositionMaterialQuantities } from "./costEngineV2.js";
+import { getCompositionMaterialQuantitiesV2 as getCompositionMaterialQuantities, type CompositionMaterialQuantityLineV2 } from "./costEngineV2.js";
 import { getCertificateDetail } from "./measurementEngine.js";
+import { listLineItemCostSnapshots } from "./costSnapshotService.js";
 import { CONSTRUCTION_PHASES, mapToPhase, phaseLabel, type PhaseKey } from "./phaseMapping.js";
+
+// Uma vez aprovado/gerado o item, o custo fica congelado num snapshot (ver costSnapshotService)
+// exactamente para o Auto de medição, o BOQ e o relatório de materiais nunca se desalinharem
+// depois de o utilizador editar preços/receitas no Catálogo. Antes desta função, este ficheiro
+// lia sempre a composição AO VIVO, pelo que "materiais por fase" e "saldo de compras" podiam
+// divergir silenciosamente do valor já certificado ao cliente — corrigido lendo o snapshot mais
+// recente da própria linha quando existe, e só recorrendo à composição ao vivo quando não há
+// snapshot ainda (documento em rascunho, nunca aprovado/reprecificado).
+async function resolveMaterialQuantities(
+  lineItemId: string,
+  compositionId: string,
+  companyId: string | null,
+  zoneId: string | null,
+): Promise<CompositionMaterialQuantityLineV2[]> {
+  const snapshots = await listLineItemCostSnapshots(lineItemId);
+  const latest = snapshots[0];
+  if (latest?.resourceSnapshot?.materials?.length) {
+    return latest.resourceSnapshot.materials.map((line: any) => ({
+      materialId: line.materialId,
+      familyKey: line.familyKey,
+      name: line.name,
+      unit: line.unit,
+      qtyPerUnit: line.qtyPerUnit,
+      baseQtyPerUnit: line.qtyPerUnit,
+      wastePct: 0,
+      unitCost: line.unitCost,
+      currency: line.currency,
+      purchasePackageLabel: null,
+      purchasePackageQty: null,
+    }));
+  }
+  return getCompositionMaterialQuantities(compositionId, companyId, zoneId);
+}
 
 export type PhaseMaterialLine = {
   materialId: string;
@@ -119,10 +153,12 @@ export async function computeMaterialsByPhase(documentId: string, companyId: str
       const quantity = node.quantity ?? 0;
 
       if (node.compositionId) {
-        if (!compositionQtyCache.has(node.compositionId)) {
-          compositionQtyCache.set(node.compositionId, await getCompositionMaterialQuantities(node.compositionId, companyId, zoneId));
+        // Cache por LINHA (não por composição): duas linhas com a mesma composição podem ter
+        // snapshots congelados em momentos diferentes, por isso não podem partilhar resultado.
+        if (!compositionQtyCache.has(node.id)) {
+          compositionQtyCache.set(node.id, await resolveMaterialQuantities(node.id, node.compositionId, companyId, zoneId));
         }
-        const lines = compositionQtyCache.get(node.compositionId)!;
+        const lines = compositionQtyCache.get(node.id)!;
         const bucket = materialTotals.get(phaseKey)!;
         for (const line of lines) {
           const addQty = line.qtyPerUnit * quantity;
@@ -220,10 +256,10 @@ export async function computeMaterialsFromCertificate(
     if (!(measuredQty > 0)) continue;
     const compositionId = compositionByItem.get(line.lineItemId);
     if (!compositionId) continue;
-    if (!cache.has(compositionId)) {
-      cache.set(compositionId, await getCompositionMaterialQuantities(compositionId, companyId, context.zoneId));
+    if (!cache.has(line.lineItemId)) {
+      cache.set(line.lineItemId, await resolveMaterialQuantities(line.lineItemId, compositionId, companyId, context.zoneId));
     }
-    for (const resource of cache.get(compositionId)!) {
+    for (const resource of cache.get(line.lineItemId)!) {
       if (!resource.materialId) continue;
       const addQty = resource.qtyPerUnit * measuredQty;
       const addValue = addQty * resource.unitCost;

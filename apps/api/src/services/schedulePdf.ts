@@ -85,7 +85,7 @@ export function buildScheduleHtml(
     const children = task.isSummary ? schedule.tasks.filter((child) => child.parentId === task.id).length : 0;
     return `<tr class="${task.isSummary ? "summary-row" : task.parentId ? "child-row" : ""}">
       <td class="code">${esc(task.code)}</td><td class="task"><strong>${task.parentId ? '<i class="branch"></i>' : ""}${esc(task.name)}</strong><small>${task.isSummary ? `${children} subactividade${children === 1 ? "" : "s"} · resumo calculado` : task.parentId ? `Subactividade · ${esc(statusLabel)}` : esc(statusLabel)}</small></td>
-      <td>${dateLabel(task.startDate)}</td><td>${dateLabel(task.endDate)}</td><td class="num">${task.durationDays} d</td><td class="num">${task.progress.toFixed(2)}%</td>
+      <td>${dateLabel(task.startDate)}</td><td>${dateLabel(task.endDate)}</td><td class="num">${task.isMilestone ? "Marco" : `${task.durationDays} d`}</td><td class="num">${task.progress.toFixed(2)}%</td>
       <td class="gantt"><div class="gridlines">${monthMarkers.map((marker) => `<i style="left:${marker.left}%"></i>`).join("")}</div><span class="baseline" style="left:${baselineLeft}%;width:${baselineWidth}%"></span><span class="bar ${task.status} ${task.isSummary ? "summary-bar" : ""}" style="left:${left}%;width:${width}%"><b style="width:${Math.min(100, task.progress)}%"></b></span></td>
     </tr>`;
   }).join("");

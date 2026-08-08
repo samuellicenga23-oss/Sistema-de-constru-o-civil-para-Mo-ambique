@@ -66,6 +66,10 @@ function depExists(plan: ReturnType<typeof buildExecutionPlan>, predecessorKey: 
   return plan.dependencies.some((dep) => dep.predecessorKey === predecessorKey && dep.successorKey === successorKey);
 }
 
+function slabMilestone(plan: ReturnType<typeof buildExecutionPlan>, slabKey: string) {
+  return activities(plan).find((node) => node.key === `control:milestone:slab:${slabKey}`)!;
+}
+
 function expectSharesClose(plan: ReturnType<typeof buildExecutionPlan>) {
   for (const row of validateValueShares(plan.roots)) expect(row.totalShare).toBe(1);
 }
@@ -125,11 +129,11 @@ describe("Motor profissional de WBS", () => {
     expect(byCode(plan, "4.1")).toHaveLength(3);
     const slab0 = byCode(plan, "3.5").find((node) => node.floorIndex === 0)!;
     const columns1 = byCode(plan, "3.3").find((node) => node.floorIndex === 1)!;
-    expect(depExists(plan, slab0.key, columns1.key)).toBe(true);
-    expect(plan.dependencies.find((dep) => dep.predecessorKey === slab0.key && dep.successorKey === columns1.key)?.lagDays).toBe(6);
+    expect(depExists(plan, slabMilestone(plan, slab0.key).key, columns1.key)).toBe(true);
+    expect(activities(plan).find((node) => node.key === `control:cure:${slab0.key}`)?.durationDays).toBe(6);
     const columns2 = byCode(plan, "3.3").find((node) => node.floorIndex === 2)!;
     const slab1 = byCode(plan, "3.5").find((node) => node.floorIndex === 1)!;
-    expect(depExists(plan, slab1.key, columns2.key)).toBe(true);
+    expect(depExists(plan, slabMilestone(plan, slab1.key).key, columns2.key)).toBe(true);
     expectSharesClose(plan);
   });
 
@@ -156,8 +160,8 @@ describe("Motor profissional de WBS", () => {
     const roofMesh = byCode(plan, "3.7")[0];
     expect(roofMesh.name).toBe("Montar malha de armadura da laje — Cobertura");
     expect(depExists(plan, roofMesh.key, slab.key)).toBe(true);
-    expect(depExists(plan, slab.key, byCode(plan, "10.1")[0].key)).toBe(true);
-    expect(plan.dependencies.find((dep) => dep.predecessorKey === slab.key && dep.successorKey === byCode(plan, "10.1")[0].key)?.lagDays).toBe(6);
+    expect(depExists(plan, slabMilestone(plan, slab.key).key, byCode(plan, "10.1")[0].key)).toBe(true);
+    expect(activities(plan).find((node) => node.key === `control:cure:${slab.key}`)?.durationDays).toBe(6);
     expectSharesClose(plan);
   });
 
@@ -201,9 +205,9 @@ describe("Motor profissional de WBS", () => {
     expect(slabs.find((node) => node.floorIndex === 1)?.name).toMatch(/Cobertura$/);
     const slab0 = slabs.find((node) => node.floorIndex === 0)!;
     const columns1 = byCode(plan, "3.3").find((node) => node.floorIndex === 1)!;
-    expect(depExists(plan, slab0.key, columns1.key)).toBe(true);
+    expect(depExists(plan, slabMilestone(plan, slab0.key).key, columns1.key)).toBe(true);
     const roofSlab = slabs.find((node) => node.floorIndex === 1)!;
-    expect(depExists(plan, roofSlab.key, byCode(plan, "10.1")[0].key)).toBe(true);
+    expect(depExists(plan, slabMilestone(plan, roofSlab.key).key, byCode(plan, "10.1")[0].key)).toBe(true);
     expectSharesClose(plan);
   });
 
@@ -427,6 +431,44 @@ describe("Motor profissional de WBS", () => {
     expect(adjusted.naturalDurationDays).toBe(natural.durationDays);
     expect(adjusted.targetDurationDays).toBe(natural.durationDays + 10);
     expect(adjusted.durationDays).toBeGreaterThanOrEqual(natural.durationDays);
+  });
+
+  it("gera EAP física por sapata, compartimento e laje sem duplicar o orçamento", () => {
+    const sections = [standardSection([
+      chapter("2", "MOVIMENTOS DE TERRA", [leaf("2.1", "Escavação de sapatas", 6)]),
+      chapter("3", "ESTRUTURA", [
+        leaf("3.1", "Betão de limpeza", 6), leaf("3.2", "Betão em sapatas", 6),
+        leaf("3.3", "Pilares", 8), leaf("3.4", "Vigas", 8),
+        leaf("3.5", "Lajes", 8), leaf("3.7", "Armadura de cobertura", 2),
+      ]),
+      chapter("4", "ALVENARIAS", [leaf("4.1", "Paredes", 8)]),
+    ])];
+    const context = buildPlanningContext(sections, 2, ["Piso térreo", "Piso superior"]);
+    const profile = defaultSchedulePlanningProfile(context, "2026-08-10");
+    const plan = buildExecutionPlan({
+      sections, floors: 2, startDate: profile.startDate, profile,
+      physicalContext: {
+        source: "plants",
+        footings: [1, 2].map((number) => ({ key: `s${number}`, label: `Sapata S0${number}`, floorLabel: null, weight: 1 })),
+        slabs: [
+          { key: "l1", label: "Laje do piso superior (15.00 cm)", floorLabel: "Piso térreo", weight: 80 },
+          { key: "l2", label: "Laje de cobertura (12.00 cm)", floorLabel: "Piso superior", weight: 70 },
+        ],
+        rooms: [
+          { key: "sala", label: "Sala de estar", floorLabel: "Piso térreo", weight: 18 },
+          { key: "quarto", label: "Quarto 01", floorLabel: "Piso superior", weight: 14 },
+        ],
+      },
+    });
+
+    expect(byCode(plan, "2.1").map((task) => task.name)).toEqual(expect.arrayContaining([expect.stringContaining("Sapata S01"), expect.stringContaining("Sapata S02")]));
+    expect(byCode(plan, "4.1").map((task) => task.name)).toEqual(expect.arrayContaining([expect.stringContaining("Sala de estar"), expect.stringContaining("Quarto 01")]));
+    expect(byCode(plan, "3.5")).toHaveLength(2);
+    expect(activities(plan).filter((task) => task.name.startsWith("Curar e proteger a laje"))).toHaveLength(2);
+    const milestones = activities(plan).filter((task) => task.name.startsWith("◆ Marco"));
+    expect(milestones).toHaveLength(3);
+    expect(milestones.every((task) => task.durationDays === 0 && task.startDate === task.endDate)).toBe(true);
+    expectSharesClose(plan);
   });
 
 });

@@ -160,7 +160,7 @@ export default function ScheduleSheetModal({ tasks, byId, onClose, onChanged, on
                 const cell = editing?.id === task.id ? editing.cell : null;
                 const predLabel = formatPredecessorLabel(task, byId);
                 return (
-                  <tr key={task.id} className={`${savingId === task.id ? "opacity-50" : ""} ${task.isSummary ? "bg-slate-50" : "bg-white hover:bg-slate-50/80"}`}>
+                  <tr key={task.id} className={`${savingId === task.id ? "opacity-50" : ""} ${task.isSummary ? "bg-slate-50" : task.isMilestone ? "bg-amber-50" : "bg-white hover:bg-slate-50/80"}`}>
                     <SheetCell align="right" className="w-9" rowH={40}>
                       {!task.isSummary && (
                         <input type="checkbox" checked={selected.has(task.id)} onChange={() => toggleSelected(task.id)} className="h-3.5 w-3.5 rounded border-slate-300" />
@@ -180,7 +180,7 @@ export default function ScheduleSheetModal({ tasks, byId, onClose, onChanged, on
                           <CellInput value={task.name} onCommit={(v) => void commitCell(task, "name", v)} onCancel={() => setEditing(null)} />
                         </div>
                       ) : (
-                        <span className={task.isSummary ? "font-semibold text-slate-900" : "text-slate-700"} style={{ paddingLeft: (task.wbsDepth ?? (task.parentId ? 1 : 0)) * 16 }}>
+                        <span className={task.isSummary || task.isMilestone ? "font-semibold text-slate-900" : "text-slate-700"} style={{ paddingLeft: (task.wbsDepth ?? (task.parentId ? 1 : 0)) * 16 }}>
                           {task.name}
                         </span>
                       )}
@@ -189,7 +189,7 @@ export default function ScheduleSheetModal({ tasks, byId, onClose, onChanged, on
                       {cell === "duration" ? (
                         <CellInput type="number" step="1" value={String(task.durationDays)} onCommit={(v) => void commitCell(task, "duration", v)} onCancel={() => setEditing(null)} />
                       ) : (
-                        <span className="tabular-nums text-slate-600">{task.durationDays}d</span>
+                        <span className="tabular-nums text-slate-600">{task.isMilestone ? "Marco" : `${task.durationDays}d`}</span>
                       )}
                     </SheetCell>
                     <SheetCell onEdit={() => startEdit(task, "start")} rowH={40}>

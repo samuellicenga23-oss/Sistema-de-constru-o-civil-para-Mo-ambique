@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import {
   projects,
@@ -127,7 +127,14 @@ function resolveInstallmentStatus(
 }
 
 async function loadContractValue(projectId: string): Promise<number | null> {
-  const [contract] = await db.select().from(projectContracts).where(eq(projectContracts.projectId, projectId)).limit(1);
+  // Um contrato em rascunho ainda não foi acordado, e um cancelado deixou de valer — nenhum dos
+  // dois deve aparecer como valor "do contrato" no link público, sob risco de mostrar ao dono da
+  // obra um número que nunca foi combinado (ou que já não é válido).
+  const [contract] = await db
+    .select()
+    .from(projectContracts)
+    .where(and(eq(projectContracts.projectId, projectId), inArray(projectContracts.status, ["activo", "concluido"])))
+    .limit(1);
   if (!contract) return null;
   const variations = await db
     .select()

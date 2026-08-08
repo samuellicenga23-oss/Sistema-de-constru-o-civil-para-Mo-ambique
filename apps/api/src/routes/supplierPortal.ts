@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { and, desc, eq, inArray, isNull, isNotNull } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, isNull, isNotNull } from "drizzle-orm";
 import { db } from "../db/index.js";
 import {
   suppliers,
@@ -325,6 +325,18 @@ export async function supplierPortalRoutes(app: FastifyInstance) {
     const parsed = createMaterialSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
 
+    // Catálogo nacional é partilhado por todas as empresas — sem verificação, cada fornecedor que
+    // digita o mesmo material de forma ligeiramente diferente cria uma entrada duplicada. Reaproveita
+    // a global existente com o mesmo nome em vez de multiplicar linhas no catálogo.
+    const [duplicate] = await db.select().from(materials).where(and(isNull(materials.companyId), ilike(materials.name, parsed.data.name.trim()))).limit(1);
+    if (duplicate) {
+      await addCatalogItem(supplier.id, "material", duplicate.id);
+      if (parsed.data.unitCost != null) {
+        await db.insert(supplierMaterialPrices).values({ supplierId: supplier.id, materialId: duplicate.id, zoneId: supplier.zoneId, unitCost: parsed.data.unitCost.toString(), currency: "MZN" });
+      }
+      return reply.code(200).send(duplicate);
+    }
+
     const [row] = await db
       .insert(materials)
       .values({
@@ -365,6 +377,16 @@ export async function supplierPortalRoutes(app: FastifyInstance) {
     const parsed = createLabourSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     const hourly = parsed.data.hourlyCost ?? 0;
+
+    const [duplicateLabour] = await db.select().from(labourCategories).where(and(isNull(labourCategories.companyId), ilike(labourCategories.name, parsed.data.name.trim()))).limit(1);
+    if (duplicateLabour) {
+      await addCatalogItem(supplier.id, "labour", duplicateLabour.id);
+      if (parsed.data.hourlyCost != null) {
+        await db.insert(supplierLabourPrices).values({ supplierId: supplier.id, labourCategoryId: duplicateLabour.id, zoneId: supplier.zoneId, hourlyCost: hourly.toString(), currency: "MZN" });
+      }
+      return reply.code(200).send(duplicateLabour);
+    }
+
     const [row] = await db
       .insert(labourCategories)
       .values({
@@ -403,6 +425,16 @@ export async function supplierPortalRoutes(app: FastifyInstance) {
     const parsed = createEquipmentSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     const hourly = parsed.data.hourlyCost ?? 0;
+
+    const [duplicateEquipment] = await db.select().from(equipment).where(and(isNull(equipment.companyId), ilike(equipment.name, parsed.data.name.trim()))).limit(1);
+    if (duplicateEquipment) {
+      await addCatalogItem(supplier.id, "equipment", duplicateEquipment.id);
+      if (parsed.data.hourlyCost != null) {
+        await db.insert(supplierEquipmentPrices).values({ supplierId: supplier.id, equipmentId: duplicateEquipment.id, zoneId: supplier.zoneId, hourlyCost: hourly.toString(), currency: "MZN" });
+      }
+      return reply.code(200).send(duplicateEquipment);
+    }
+
     const [row] = await db
       .insert(equipment)
       .values({

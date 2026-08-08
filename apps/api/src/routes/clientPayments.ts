@@ -3,6 +3,7 @@ import { z } from "zod";
 import { CURRENCIES } from "@sigo/shared";
 import { requireCompanyUser, requireRole } from "../auth/middleware.js";
 import { assertProjectOwned } from "../services/accessControl.js";
+import { recordAuditEvent } from "../services/auditTrail.js";
 import {
   addInstallment,
   deleteInstallment,
@@ -59,7 +60,17 @@ export async function clientPaymentRoutes(app: FastifyInstance) {
     if (!project) return reply.code(404).send({ error: "Projecto não encontrado" });
     const parsed = planSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    if (parsed.data.currency !== project.currency) {
+      return reply.code(400).send({ error: `A moeda do plano de pagamento deve ser a mesma da obra (${project.currency})` });
+    }
+    const before = await getClientPaymentPlan(projectId);
     const plan = await upsertClientPaymentPlan(projectId, parsed.data);
+    await recordAuditEvent({
+      companyId: companyIdOf(request), projectId, actorUserId: request.currentUser!.id,
+      entityType: "client_payment_plan", entityId: plan.id, action: before ? "updated" : "created",
+      before: before ? { mode: before.mode, currency: before.currency, totalAmount: before.totalAmount } : null,
+      after: { mode: plan.mode, currency: plan.currency, totalAmount: plan.totalAmount },
+    });
     return plan;
   });
 
@@ -90,6 +101,10 @@ export async function clientPaymentRoutes(app: FastifyInstance) {
     if (!project) return reply.code(404).send({ error: "Projecto não encontrado" });
     const ok = await deleteInstallment(projectId, id);
     if (!ok) return reply.code(404).send({ error: "Parcela não encontrada" });
+    await recordAuditEvent({
+      companyId: companyIdOf(request), projectId, actorUserId: request.currentUser!.id,
+      entityType: "client_payment_installment", entityId: id, action: "deleted",
+    });
     return { ok: true };
   });
 
@@ -101,6 +116,11 @@ export async function clientPaymentRoutes(app: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     const row = await markInstallmentPaid(projectId, id, parsed.data);
     if (!row) return reply.code(404).send({ error: "Parcela não encontrada" });
+    await recordAuditEvent({
+      companyId: companyIdOf(request), projectId, actorUserId: request.currentUser!.id,
+      entityType: "client_payment_installment", entityId: id, action: "marked_paid",
+      after: { status: row.status, paidAmount: row.paidAmount, paidAt: row.paidAt },
+    });
     return row;
   });
 }
