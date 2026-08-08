@@ -104,9 +104,8 @@ export async function scheduleRoutes(app: FastifyInstance) {
       budgetDocumentId: z.string().uuid(),
       startDate: z.string().refine(isWorkingDay, { message: "A obra não trabalha ao domingo — escolha uma data de segunda a sábado" }),
       totalDurationDays: z.number().int().min(7).max(3650).optional(),
-      // Trabalhadores disponíveis por frente de trabalho (equipa máxima que a obra consegue
-      // pôr numa mesma tarefa em simultâneo) — mais mão-de-obra disponível encurta as tarefas
-      // com muitas horas de trabalho até ao limite físico de cada pacote (não é linear).
+      // Equipa disponível por frente. A duração por composição é:
+      // horas/unidade × quantidade ÷ (equipa × 8 h/dia). Não há factor oculto de produtividade.
       maxCrewSize: z.number().int().min(1).max(60).optional(),
     }).safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });

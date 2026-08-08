@@ -29,6 +29,7 @@ export type SectionNode = {
   id: string;
   name: string;
   sortOrder: number;
+  templateKey: string | null;
   items: LineItemNode[];
   total: number;
   sellingTotal: number;

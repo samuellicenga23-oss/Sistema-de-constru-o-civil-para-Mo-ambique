@@ -218,6 +218,16 @@ export default function ProjectSchedulePage() {
   const doneCount = leafTasks.filter((t) => t.status === "concluido").length;
   const durationDays = schedule.startDate && schedule.endDate ? workingDaysInclusive(schedule.startDate, schedule.endDate) : 0;
   const progressTone = schedule.overallProgress >= 70 ? "positive" : schedule.overallProgress >= 30 ? "info" : "neutral";
+  const generationHasLongActivity = schedule.generationWarnings?.some((warning) => warning.code === "LONG_ACTIVITY") ?? false;
+  const technicalWarnings = [
+    ...(schedule.generationWarnings ?? []).map((warning) => warning.message),
+    ...(!generationHasLongActivity
+      ? (schedule.validation?.longActivities ?? []).map((task) => `${task.code} — ${task.name}: ${task.durationDays} dias úteis. Sugere-se subdividir por zona/frente/equipa.`)
+      : []),
+    ...(!(schedule.validation?.valueSharesValid ?? true)
+      ? (schedule.validation?.valueShareIssues ?? []).map((issue) => `Ligação BOQ/WBS ${issue.budgetItem}: valueShare acumulado ${issue.totalShare.toFixed(4)}; esperado 1.0000.`)
+      : []),
+  ];
 
   return (
     <Layout
@@ -269,6 +279,19 @@ export default function ProjectSchedulePage() {
         {error && (
           <AlertBanner tone="error" onDismiss={() => setError(null)}>
             {error}
+          </AlertBanner>
+        )}
+        {technicalWarnings.length > 0 && (
+          <AlertBanner tone="warning">
+            <div className="space-y-1">
+              <p className="font-semibold">Validação técnica da WBS</p>
+              <ul className="list-disc space-y-0.5 pl-5">
+                {technicalWarnings.slice(0, 5).map((message, index) => <li key={`${index}-${message}`}>{message}</li>)}
+              </ul>
+              {technicalWarnings.length > 5 && (
+                <p className="text-xs opacity-80">+{technicalWarnings.length - 5} aviso(s) adicionais.</p>
+              )}
+            </div>
           </AlertBanner>
         )}
 

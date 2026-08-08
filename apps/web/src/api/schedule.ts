@@ -1,14 +1,26 @@
 import { request } from "./http";
 
 export type ScheduleTaskStatus = "nao_iniciado" | "em_curso" | "bloqueado" | "concluido";
+export type ScheduleDurationBasis = "horas" | "valor" | "minimo" | "soma" | "manual";
+export type ScheduleWeightBasis = "horas" | "valor" | "minimo" | "manual" | "misto";
+
+export type ScheduleGenerationWarning = {
+  code: string;
+  message: string;
+  sourceCode: string | null;
+  activityName: string | null;
+};
+
 export type ScheduleTask = {
   id: string;
   projectId: string;
   parentId: string | null;
   budgetDocumentId: string | null;
+  budgetLineItemId: string | null;
   code: string;
   name: string;
   budgetChapterCode: string | null;
+  valueShare: string;
   startDate: string;
   endDate: string;
   baselineStartDate: string | null;
@@ -16,6 +28,7 @@ export type ScheduleTask = {
   actualStartDate: string | null;
   actualEndDate: string | null;
   durationDays: number;
+  durationBasis: ScheduleDurationBasis;
   manualProgress: string | null;
   status: ScheduleTaskStatus;
   notes: string | null;
@@ -27,8 +40,18 @@ export type ScheduleTask = {
   isSummary: boolean;
   wbsDepth?: number;
   predecessorTaskId: string | null;
+  predecessorTaskIds?: string[];
+  dependencyCount?: number;
   dependencyType: "FS" | "SS" | "FF" | "SF" | null;
   lagDays: number;
+};
+
+export type ScheduleValidation = {
+  valueSharesValid: boolean;
+  checkedBudgetItems: number;
+  crewSizePerFront?: number;
+  valueShareIssues?: Array<{ budgetItem: string; totalShare: number }>;
+  longActivities?: Array<{ id: string; code: string; name: string; durationDays: number }>;
 };
 
 export type ProjectSchedule = {
@@ -39,6 +62,11 @@ export type ProjectSchedule = {
   overallProgress: number;
   plannedValue: number;
   executedValue: number;
+  weightBasis: ScheduleWeightBasis;
+  roofKind?: "sheet" | "slab" | "unknown";
+  generationWarnings?: ScheduleGenerationWarning[];
+  planningAssumptions?: string[];
+  validation: ScheduleValidation;
 };
 
 export type ScheduleTaskInput = Partial<{

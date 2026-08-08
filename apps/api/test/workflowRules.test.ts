@@ -63,8 +63,8 @@ describe("Regras do Cronograma", () => {
 
   it("calcula a duração de um pacote de trabalho a partir das suas próprias horas, não de uma fatia de um total maior", () => {
     const hoursCache = new Map([["comp-1", 8]]); // 8 h/m3
-    const small = itemNode({ compositionId: "comp-1", quantity: 5 }); // 40 h → ~1 pessoa, ~5 dias
-    const large = itemNode({ compositionId: "comp-1", quantity: 200 }); // 1600 h → equipa maior, mas proporcional
+    const small = itemNode({ compositionId: "comp-1", quantity: 5 }); // 40 h / equipa disponível na frente
+    const large = itemNode({ compositionId: "comp-1", quantity: 200 }); // 1600 h / equipa disponível na frente
     const smallResult = computeItemDurationDays(small, hoursCache);
     const largeResult = computeItemDurationDays(large, hoursCache);
     expect(smallResult.basis).toBe("horas");

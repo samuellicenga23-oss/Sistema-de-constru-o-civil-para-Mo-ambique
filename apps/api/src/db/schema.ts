@@ -674,13 +674,17 @@ export const measurementCertificateLines = pgTable("measurement_certificate_line
 
 // ---------- Cronograma de obra ----------
 
-// O cronograma usa a mesma WBS do orçamento. `budgetChapterCode` liga cada tarefa a um capítulo
-// (e, por prefixo, aos respectivos itens), permitindo que autos e diário actualizem o progresso
-// sem o utilizador voltar a lançar percentagens noutro módulo.
+// O cronograma usa a mesma WBS do orçamento. `budgetLineItemId` é a ligação auditável exacta;
+// `budgetChapterCode` mantém códigos WBS/prefixos e compatibilidade com linhas de base antigas.
+// `valueShare` reparte uma linha agregada sem duplicar valor/progresso.
 export const scheduleTasks = pgTable("schedule_tasks", {
   id: uuid("id").primaryKey().defaultRandom(),
   projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
   budgetDocumentId: uuid("budget_document_id").references(() => budgetDocuments.id, { onDelete: "set null" }),
+  // Ligação exacta à linha do BOQ. `budgetChapterCode` continua disponível para WBS/prefixos e
+  // compatibilidade com cronogramas antigos, mas o ID evita ambiguidades em mapas importados com
+  // códigos repetidos ou nulos.
+  budgetLineItemId: uuid("budget_line_item_id").references(() => lineItems.id, { onDelete: "set null" }),
   parentId: uuid("parent_id").references((): AnyPgColumn => scheduleTasks.id, { onDelete: "cascade" }),
   code: varchar("code", { length: 30 }).notNull(),
   name: varchar("name", { length: 240 }).notNull(),
@@ -697,13 +701,16 @@ export const scheduleTasks = pgTable("schedule_tasks", {
   actualStartDate: date("actual_start_date"),
   actualEndDate: date("actual_end_date"),
   durationDays: integer("duration_days").notNull().default(1),
+  // Base auditável da duração: horas da composição, fallback por valor, mínimo, soma (resumo) ou
+  // manual. Permite reconstruir `weightBasis` também depois de recarregar a página.
+  durationBasis: varchar("duration_basis", { length: 16 }).notNull().default("manual"),
   manualProgress: numeric("manual_progress", { precision: 5, scale: 2 }),
   status: scheduleTaskStatusEnum("status").notNull().default("nao_iniciado"),
   notes: text("notes"),
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+}, (table) => [index("schedule_tasks_budget_line_item_idx").on(table.budgetLineItemId)]);
 
 export const scheduleDependencies = pgTable("schedule_dependencies", {
   id: uuid("id").primaryKey().defaultRandom(),
