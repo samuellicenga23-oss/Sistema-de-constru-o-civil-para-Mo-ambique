@@ -82,13 +82,13 @@ ALTER TABLE "line_items" ADD COLUMN "quantity_source" "line_item_quantity_source
 ALTER TABLE "materials" ADD COLUMN "family_key" uuid;--> statement-breakpoint
 UPDATE "materials" SET "family_key" = "id" WHERE "company_id" IS NULL;--> statement-breakpoint
 WITH unique_global_code AS (
-  SELECT "code", min("id") AS id FROM "materials"
+  SELECT "code", (array_agg("id" ORDER BY "id"::text))[1] AS id FROM "materials"
   WHERE "company_id" IS NULL AND "code" IS NOT NULL GROUP BY "code" HAVING count(*) = 1
 )
 UPDATE "materials" own SET "family_key" = u.id FROM unique_global_code u
 WHERE own."company_id" IS NOT NULL AND own."family_key" IS NULL AND own."code" = u."code";--> statement-breakpoint
 WITH unique_global AS (
-  SELECT lower(trim("name")) AS key, min("id") AS id FROM "materials"
+  SELECT lower(trim("name")) AS key, (array_agg("id" ORDER BY "id"::text))[1] AS id FROM "materials"
   WHERE "company_id" IS NULL GROUP BY lower(trim("name")) HAVING count(*) = 1
 )
 UPDATE "materials" own SET "family_key" = u.id FROM unique_global u
@@ -96,13 +96,13 @@ WHERE own."company_id" IS NOT NULL AND own."family_key" IS NULL AND lower(trim(o
 UPDATE "materials" SET "family_key" = "id" WHERE "family_key" IS NULL;--> statement-breakpoint
 UPDATE "labour_categories" SET "family_key" = "id" WHERE "company_id" IS NULL;--> statement-breakpoint
 WITH unique_global_code AS (
-  SELECT "code", min("id") AS id FROM "labour_categories"
+  SELECT "code", (array_agg("id" ORDER BY "id"::text))[1] AS id FROM "labour_categories"
   WHERE "company_id" IS NULL AND "code" IS NOT NULL GROUP BY "code" HAVING count(*) = 1
 )
 UPDATE "labour_categories" own SET "family_key" = u.id FROM unique_global_code u
 WHERE own."company_id" IS NOT NULL AND own."family_key" IS NULL AND own."code" = u."code";--> statement-breakpoint
 WITH unique_global AS (
-  SELECT lower(trim("name")) AS key, min("id") AS id FROM "labour_categories"
+  SELECT lower(trim("name")) AS key, (array_agg("id" ORDER BY "id"::text))[1] AS id FROM "labour_categories"
   WHERE "company_id" IS NULL GROUP BY lower(trim("name")) HAVING count(*) = 1
 )
 UPDATE "labour_categories" own SET "family_key" = u.id FROM unique_global u
@@ -110,7 +110,7 @@ WHERE own."company_id" IS NOT NULL AND own."family_key" IS NULL AND lower(trim(o
 UPDATE "labour_categories" SET "family_key" = "id" WHERE "family_key" IS NULL;--> statement-breakpoint
 UPDATE "equipment" SET "family_key" = "id" WHERE "company_id" IS NULL;--> statement-breakpoint
 WITH unique_global AS (
-  SELECT lower(trim("name")) AS key, min("id") AS id FROM "equipment"
+  SELECT lower(trim("name")) AS key, (array_agg("id" ORDER BY "id"::text))[1] AS id FROM "equipment"
   WHERE "company_id" IS NULL GROUP BY lower(trim("name")) HAVING count(*) = 1
 )
 UPDATE "equipment" own SET "family_key" = u.id FROM unique_global u

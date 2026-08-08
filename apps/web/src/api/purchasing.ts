@@ -73,6 +73,8 @@ export type ProcurementRequirement = {
   materialName: string;
   unit: string;
   phases: { key: string; label: string; quantity: number }[];
+  designQty: number;
+  executedQty: number;
   requiredQty: number;
   stockQty: number;
   consumedQty: number;
@@ -133,6 +135,8 @@ export type ProcurementPlan = {
   documentId: string;
   currency: string;
   ivaRate: number;
+  quantityBasis?: "remaining" | "design";
+  sourceCertificate?: { id: string; number: number; periodDate: string } | null;
   requiredValue: number;
   shortageValue: number;
   shortageVat: number;

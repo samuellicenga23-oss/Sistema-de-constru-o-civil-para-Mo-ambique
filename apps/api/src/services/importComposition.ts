@@ -10,7 +10,7 @@ import {
   labourCategories,
   materials,
 } from "../db/schema.js";
-import { computeCompositionUnitCost } from "./costEngine.js";
+import { computeCompositionUnitCostV2 } from "./costEngineV2.js";
 import {
   mapDescriptionToSigoComposition,
   mentionsSteel,
@@ -573,7 +573,7 @@ export async function resolveOrCreateCompositionForImport(
   }
 
   // Usar `tx` para o motor ver composições acabadas de criar na mesma transação.
-  const breakdown = await computeCompositionUnitCost(compositionId, companyId, zoneId, tx);
+  const breakdown = await computeCompositionUnitCostV2(compositionId, companyId, zoneId, tx);
   const resolved: ResolvedImportComposition = {
     compositionId,
     compositionName,

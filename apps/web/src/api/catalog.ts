@@ -74,6 +74,7 @@ export type CostComposition = {
   version: number;
   sourceName: string | null;
   sourceReference: string | null;
+  defaultMeasurementFormula?: string | null;
   isActive: boolean;
   labourCost: number;
   materialCost: number;

@@ -5,6 +5,7 @@ import { boqApi } from "../api/boq";
 import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { isItemMissingPrice } from "../utils/boqHelpers";
 import MeasurementGrid from "./MeasurementGrid";
+import LineItemCostSnapshotPanel from "./LineItemCostSnapshotPanel";
 import ChapterSpecBulkEditor from "./ChapterSpecBulkEditor";
 import { IconPlus, IconPencil, IconRuler, IconTrash } from "./icons";
 
@@ -167,6 +168,7 @@ export default function LineItemRow({
   const { confirm, dialog } = useConfirmDialog();
   const [showAdd, setShowAdd] = useState(false);
   const [showMeasurements, setShowMeasurements] = useState(false);
+  const [showSnapshot, setShowSnapshot] = useState(false);
   const [showChapterSpecs, setShowChapterSpecs] = useState(false);
   const [editingDesc, setEditingDesc] = useState(false);
   const [editingSpec, setEditingSpec] = useState(false);
@@ -389,6 +391,15 @@ export default function LineItemRow({
                 <IconRuler className="w-4 h-4" />
               </button>
             )}
+            {node.kind === "item" && node.compositionId && (
+              <button
+                onClick={() => { setShowSnapshot((s) => !s); setShowMeasurements(false); }}
+                className={`icon-btn ${showSnapshot ? "icon-btn-active opacity-100" : ""}`}
+                title="Snapshot APU — custo unitário e fontes de preço capturados"
+              >
+                <span className="text-[9px] font-bold tracking-wide">APU</span>
+              </button>
+            )}
             {!readOnly && isChapter && !measurementOnly && (
               <button
                 onClick={() => setShowChapterSpecs(true)}
@@ -410,6 +421,16 @@ export default function LineItemRow({
         </td>
       </tr>
 
+      {showSnapshot && node.kind === "item" && (
+        <tr>
+          <td colSpan={measurementOnly ? 5 : 7} className="bg-white pb-2">
+            <div className="sm:ml-14">
+              <LineItemCostSnapshotPanel lineItemId={node.id} />
+            </div>
+          </td>
+        </tr>
+      )}
+
       {showMeasurements && node.kind === "item" && (
         <tr>
           <td colSpan={measurementOnly ? 5 : 7} className="bg-white pb-2">
@@ -417,6 +438,8 @@ export default function LineItemRow({
               lineItemId={node.id}
               itemCode={node.code}
               itemUnit={node.unit}
+              compositionId={node.compositionId}
+              compositions={compositions}
               hasPlantRooms={hasPlantRooms}
               onQuantityChange={onChange}
             />

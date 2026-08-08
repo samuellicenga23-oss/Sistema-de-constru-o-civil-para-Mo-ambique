@@ -34,7 +34,9 @@ export async function createLineItemCostSnapshot(args: {
       outputUnit: composition.outputUnit, crewSize: composition.crewSize,
       productiveHoursPerDay: composition.productiveHoursPerDay, outputPerDay: composition.outputPerDay,
       productivitySource: composition.productivitySource, defaultMeasurementFormula: composition.defaultMeasurementFormula,
+      sourceName: composition.sourceName, sourceReference: composition.sourceReference,
     },
+    zone: args.zoneId ? { id: args.zoneId } : null,
     labour: effectiveResources.labour,
     materials: effectiveResources.materials,
     equipment: effectiveResources.equipment,
@@ -85,4 +87,36 @@ export async function copyLatestLineItemCostSnapshot(args: {
     reason: args.reason ?? "revision_copy",
   }).returning();
   return copy;
+}
+
+export async function listLineItemCostSnapshots(lineItemId: string, executor: Executor = db) {
+  const rows = await executor.select({
+    id: lineItemCostSnapshots.id,
+    lineItemId: lineItemCostSnapshots.lineItemId,
+    compositionId: lineItemCostSnapshots.compositionId,
+    compositionVersion: lineItemCostSnapshots.compositionVersion,
+    zoneId: lineItemCostSnapshots.zoneId,
+    currency: lineItemCostSnapshots.currency,
+    unitCost: lineItemCostSnapshots.unitCost,
+    labourCost: lineItemCostSnapshots.labourCost,
+    materialCost: lineItemCostSnapshots.materialCost,
+    equipmentCost: lineItemCostSnapshots.equipmentCost,
+    subcompositionCost: lineItemCostSnapshots.subcompositionCost,
+    derivedCost: lineItemCostSnapshots.derivedCost,
+    resourceSnapshot: lineItemCostSnapshots.resourceSnapshot,
+    reason: lineItemCostSnapshots.reason,
+    createdAt: lineItemCostSnapshots.createdAt,
+  }).from(lineItemCostSnapshots)
+    .where(eq(lineItemCostSnapshots.lineItemId, lineItemId))
+    .orderBy(desc(lineItemCostSnapshots.createdAt));
+
+  return rows.map((row: any) => ({
+    ...row,
+    unitCost: Number(row.unitCost),
+    labourCost: Number(row.labourCost),
+    materialCost: Number(row.materialCost),
+    equipmentCost: Number(row.equipmentCost),
+    subcompositionCost: Number(row.subcompositionCost),
+    derivedCost: Number(row.derivedCost),
+  }));
 }

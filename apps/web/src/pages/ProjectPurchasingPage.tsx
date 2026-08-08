@@ -505,7 +505,7 @@ export default function ProjectPurchasingPage() {
         )}
 
         {procurementPlan && view === "necessidades" && <section className="card overflow-hidden">
-          <SectionHeader title="Necessidades" description="Orçamento menos stock e pedidos em curso" />
+          <SectionHeader title="Necessidades" description={procurementPlan.sourceCertificate ? `Saldo restante = BOQ − Auto aprovado n.º ${procurementPlan.sourceCertificate.number}` : "Saldo restante do projecto (ainda sem Auto aprovado — igual ao BOQ)"} />
           <div className="border-b border-slate-100 bg-blue-50/60 px-5 py-2.5 text-xs text-blue-900"><strong>Quantidade em falta já calculada.</strong> Confirme antes de preparar o pedido.</div>
           <div className="grid gap-px bg-slate-200 sm:grid-cols-2">
             {filteredRequirements.map((item) => (
@@ -522,7 +522,7 @@ export default function ProjectPurchasingPage() {
                   })()}
                 </div>
                 <div className="mt-4 grid grid-cols-3 gap-2 rounded-lg bg-slate-50 p-3 text-xs">
-                  <div><span className="block text-slate-500">Necessário</span><strong className="mt-1 block tabular-nums">{item.requiredQty.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {item.unit}</strong></div>
+                  <div><span className="block text-slate-500">Saldo (BOQ − exec.)</span><strong className="mt-1 block tabular-nums">{item.requiredQty.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {item.unit}</strong><small className="text-slate-400">Projecto {(item.designQty ?? item.requiredQty).toLocaleString("pt-MZ", { maximumFractionDigits: 2 })} · Exec. {(item.executedQty ?? 0).toLocaleString("pt-MZ", { maximumFractionDigits: 2 })}</small></div>
                   <div><span className="block text-slate-500">Coberto</span><strong className="mt-1 block tabular-nums">{(item.consumedQty + Math.max(0, item.stockQty) + item.orderedQty).toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {item.unit}</strong></div>
                   <div><span className="block text-slate-500">A comprar</span><strong className="mt-1 block tabular-nums text-orange-700">{item.suggestedOrderQty.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {item.unit}</strong></div>
                 </div>

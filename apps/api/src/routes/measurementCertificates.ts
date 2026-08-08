@@ -15,6 +15,7 @@ import { computeLabourByPhase } from "../services/labourByPhase.js";
 import { calculateBudgetTotals } from "../services/budgetTotals.js";
 import { createDraftInvoiceForCertificate } from "../services/invoicing.js";
 import { recordAuditEvent } from "../services/auditTrail.js";
+import { buildCertificateFieldMeasurementPdf } from "../services/certificateFieldMeasurementPdf.js";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista", "engenheiro_fiscal"] as const;
 const createSchema = z.object({
@@ -102,6 +103,19 @@ export async function measurementCertificateRoutes(app: FastifyInstance) {
         profitMarginRate: 0,
       },
     };
+  });
+
+  app.get("/api/measurement-certificates/:id/field-measurements.pdf", { preHandler: requireCompanyUser }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const companyId = request.currentUser!.companyId!;
+    const certificate = await assertCertificateOwned(id, companyId);
+    if (!certificate) return reply.code(404).send({ error: "Auto de medição não encontrado" });
+    const result = await buildCertificateFieldMeasurementPdf(id, companyId);
+    if (!result) return reply.code(404).send({ error: "Auto de medição não encontrado" });
+    return reply
+      .header("Content-Type", "application/pdf")
+      .header("Content-Disposition", `attachment; filename="${result.filename}"`)
+      .send(result.buffer);
   });
 
   app.get("/api/measurement-certificates/:id/labour-by-phase", { preHandler: requireCompanyUser }, async (request, reply) => {

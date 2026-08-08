@@ -7,7 +7,7 @@ import { budgetDocuments, budgetSections, lineItems, measurementLines, measureme
 import { requireCompanyUser, requireRole } from "../auth/middleware.js";
 import { getBudgetDocumentSummary, hideInternalPricing } from "../services/boqEngine.js";
 import { computeCompositionUnitCostV2 } from "../services/costEngineV2.js";
-import { createLineItemCostSnapshot, copyLatestLineItemCostSnapshot } from "../services/costSnapshotService.js";
+import { createLineItemCostSnapshot, copyLatestLineItemCostSnapshot, listLineItemCostSnapshots } from "../services/costSnapshotService.js";
 import {
   assertProjectOwned,
   assertDocumentOwned,
@@ -1085,6 +1085,20 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
       return created;
     });
     return reply.code(201).send(item);
+  });
+
+  app.get("/api/line-items/:id/cost-snapshots", { preHandler: requireCompanyUser }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const companyId = companyIdOf(request);
+    const existing = await assertLineItemOwned(id, companyId);
+    if (!existing) return reply.code(404).send({ error: "Item não encontrado" });
+    const snapshots = await listLineItemCostSnapshots(id);
+    return {
+      lineItemId: id,
+      compositionId: existing.compositionId,
+      latest: snapshots[0] ?? null,
+      snapshots,
+    };
   });
 
   app.put("/api/line-items/:id", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {

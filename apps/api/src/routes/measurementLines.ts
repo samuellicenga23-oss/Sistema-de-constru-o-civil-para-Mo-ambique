@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { measurementLines, budgetSections, budgetDocuments, lineItems } from "../db/schema.js";
+import { measurementLines, budgetSections, budgetDocuments, lineItems, costCompositions } from "../db/schema.js";
 import { requireCompanyUser, requireRole } from "../auth/middleware.js";
 import { assertLineItemOwned } from "../services/accessControl.js";
 import { getMeasurementLines, recomputeItemQuantity, computePartial } from "../services/dimensionEngine.js";
@@ -66,6 +66,20 @@ async function getItemDocument(lineItemId: string) {
 
 function effectiveFormulaType(data: LineInput): MeasurementFormulaType {
   return data.formulaType ?? "legacy_product";
+}
+
+async function resolveDefaultFormula(item: { unit: string | null; compositionId: string | null }): Promise<MeasurementFormulaType> {
+  if (item.compositionId) {
+    const [composition] = await db
+      .select({ defaultMeasurementFormula: costCompositions.defaultMeasurementFormula })
+      .from(costCompositions)
+      .where(eq(costCompositions.id, item.compositionId))
+      .limit(1);
+    if (composition?.defaultMeasurementFormula) {
+      return composition.defaultMeasurementFormula as MeasurementFormulaType;
+    }
+  }
+  return recommendedFormulaForUnit(item.unit);
 }
 
 function validateCalculatedInput(data: LineInput) {
@@ -158,11 +172,12 @@ async function plantPreview(lineItemId: string, companyId: string) {
   const { rooms, openings } = await loadProjectPlantContext(projectRow.projectId);
   const built = buildMeasurementLinesFromPlant(item.code, rooms, openings);
   if (!built.ok) return { ok: false as const, reason: built.reason };
+  const compositionDefault = await resolveDefaultFormula(item);
   const lines = built.lines.map((line, index) => {
-    let formulaType: MeasurementFormulaType = recommendedFormulaForUnit(item.unit);
+    let formulaType: MeasurementFormulaType = compositionDefault;
     if (line.height != null && line.width != null && line.length != null) formulaType = "volume";
     else if (line.width != null && line.length != null) formulaType = "area";
-    else if (line.length != null) formulaType = "length";
+    else if (line.length != null && formulaType !== "volume" && formulaType !== "area" && formulaType !== "wall_area") formulaType = "length";
     const candidate: LineInput = {
       description: line.description,
       formulaType,
@@ -211,8 +226,12 @@ export async function measurementLineRoutes(app: FastifyInstance) {
     if (!document || document.status !== "rascunho") return reply.code(409).send({ error: documentLockedMessage(document?.status ?? "submetido") });
     const parsed = lineSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
-    try { validateCalculatedInput(parsed.data); } catch (cause) { return reply.code(400).send({ error: cause instanceof Error ? cause.message : "Fórmula de medição inválida" }); }
-    const [row] = await db.insert(measurementLines).values(valuesForInsert(id, parsed.data)).returning();
+    const data: LineInput = {
+      ...parsed.data,
+      formulaType: parsed.data.formulaType ?? await resolveDefaultFormula(item),
+    };
+    try { validateCalculatedInput(data); } catch (cause) { return reply.code(400).send({ error: cause instanceof Error ? cause.message : "Fórmula de medição inválida" }); }
+    const [row] = await db.insert(measurementLines).values(valuesForInsert(id, data)).returning();
     const newQuantity = await recomputeItemQuantity(id);
     return reply.code(201).send({ ...row, partial: computePartial(row), itemQuantity: newQuantity });
   });

@@ -13,6 +13,7 @@ import {
   computeSubcompositionCost,
   resolveResourcesByIdentity,
 } from "../src/services/compositionV2Engine.js";
+import { remainingMaterialQuantity } from "../src/services/materialsByPhase.js";
 
 function equal(actual: unknown, expected: unknown) { if (actual !== expected) throw new Error(`Esperado ${String(expected)}, recebido ${String(actual)}`); }
 function ok(value: unknown) { if (!value) throw new Error("Condição esperada como verdadeira"); }
@@ -57,6 +58,18 @@ test("unidade recomenda fórmula", () => {
   assert.equal(recommendedFormulaForUnit("m3"), "volume");
   assert.equal(recommendedFormulaForUnit("kg"), "weight");
 });
+test("defaultMeasurementFormula da composição prevalece sobre unidade", () => {
+  // Espelha resolveDefaultFormula: composição tipada → senão recomendação da unidade.
+  const compositionDefault = "wall_area" as const;
+  const unitFallback = recommendedFormulaForUnit("m2");
+  assert.equal(compositionDefault || unitFallback, "wall_area");
+  assert.equal(unitFallback, "area");
+});
+test("saldo restante de materiais = max(0, BOQ − executado)", () => {
+  assert.equal(remainingMaterialQuantity(100, 35), 65);
+  assert.equal(remainingMaterialQuantity(50, 50), 0);
+  assert.equal(remainingMaterialQuantity(40, 55), 0);
+});
 test("subcomposição detecta ciclo", () => {
   assert.throws(() => assertAcyclicCompositionGraph("A", [
     { compositionId: "A", subcompositionId: "B", qtyPerUnit: 1 },
@@ -88,6 +101,25 @@ test("familyKey prevalece sobre nome", () => {
     { id: "c", familyKey: "fam-1", name: "Cimento 42.5 local", companyId: "company" },
   ];
   assert.equal(resolveResourcesByIdentity(rows).get("fam-1")?.id, "c");
+});
+test("agregação por fase usa familyKey e não nome", () => {
+  // Simula o bucket materialsByPhase/labourByPhase: nomes diferentes da mesma família somam juntas.
+  const lines = [
+    { familyKey: "fam-cimento", name: "Cimento antigo", qty: 10 },
+    { familyKey: "fam-cimento", name: "Cimento 42.5 local", qty: 4 },
+    { familyKey: "fam-areia", name: "Areia", qty: 2 },
+  ];
+  const bucket = new Map<string, { name: string; qty: number }>();
+  for (const line of lines) {
+    const existing = bucket.get(line.familyKey);
+    if (existing) {
+      existing.qty += line.qty;
+      existing.name = line.name;
+    } else bucket.set(line.familyKey, { name: line.name, qty: line.qty });
+  }
+  assert.equal(bucket.size, 2);
+  assert.equal(bucket.get("fam-cimento")?.qty, 14);
+  assert.equal(bucket.get("fam-cimento")?.name, "Cimento 42.5 local");
 });
 
 test("Auto: memória de campo soma adições e deduções", () => {

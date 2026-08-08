@@ -2,7 +2,7 @@ import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import { db, sql } from "./index.js";
 import { budgetDocuments, budgetSections, costCompositions, lineItems, projects } from "./schema.js";
 import { STANDARD_CHAPTERS } from "../services/boqTemplate.js";
-import { computeCompositionUnitCost } from "../services/costEngine.js";
+import { computeCompositionUnitCostV2 } from "../services/costEngineV2.js";
 
 async function main() {
   const documentId = process.argv[2];
@@ -50,7 +50,7 @@ async function main() {
     if (!template) continue;
     const compositionId = template.composition ? compositionByName.get(template.composition) ?? item.compositionId : item.compositionId;
     const unitPrice = compositionId && document.documentType === "orcamento"
-      ? (await computeCompositionUnitCost(compositionId, document.companyId, document.zoneId)).unitCost
+      ? (await computeCompositionUnitCostV2(compositionId, document.companyId, document.zoneId)).unitCost
       : null;
 
     await db.update(lineItems).set({

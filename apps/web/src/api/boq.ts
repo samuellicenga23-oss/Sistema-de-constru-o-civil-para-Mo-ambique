@@ -146,6 +146,51 @@ export type BudgetRepriceResult = {
   zoneId: string | null;
 };
 
+export type LineItemCostSnapshot = {
+  id: string;
+  lineItemId: string;
+  compositionId: string | null;
+  compositionVersion: number | null;
+  zoneId: string | null;
+  currency: string;
+  unitCost: number;
+  labourCost: number;
+  materialCost: number;
+  equipmentCost: number;
+  subcompositionCost: number;
+  derivedCost: number;
+  resourceSnapshot: {
+    schemaVersion?: number;
+    capturedAt?: string;
+    composition?: {
+      id?: string;
+      code?: string | null;
+      name?: string;
+      version?: number;
+      outputUnit?: string;
+      sourceName?: string | null;
+      productivitySource?: string | null;
+      outputPerDay?: string | number | null;
+      crewSize?: number | null;
+    };
+    labour?: Array<{ name: string; hoursPerUnit: number; hourlyRate: number; priceSourceName?: string | null; priceDate?: string | null }>;
+    materials?: Array<{ name: string; unit: string; qtyPerUnit: number; unitCost: number; priceSourceName?: string | null; priceDate?: string | null; priceOrigin?: string }>;
+    equipment?: Array<{ name: string; hoursPerUnit: number; hourlyCost: number; priceSourceName?: string | null; priceDate?: string | null }>;
+    derivedCosts?: Array<{ name: string; basis: string; percentage: number }>;
+    computed?: {
+      labourCost?: number;
+      materialCost?: number;
+      equipmentCost?: number;
+      subcompositionCost?: number;
+      derivedCost?: number;
+      unitCost?: number;
+      productivity?: { outputPerDay?: number | null; basis?: string };
+    };
+  } | null;
+  reason: string;
+  createdAt: string;
+};
+
 export const boqApi = {
   listProjects: () => request<Project[]>("/projects"),
   listProjectsReadyForSite: () => request<Project[]>("/projects?readyForSite=1"),
@@ -259,6 +304,14 @@ export const boqApi = {
   ) => request<LineItemNode>(`/line-items/${id}`, { method: "PUT", body: JSON.stringify(data) }),
 
   deleteLineItem: (id: string) => request<{ ok: true }>(`/line-items/${id}`, { method: "DELETE" }),
+
+  listCostSnapshots: (lineItemId: string) =>
+    request<{
+      lineItemId: string;
+      compositionId: string | null;
+      latest: LineItemCostSnapshot | null;
+      snapshots: LineItemCostSnapshot[];
+    }>(`/line-items/${lineItemId}/cost-snapshots`),
 
   bulkUpdateSpecifications: (items: Array<{ id: string; technicalSpecification: string | null }>) =>
     request<{ updated: number }>(`/line-items/bulk-specifications`, { method: "POST", body: JSON.stringify({ items }) }),

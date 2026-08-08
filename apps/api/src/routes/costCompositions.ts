@@ -14,9 +14,9 @@ import {
   materialZonePrices,
 } from "../db/schema.js";
 import { requireRole } from "../auth/middleware.js";
-import { resolveByName, companyScope } from "../services/costEngine.js";
+import { companyScope } from "../services/costEngine.js";
 import { computeCompositionUnitCostV2 } from "../services/costEngineV2.js";
-import { assertAcyclicCompositionGraph } from "../services/compositionV2Engine.js";
+import { assertAcyclicCompositionGraph, resolveResourcesByIdentity } from "../services/compositionV2Engine.js";
 import { cloneCompositionForCompany } from "../services/catalogClone.js";
 import { costCompositionInputSchema } from "@sigo/shared";
 
@@ -104,11 +104,11 @@ export async function costCompositionRoutes(app: FastifyInstance) {
     if (!composition) return reply.code(404).send({ error: "Composição não encontrada" });
 
     const [labourLines, materialLines, equipmentLines, subcompositionRows, derivedCostLines, breakdown] = await Promise.all([
-      db.select({ id: compositionLabourLines.id, refId: compositionLabourLines.labourCategoryId, qtyPerUnit: compositionLabourLines.qtyPerUnit, notes: compositionLabourLines.notes, name: labourCategories.name, unitCost: labourCategories.hourlyRate })
+      db.select({ id: compositionLabourLines.id, refId: compositionLabourLines.labourCategoryId, qtyPerUnit: compositionLabourLines.qtyPerUnit, notes: compositionLabourLines.notes, name: labourCategories.name, familyKey: labourCategories.familyKey, unitCost: labourCategories.hourlyRate })
         .from(compositionLabourLines).innerJoin(labourCategories, eq(compositionLabourLines.labourCategoryId, labourCategories.id)).where(eq(compositionLabourLines.compositionId, id)),
-      db.select({ id: compositionMaterialLines.id, refId: compositionMaterialLines.materialId, qtyPerUnit: compositionMaterialLines.qtyPerUnit, wastePct: compositionMaterialLines.wastePct, notes: compositionMaterialLines.notes, name: materials.name, unitCost: materials.baseUnitCost, importFactor: materials.importFactor, unit: materials.unit })
+      db.select({ id: compositionMaterialLines.id, refId: compositionMaterialLines.materialId, qtyPerUnit: compositionMaterialLines.qtyPerUnit, wastePct: compositionMaterialLines.wastePct, notes: compositionMaterialLines.notes, name: materials.name, familyKey: materials.familyKey, unitCost: materials.baseUnitCost, importFactor: materials.importFactor, unit: materials.unit })
         .from(compositionMaterialLines).innerJoin(materials, eq(compositionMaterialLines.materialId, materials.id)).where(eq(compositionMaterialLines.compositionId, id)),
-      db.select({ id: compositionEquipmentLines.id, refId: compositionEquipmentLines.equipmentId, qtyPerUnit: compositionEquipmentLines.qtyPerUnit, notes: compositionEquipmentLines.notes, name: equipment.name, unitCost: equipment.hourlyCost })
+      db.select({ id: compositionEquipmentLines.id, refId: compositionEquipmentLines.equipmentId, qtyPerUnit: compositionEquipmentLines.qtyPerUnit, notes: compositionEquipmentLines.notes, name: equipment.name, familyKey: equipment.familyKey, unitCost: equipment.hourlyCost })
         .from(compositionEquipmentLines).innerJoin(equipment, eq(compositionEquipmentLines.equipmentId, equipment.id)).where(eq(compositionEquipmentLines.compositionId, id)),
       db.select({ id: compositionSubcompositionLines.id, refId: compositionSubcompositionLines.subcompositionId, qtyPerUnit: compositionSubcompositionLines.qtyPerUnit, notes: compositionSubcompositionLines.notes, name: costCompositions.name, outputUnit: costCompositions.outputUnit })
         .from(compositionSubcompositionLines).innerJoin(costCompositions, eq(compositionSubcompositionLines.subcompositionId, costCompositions.id)).where(eq(compositionSubcompositionLines.compositionId, id)),
@@ -117,25 +117,48 @@ export async function costCompositionRoutes(app: FastifyInstance) {
     ]);
 
     const requestingCompanyId = request.currentUser!.companyId;
-    const labourNames = Array.from(new Set(labourLines.map((line) => line.name)));
-    const materialNames = Array.from(new Set(materialLines.map((line) => line.name)));
-    const equipmentNames = Array.from(new Set(equipmentLines.map((line) => line.name)));
-    const [resolvedLabour, resolvedMaterials, resolvedEquipment] = await Promise.all([
-      labourNames.length ? resolveByName(await db.select({ id: labourCategories.id, name: labourCategories.name, companyId: labourCategories.companyId, unitCost: labourCategories.hourlyRate }).from(labourCategories).where(and(inArray(labourCategories.name, labourNames), companyScope(labourCategories.companyId, requestingCompanyId)))) : new Map(),
-      materialNames.length ? resolveByName(await db.select({ id: materials.id, name: materials.name, companyId: materials.companyId, unitCost: materials.baseUnitCost, importFactor: materials.importFactor, unit: materials.unit }).from(materials).where(and(inArray(materials.name, materialNames), companyScope(materials.companyId, requestingCompanyId)))) : new Map(),
-      equipmentNames.length ? resolveByName(await db.select({ id: equipment.id, name: equipment.name, companyId: equipment.companyId, unitCost: equipment.hourlyCost }).from(equipment).where(and(inArray(equipment.name, equipmentNames), companyScope(equipment.companyId, requestingCompanyId)))) : new Map(),
+    const labourFamilies = Array.from(new Set(labourLines.map((line) => line.familyKey)));
+    const materialFamilies = Array.from(new Set(materialLines.map((line) => line.familyKey)));
+    const equipmentFamilies = Array.from(new Set(equipmentLines.map((line) => line.familyKey)));
+    const [labourCandidates, materialCandidates, equipmentCandidates] = await Promise.all([
+      labourFamilies.length
+        ? db.select({ id: labourCategories.id, familyKey: labourCategories.familyKey, name: labourCategories.name, companyId: labourCategories.companyId, unitCost: labourCategories.hourlyRate })
+            .from(labourCategories).where(and(inArray(labourCategories.familyKey, labourFamilies), companyScope(labourCategories.companyId, requestingCompanyId)))
+        : Promise.resolve([]),
+      materialFamilies.length
+        ? db.select({ id: materials.id, familyKey: materials.familyKey, name: materials.name, companyId: materials.companyId, unitCost: materials.baseUnitCost, importFactor: materials.importFactor, unit: materials.unit })
+            .from(materials).where(and(inArray(materials.familyKey, materialFamilies), companyScope(materials.companyId, requestingCompanyId)))
+        : Promise.resolve([]),
+      equipmentFamilies.length
+        ? db.select({ id: equipment.id, familyKey: equipment.familyKey, name: equipment.name, companyId: equipment.companyId, unitCost: equipment.hourlyCost })
+            .from(equipment).where(and(inArray(equipment.familyKey, equipmentFamilies), companyScope(equipment.companyId, requestingCompanyId)))
+        : Promise.resolve([]),
     ]);
-    const resolvedLabourLines = labourLines.map((line) => ({ ...line, unitCost: resolvedLabour.get(line.name)?.unitCost ?? line.unitCost }));
+    const resolvedLabour = resolveResourcesByIdentity(labourCandidates);
+    const resolvedMaterials = resolveResourcesByIdentity(materialCandidates);
+    const resolvedEquipment = resolveResourcesByIdentity(equipmentCandidates);
+    const resolvedLabourLines = labourLines.map((line) => {
+      const resolved = resolvedLabour.get(line.familyKey);
+      return { ...line, name: resolved?.name ?? line.name, unitCost: resolved?.unitCost ?? line.unitCost };
+    });
     const resolvedMaterialLines = materialLines.map((line) => {
-      const resolved = resolvedMaterials.get(line.name);
-      return { ...line, unitCost: resolved?.unitCost ?? line.unitCost, importFactor: resolved?.importFactor ?? line.importFactor, unit: resolved?.unit ?? line.unit };
+      const resolved = resolvedMaterials.get(line.familyKey);
+      return {
+        ...line,
+        name: resolved?.name ?? line.name,
+        unitCost: resolved?.unitCost ?? line.unitCost,
+        importFactor: resolved?.importFactor ?? line.importFactor,
+        unit: resolved?.unit ?? line.unit,
+      };
     });
     if (zoneId && resolvedMaterialLines.length) {
-      const resolvedIds = resolvedMaterialLines.map((line) => resolvedMaterials.get(line.name)?.id).filter((value): value is string => Boolean(value));
-      const zonePrices = resolvedIds.length ? await db.select().from(materialZonePrices).where(and(eq(materialZonePrices.zoneId, zoneId), inArray(materialZonePrices.materialId, resolvedIds))) : [];
+      const resolvedIds = [...resolvedMaterials.values()].map((row) => row.id);
+      const zonePrices = resolvedIds.length
+        ? await db.select().from(materialZonePrices).where(and(eq(materialZonePrices.zoneId, zoneId), inArray(materialZonePrices.materialId, resolvedIds)))
+        : [];
       const priceByMaterial = new Map(zonePrices.map((price) => [price.materialId, price.unitCost]));
       for (const line of resolvedMaterialLines) {
-        const materialId = resolvedMaterials.get(line.name)?.id;
+        const materialId = resolvedMaterials.get(line.familyKey)?.id;
         if (materialId && priceByMaterial.has(materialId)) line.unitCost = priceByMaterial.get(materialId)!;
       }
     }
@@ -143,7 +166,10 @@ export async function costCompositionRoutes(app: FastifyInstance) {
       ...composition,
       labourLines: resolvedLabourLines,
       materialLines: resolvedMaterialLines,
-      equipmentLines: equipmentLines.map((line) => ({ ...line, unitCost: resolvedEquipment.get(line.name)?.unitCost ?? line.unitCost })),
+      equipmentLines: equipmentLines.map((line) => {
+        const resolved = resolvedEquipment.get(line.familyKey);
+        return { ...line, name: resolved?.name ?? line.name, unitCost: resolved?.unitCost ?? line.unitCost };
+      }),
       subcompositionLines: subcompositionRows,
       ...breakdown,
       derivedCostLines,

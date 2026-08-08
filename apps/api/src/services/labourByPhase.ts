@@ -76,7 +76,7 @@ export async function computeLabourByPhase(certificateId: string, companyId: str
       const plannedHours = (line.budgetedQty ?? 0) * resource.hoursPerUnit;
       const periodHours = line.periodQty * resource.hoursPerUnit;
       const cumulativeHours = line.cumulativeQty * resource.hoursPerUnit;
-      const existing = bucket.get(resource.name) ?? {
+      const existing = bucket.get(resource.familyKey) ?? {
         labourCategoryId: resource.labourCategoryId,
         name: resource.name,
         plannedHours: 0,
@@ -92,7 +92,10 @@ export async function computeLabourByPhase(certificateId: string, companyId: str
       existing.cumulativeHours += cumulativeHours;
       existing.periodCost += periodHours * resource.hourlyRate;
       existing.cumulativeCost += cumulativeHours * resource.hourlyRate;
-      bucket.set(resource.name, existing);
+      existing.labourCategoryId = resource.labourCategoryId || existing.labourCategoryId;
+      existing.name = resource.name || existing.name;
+      existing.hourlyRate = resource.hourlyRate;
+      bucket.set(resource.familyKey, existing);
     }
     buckets.set(phaseKey, bucket);
   }

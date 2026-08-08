@@ -1,9 +1,10 @@
-import { DEFAULT_REBAR_LENGTH_M, rebarWeightPerMeter } from "@sigo/shared";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { budgetDocuments, projects } from "../db/schema.js";
+import { budgetDocuments, lineItems, projects } from "../db/schema.js";
+import { DEFAULT_REBAR_LENGTH_M, rebarWeightPerMeter } from "@sigo/shared";
 import { getBudgetDocumentSummary, type LineItemNode } from "./boqEngine.js";
 import { getCompositionMaterialQuantitiesV2 as getCompositionMaterialQuantities } from "./costEngineV2.js";
+import { getCertificateDetail } from "./measurementEngine.js";
 import { CONSTRUCTION_PHASES, mapToPhase, phaseLabel, type PhaseKey } from "./phaseMapping.js";
 
 export type PhaseMaterialLine = {
@@ -76,7 +77,7 @@ async function getProjectZoneId(documentId: string): Promise<string | null> {
 
 // Explode o Mapa de Quantidades já medido em materiais reais, agrupados por fase de obra: para
 // cada item com quantidade > 0 e composição associada, soma quantidade × qtyPerUnit de cada
-// material da composição (resolvido por nome + preço de zona, mesma lógica do costEngine) na fase
+// material da composição (resolvido por familyKey + preço de zona, costEngineV2) na fase
 // a que o capítulo/palavras-chave do item pertence (ver phaseMapping.ts), e soma também o VALOR
 // (quantidade × custo unitário do material). Itens sem composição (preço manual) não têm como ser
 // explodidos em materiais — ficam listados à parte, por fase, com o seu próprio valor (quantidade
@@ -87,7 +88,17 @@ export async function computeMaterialsByPhase(documentId: string, companyId: str
   if (!summary) return null;
   const zoneId = await getProjectZoneId(documentId);
 
-  type MaterialBucket = { materialId: string; unit: string; quantity: number; value: number; currency: string; purchasePackageLabel: string | null; purchasePackageQty: number | null };
+  type MaterialBucket = {
+    materialId: string;
+    familyKey: string;
+    name: string;
+    unit: string;
+    quantity: number;
+    value: number;
+    currency: string;
+    purchasePackageLabel: string | null;
+    purchasePackageQty: number | null;
+  };
   const materialTotals = new Map<PhaseKey, Map<string, MaterialBucket>>();
   const unmapped = new Map<PhaseKey, PhaseUnmappedItem[]>();
   const compositionQtyCache = new Map<string, Awaited<ReturnType<typeof getCompositionMaterialQuantities>>>();
@@ -116,13 +127,18 @@ export async function computeMaterialsByPhase(documentId: string, companyId: str
         for (const line of lines) {
           const addQty = line.qtyPerUnit * quantity;
           const addValue = addQty * line.unitCost;
-          const existing = bucket.get(line.name);
+          const key = line.familyKey || line.materialId;
+          const existing = bucket.get(key);
           if (existing) {
             existing.quantity += addQty;
             existing.value += addValue;
+            existing.materialId = line.materialId || existing.materialId;
+            existing.name = line.name || existing.name;
           } else {
-            bucket.set(line.name, {
+            bucket.set(key, {
               materialId: line.materialId,
+              familyKey: line.familyKey,
+              name: line.name,
               unit: line.unit,
               quantity: addQty,
               value: addValue,
@@ -153,10 +169,10 @@ export async function computeMaterialsByPhase(documentId: string, companyId: str
 
   let grandTotal = 0;
   const phases = CONSTRUCTION_PHASES.map((p) => {
-    const materials = Array.from(materialTotals.get(p.key)?.entries() ?? [])
-      .map(([name, v]) => ({
+    const materials = Array.from(materialTotals.get(p.key)?.values() ?? [])
+      .map((v) => ({
         materialId: v.materialId,
-        name,
+        name: v.name,
         unit: v.unit,
         quantity: v.quantity,
         value: v.value,
@@ -174,3 +190,86 @@ export async function computeMaterialsByPhase(documentId: string, companyId: str
 
   return { phases, currency: summary.document.currency, grandTotal };
 }
+
+/** Quantidades teóricas de material derivadas das medições de um Auto (período ou acumulado). */
+export async function computeMaterialsFromCertificate(
+  certificateId: string,
+  companyId: string,
+  qtyField: "periodQty" | "cumulativeQty" = "cumulativeQty",
+): Promise<Map<string, { quantity: number; value: number; name: string; unit: string; purchasePackageLabel: string | null; purchasePackageQty: number | null }>> {
+  const byMaterialId = new Map<string, { quantity: number; value: number; name: string; unit: string; purchasePackageLabel: string | null; purchasePackageQty: number | null }>();
+  const detail = await getCertificateDetail(certificateId);
+  if (!detail) return byMaterialId;
+
+  const [context] = await db
+    .select({ zoneId: projects.zoneId, projectCompanyId: projects.companyId })
+    .from(projects)
+    .where(eq(projects.id, detail.certificate.projectId))
+    .limit(1);
+  if (!context || context.projectCompanyId !== companyId) return byMaterialId;
+
+  const itemIds = detail.lines.map((line) => line.lineItemId);
+  if (!itemIds.length) return byMaterialId;
+  const itemRows = await db.select({ id: lineItems.id, compositionId: lineItems.compositionId }).from(lineItems).where(inArray(lineItems.id, itemIds));
+  const compositionByItem = new Map(itemRows.map((row) => [row.id, row.compositionId]));
+  const cache = new Map<string, Awaited<ReturnType<typeof getCompositionMaterialQuantities>>>();
+  const familyBuckets = new Map<string, { materialId: string; quantity: number; value: number; name: string; unit: string; purchasePackageLabel: string | null; purchasePackageQty: number | null }>();
+
+  for (const line of detail.lines) {
+    const measuredQty = qtyField === "periodQty" ? line.periodQty : line.cumulativeQty;
+    if (!(measuredQty > 0)) continue;
+    const compositionId = compositionByItem.get(line.lineItemId);
+    if (!compositionId) continue;
+    if (!cache.has(compositionId)) {
+      cache.set(compositionId, await getCompositionMaterialQuantities(compositionId, companyId, context.zoneId));
+    }
+    for (const resource of cache.get(compositionId)!) {
+      if (!resource.materialId) continue;
+      const addQty = resource.qtyPerUnit * measuredQty;
+      const addValue = addQty * resource.unitCost;
+      const key = resource.familyKey || resource.materialId;
+      const existing = familyBuckets.get(key);
+      if (existing) {
+        existing.quantity += addQty;
+        existing.value += addValue;
+        existing.materialId = resource.materialId || existing.materialId;
+        existing.name = resource.name || existing.name;
+      } else {
+        familyBuckets.set(key, {
+          materialId: resource.materialId,
+          quantity: addQty,
+          value: addValue,
+          name: resource.name,
+          unit: resource.unit,
+          purchasePackageLabel: resource.purchasePackageLabel,
+          purchasePackageQty: resource.purchasePackageQty,
+        });
+      }
+    }
+  }
+
+  for (const row of familyBuckets.values()) {
+    const current = byMaterialId.get(row.materialId);
+    if (current) {
+      current.quantity += row.quantity;
+      current.value += row.value;
+      current.name = row.name;
+    } else {
+      byMaterialId.set(row.materialId, {
+        quantity: row.quantity,
+        value: row.value,
+        name: row.name,
+        unit: row.unit,
+        purchasePackageLabel: row.purchasePackageLabel,
+        purchasePackageQty: row.purchasePackageQty,
+      });
+    }
+  }
+  return byMaterialId;
+}
+
+/** Saldo de materiais do projecto ainda por executar: max(0, BOQ − Auto acumulado). */
+export function remainingMaterialQuantity(designQty: number, executedQty: number) {
+  return Math.max(0, designQty - executedQty);
+}
+

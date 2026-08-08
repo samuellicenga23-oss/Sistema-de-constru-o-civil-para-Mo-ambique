@@ -1,6 +1,7 @@
 import { and, desc, eq, inArray, isNull, or } from "drizzle-orm";
 import { db } from "../db/index.js";
 import {
+  measurementCertificates,
   purchaseOrderLines,
   purchaseOrders,
   stockMovements,
@@ -10,7 +11,7 @@ import {
   plants,
   extractedRebarSchedules,
 } from "../db/schema.js";
-import { computeMaterialsByPhase } from "./materialsByPhase.js";
+import { computeMaterialsByPhase, computeMaterialsFromCertificate, remainingMaterialQuantity } from "./materialsByPhase.js";
 import { mapToPhase } from "./phaseMapping.js";
 import { buildRebarPurchasePlan, calculateVatTotals, DEFAULT_REBAR_LENGTH_M, type RebarPurchaseLine } from "@sigo/shared";
 import { SIGO_PRICES_SUPPLIER_NAME } from "./sigoPrices.js";
@@ -58,6 +59,8 @@ export type ProcurementRequirement = {
   materialName: string;
   unit: string;
   phases: { key: string; label: string; quantity: number }[];
+  designQty: number;
+  executedQty: number;
   requiredQty: number;
   stockQty: number;
   consumedQty: number;
@@ -109,9 +112,10 @@ export function calculateProcurementQuantity(args: { requiredQty: number; consum
   return { shortageQty, suggestedOrderQty };
 }
 
-// Transforma as composições do Mapa de Quantidades num plano de aprovisionamento real: total
-// necessário - stock disponível - encomendas ainda abertas. As cotações da zona da obra têm
-// prioridade; entre fornecedores equivalentes vence o menor preço. O catálogo só é fallback.
+// Transforma o BOQ em necessidades de compra, descontando o que o último Auto aprovado
+// já certificou (acumulado × composição): saldo restante = max(0, projecto − executado).
+// Stock e encomendas abertas cobrem esse saldo; saídas de armazém não voltam a abater o saldo,
+// porque o Auto acumulado já representa o trabalho executado.
 export async function computeProcurementPlan(args: {
   projectId: string;
   documentId: string;
@@ -124,10 +128,25 @@ export async function computeProcurementPlan(args: {
   if (!phaseReport) return null;
   const rebarPurchasePlan = await getProjectRebarPurchasePlan(args.projectId);
 
+  const [latestApproved] = await db
+    .select({ id: measurementCertificates.id, number: measurementCertificates.number, periodDate: measurementCertificates.periodDate })
+    .from(measurementCertificates)
+    .where(and(
+      eq(measurementCertificates.budgetDocumentId, args.documentId),
+      eq(measurementCertificates.status, "aprovado"),
+    ))
+    .orderBy(desc(measurementCertificates.number))
+    .limit(1);
+  const executedByMaterial = latestApproved
+    ? await computeMaterialsFromCertificate(latestApproved.id, args.companyId, "cumulativeQty")
+    : new Map<string, { quantity: number; value: number; name: string; unit: string; purchasePackageLabel: string | null; purchasePackageQty: number | null }>();
+
   type RequiredBucket = {
     materialId: string;
     materialName: string;
     unit: string;
+    designQty: number;
+    executedQty: number;
     requiredQty: number;
     catalogValue: number;
     purchasePackageLabel: string | null;
@@ -142,17 +161,25 @@ export async function computeProcurementPlan(args: {
         materialId: line.materialId,
         materialName: line.name,
         unit: line.unit,
+        designQty: 0,
+        executedQty: 0,
         requiredQty: 0,
         catalogValue: 0,
         purchasePackageLabel: line.purchasePackageLabel,
         packageSize: line.purchasePackageQty,
         phases: [],
       };
-      current.requiredQty += line.quantity;
+      current.designQty += line.quantity;
       current.catalogValue += line.value;
       current.phases.push({ key: phase.key, label: phase.label, quantity: line.quantity });
       required.set(line.materialId, current);
     }
+  }
+  for (const [materialId, bucket] of required) {
+    const executedQty = executedByMaterial.get(materialId)?.quantity ?? 0;
+    bucket.executedQty = executedQty;
+    bucket.requiredQty = remainingMaterialQuantity(bucket.designQty, executedQty);
+    required.set(materialId, bucket);
   }
 
   const materialIds = Array.from(required.keys());
@@ -161,6 +188,8 @@ export async function computeProcurementPlan(args: {
       documentId: args.documentId,
       currency: args.currency,
       ivaRate: args.ivaRate,
+      quantityBasis: "remaining" as const,
+      sourceCertificate: latestApproved ? { id: latestApproved.id, number: latestApproved.number, periodDate: latestApproved.periodDate } : null,
       requiredValue: 0,
       shortageValue: 0,
       shortageVat: 0,
@@ -249,15 +278,21 @@ export async function computeProcurementPlan(args: {
     const stockQty = stock.get(item.materialId) ?? 0;
     const consumedQty = consumed.get(item.materialId) ?? 0;
     const orderedQty = ordered.get(item.materialId) ?? 0;
-    // O consumo registado no Diario ja executou parte da necessidade. Sem o abater,
-    // cada saida de armazem voltaria a aparecer como uma nova compra e duplicaria o custo.
-    const { shortageQty, suggestedOrderQty } = calculateProcurementQuantity({ requiredQty: item.requiredQty, consumedQty, stockQty, orderedQty, packageSize: item.packageSize });
+    // Saldo restante já desconta o Auto acumulado; stock + OC abertos cobrem o que falta comprar
+    // para o trabalho por executar. Saídas de armazém não voltam a reduzir este saldo.
+    const { shortageQty, suggestedOrderQty } = calculateProcurementQuantity({
+      requiredQty: item.requiredQty,
+      consumedQty: 0,
+      stockQty,
+      orderedQty,
+      packageSize: item.packageSize,
+    });
     const availableQuotes = Array.from(quotesByMaterial.get(item.materialId)?.values() ?? []);
     // SIGO Preços compete em igualdade com fornecedores comerciais — pode ser escolhido para OC.
     const rankedQuotes = rankProcurementQuotes(availableQuotes, args.zoneId);
     const quote = rankedQuotes[0];
     const quoteIsSigo = quote?.supplierName === SIGO_PRICES_SUPPLIER_NAME;
-    const catalogUnitCost = item.requiredQty > 0 ? item.catalogValue / item.requiredQty : 0;
+    const catalogUnitCost = item.designQty > 0 ? item.catalogValue / item.designQty : 0;
     const estimatedUnitCost = quote ? Number(quote.unitCost) : catalogUnitCost;
     const quoteSource: ProcurementRequirement["quoteSource"] = !quote
       ? "catalogo"
@@ -293,6 +328,8 @@ export async function computeProcurementPlan(args: {
       materialName: item.materialName,
       unit: item.unit,
       phases: item.phases,
+      designQty: item.designQty,
+      executedQty: item.executedQty,
       requiredQty: item.requiredQty,
       stockQty,
       consumedQty,
@@ -322,12 +359,14 @@ export async function computeProcurementPlan(args: {
     documentId: args.documentId,
     currency: args.currency,
     ivaRate: args.ivaRate,
+    quantityBasis: "remaining" as const,
+    sourceCertificate: latestApproved ? { id: latestApproved.id, number: latestApproved.number, periodDate: latestApproved.periodDate } : null,
     requiredValue: requirements.reduce((sum, item) => sum + item.requiredQty * item.estimatedUnitCost, 0),
     shortageValue,
     shortageVat: shortageTotals.iva,
     shortageTotal: shortageTotals.total,
     coveragePercent: requirements.reduce((sum, item) => sum + item.requiredQty * item.estimatedUnitCost, 0)
-      ? Math.max(0, Math.min(100, (requirements.reduce((sum, item) => sum + Math.min(item.requiredQty, item.consumedQty + Math.max(0, item.stockQty) + item.orderedQty) * item.estimatedUnitCost, 0) / requirements.reduce((sum, item) => sum + item.requiredQty * item.estimatedUnitCost, 0)) * 100))
+      ? Math.max(0, Math.min(100, (requirements.reduce((sum, item) => sum + Math.min(item.requiredQty, Math.max(0, item.stockQty) + item.orderedQty) * item.estimatedUnitCost, 0) / requirements.reduce((sum, item) => sum + item.requiredQty * item.estimatedUnitCost, 0)) * 100))
       : 100,
     requirements,
     rebarPurchasePlan,

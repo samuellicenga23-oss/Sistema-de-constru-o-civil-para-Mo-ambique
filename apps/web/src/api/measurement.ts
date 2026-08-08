@@ -34,6 +34,7 @@ export type MeasurementLine = {
   notes: string | null;
   overrunReason: string | null;
   hasOverrun: boolean;
+  hasFieldMemory?: boolean;
   sectionId: string;
   sectionName: string;
 };
@@ -99,6 +100,7 @@ export const measurementApi = {
     request<MeasurementCertificate>(`/projects/${projectId}/measurement-certificates`, { method: "POST", body: JSON.stringify(data) }),
   detail: (id: string) => request<MeasurementCertificateDetail>(`/measurement-certificates/${id}`),
   labourByPhase: (id: string) => request<LabourByPhaseResponse>(`/measurement-certificates/${id}/labour-by-phase`),
+  fieldMeasurementsPdfUrl: (id: string) => `/api/measurement-certificates/${id}/field-measurements.pdf`,
   updateStatus: (id: string, status: "rascunho" | "submetido" | "aprovado", decisionNote?: string) =>
     request<MeasurementCertificate>(`/measurement-certificates/${id}`, { method: "PUT", body: JSON.stringify({ status, decisionNote }) }),
   delete: (id: string) => request<{ ok: true }>(`/measurement-certificates/${id}`, { method: "DELETE" }),

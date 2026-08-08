@@ -42,20 +42,29 @@ export default function MeasurementGrid({
   lineItemId,
   itemCode,
   itemUnit,
+  compositionId,
+  compositions = [],
   hasPlantRooms = false,
   onQuantityChange,
 }: {
   lineItemId: string;
   itemCode?: string | null;
   itemUnit?: string | null;
+  compositionId?: string | null;
+  compositions?: Array<{ id: string; defaultMeasurementFormula?: string | null }>;
   hasPlantRooms?: boolean;
   onQuantityChange: () => void;
 }) {
+  const suggestedFormula = useMemo(() => {
+    const fromComposition = compositions.find((row) => row.id === compositionId)?.defaultMeasurementFormula;
+    if (fromComposition) return fromComposition as MeasurementFormulaType;
+    return recommended(itemUnit);
+  }, [compositionId, compositions, itemUnit]);
   const [lines, setLines] = useState<MeasurementLine[]>([]);
   const [history, setHistory] = useState<MeasurementLine[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [formulaType, setFormulaType] = useState<MeasurementFormulaType>(recommended(itemUnit));
+  const [formulaType, setFormulaType] = useState<MeasurementFormulaType>(suggestedFormula);
   const [sign, setSign] = useState<1 | -1>(1);
   const [description, setDescription] = useState("");
   const [count, setCount] = useState("1");
@@ -86,7 +95,9 @@ export default function MeasurementGrid({
     if (showHistory) setHistory(await measurementLinesApi.history(lineItemId));
   }
   useEffect(() => { void reload().catch((err) => setError(err.message)); }, [lineItemId]);
-  useEffect(() => { setFormulaType(recommended(itemUnit)); }, [itemUnit, lineItemId]);
+  useEffect(() => {
+    if (!editingId) setFormulaType(suggestedFormula);
+  }, [suggestedFormula, lineItemId, editingId]);
 
   const total = useMemo(() => lines.reduce((sum, line) => sum + line.partial, 0), [lines]);
   const additions = useMemo(() => lines.filter((line) => line.partial >= 0).reduce((sum, line) => sum + line.partial, 0), [lines]);
@@ -105,7 +116,7 @@ export default function MeasurementGrid({
   }
 
   function resetForm() {
-    setEditingId(null); setDescription(""); setCount("1"); setLength(""); setWidth(""); setHeight("");
+    setEditingId(null); setFormulaType(suggestedFormula); setDescription(""); setCount("1"); setLength(""); setWidth(""); setHeight("");
     setDirectQuantity(""); setCoefficient("1"); setUnitWeight(""); setDiameterMm(""); setBaseQuantity(""); setPercentage(""); setSign(1);
   }
 

@@ -318,12 +318,12 @@ export default function ProjectProcurementPage() {
 
         {view === "necessidades" && (
           <section className="card overflow-hidden">
-            <SectionHeader title="Necessidades da obra" description="Calculadas a partir do orçamento, consumo, stock, compras em curso e cronograma" />
+            <SectionHeader title="Necessidades da obra" description={plan?.sourceCertificate ? `Saldo restante = BOQ − Auto aprovado n.º ${plan.sourceCertificate.number}` : "Saldo restante do projecto (ainda sem Auto aprovado — igual ao BOQ)"} />
             <div className="grid gap-px bg-slate-200 lg:grid-cols-2">
               {requirements.map((item) => (
                 <article key={item.materialId} className="bg-white p-5">
                   <div className="flex items-start justify-between gap-3"><div><strong>{item.materialName}</strong><p className="mt-1 text-xs text-slate-500">{item.phases.map((p) => p.label).join(" · ")}</p></div><span className="badge badge-brand">{item.suggestedOrderQty.toLocaleString("pt-MZ")} {item.unit}</span></div>
-                  <div className="mt-4 grid grid-cols-3 gap-2 rounded-lg bg-slate-50 p-3 text-xs"><div><span className="text-slate-500">Necessário</span><strong className="block">{item.requiredQty.toLocaleString("pt-MZ")} {item.unit}</strong></div><div><span className="text-slate-500">Coberto</span><strong className="block">{(item.stockQty + item.orderedQty).toLocaleString("pt-MZ")} {item.unit}</strong></div><div><span className="text-slate-500">Comprar</span><strong className="block text-orange-700">{item.suggestedOrderQty.toLocaleString("pt-MZ")} {item.unit}</strong></div></div>
+                  <div className="mt-4 grid grid-cols-3 gap-2 rounded-lg bg-slate-50 p-3 text-xs"><div><span className="text-slate-500">Saldo restante</span><strong className="block">{item.requiredQty.toLocaleString("pt-MZ")} {item.unit}</strong><small className="text-slate-400">BOQ {(item.designQty ?? item.requiredQty).toLocaleString("pt-MZ")} − exec. {(item.executedQty ?? 0).toLocaleString("pt-MZ")}</small></div><div><span className="text-slate-500">Coberto</span><strong className="block">{(item.stockQty + item.orderedQty).toLocaleString("pt-MZ")} {item.unit}</strong></div><div><span className="text-slate-500">Comprar</span><strong className="block text-orange-700">{item.suggestedOrderQty.toLocaleString("pt-MZ")} {item.unit}</strong></div></div>
                   <div className="mt-4 flex items-center justify-between gap-3"><div className="text-xs text-slate-500">{item.requiredByDate ? <>Necessário até <strong>{dateLabel(item.requiredByDate)}</strong></> : "Sem data crítica definida"}</div>{canRequest && <button className="btn btn-primary btn-sm" type="button" onClick={() => addRequirementToRequisition(item)}><IconPlus className="h-4 w-4" /> Requisitar</button>}</div>
                 </article>
               ))}

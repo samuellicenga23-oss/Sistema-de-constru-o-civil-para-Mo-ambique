@@ -1,7 +1,7 @@
 import { eq, isNull, or, and } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { budgetSections, lineItems, costCompositions, workItemTemplates } from "../db/schema.js";
-import { computeCompositionUnitCost } from "./costEngine.js";
+import { computeCompositionUnitCostV2 } from "./costEngineV2.js";
 import { fixedSigo, type Unit } from "@sigo/shared";
 
 // Estrutura padrão de um Mapa de Quantidades moçambicano (capítulos e trabalhos correntes,
@@ -359,7 +359,7 @@ export async function generateStandardBoq(
   const unitCostCache = new Map<string, number>();
   async function unitCostOf(compositionId: string): Promise<number> {
     if (!unitCostCache.has(compositionId)) {
-      const breakdown = await computeCompositionUnitCost(compositionId, companyId, zoneId);
+      const breakdown = await computeCompositionUnitCostV2(compositionId, companyId, zoneId);
       unitCostCache.set(compositionId, breakdown.unitCost);
     }
     return unitCostCache.get(compositionId)!;

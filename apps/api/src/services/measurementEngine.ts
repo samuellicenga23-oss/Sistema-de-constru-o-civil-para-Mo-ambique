@@ -4,6 +4,7 @@ import {
   budgetSections,
   budgetDocuments,
   lineItems,
+  measurementCertificateFieldLines,
   measurementCertificateLines,
   measurementCertificates,
 } from "../db/schema.js";
@@ -166,6 +167,18 @@ export async function getCertificateDetail(certificateId: string) {
     .where(eq(measurementCertificateLines.certificateId, certificateId))
     .orderBy(budgetSections.sortOrder, lineItems.sortOrder);
 
+  const lineIds = lines.map((line) => line.id);
+  const fieldMemoryRows = lineIds.length
+    ? await db
+        .select({ certificateLineId: measurementCertificateFieldLines.certificateLineId })
+        .from(measurementCertificateFieldLines)
+        .where(and(
+          inArray(measurementCertificateFieldLines.certificateLineId, lineIds),
+          eq(measurementCertificateFieldLines.isActive, true),
+        ))
+    : [];
+  const linesWithFieldMemory = new Set(fieldMemoryRows.map((row) => row.certificateLineId));
+
   return {
     certificate,
     lines: lines.map((line) => {
@@ -186,6 +199,7 @@ export async function getCertificateDetail(certificateId: string) {
         remainingQty: budgetedQty === null ? null : budgetedQty - cumulativeQty,
         percentExecuted: budgetedQty ? (cumulativeQty / budgetedQty) * 100 : null,
         hasOverrun: budgetedQty !== null && cumulativeQty > budgetedQty + 0.0001,
+        hasFieldMemory: linesWithFieldMemory.has(line.id),
       };
     }),
   };
