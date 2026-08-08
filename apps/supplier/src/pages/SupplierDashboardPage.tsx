@@ -24,6 +24,7 @@ import {
   type SupplierPortalCompany,
   type SupplierQuoteRequest,
 } from "../api/supplierPortal";
+import { fulfillmentApi } from "../api/fulfillment";
 
 const STATUS_LABELS: Record<QuoteRequestStatus, string> = {
   enviado: "Por responder",
@@ -89,6 +90,7 @@ export default function SupplierDashboardPage() {
   const [profile, setProfile] = useState<MarketplaceProfile | null>(null);
   const [pricedCount, setPricedCount] = useState(0);
   const [catalogCount, setCatalogCount] = useState(0);
+  const [pendingOrders, setPendingOrders] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -123,6 +125,12 @@ export default function SupplierDashboardPage() {
       document.title = "Portal do Fornecedor — SIGO";
     };
   }, [navigate]);
+
+  useEffect(() => {
+    fulfillmentApi.orders()
+      .then((rows) => setPendingOrders(rows.filter((order) => order.status === "aprovado" && order.supplierConfirmationStatus === "pendente").length))
+      .catch(() => setPendingOrders(0));
+  }, []);
 
   const pending = useMemo(() => requests.filter((r) => r.status === "enviado"), [requests]);
   const rest = useMemo(() => requests.filter((r) => r.status !== "enviado"), [requests]);
@@ -209,6 +217,11 @@ export default function SupplierDashboardPage() {
         </section>
 
         <div className="action-grid stagger">
+          <Link to="/ordens" className="action-tile">
+            <span className="stat-tile-icon tone-orange"><IconClipboard size={17} /></span>
+            <strong>Ordens de Compra</strong>
+            <span>{pendingOrders ? `${pendingOrders} por confirmar` : "Acompanhe preparação, expedição e entrega"}</span>
+          </Link>
           <Link to="/precos" className="action-tile">
             <span className="stat-tile-icon tone-teal"><IconTag size={17} /></span>
             <strong>Meus preços</strong>

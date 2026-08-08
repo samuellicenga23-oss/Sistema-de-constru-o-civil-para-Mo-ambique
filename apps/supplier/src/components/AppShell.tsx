@@ -1,7 +1,7 @@
 import { type ReactNode } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { LogoMark } from "./Logo";
-import { IconGrid, IconTag, IconLogout, IconUser, IconPackage } from "./icons";
+import { IconGrid, IconTag, IconLogout, IconUser, IconPackage, IconClipboard } from "./icons";
 import { supplierPortalAuthApi } from "../api/supplierPortal";
 import NotificationBell from "./NotificationBell";
 
@@ -45,6 +45,9 @@ export function AppShell({ accountName, pendingCount = 0, children }: { accountN
             </Link>
             <Link to="/oportunidades" className={`app-nav-link ${path.includes("/oportunidades") ? "active" : ""}`}>
               <IconPackage size={15} /> Oportunidades
+            </Link>
+            <Link to="/ordens" className={`app-nav-link ${path.includes("/ordens") ? "active" : ""}`}>
+              <IconClipboard size={15} /> Ordens
             </Link>
             <Link to="/precos" className={`app-nav-link ${path.endsWith("/precos") ? "active" : ""}`}>
               <IconTag size={15} /> Meus preços

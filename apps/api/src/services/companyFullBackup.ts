@@ -55,8 +55,23 @@ import {
   projectInvoices,
   projectMaterialSpecifications,
   projects,
+  procurementAwards,
+  procurementAwardLines,
+  procurementDocumentSequences,
+  procurementRfqInvitations,
+  procurementRfqLines,
+  procurementRfqs,
+  procurementSupplierQuoteLines,
+  procurementSupplierQuotes,
+  purchaseRequisitionLines,
+  purchaseRequisitions,
   purchaseOrderLines,
+  purchaseOrderShipmentLines,
+  purchaseOrderShipments,
+  purchaseOrderSupplierEvents,
   purchaseOrders,
+  goodsReceiptLines,
+  goodsReceipts,
   scheduleDependencies,
   scheduleTasks,
   siteDiaryEntries,
@@ -205,6 +220,45 @@ export async function collectCompanyFullBackup(companyId: string) {
   const practiceInvoiceIds = idsOf(practiceInvoiceRows);
   const practiceReceiptIds = idsOf(practiceReceiptRows);
 
+  // Procurement é dado operacional da empresa e precisa viajar no backup completo. A Fase 1
+  // criou a cadeia requisição → RFQ → proposta → adjudicação; a Fase 2 acrescenta expedições e
+  // recepções. Não exportar estas tabelas deixaria purchase_orders/stock sem a sua origem.
+  const [procurementSequenceRows, requisitionRows, procurementRfqRows] = await Promise.all([
+    db.select().from(procurementDocumentSequences).where(eq(procurementDocumentSequences.companyId, companyId)),
+    db.select().from(purchaseRequisitions).where(eq(purchaseRequisitions.companyId, companyId)),
+    db.select().from(procurementRfqs).where(eq(procurementRfqs.companyId, companyId)),
+  ]);
+  const requisitionIds = idsOf(requisitionRows);
+  const procurementRfqIds = idsOf(procurementRfqRows);
+
+  const [requisitionLineRows, procurementRfqLineRows, procurementInvitationRows, supplierQuoteRows, awardRows] = await Promise.all([
+    requisitionIds.length
+      ? db.select().from(purchaseRequisitionLines).where(inArray(purchaseRequisitionLines.requisitionId, requisitionIds))
+      : Promise.resolve([]),
+    procurementRfqIds.length
+      ? db.select().from(procurementRfqLines).where(inArray(procurementRfqLines.rfqId, procurementRfqIds))
+      : Promise.resolve([]),
+    procurementRfqIds.length
+      ? db.select().from(procurementRfqInvitations).where(inArray(procurementRfqInvitations.rfqId, procurementRfqIds))
+      : Promise.resolve([]),
+    procurementRfqIds.length
+      ? db.select().from(procurementSupplierQuotes).where(inArray(procurementSupplierQuotes.rfqId, procurementRfqIds))
+      : Promise.resolve([]),
+    procurementRfqIds.length
+      ? db.select().from(procurementAwards).where(inArray(procurementAwards.rfqId, procurementRfqIds))
+      : Promise.resolve([]),
+  ]);
+  const supplierQuoteIds = idsOf(supplierQuoteRows);
+  const awardIds = idsOf(awardRows);
+  const [supplierQuoteLineRows, awardLineRows] = await Promise.all([
+    supplierQuoteIds.length
+      ? db.select().from(procurementSupplierQuoteLines).where(inArray(procurementSupplierQuoteLines.quoteId, supplierQuoteIds))
+      : Promise.resolve([]),
+    awardIds.length
+      ? db.select().from(procurementAwardLines).where(inArray(procurementAwardLines.awardId, awardIds))
+      : Promise.resolve([]),
+  ]);
+
   const [
     zonePriceRows,
     compositionLabour,
@@ -259,6 +313,29 @@ export async function collectCompanyFullBackup(companyId: string) {
   const contractIds = idsOf(contractRows);
   const diaryIds = idsOf(diaryRows);
   const purchaseOrderIds = idsOf(purchaseOrderRows);
+
+  const [shipmentRows, goodsReceiptRows, supplierEventRows] = await Promise.all([
+    purchaseOrderIds.length
+      ? db.select().from(purchaseOrderShipments).where(inArray(purchaseOrderShipments.purchaseOrderId, purchaseOrderIds))
+      : Promise.resolve([]),
+    purchaseOrderIds.length
+      ? db.select().from(goodsReceipts).where(inArray(goodsReceipts.purchaseOrderId, purchaseOrderIds))
+      : Promise.resolve([]),
+    purchaseOrderIds.length
+      ? db.select().from(purchaseOrderSupplierEvents).where(inArray(purchaseOrderSupplierEvents.purchaseOrderId, purchaseOrderIds))
+      : Promise.resolve([]),
+  ]);
+  const shipmentIds = idsOf(shipmentRows);
+  const goodsReceiptIds = idsOf(goodsReceiptRows);
+
+  const [shipmentLineRows, goodsReceiptLineRows] = await Promise.all([
+    shipmentIds.length
+      ? db.select().from(purchaseOrderShipmentLines).where(inArray(purchaseOrderShipmentLines.shipmentId, shipmentIds))
+      : Promise.resolve([]),
+    goodsReceiptIds.length
+      ? db.select().from(goodsReceiptLines).where(inArray(goodsReceiptLines.goodsReceiptId, goodsReceiptIds))
+      : Promise.resolve([]),
+  ]);
 
   const [
     sectionRows,
@@ -484,6 +561,23 @@ export async function collectCompanyFullBackup(companyId: string) {
     supplierMaterialPrices: supplierMaterialPriceRows,
     supplierLabourPrices: supplierLabourPriceRows,
     supplierEquipmentPrices: supplierEquipmentPriceRows,
+    procurement: {
+      documentSequences: procurementSequenceRows,
+      requisitions: requisitionRows,
+      requisitionLines: requisitionLineRows,
+      rfqs: procurementRfqRows,
+      rfqLines: procurementRfqLineRows,
+      invitations: procurementInvitationRows,
+      supplierQuotes: supplierQuoteRows,
+      supplierQuoteLines: supplierQuoteLineRows,
+      awards: awardRows,
+      awardLines: awardLineRows,
+      shipments: shipmentRows,
+      shipmentLines: shipmentLineRows,
+      goodsReceipts: goodsReceiptRows,
+      goodsReceiptLines: goodsReceiptLineRows,
+      supplierEvents: supplierEventRows,
+    },
     purchaseOrders: purchaseOrderRows,
     purchaseOrderLines: purchaseLineRows,
     stockMovements: stockRows,

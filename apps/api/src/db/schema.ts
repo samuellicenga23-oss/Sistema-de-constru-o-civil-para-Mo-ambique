@@ -1470,6 +1470,16 @@ export const procurementInvitationStatusEnum = pgEnum("procurement_invitation_st
 export const procurementSupplierQuoteStatusEnum = pgEnum("procurement_supplier_quote_status", [
   "rascunho", "submetida", "substituida", "retirada",
 ]);
+export const purchaseOrderSupplierConfirmationStatusEnum = pgEnum("purchase_order_supplier_confirmation_status", [
+  "pendente", "confirmado", "alteracao_solicitada", "recusado",
+]);
+export const purchaseOrderFulfillmentStatusEnum = pgEnum("purchase_order_fulfillment_status", [
+  "aguarda_confirmacao", "confirmado", "em_preparacao", "pronto_expedir", "em_transito", "parcialmente_recebido", "recebido", "fechado",
+]);
+export const purchaseOrderShipmentStatusEnum = pgEnum("purchase_order_shipment_status", [
+  "rascunho", "pronto", "expedido", "entregue", "cancelado",
+]);
+export const goodsReceiptStatusEnum = pgEnum("goods_receipt_status", ["rascunho", "confirmado", "cancelado"]);
 
 // Duas naturezas de linha nesta tabela, distinguidas por `companyId`:
 // 1) `companyId` preenchido — a ficha «SIGO Preços» de referência dessa empresa (gerida pelo
@@ -1685,6 +1695,16 @@ export const purchaseOrders = pgTable("purchase_orders", {
   // Transporte adjudicado fora dos preços unitários. Mantê-lo separado preserva a proposta
   // original e garante que OC/Financeiro não perdem este custo. Valor sem IVA.
   transportCost: numeric("transport_cost", { precision: 14, scale: 2 }).notNull().default("0"),
+  // A aprovação comercial continua em `status`; estes campos descrevem a execução logística.
+  // Isto preserva compatibilidade com Financeiro/OCs antigas sem confundir "aprovado" com
+  // "confirmado pelo fornecedor" ou "material fisicamente recebido".
+  supplierConfirmationStatus: purchaseOrderSupplierConfirmationStatusEnum("supplier_confirmation_status").notNull().default("pendente"),
+  fulfillmentStatus: purchaseOrderFulfillmentStatusEnum("fulfillment_status").notNull().default("aguarda_confirmacao"),
+  approvedAt: timestamp("approved_at"),
+  supplierConfirmedAt: timestamp("supplier_confirmed_at"),
+  promisedDeliveryDate: date("promised_delivery_date"),
+  supplierResponseNotes: text("supplier_response_notes"),
+  lastSupplierUpdateAt: timestamp("last_supplier_update_at"),
   notes: text("notes"),
   // Snapshot fiscal da ordem. O total aprovado no Financeiro usa esta taxa, mesmo que a taxa
   // padrão da empresa venha a mudar depois.
@@ -1707,6 +1727,90 @@ export const purchaseOrderLines = pgTable("purchase_order_lines", {
   currency: currencyEnum("currency").notNull().default("MZN"),
 }, (table) => [unique("purchase_order_material_unique").on(table.purchaseOrderId, table.materialId)]);
 
+// Histórico append-only das acções do fornecedor sobre uma OC. Não substitui auditoria da
+// empresa; regista o lado do portal, que usa autenticação própria (`supplier_accounts`).
+export const purchaseOrderSupplierEvents = pgTable("purchase_order_supplier_events", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  purchaseOrderId: uuid("purchase_order_id").notNull().references(() => purchaseOrders.id, { onDelete: "cascade" }),
+  supplierAccountId: uuid("supplier_account_id").notNull().references((): AnyPgColumn => supplierAccounts.id, { onDelete: "cascade" }),
+  eventType: varchar("event_type", { length: 50 }).notNull(),
+  message: text("message"),
+  metadata: jsonb("metadata").$type<Record<string, unknown> | null>(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [index("purchase_order_supplier_event_order_idx").on(table.purchaseOrderId, table.createdAt)]);
+
+// Uma OC pode sair em várias cargas. Cada expedição declara exactamente as quantidades que o
+// fornecedor preparou/expediu por linha, permitindo comparar "a expedir", "em trânsito" e
+// "aceite em obra" sem usar textos livres.
+export const purchaseOrderShipments = pgTable("purchase_order_shipments", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  purchaseOrderId: uuid("purchase_order_id").notNull().references(() => purchaseOrders.id, { onDelete: "cascade" }),
+  reference: varchar("reference", { length: 50 }).notNull(),
+  status: purchaseOrderShipmentStatusEnum("status").notNull().default("rascunho"),
+  expectedDeliveryDate: date("expected_delivery_date"),
+  carrier: varchar("carrier", { length: 200 }),
+  vehiclePlate: varchar("vehicle_plate", { length: 80 }),
+  driverName: varchar("driver_name", { length: 160 }),
+  driverPhone: varchar("driver_phone", { length: 80 }),
+  trackingReference: varchar("tracking_reference", { length: 160 }),
+  supplierNotes: text("supplier_notes"),
+  createdBySupplierAccountId: uuid("created_by_supplier_account_id").references((): AnyPgColumn => supplierAccounts.id, { onDelete: "set null" }),
+  readyAt: timestamp("ready_at"),
+  dispatchedAt: timestamp("dispatched_at"),
+  deliveredAt: timestamp("delivered_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => [
+  index("purchase_order_shipment_reference_idx").on(table.reference),
+  index("purchase_order_shipment_order_status_idx").on(table.purchaseOrderId, table.status),
+]);
+
+export const purchaseOrderShipmentLines = pgTable("purchase_order_shipment_lines", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  shipmentId: uuid("shipment_id").notNull().references(() => purchaseOrderShipments.id, { onDelete: "cascade" }),
+  purchaseOrderLineId: uuid("purchase_order_line_id").notNull().references(() => purchaseOrderLines.id, { onDelete: "cascade" }),
+  quantity: numeric("quantity", { precision: 14, scale: 3 }).notNull(),
+}, (table) => [unique("purchase_order_shipment_line_unique").on(table.shipmentId, table.purchaseOrderLineId)]);
+
+// Documento de recepção/inspecção em obra. `deliveredQty` é o que chegou fisicamente;
+// `acceptedQty` é o único que entra em stock; `rejectedQty` continua pendente para substituição.
+export const goodsReceipts = pgTable("goods_receipts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  purchaseOrderId: uuid("purchase_order_id").notNull().references(() => purchaseOrders.id, { onDelete: "cascade" }),
+  shipmentId: uuid("shipment_id").references(() => purchaseOrderShipments.id, { onDelete: "set null" }),
+  reference: varchar("reference", { length: 50 }).notNull(),
+  status: goodsReceiptStatusEnum("status").notNull().default("rascunho"),
+  receiptDate: date("receipt_date").notNull(),
+  deliveryNoteNumber: varchar("delivery_note_number", { length: 160 }),
+  inspectionNotes: text("inspection_notes"),
+  receivedByUserId: uuid("received_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  confirmedByUserId: uuid("confirmed_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  confirmedAt: timestamp("confirmed_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [
+  index("goods_receipt_reference_idx").on(table.reference),
+  // Não é UNIQUE: uma recepção anulada pode ser refeita para a mesma expedição. A API
+  // serializa por OC/expedição e garante apenas uma recepção activa.
+  index("goods_receipt_shipment_idx").on(table.shipmentId),
+  index("goods_receipt_order_date_idx").on(table.purchaseOrderId, table.receiptDate),
+]);
+
+export const goodsReceiptLines = pgTable("goods_receipt_lines", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  goodsReceiptId: uuid("goods_receipt_id").notNull().references(() => goodsReceipts.id, { onDelete: "cascade" }),
+  purchaseOrderLineId: uuid("purchase_order_line_id").notNull().references(() => purchaseOrderLines.id),
+  materialId: uuid("material_id").notNull().references(() => materials.id),
+  deliveredQty: numeric("delivered_qty", { precision: 14, scale: 3 }).notNull(),
+  acceptedQty: numeric("accepted_qty", { precision: 14, scale: 3 }).notNull(),
+  rejectedQty: numeric("rejected_qty", { precision: 14, scale: 3 }).notNull().default("0"),
+  rejectionReason: text("rejection_reason"),
+  conditionNotes: text("condition_notes"),
+  // Snapshot do custo adjudicado para métricas de qualidade por valor e entrada de stock.
+  unitCost: numeric("unit_cost", { precision: 14, scale: 4 }).notNull(),
+  currency: currencyEnum("currency").notNull().default("MZN"),
+}, (table) => [unique("goods_receipt_order_line_unique").on(table.goodsReceiptId, table.purchaseOrderLineId)]);
+
 // Movimento de stock por projecto (um "armazém" simples por obra, não multi-armazém ainda) —
 // "entrada" acontece automaticamente quando uma ordem de compra passa a "recebido" (ver
 // purchasing.ts), ou pode ser lançada manualmente; "saída" regista consumo em obra. O stock
@@ -1723,11 +1827,16 @@ export const stockMovements = pgTable("stock_movements", {
   currency: currencyEnum("currency").default("MZN"),
   notes: text("notes"),
   purchaseOrderId: uuid("purchase_order_id").references(() => purchaseOrders.id, { onDelete: "cascade" }),
+  goodsReceiptLineId: uuid("goods_receipt_line_id").references(() => goodsReceiptLines.id, { onDelete: "cascade" }),
   diaryEntryId: uuid("diary_entry_id").references(() => siteDiaryEntries.id, { onDelete: "cascade" }),
   createdByUserId: uuid("created_by_user_id").references(() => users.id),
   date: date("date").notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-}, (table) => [unique("stock_purchase_material_unique").on(table.purchaseOrderId, table.materialId)]);
+}, (table) => [
+  // Recepção parcial exige várias entradas para o mesmo material/OC. Idempotência passa a ser
+  // por linha de recepção, que representa um evento físico único e confirmado.
+  unique("stock_goods_receipt_line_unique").on(table.goodsReceiptLineId),
+]);
 
 // Preço de um material específico por fornecedor, opcionalmente por zona (transporte varia por
 // zona tal como material_zone_prices) — é isto que faz aparecer "materiais" dentro de um

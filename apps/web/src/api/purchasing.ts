@@ -18,6 +18,12 @@ export type PurchaseOrder = {
   procurementAwardId?: string | null;
   purchaseRequisitionId?: string | null;
   transportCost?: string;
+  supplierConfirmationStatus?: "pendente" | "confirmado" | "alteracao_solicitada" | "recusado";
+  fulfillmentStatus?: "aguarda_confirmacao" | "confirmado" | "em_preparacao" | "pronto_expedir" | "em_transito" | "parcialmente_recebido" | "recebido" | "fechado";
+  approvedAt?: string | null;
+  supplierConfirmedAt?: string | null;
+  promisedDeliveryDate?: string | null;
+  supplierResponseNotes?: string | null;
   supplierName: string;
   supplierContact: string | null;
   status: "rascunho" | "aprovado" | "recebido" | "cancelado";

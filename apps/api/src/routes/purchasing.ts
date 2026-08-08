@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { eq, and, or, isNull, desc, inArray, sql as drizzleSql } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { purchaseOrders, purchaseOrderLines, purchaseRequisitions, stockMovements, suppliers, materials, budgetDocuments, financialEntries, scheduleTasks, supplierAccounts, materialZonePrices, supplierMaterialPrices, priceZones } from "../db/schema.js";
+import { purchaseOrders, purchaseOrderLines, purchaseRequisitions, purchaseOrderShipments, goodsReceipts, stockMovements, suppliers, materials, budgetDocuments, financialEntries, scheduleTasks, supplierAccounts, materialZonePrices, supplierMaterialPrices, priceZones } from "../db/schema.js";
 import { requireCompanyUser, requirePermission, requireRole } from "../auth/middleware.js";
 import { assertProjectOwned } from "../services/accessControl.js";
 import { assertApprovedOrcamentoForSite } from "../services/siteGate.js";
@@ -475,6 +475,11 @@ export async function purchasingRoutes(app: FastifyInstance) {
     if (parsed.data.status === "aprovado" && order.createdByUserId === user.id && user.role !== "admin_empresa" && user.role !== "super_admin") {
       return reply.code(409).send({ error: "Quem criou a ordem não pode aprová-la" });
     }
+    // OCs adjudicadas no procurement integrado deixam de usar o atalho legado "Recebido".
+    // A recepção passa por documento próprio (entregue/aceite/rejeitado), que permite parciais.
+    if (parsed.data.status === "recebido" && order.procurementAwardId) {
+      return reply.code(409).send({ error: "Use Recepção de Materiais para esta OC; o stock só recebe quantidades inspeccionadas e aceites" });
+    }
 
     const transitions: Record<typeof order.status, typeof order.status[]> = {
       rascunho: ["aprovado", "cancelado"],
@@ -500,7 +505,28 @@ export async function purchasingRoutes(app: FastifyInstance) {
         }
       }
 
-      const [row] = await tx.update(purchaseOrders).set({ status: parsed.data.status }).where(eq(purchaseOrders.id, id)).returning();
+      if (parsed.data.status === "cancelado" && lockedOrder.procurementAwardId) {
+        const [shipmentRows, receiptRows] = await Promise.all([
+          tx.select({ id: purchaseOrderShipments.id, status: purchaseOrderShipments.status }).from(purchaseOrderShipments).where(eq(purchaseOrderShipments.purchaseOrderId, id)),
+          tx.select({ id: goodsReceipts.id, status: goodsReceipts.status }).from(goodsReceipts).where(eq(goodsReceipts.purchaseOrderId, id)),
+        ]);
+        if (shipmentRows.some((shipment) => shipment.status === "expedido" || shipment.status === "entregue") || receiptRows.some((receipt) => receipt.status === "confirmado")) {
+          return { error: "Não é possível cancelar uma OC com material já expedido/recebido; regularize a entrega e o Financeiro" } as const;
+        }
+        const cancellableShipmentIds = shipmentRows.filter((shipment) => shipment.status === "rascunho" || shipment.status === "pronto").map((shipment) => shipment.id);
+        if (cancellableShipmentIds.length) {
+          await tx.update(purchaseOrderShipments).set({ status: "cancelado", updatedAt: new Date() }).where(inArray(purchaseOrderShipments.id, cancellableShipmentIds));
+        }
+      }
+
+      const [row] = await tx.update(purchaseOrders).set({
+        status: parsed.data.status,
+        ...(parsed.data.status === "aprovado" ? {
+          approvedAt: lockedOrder.approvedAt ?? new Date(),
+          supplierConfirmationStatus: "pendente" as const,
+          fulfillmentStatus: "aguarda_confirmacao" as const,
+        } : {}),
+      }).where(eq(purchaseOrders.id, id)).returning();
 
       if (parsed.data.status === "aprovado") {
         const lines = await tx.select().from(purchaseOrderLines).where(eq(purchaseOrderLines.purchaseOrderId, id));
@@ -524,11 +550,11 @@ export async function purchasingRoutes(app: FastifyInstance) {
       // só avança quando TODAS as OCs activas atingem o marco correspondente; nunca ao criar a OC.
       if (lockedOrder.purchaseRequisitionId) {
         const linkedOrders = await tx
-          .select({ status: purchaseOrders.status })
+          .select({ status: purchaseOrders.status, fulfillmentStatus: purchaseOrders.fulfillmentStatus })
           .from(purchaseOrders)
           .where(eq(purchaseOrders.purchaseRequisitionId, lockedOrder.purchaseRequisitionId));
         const activeOrders = linkedOrders.filter((linked) => linked.status !== "cancelado");
-        const requisitionStatus = activeOrders.length > 0 && activeOrders.every((linked) => linked.status === "recebido")
+        const requisitionStatus = activeOrders.length > 0 && activeOrders.every((linked) => linked.status === "recebido" || linked.fulfillmentStatus === "fechado")
           ? "fechada"
           : activeOrders.length > 0 && activeOrders.every((linked) => linked.status === "aprovado" || linked.status === "recebido")
             ? "comprada"
@@ -653,7 +679,7 @@ export async function purchasingRoutes(app: FastifyInstance) {
     if (!movement) return { ok: true };
     const project = await assertProjectOwned(movement.projectId, companyIdOf(request));
     if (!project) return { ok: true };
-    if (movement.purchaseOrderId || movement.diaryEntryId) {
+    if (movement.purchaseOrderId || movement.diaryEntryId || movement.goodsReceiptLineId) {
       return reply.code(409).send({ error: "Este movimento foi gerado por outro módulo e deve ser corrigido na sua origem" });
     }
     const result = await db.transaction(async (tx) => {

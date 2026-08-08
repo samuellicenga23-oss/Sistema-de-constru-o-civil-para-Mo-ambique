@@ -15,8 +15,9 @@ import { procurementApi, type ProcurementComparison, type ProcurementRfq, type P
 import { marketplaceApi, type MarketplaceSupplier } from "../api/marketplace";
 import { useAuth } from "../auth/AuthContext";
 import { can } from "../permissions";
+import ProcurementFulfillmentPanel from "../components/ProcurementFulfillmentPanel";
 
-type View = "necessidades" | "requisicoes" | "cotacoes" | "ordens" | "stock";
+type View = "necessidades" | "requisicoes" | "cotacoes" | "ordens" | "recepcoes" | "stock";
 type DraftRequisitionLine = { materialId: string; materialName: string; unit: string; quantity: number; specification?: string };
 
 type AwardDraft = Record<string, Array<{ quoteId: string; quantity: string }>>;
@@ -299,7 +300,8 @@ export default function ProjectProcurementPage() {
               ["requisicoes", "2. Requisições", requisitions.length],
               ["cotacoes", "3. Cotações", rfqs.length],
               ["ordens", "4. Ordens de compra", orders.length],
-              ["stock", "5. Stock", stock.length],
+              ["recepcoes", "5. Entregas e recepções", orders.filter((order) => order.status === "aprovado" || order.status === "recebido").length],
+              ["stock", "6. Stock", stock.length],
             ] as Array<[View, string, number]>).map(([id, label, count]) => (
               <button key={id} type="button" onClick={() => { setView(id); setQuery(""); }} className={`flex items-center justify-between rounded-lg px-3 py-3 text-sm font-semibold ${view === id ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-100"}`}>
                 <span>{label}</span><span className={`rounded-full px-2 py-0.5 text-xs ${view === id ? "bg-white/15" : "bg-slate-100 text-slate-500"}`}>{count}</span>
@@ -341,6 +343,14 @@ export default function ProjectProcurementPage() {
 
         {view === "ordens" && (
           <section className="space-y-3"><SectionHeader title="Ordens de compra" description="As adjudicações geram OCs sem redigitar fornecedor, quantidade ou preço" />{visibleOrders.map((order) => <article key={order.id} className="card p-5"><div className="flex items-start justify-between"><div><strong>{order.supplierName}</strong><p className="text-xs text-slate-500">{dateLabel(order.orderDate)} · entrega {dateLabel(order.requiredByDate)}</p></div><span className="badge badge-gray">{order.status}</span></div><div className="mt-3 text-sm">{order.lines.map((line) => <div key={line.id} className="flex justify-between border-t border-slate-100 py-2"><span>{line.materialName} · {Number(line.quantity).toLocaleString("pt-MZ")} {line.unit}</span><strong>{money(Number(line.quantity) * Number(line.unitCost), line.currency)}</strong></div>)}{Number(order.transportCost ?? 0) > 0 && <div className="flex justify-between border-t border-slate-100 py-2"><span>Transporte adjudicado</span><strong>{money(Number(order.transportCost), order.lines[0]?.currency ?? project.currency)}</strong></div>}</div></article>)}</section>
+        )}
+
+        {view === "recepcoes" && (
+          <ProcurementFulfillmentPanel
+            projectId={projectId!}
+            canReceive={Boolean(canRequest || canApprove)}
+            onChanged={reload}
+          />
         )}
 
         {view === "stock" && (

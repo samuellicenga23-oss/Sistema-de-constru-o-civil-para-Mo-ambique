@@ -505,6 +505,13 @@
       "when": 1786182750635,
       "tag": "0071_shiny_slyde",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1786189681719,
+      "tag": "0072_glossy_professor_monster",
+      "breakpoints": true
     }
   ]
 }
