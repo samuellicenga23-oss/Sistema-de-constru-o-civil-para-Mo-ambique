@@ -17,8 +17,9 @@ import { useAuth } from "../auth/AuthContext";
 import { can } from "../permissions";
 import ProcurementFulfillmentPanel from "../components/ProcurementFulfillmentPanel";
 import ProcurementAccountsPayablePanel from "../components/ProcurementAccountsPayablePanel";
+import ProcurementIntelligencePanel from "../components/ProcurementIntelligencePanel";
 
-type View = "necessidades" | "requisicoes" | "cotacoes" | "ordens" | "recepcoes" | "facturas" | "stock";
+type View = "necessidades" | "requisicoes" | "cotacoes" | "ordens" | "recepcoes" | "facturas" | "stock" | "inteligencia";
 type DraftRequisitionLine = { materialId: string; materialName: string; unit: string; quantity: number; specification?: string };
 
 type AwardDraft = Record<string, Array<{ quoteId: string; quantity: string }>>;
@@ -295,7 +296,7 @@ export default function ProjectProcurementPage() {
         </div>
 
         <section className="card p-2">
-          <div className="grid gap-1 md:grid-cols-5">
+          <div className="grid gap-1 md:grid-cols-4 xl:grid-cols-8">
             {([
               ["necessidades", "1. Necessidades", requirements.length],
               ["requisicoes", "2. Requisições", requisitions.length],
@@ -304,6 +305,7 @@ export default function ProjectProcurementPage() {
               ["recepcoes", "5. Entregas e recepções", orders.filter((order) => order.status === "aprovado" || order.status === "recebido").length],
               ["facturas", "6. Facturas e AP", null],
               ["stock", "7. Stock", stock.length],
+              ["inteligencia", "8. Inteligência & Tesouraria", null],
             ] as Array<[View, string, number | null]>).map(([id, label, count]) => (
               <button key={id} type="button" onClick={() => { setView(id); setQuery(""); }} className={`flex items-center justify-between rounded-lg px-3 py-3 text-sm font-semibold ${view === id ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-100"}`}>
                 <span>{label}</span><span className={`rounded-full px-2 py-0.5 text-xs ${view === id ? "bg-white/15" : "bg-slate-100 text-slate-500"}`}>{count}</span>
@@ -312,7 +314,7 @@ export default function ProjectProcurementPage() {
           </div>
         </section>
 
-        <section className="card p-4"><PageSearch value={query} onChange={setQuery} placeholder="Pesquisar neste estágio do procurement…" resultLabel="" /></section>
+        {view !== "inteligencia" && <section className="card p-4"><PageSearch value={query} onChange={setQuery} placeholder="Pesquisar neste estágio do procurement…" resultLabel="" /></section>}
 
         {view === "necessidades" && (
           <section className="card overflow-hidden">
@@ -366,6 +368,7 @@ export default function ProjectProcurementPage() {
         {view === "stock" && (
           <section className="card overflow-hidden"><SectionHeader title="Stock da obra" description="Saldo actual após entradas e consumos" /><div className="divide-y divide-slate-100">{visibleStock.map((line) => <div key={line.materialId} className="flex items-center justify-between px-5 py-4"><strong className="text-sm">{line.materialName}</strong><span className="tabular-nums text-sm">{line.balance.toLocaleString("pt-MZ")} {line.unit}</span></div>)}</div></section>
         )}
+        {view === "inteligencia" && <ProcurementIntelligencePanel projectId={projectId!} />}
       </div>
 
       {reqOpen && <Modal onClose={() => setReqOpen(false)} title="Nova requisição de compra" maxWidth="max-w-4xl">

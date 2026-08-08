@@ -31,6 +31,7 @@ import { procurementWorkflowRoutes } from "./routes/procurementWorkflow.js";
 import { procurementFulfillmentRoutes } from "./routes/procurementFulfillment.js";
 import { procurementAccountsPayableRoutes } from "./routes/procurementAccountsPayable.js";
 import { procurementFiscalControlRoutes } from "./routes/procurementFiscalControl.js";
+import { procurementIntelligenceRoutes } from "./routes/procurementIntelligence.js";
 import { fileRoutes } from "./routes/files.js";
 import { scheduleRoutes } from "./routes/schedule.js";
 import { auditRoutes } from "./routes/audit.js";
@@ -161,6 +162,7 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   await app.register(procurementFulfillmentRoutes);
   await app.register(procurementAccountsPayableRoutes);
   await app.register(procurementFiscalControlRoutes);
+  await app.register(procurementIntelligenceRoutes);
   await app.register(scheduleRoutes);
   await app.register(auditRoutes);
   await app.register(projectControlRoutes);
