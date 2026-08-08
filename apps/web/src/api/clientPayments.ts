@@ -7,6 +7,7 @@ export type ClientInstallment = {
   dueDate: string;
   amount: number;
   status: "prevista" | "parcial" | "paga" | "atrasada";
+  overdue?: boolean;
   paidAmount: number;
   paidAt: string | null;
   invoiceId: string | null;

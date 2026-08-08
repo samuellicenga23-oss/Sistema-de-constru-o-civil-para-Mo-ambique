@@ -21,6 +21,8 @@ import { getStandardSectionId } from "../services/quickEstimate.js";
 import { getProjectWorkflowStatus } from "../services/projectWorkflow.js";
 import { resolveOrCreateMaterialByName } from "../services/materialResolution.js";
 import { syncProjectPlantMeasurements } from "../services/plantMeasurementSync.js";
+import { getProjectControl } from "../services/projectControl.js";
+import { getProjectSchedule } from "../services/scheduleEngine.js";
 import { CURRENCIES, DEFAULT_IVA_RATE, getPlanDefinition, UNITS } from "@sigo/shared";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista"] as const;
@@ -43,6 +45,7 @@ const projectSchema = z.object({
   currency: z.enum(CURRENCIES).default("MZN"),
   projectType: z.enum(["medicao", "orcamento", "hibrido"]).default("orcamento"),
   measurementMode: z.enum(["plantas", "manual", "importar"]).default("plantas"),
+  floors: z.number().int().min(1).max(20).default(1),
   ivaRate: z.number().min(0).max(1).default(DEFAULT_IVA_RATE),
   contingenciasRate: z.number().min(0).max(1).default(0.1),
   siteCostsRate: z.number().min(0).max(1).default(0),
@@ -181,6 +184,78 @@ export async function projectRoutes(app: FastifyInstance) {
       .from(projects)
       .where(and(eq(projects.companyId, companyId), isNull(projects.trashedAt)))
       .orderBy(projects.createdAt);
+  });
+
+  // Painel da Gestão de Obras: saúde física/financeira de cada obra pronta, num único pedido.
+  app.get("/api/projects/site-management-overview", { preHandler: requireCompanyUser }, async (request) => {
+    const companyId = request.currentUser!.companyId!;
+    const approved = await db
+      .select({ projectId: budgetDocuments.projectId })
+      .from(budgetDocuments)
+      .innerJoin(projects, eq(projects.id, budgetDocuments.projectId))
+      .where(
+        and(
+          eq(projects.companyId, companyId),
+          isNull(projects.trashedAt),
+          eq(budgetDocuments.documentType, "orcamento"),
+          eq(budgetDocuments.status, "aprovado"),
+        ),
+      );
+    const ids = [...new Set(approved.map((row) => row.projectId))];
+    if (!ids.length) return [];
+    const readyProjects = await db
+      .select()
+      .from(projects)
+      .where(and(inArray(projects.id, ids), isNull(projects.trashedAt)));
+
+    const results = await Promise.all(
+      readyProjects.map(async (project) => {
+        try {
+          const [control, schedule] = await Promise.all([
+            getProjectControl(project.id, project.currency),
+            getProjectSchedule(project.id),
+          ]);
+          const phases = schedule.tasks
+            .filter((task) => !task.parentId)
+            .map((task) => ({
+              id: task.id,
+              name: task.name,
+              startDate: task.startDate,
+              endDate: task.endDate,
+              progress: task.progress,
+              status: task.status,
+            }));
+          return {
+            projectId: project.id,
+            projectName: project.name,
+            currency: project.currency,
+            expectedProgress: control.schedule.expectedProgress,
+            actualProgress: control.schedule.actualProgress,
+            progressGap: control.schedule.progressGap,
+            contractedValue: control.commercial.contractedValue,
+            receivedValue: control.commercial.receivedValue,
+            cashMargin: control.cost.cashMargin,
+            alerts: control.alerts,
+            schedule: { startDate: schedule.startDate, endDate: schedule.endDate, phases },
+          };
+        } catch {
+          return {
+            projectId: project.id,
+            projectName: project.name,
+            currency: project.currency,
+            expectedProgress: 0,
+            actualProgress: 0,
+            progressGap: 0,
+            contractedValue: 0,
+            receivedValue: 0,
+            cashMargin: 0,
+            alerts: [],
+            schedule: { startDate: null, endDate: null, phases: [] },
+          };
+        }
+      }),
+    );
+    return results;
   });
 
   app.get("/api/projects/:id", { preHandler: requireCompanyUser }, async (request, reply) => {

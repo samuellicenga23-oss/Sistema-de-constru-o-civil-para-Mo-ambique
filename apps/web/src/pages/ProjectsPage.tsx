@@ -27,6 +27,7 @@ export default function ProjectsPage() {
   const [name, setName] = useState("");
   const [client, setClient] = useState("");
   const [currency, setCurrency] = useState<"MZN" | "USD">("MZN");
+  const [floors, setFloors] = useState(1);
   const [startMode, setStartMode] = useState<ProjectStartMode>("plantas");
   const [materialSpecifications, setMaterialSpecifications] = useState<MaterialSpecificationDraft[]>([]);
   const [zoneId, setZoneId] = useState("");
@@ -146,6 +147,7 @@ export default function ProjectsPage() {
         zoneId: zoneId || undefined,
         projectType: workspace === "medicoes" ? "medicao" : "orcamento",
         measurementMode: startMode,
+        floors,
         materialSpecifications: materialSpecifications
           .filter((item) => item.name.trim())
           .map((item) => ({ ...item, name: item.name.trim(), specification: item.specification.trim() || undefined })),
@@ -244,6 +246,18 @@ export default function ProjectsPage() {
                   <option value="MZN">MZN</option>
                   <option value="USD">USD</option>
                 </select>
+              </div>
+              <div>
+                <label className="label">Número de pisos</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={20}
+                  value={floors}
+                  onChange={(e) => setFloors(Math.max(1, Math.min(20, Number(e.target.value) || 1)))}
+                  className="input"
+                />
+                <p className="mt-1 text-xs text-slate-500">Usado para sequenciar a estrutura e as paredes piso a piso no cronograma.</p>
               </div>
               <div className="sm:col-span-2">
                 <label className="label">{workspace === "medicoes" ? "Como deseja medir?" : "Origem das quantidades"}</label>

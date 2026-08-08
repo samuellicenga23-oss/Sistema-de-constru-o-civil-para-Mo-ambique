@@ -6,7 +6,7 @@ import { scheduleTasks } from "../db/schema.js";
 import { requireCompanyUser, requireRole } from "../auth/middleware.js";
 import { assertDocumentOwned, assertProjectOwned } from "../services/accessControl.js";
 import { assertApprovedOrcamentoForSite } from "../services/siteGate.js";
-import { addWorkingDays, generateSchedule, getProjectSchedule, getTaskDependency, upsertTaskDependency, validateTaskDependency, workingDaysInclusive } from "../services/scheduleEngine.js";
+import { addWorkingDays, cascadeSuccessorDates, computeSuccessorDates, generateSchedule, getProjectSchedule, getTaskDependency, isWorkingDay, upsertTaskDependency, validateTaskDependency, workingDaysInclusive } from "../services/scheduleEngine.js";
 import { buildSchedulePdf } from "../services/schedulePdf.js";
 import { loadCompanyBrand, logoDataUri } from "../services/companyBrand.js";
 import { brandDisplayName, brandFooterText } from "../services/documentChrome.js";
@@ -25,7 +25,7 @@ const taskInput = z.object({
   name: z.string().min(1).max(240),
   budgetDocumentId: z.string().uuid().nullable().optional(),
   budgetChapterCode: z.string().max(30).nullable().optional(),
-  startDate: z.string(),
+  startDate: z.string().refine(isWorkingDay, { message: "A obra não trabalha ao domingo — escolha uma data de segunda a sábado" }),
   endDate: z.string().optional(),
   durationDays: z.number().int().positive().optional(),
   manualProgress: z.number().min(0).max(100).nullable().optional(),
@@ -71,7 +71,15 @@ export async function scheduleRoutes(app: FastifyInstance) {
     const companyId = companyIdOf(request);
     const gate = await assertApprovedOrcamentoForSite(projectId, companyId);
     if (!gate.ok) return reply.code(gate.status).send({ error: gate.error });
-    const parsed = z.object({ budgetDocumentId: z.string().uuid(), startDate: z.string(), totalDurationDays: z.number().int().min(7).max(3650).optional() }).safeParse(request.body);
+    const parsed = z.object({
+      budgetDocumentId: z.string().uuid(),
+      startDate: z.string().refine(isWorkingDay, { message: "A obra não trabalha ao domingo — escolha uma data de segunda a sábado" }),
+      totalDurationDays: z.number().int().min(7).max(3650).optional(),
+      // Trabalhadores disponíveis por frente de trabalho (equipa máxima que a obra consegue
+      // pôr numa mesma tarefa em simultâneo) — mais mão-de-obra disponível encurta as tarefas
+      // com muitas horas de trabalho até ao limite físico de cada pacote (não é linear).
+      maxCrewSize: z.number().int().min(1).max(60).optional(),
+    }).safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     const document = await assertDocumentOwned(parsed.data.budgetDocumentId, companyId);
     if (!document || document.projectId !== projectId) return reply.code(404).send({ error: "Mapa de Quantidades não encontrado" });
@@ -97,9 +105,10 @@ export async function scheduleRoutes(app: FastifyInstance) {
       const document = await assertDocumentOwned(parsed.data.budgetDocumentId, companyId);
       if (!document || document.projectId !== projectId) return reply.code(404).send({ error: "Mapa de Quantidades não encontrado" });
     }
+    let predecessorTask: typeof scheduleTasks.$inferSelect | null = null;
     if (parsed.data.predecessorTaskId) {
-      const predecessor = await ownedTask(parsed.data.predecessorTaskId, companyId);
-      if (!predecessor || predecessor.projectId !== projectId) return reply.code(400).send({ error: "A predecessora não pertence ao cronograma desta obra" });
+      predecessorTask = await ownedTask(parsed.data.predecessorTaskId, companyId);
+      if (!predecessorTask || predecessorTask.projectId !== projectId) return reply.code(400).send({ error: "A predecessora não pertence ao cronograma desta obra" });
     }
     try {
       await validateParentTask(parsed.data.parentId, projectId, companyId);
@@ -108,11 +117,16 @@ export async function scheduleRoutes(app: FastifyInstance) {
     }
     const [{ value: taskCount }] = await db.select({ value: count() }).from(scheduleTasks).where(eq(scheduleTasks.projectId, projectId));
     const durationDays = parsed.data.durationDays ?? (parsed.data.endDate ? workingDaysInclusive(parsed.data.startDate, parsed.data.endDate) : 1);
-    const endDate = parsed.data.endDate ?? addWorkingDays(parsed.data.startDate, durationDays - 1);
-    const { predecessorTaskId, dependencyType, lagDays, manualProgress, ...values } = parsed.data;
+    // Com predecessora definida, as datas são sempre calculadas a partir dela (FS/SS/FF/SF +
+    // folga) — nunca da data escrita manualmente, para nunca ficarem inconsistentes.
+    const { startDate, endDate } = predecessorTask
+      ? computeSuccessorDates(predecessorTask, parsed.data.dependencyType, parsed.data.lagDays, durationDays)
+      : { startDate: parsed.data.startDate, endDate: parsed.data.endDate ?? addWorkingDays(parsed.data.startDate, durationDays - 1) };
+    const { predecessorTaskId, dependencyType, lagDays, manualProgress, startDate: _startDate, endDate: _endDate, ...values } = parsed.data;
     const [task] = await db.insert(scheduleTasks).values({
       ...values,
       projectId,
+      startDate,
       endDate,
       durationDays,
       manualProgress: manualProgress === null || manualProgress === undefined ? null : manualProgress.toString(),
@@ -148,11 +162,21 @@ export async function scheduleRoutes(app: FastifyInstance) {
     } catch (error) {
       return reply.code(409).send({ error: error instanceof Error ? error.message : "Dependência inválida" });
     }
-    const startDate = parsed.data.startDate ?? current.startDate;
+    let startDate = parsed.data.startDate ?? current.startDate;
     let endDate = parsed.data.endDate ?? current.endDate;
     let durationDays = parsed.data.durationDays ?? current.durationDays;
     if (parsed.data.durationDays !== undefined && parsed.data.endDate === undefined) endDate = addWorkingDays(startDate, durationDays - 1);
     if (parsed.data.endDate !== undefined && parsed.data.durationDays === undefined) durationDays = workingDaysInclusive(startDate, endDate);
+    // Com predecessora definida, as datas nunca vêm do que foi escrito à mão — são sempre
+    // recalculadas a partir dela (FS/SS/FF/SF + folga), tal como na criação da tarefa.
+    if (nextDependency?.predecessorTaskId) {
+      const predecessorTask = await ownedTask(nextDependency.predecessorTaskId, companyId);
+      if (predecessorTask) {
+        const computed = computeSuccessorDates(predecessorTask, nextDependency.type, nextDependency.lagDays, durationDays);
+        startDate = computed.startDate;
+        endDate = computed.endDate;
+      }
+    }
     if (endDate < startDate) return reply.code(400).send({ error: "A data final não pode ser anterior ao início" });
     const { predecessorTaskId, dependencyType, lagDays, manualProgress, ...values } = parsed.data;
     const today = new Date().toISOString().slice(0, 10);
@@ -172,6 +196,11 @@ export async function scheduleRoutes(app: FastifyInstance) {
     }).where(eq(scheduleTasks.id, id)).returning();
     if (nextDependency) {
       await upsertTaskDependency(id, nextDependency.predecessorTaskId, nextDependency.type, nextDependency.lagDays);
+    }
+    // As datas desta tarefa podem ter mudado (edição directa ou herdadas da predecessora) —
+    // propaga a quem depende dela, para nunca ficarem "penduradas" nas datas antigas.
+    if (task.startDate !== current.startDate || task.endDate !== current.endDate) {
+      await cascadeSuccessorDates(id);
     }
     return task;
   });

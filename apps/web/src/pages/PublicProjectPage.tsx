@@ -20,6 +20,7 @@ type Installment = {
   dueDate: string;
   amount: number;
   status: "prevista" | "parcial" | "paga" | "atrasada";
+  overdue?: boolean;
   paidAmount: number;
 };
 
@@ -64,7 +65,8 @@ function money(value: number, currency: string) {
 }
 
 function fmtDate(value: string) {
-  const d = new Date(value);
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  const d = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(value);
   if (Number.isNaN(d.getTime())) return value;
   return new Intl.DateTimeFormat("pt-MZ", { day: "2-digit", month: "short", year: "numeric" }).format(d);
 }
@@ -78,11 +80,11 @@ function Bar({ percent, tone }: { percent: number; tone: "brand" | "amber" }) {
   );
 }
 
-function statusLabel(status: Installment["status"]) {
+function statusLabel(status: Installment["status"], overdue?: boolean) {
   if (status === "paga") return "Paga";
-  if (status === "parcial") return "Parcial";
+  if (status === "parcial") return overdue ? "Parcial · atrasada" : "Parcial";
   if (status === "atrasada") return "Atrasada";
-  return "Prevista";
+  return overdue ? "Atrasada" : "Prevista";
 }
 
 export default function PublicProjectPage() {
@@ -250,12 +252,12 @@ export default function PublicProjectPage() {
                           className={
                             row.status === "paga"
                               ? "text-teal-700"
-                              : row.status === "atrasada"
+                              : row.status === "atrasada" || row.overdue
                                 ? "font-semibold text-red-700"
                                 : "text-slate-600"
                           }
                         >
-                          {statusLabel(row.status)}
+                          {statusLabel(row.status, row.overdue)}
                         </span>
                       </td>
                     </tr>

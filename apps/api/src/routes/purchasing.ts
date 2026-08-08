@@ -356,7 +356,7 @@ export async function purchasingRoutes(app: FastifyInstance) {
     if ((parsed.data.status === "aprovado" || parsed.data.status === "recebido") && !canApprove) {
       return reply.code(403).send({ error: "Sem permissão para aprovar ou receber pedidos de material" });
     }
-    if (parsed.data.status === "aprovado" && order.createdByUserId === user.id && user.role !== "admin_empresa") {
+    if (parsed.data.status === "aprovado" && order.createdByUserId === user.id && user.role !== "admin_empresa" && user.role !== "super_admin") {
       return reply.code(409).send({ error: "Quem criou a ordem não pode aprová-la" });
     }
 
@@ -376,6 +376,14 @@ export async function purchasingRoutes(app: FastifyInstance) {
       if (!lockedOrder) return { error: "Ordem de compra não encontrada" } as const;
       if (lockedOrder.status === parsed.data.status) return { row: lockedOrder, changed: false } as const;
       if (!transitions[lockedOrder.status].includes(parsed.data.status)) return { error: `A ordem ${lockedOrder.status} não pode passar para ${parsed.data.status}` } as const;
+
+      if (parsed.data.status === "cancelado") {
+        const linkedEntries = await tx.select().from(financialEntries).where(and(eq(financialEntries.projectId, lockedOrder.projectId), eq(financialEntries.sourceType, "purchase_order"), eq(financialEntries.sourceId, id)));
+        if (linkedEntries.some((entry) => entry.status === "pago")) {
+          return { error: "Esta ordem já tem uma despesa paga associada — reverta o pagamento no Financeiro antes de cancelar" } as const;
+        }
+      }
+
       const [row] = await tx.update(purchaseOrders).set({ status: parsed.data.status }).where(eq(purchaseOrders.id, id)).returning();
 
       if (parsed.data.status === "aprovado") {
@@ -420,6 +428,29 @@ export async function purchasingRoutes(app: FastifyInstance) {
     }
     await db.delete(purchaseOrders).where(eq(purchaseOrders.id, id));
     return { ok: true };
+  });
+
+  // "Pedir materiais" cria linhas com preço 0 (o requisitante só sabe a quantidade) — este
+  // endpoint é onde quem aprova preenche o preço real antes de a ordem sair do rascunho.
+  app.put("/api/purchase-order-lines/:id", { preHandler: canRequestMaterials }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const parsed = z.object({ unitCost: z.number().nonnegative().optional(), quantity: z.number().positive().optional() }).safeParse(request.body);
+    if (!parsed.success || (parsed.data.unitCost === undefined && parsed.data.quantity === undefined)) {
+      return reply.code(400).send({ error: "Indique um preço ou quantidade válidos" });
+    }
+
+    const [line] = await db.select().from(purchaseOrderLines).where(eq(purchaseOrderLines.id, id)).limit(1);
+    if (!line) return reply.code(404).send({ error: "Linha não encontrada" });
+    const order = await assertPurchaseOrderOwned(line.purchaseOrderId, companyIdOf(request));
+    if (!order) return reply.code(404).send({ error: "Ordem de compra não encontrada" });
+    if (order.status !== "rascunho") {
+      return reply.code(409).send({ error: "Só é possível alterar a linha enquanto a ordem está em rascunho" });
+    }
+    const [updated] = await db.update(purchaseOrderLines).set({
+      ...(parsed.data.unitCost !== undefined ? { unitCost: parsed.data.unitCost.toString() } : {}),
+      ...(parsed.data.quantity !== undefined ? { quantity: parsed.data.quantity.toString() } : {}),
+    }).where(eq(purchaseOrderLines.id, id)).returning();
+    return updated;
   });
 
   // ---------- Armazém (movimentos e stock actual por projecto) ----------
@@ -489,7 +520,24 @@ export async function purchasingRoutes(app: FastifyInstance) {
     if (movement.purchaseOrderId || movement.diaryEntryId) {
       return reply.code(409).send({ error: "Este movimento foi gerado por outro módulo e deve ser corrigido na sua origem" });
     }
-    await db.delete(stockMovements).where(eq(stockMovements.id, id));
+    const result = await db.transaction(async (tx) => {
+      // Mesmo bloqueio dos outros movimentos de stock: sem isto, apagar uma entrada ao mesmo
+      // tempo que uma saída está a ser criada podia deixar o saldo negativo sem nenhum aviso.
+      await tx.execute(drizzleSql`select pg_advisory_xact_lock(hashtext(${`${movement.projectId}:${movement.materialId}`}))`);
+      if (movement.type === "entrada") {
+        const others = await tx.select().from(stockMovements).where(and(eq(stockMovements.projectId, movement.projectId), eq(stockMovements.materialId, movement.materialId)));
+        const balanceWithoutThis = others
+          .filter((m) => m.id !== movement.id)
+          .reduce((sum, m) => sum + (m.type === "entrada" ? Number(m.quantity) : -Number(m.quantity)), 0);
+        if (balanceWithoutThis < -0.0001) {
+          const [material] = await tx.select().from(materials).where(eq(materials.id, movement.materialId)).limit(1);
+          return { error: `Não é possível remover: ${material?.name ?? "o material"} já tem ${Math.abs(balanceWithoutThis).toFixed(2)} ${material?.unit ?? ""} consumido(s) para além desta entrada` } as const;
+        }
+      }
+      await tx.delete(stockMovements).where(eq(stockMovements.id, id));
+      return { ok: true } as const;
+    });
+    if ("error" in result) return reply.code(409).send({ error: result.error });
     await recordAuditEvent({
       companyId: companyIdOf(request), projectId: movement.projectId, actorUserId: request.currentUser!.id,
       entityType: "stock_movement", entityId: id, action: "deleted",
@@ -510,9 +558,10 @@ export async function purchasingRoutes(app: FastifyInstance) {
       .innerJoin(materials, eq(stockMovements.materialId, materials.id))
       .where(eq(stockMovements.projectId, projectId));
 
-    const byMaterial = new Map<string, { materialId: string; unit: string; balance: number; valueIn: number }>();
+    const byMaterial = new Map<string, { materialName: string; unit: string; balance: number; valueIn: number }>();
     for (const r of rows) {
-      const bucket = byMaterial.get(r.materialName) ?? { materialId: r.movement.materialId, unit: r.materialUnit, balance: 0, valueIn: 0 };
+      const materialId = r.movement.materialId;
+      const bucket = byMaterial.get(materialId) ?? { materialName: r.materialName, unit: r.materialUnit, balance: 0, valueIn: 0 };
       const qty = Number(r.movement.quantity);
       if (r.movement.type === "entrada") {
         bucket.balance += qty;
@@ -520,10 +569,10 @@ export async function purchasingRoutes(app: FastifyInstance) {
       } else {
         bucket.balance -= qty;
       }
-      byMaterial.set(r.materialName, bucket);
+      byMaterial.set(materialId, bucket);
     }
     return Array.from(byMaterial.entries())
-      .map(([materialName, v]) => ({ materialName, materialId: v.materialId, unit: v.unit, balance: v.balance, valueIn: v.valueIn }))
+      .map(([materialId, v]) => ({ materialName: v.materialName, materialId, unit: v.unit, balance: v.balance, valueIn: v.valueIn }))
       .sort((a, b) => a.materialName.localeCompare(b.materialName, "pt"));
   });
 }

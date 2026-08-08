@@ -5,7 +5,9 @@ import {
   projectClientPaymentInstallments,
   projectContracts,
   projectInvoices,
+  contractVariations,
 } from "../db/schema.js";
+import { calendarDaysUntil, localTodayIso } from "../lib/calendarDate.js";
 
 export type ClientPaymentPlanView = {
   id: string;
@@ -21,30 +23,33 @@ export type ClientPaymentPlanView = {
     dueDate: string;
     amount: number;
     status: "prevista" | "parcial" | "paga" | "atrasada";
+    overdue: boolean;
     paidAmount: number;
     paidAt: string | null;
     invoiceId: string | null;
   }>;
 };
 
-function todayIso() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function deriveStatus(status: "prevista" | "parcial" | "paga", dueDate: string): ClientPaymentPlanView["installments"][number]["status"] {
-  if (status === "paga") return "paga";
-  if (dueDate < todayIso()) return "atrasada";
-  return status;
+function deriveStatus(
+  status: "prevista" | "parcial" | "paga",
+  dueDate: string,
+): { status: ClientPaymentPlanView["installments"][number]["status"]; overdue: boolean } {
+  const overdue = status !== "paga" && calendarDaysUntil(dueDate) < 0;
+  if (status === "paga") return { status: "paga", overdue: false };
+  if (status === "parcial") return { status: "parcial", overdue };
+  return { status: overdue ? "atrasada" : "prevista", overdue };
 }
 
 function mapInstallment(row: typeof projectClientPaymentInstallments.$inferSelect): ClientPaymentPlanView["installments"][number] {
+  const derived = deriveStatus(row.status, row.dueDate);
   return {
     id: row.id,
     sequence: row.sequence,
     title: row.title,
     dueDate: row.dueDate,
     amount: Number(row.amount),
-    status: deriveStatus(row.status, row.dueDate),
+    status: derived.status,
+    overdue: derived.overdue,
     paidAmount: Number(row.paidAmount),
     paidAt: row.paidAt,
     invoiceId: row.invoiceId,
@@ -73,7 +78,12 @@ export async function getClientPaymentPlan(projectId: string): Promise<ClientPay
 export async function suggestedContractTotal(projectId: string): Promise<{ amount: number; currency: string } | null> {
   const [contract] = await db.select().from(projectContracts).where(eq(projectContracts.projectId, projectId)).limit(1);
   if (!contract) return null;
-  return { amount: Number(contract.originalAmount), currency: contract.currency };
+  const variations = await db
+    .select({ amount: contractVariations.amount })
+    .from(contractVariations)
+    .where(and(eq(contractVariations.contractId, contract.id), eq(contractVariations.status, "aprovada")));
+  const approved = variations.reduce((sum, v) => sum + Number(v.amount), 0);
+  return { amount: Number(contract.originalAmount) + approved, currency: contract.currency };
 }
 
 export async function upsertClientPaymentPlan(
@@ -118,7 +128,7 @@ export async function upsertClientPaymentPlan(
 
   if (input.mode === "total") {
     await db.delete(projectClientPaymentInstallments).where(eq(projectClientPaymentInstallments.planId, planId));
-    const dueDate = input.singleDueDate ?? todayIso();
+    const dueDate = input.singleDueDate ?? localTodayIso();
     await db.insert(projectClientPaymentInstallments).values({
       planId,
       sequence: 1,
@@ -128,6 +138,8 @@ export async function upsertClientPaymentPlan(
       status: "prevista",
       paidAmount: "0",
     });
+  } else {
+    await recalculatePlanTotal(planId);
   }
 
   const view = await getClientPaymentPlan(projectId);
@@ -235,7 +247,7 @@ export async function markInstallmentPaid(
     .set({
       paidAmount: paidAmount.toFixed(2),
       status,
-      paidAt: status === "prevista" ? null : (input.paidAt ?? todayIso()),
+      paidAt: status === "prevista" ? null : (input.paidAt ?? localTodayIso()),
       invoiceId: input.invoiceId === undefined ? owned.invoiceId : input.invoiceId,
     })
     .where(eq(projectClientPaymentInstallments.id, installmentId))

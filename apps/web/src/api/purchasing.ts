@@ -149,6 +149,10 @@ export const purchasingApi = {
   updateOrderStatus: (id: string, status: PurchaseOrder["status"]) =>
     request<PurchaseOrder>(`/purchase-orders/${id}/status`, { method: "PUT", body: JSON.stringify({ status }) }),
   deleteOrder: (id: string) => request<{ ok: true }>(`/purchase-orders/${id}`, { method: "DELETE" }),
+  updateOrderLineCost: (lineId: string, unitCost: number) =>
+    request<{ id: string }>(`/purchase-order-lines/${lineId}`, { method: "PUT", body: JSON.stringify({ unitCost }) }),
+  updateOrderLine: (lineId: string, data: { unitCost?: number; quantity?: number }) =>
+    request<PurchaseOrderLine>(`/purchase-order-lines/${lineId}`, { method: "PUT", body: JSON.stringify(data) }),
 
   listStockMovements: (projectId: string) => request<StockMovement[]>(`/projects/${projectId}/stock-movements`),
   createStockMovement: (projectId: string, data: StockMovementInput) =>

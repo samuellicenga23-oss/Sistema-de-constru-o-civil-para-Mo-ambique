@@ -62,7 +62,7 @@ export type SchedulePrintScale = "fit" | 100 | 85 | 70 | 55;
 
 export const scheduleApi = {
   get: (projectId: string) => request<ProjectSchedule>(`/projects/${projectId}/schedule`),
-  generate: (projectId: string, data: { budgetDocumentId: string; startDate: string; totalDurationDays?: number }) =>
+  generate: (projectId: string, data: { budgetDocumentId: string; startDate: string; totalDurationDays?: number; maxCrewSize?: number }) =>
     request<ProjectSchedule>(`/projects/${projectId}/schedule/generate`, { method: "POST", body: JSON.stringify(data) }),
   createTask: (projectId: string, data: Required<Pick<ScheduleTaskInput, "code" | "name" | "startDate">> & ScheduleTaskInput) =>
     request<ScheduleTask>(`/projects/${projectId}/schedule/tasks`, { method: "POST", body: JSON.stringify(data) }),

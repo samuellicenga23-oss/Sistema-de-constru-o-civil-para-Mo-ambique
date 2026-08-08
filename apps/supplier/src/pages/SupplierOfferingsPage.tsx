@@ -74,6 +74,17 @@ export default function SupplierOfferingsPage() {
     }
   }
 
+  async function ensureOfferFlag(kind: "material" | "labour" | "equipment") {
+    const next: OfferDraft = {
+      ...offer,
+      offersMaterials: kind === "material" ? true : offer.offersMaterials,
+      offersLabour: kind === "labour" ? true : offer.offersLabour,
+      offersEquipment: kind === "equipment" ? true : offer.offersEquipment,
+    };
+    setOffer(next);
+    await marketplaceApi.updateOfferings(next);
+  }
+
   async function afterCreate(kind: "material" | "labour" | "equipment", id: string) {
     await reload();
     if (kind === "material") setOffer((o) => ({ ...o, offersMaterials: true, materialIds: [...new Set([...o.materialIds, id])] }));
@@ -117,6 +128,7 @@ export default function SupplierOfferingsPage() {
             onCreateMaterial={async (data) => {
               setCreating(true);
               try {
+                await ensureOfferFlag("material");
                 const row = await marketplaceApi.createMaterial(data);
                 await afterCreate("material", row.id);
               } catch (err) {
@@ -129,6 +141,7 @@ export default function SupplierOfferingsPage() {
             onCreateLabour={async (data) => {
               setCreating(true);
               try {
+                await ensureOfferFlag("labour");
                 const row = await marketplaceApi.createLabour(data);
                 await afterCreate("labour", row.id);
               } catch (err) {
@@ -141,6 +154,7 @@ export default function SupplierOfferingsPage() {
             onCreateEquipment={async (data) => {
               setCreating(true);
               try {
+                await ensureOfferFlag("equipment");
                 const row = await marketplaceApi.createEquipment(data);
                 await afterCreate("equipment", row.id);
               } catch (err) {

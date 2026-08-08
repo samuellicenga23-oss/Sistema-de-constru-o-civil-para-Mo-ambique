@@ -11,6 +11,7 @@ import ProjectWorkspaceNav from "../components/ProjectWorkspaceNav";
 import Modal from "../components/Modal";
 import PageSearch from "../components/PageSearch";
 import ScheduleWorkspace from "../components/ScheduleWorkspace";
+import ScheduleSheetModal from "../components/ScheduleSheetModal";
 import { IconBack, IconChart, IconDownload, IconPlus, IconRefresh, IconTrash } from "../components/icons";
 
 const STATUS_LABELS: Record<ScheduleTaskStatus, string> = {
@@ -42,10 +43,12 @@ export default function ProjectSchedulePage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [setupOpen, setSetupOpen] = useState(false);
+  const [sheetModalOpen, setSheetModalOpen] = useState(false);
   const [documentId, setDocumentId] = useState("");
   const [startDate, setStartDate] = useState(today());
   const [duration, setDuration] = useState("");
   const [manualDuration, setManualDuration] = useState(false);
+  const [crewSize, setCrewSize] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [printPaper, setPrintPaper] = useState<SchedulePaper>("auto");
@@ -98,6 +101,7 @@ export default function ProjectSchedulePage() {
         budgetDocumentId: documentId,
         startDate,
         ...(manualDuration && duration ? { totalDurationDays: Number(duration) } : {}),
+        ...(crewSize ? { maxCrewSize: Number(crewSize) } : {}),
       });
       setSchedule(next);
       setSetupOpen(false);
@@ -170,6 +174,8 @@ export default function ProjectSchedulePage() {
 
   const selected = schedule?.tasks.find((task) => task.id === selectedId) ?? null;
   const leafTasks = schedule?.tasks.filter((task) => !task.isSummary) ?? [];
+  const taskById = useMemo(() => new Map((schedule?.tasks ?? []).map((t) => [t.id, t])), [schedule?.tasks]);
+
   const visibleTasks = useMemo(() => {
     const tasks = schedule?.tasks ?? [];
     const needle = taskQuery.trim().toLocaleLowerCase("pt");
@@ -272,6 +278,11 @@ export default function ProjectSchedulePage() {
                 <button type="button" className="btn btn-primary btn-sm" onClick={handleAddRoot} disabled={saving || !schedule.tasks.length}>
                   <IconPlus className="h-4 w-4" /> Actividade
                 </button>
+                {schedule.tasks.length > 0 && (
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => setSheetModalOpen(true)}>
+                    Abrir como folha
+                  </button>
+                )}
                 {selected && (
                   <button type="button" className="btn btn-secondary btn-sm" onClick={() => setEditorOpen(true)}>
                     Detalhes
@@ -325,6 +336,21 @@ export default function ProjectSchedulePage() {
               </button>
             </div>
             <p className="text-xs text-slate-500">A duração é calculada pelas composições; use prazo próprio apenas quando necessário.</p>
+            <div className="max-w-xs">
+              <label className="label">Trabalhadores disponíveis por frente (opcional)</label>
+              <input
+                className="input"
+                type="number"
+                min="1"
+                max="60"
+                placeholder="Automático (até 12)"
+                value={crewSize}
+                onChange={(e) => setCrewSize(e.target.value)}
+              />
+              <p className="mt-1 text-xs text-slate-500">
+                Mais trabalhadores só acelera tarefas que já pedem uma equipa grande (muitas horas) — uma tarefa pequena não ganha gente a mais só porque há disponibilidade.
+              </p>
+            </div>
             {!manualDuration ? (
               <button type="button" className="text-xs font-semibold text-blue-700 hover:underline" onClick={() => setManualDuration(true)}>
                 Substituir por prazo próprio
@@ -457,6 +483,15 @@ export default function ProjectSchedulePage() {
           </div>
         )}
         {dialog}
+        {sheetModalOpen && schedule && (
+          <ScheduleSheetModal
+            tasks={schedule.tasks}
+            byId={taskById}
+            onClose={() => setSheetModalOpen(false)}
+            onChanged={reload}
+            onError={setError}
+          />
+        )}
       </div>
     </Layout>
   );
@@ -512,7 +547,7 @@ function formFromTask(task: ScheduleTask): EditorForm {
     startDate: task.startDate,
     durationDays: String(task.durationDays),
     status: task.status,
-    manualProgress: String(Math.round(task.progress)),
+    manualProgress: String(Math.round(task.progress * 100) / 100),
     predecessorTaskId: task.predecessorTaskId ?? "",
     dependencyType: task.dependencyType ?? "FS",
     lagDays: String(task.lagDays ?? 0),
@@ -539,18 +574,30 @@ function TaskEditor({
 }) {
   const [form, setForm] = useState<EditorForm>(() => formFromTask(task));
   const [saving, setSaving] = useState(false);
-  useEffect(() => setForm(formFromTask(task)), [task.id]);
+  // Só reenvia manualProgress se o utilizador mexer mesmo no campo — caso contrário, gravar
+  // qualquer outra alteração (nome, notas, datas) fixava o progresso no valor arredondado que
+  // estava só a ser mostrado, mascarando correcções futuras vindas de autos ou do diário de obra.
+  const [progressTouched, setProgressTouched] = useState(false);
+  useEffect(() => {
+    setForm(formFromTask(task));
+    setProgressTouched(false);
+  }, [task.id]);
 
   async function save(event: FormEvent) {
     event.preventDefault();
     setSaving(true);
     setError(null);
     try {
+      const { manualProgress: _manualProgress, ...formRest } = form;
       await scheduleApi.updateTask(task.id, {
-        ...form,
+        ...formRest,
         parentId: form.parentId || null,
         durationDays: Number(form.durationDays),
-        manualProgress: task.isSummary ? null : Number(form.manualProgress),
+        ...(task.isSummary
+          ? { manualProgress: null }
+          : progressTouched
+            ? { manualProgress: Number(form.manualProgress) }
+            : {}),
         status: form.status,
         predecessorTaskId: form.predecessorTaskId || null,
         dependencyType: form.dependencyType as "FS" | "SS" | "FF" | "SF",
@@ -636,10 +683,13 @@ function TaskEditor({
                 <input
                   className="input"
                   type="date"
-                  disabled={task.isSummary}
+                  disabled={task.isSummary || !!form.predecessorTaskId}
                   value={form.startDate}
                   onChange={(e) => setForm({ ...form, startDate: e.target.value })}
                 />
+                {!task.isSummary && form.predecessorTaskId && (
+                  <p className="mt-1 text-[11px] text-slate-500">Calculado a partir da predecessora — ver Dependência abaixo.</p>
+                )}
               </div>
               <div>
                 <label className="label">Duração (dias úteis)</label>
@@ -658,7 +708,21 @@ function TaskEditor({
                   className="input"
                   disabled={task.isSummary}
                   value={form.status}
-                  onChange={(e) => setForm({ ...form, status: e.target.value as ScheduleTaskStatus })}
+                  onChange={(e) => {
+                    const status = e.target.value as ScheduleTaskStatus;
+                    // O estado "Concluído"/"Não iniciado" é derivado do progresso (0% ou 100%) —
+                    // sem isto, escolher "Concluído" aqui gravava mas revertia sozinho ao recarregar
+                    // sempre que o progresso ficava abaixo de 100%, parecendo que a gravação falhou.
+                    if (status === "concluido") {
+                      setProgressTouched(true);
+                      setForm({ ...form, status, manualProgress: "100" });
+                    } else if (status === "nao_iniciado") {
+                      setProgressTouched(true);
+                      setForm({ ...form, status, manualProgress: "0" });
+                    } else {
+                      setForm({ ...form, status });
+                    }
+                  }}
                 >
                   {Object.entries(STATUS_LABELS).map(([value, label]) => (
                     <option key={value} value={value}>
@@ -666,6 +730,9 @@ function TaskEditor({
                     </option>
                   ))}
                 </select>
+                {!task.isSummary && (form.status === "concluido" || form.status === "nao_iniciado") && (
+                  <p className="mt-1 text-[11px] text-slate-500">Ajusta o progresso automaticamente.</p>
+                )}
               </div>
               <div>
                 <label className="label">Progresso manual (%)</label>
@@ -677,8 +744,16 @@ function TaskEditor({
                   step="0.01"
                   disabled={task.isSummary}
                   value={form.manualProgress}
-                  onChange={(e) => setForm({ ...form, manualProgress: e.target.value })}
+                  onChange={(e) => {
+                    setProgressTouched(true);
+                    setForm({ ...form, manualProgress: e.target.value });
+                  }}
                 />
+                {!task.isSummary && !progressTouched && (
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Valor calculado (autos/diário) — só é fixado se editar este campo.
+                  </p>
+                )}
               </div>
             </div>
           </fieldset>

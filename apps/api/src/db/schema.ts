@@ -442,6 +442,9 @@ export const projects = pgTable("projects", {
   // técnica já foi submetida e passou também a alimentar um orçamento comercial.
   projectType: varchar("project_type", { length: 20 }).notNull().default("orcamento"),
   measurementMode: varchar("measurement_mode", { length: 20 }).notNull().default("plantas"),
+  // Número de pisos da edificação — usado só pelo gerador de cronograma para sequenciar a
+  // estrutura e as alvenarias piso a piso (térreo primeiro, depois cada piso seguinte).
+  floors: integer("floors").notNull().default(1),
   ivaRate: numeric("iva_rate", { precision: 5, scale: 4 }).notNull().default("0.16"),
   contingenciasRate: numeric("contingencias_rate", { precision: 5, scale: 4 }).notNull().default("0.10"),
   siteCostsRate: numeric("site_costs_rate", { precision: 5, scale: 4 }).notNull().default("0"),
@@ -682,6 +685,11 @@ export const scheduleTasks = pgTable("schedule_tasks", {
   code: varchar("code", { length: 30 }).notNull(),
   name: varchar("name", { length: 240 }).notNull(),
   budgetChapterCode: varchar("budget_chapter_code", { length: 30 }),
+  // Fracção (0-1) do valor orçamentado de budgetChapterCode que esta tarefa representa —
+  // só < 1 quando o gerador do cronograma divide um único item do mapa (ex: "Pilares") em
+  // várias tarefas por piso; as fracções de todas as tarefas com o mesmo código somam 1, para
+  // que o valor planeado/executado agregado nunca duplique nem perca o valor real do orçamento.
+  valueShare: numeric("value_share", { precision: 6, scale: 4 }).notNull().default("1"),
   startDate: date("start_date").notNull(),
   endDate: date("end_date").notNull(),
   baselineStartDate: date("baseline_start_date"),

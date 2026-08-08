@@ -477,6 +477,13 @@
       "when": 1786128000000,
       "tag": "0067_client_portal_payments",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1786141371157,
+      "tag": "0068_project_floors_value_share",
+      "breakpoints": true
     }
   ]
 }

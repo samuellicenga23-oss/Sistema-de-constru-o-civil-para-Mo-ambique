@@ -54,6 +54,7 @@ export default function ProjectDetailPage() {
   const [plants, setPlants] = useState<Plant[]>([]);
   const [zones, setZones] = useState<PriceZone[]>([]);
   const [savingZone, setSavingZone] = useState(false);
+  const [savingFloors, setSavingFloors] = useState(false);
   const [title, setTitle] = useState("Mapa de Quantidades");
   const [template, setTemplate] = useState<"padrao" | "vazio">("padrao");
   const [selectedDocId, setSelectedDocId] = useState("");
@@ -126,6 +127,20 @@ export default function ProjectDetailPage() {
       setError(err instanceof Error ? err.message : "Erro ao actualizar a zona");
     } finally {
       setSavingZone(false);
+    }
+  }
+
+  async function handleFloorsChange(newFloors: number) {
+    if (!projectId) return;
+    setSavingFloors(true);
+    setError(null);
+    try {
+      const updated = await boqApi.updateProject(projectId, { floors: newFloors });
+      setProject(updated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao actualizar o número de pisos");
+    } finally {
+      setSavingFloors(false);
     }
   }
 
@@ -530,6 +545,20 @@ export default function ProjectDetailPage() {
                   <option key={z.id} value={z.id}>{z.name}</option>
                 ))}
               </select>
+            </label>
+            )}
+            {showPrepararObra && (
+            <label className="bg-white px-5 py-4 sm:col-span-3 xl:col-span-1">
+              <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Pisos (cronograma)</span>
+              <input
+                type="number"
+                min={1}
+                max={20}
+                value={project.floors}
+                disabled={savingFloors}
+                onChange={(e) => handleFloorsChange(Math.max(1, Math.min(20, Number(e.target.value) || 1)))}
+                className="input"
+              />
             </label>
             )}
           </div>

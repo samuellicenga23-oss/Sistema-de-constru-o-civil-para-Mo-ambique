@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { and, desc, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or, sql as drizzleSql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -93,38 +93,52 @@ export async function siteDiaryRoutes(app: FastifyInstance) {
       const materialIds = Array.from(new Set(consumptions.map((item) => item.materialId)));
       const visibleMaterials = await db.select().from(materials).where(and(inArray(materials.id, materialIds), or(isNull(materials.companyId), eq(materials.companyId, companyId))));
       if (visibleMaterials.length !== materialIds.length) return reply.code(400).send({ error: "Um dos materiais não existe no Catálogo" });
-      const movements = await db.select().from(stockMovements).where(and(eq(stockMovements.projectId, projectId), inArray(stockMovements.materialId, materialIds)));
-      for (const materialId of materialIds) {
-        const available = movements.filter((movement) => movement.materialId === materialId).reduce((sum, movement) => sum + (movement.type === "entrada" ? Number(movement.quantity) : -Number(movement.quantity)), 0);
-        const requested = consumptions.filter((item) => item.materialId === materialId).reduce((sum, item) => sum + item.quantity, 0);
-        if (requested > available + 0.0001) {
-          const material = visibleMaterials.find((item) => item.id === materialId);
-          return reply.code(409).send({ error: `Stock insuficiente de ${material?.name ?? "material"}: disponível ${available.toFixed(2)} ${material?.unit ?? ""}` });
-        }
-      }
     }
 
-    const [row] = await db
-      .insert(siteDiaryEntries)
-      .values({ ...entryData, projectId, createdByUserId: request.currentUser!.id })
-      .returning();
-    if (taskProgress.length) await db.insert(siteDiaryTaskProgress).values(taskProgress.map((item) => ({
-      diaryEntryId: row.id,
-      scheduleTaskId: item.taskId,
-      progressPercent: item.progressPercent.toString(),
-      notes: item.notes,
-    })));
-    if (consumptions.length) await db.insert(stockMovements).values(consumptions.map((item) => ({
-      projectId,
-      materialId: item.materialId,
-      type: "saida" as const,
-      quantity: item.quantity.toString(),
-      notes: item.notes ?? "Consumo registado no Diário de Obra",
-      diaryEntryId: row.id,
-      createdByUserId: request.currentUser!.id,
-      date: entryData.date,
-    })));
-    return reply.code(201).send(row);
+    const result = await db.transaction(async (tx) => {
+      if (consumptions.length) {
+        const materialIds = Array.from(new Set(consumptions.map((item) => item.materialId))).sort();
+        // Bloqueia por ordem fixa (material ordenado) para nunca cruzar com outro registo do
+        // Diário a bloquear os mesmos materiais em ordem inversa — evita deadlock entre pedidos
+        // concorrentes. Mesma protecção que /stock-movements usa para saídas manuais.
+        for (const materialId of materialIds) {
+          await tx.execute(drizzleSql`select pg_advisory_xact_lock(hashtext(${`${projectId}:${materialId}`}))`);
+        }
+        const movements = await tx.select().from(stockMovements).where(and(eq(stockMovements.projectId, projectId), inArray(stockMovements.materialId, materialIds)));
+        for (const materialId of materialIds) {
+          const available = movements.filter((movement) => movement.materialId === materialId).reduce((sum, movement) => sum + (movement.type === "entrada" ? Number(movement.quantity) : -Number(movement.quantity)), 0);
+          const requested = consumptions.filter((item) => item.materialId === materialId).reduce((sum, item) => sum + item.quantity, 0);
+          if (requested > available + 0.0001) {
+            const material = await tx.select().from(materials).where(eq(materials.id, materialId)).limit(1);
+            return { error: `Stock insuficiente de ${material[0]?.name ?? "material"}: disponível ${available.toFixed(2)} ${material[0]?.unit ?? ""}` } as const;
+          }
+        }
+      }
+
+      const [row] = await tx
+        .insert(siteDiaryEntries)
+        .values({ ...entryData, projectId, createdByUserId: request.currentUser!.id })
+        .returning();
+      if (taskProgress.length) await tx.insert(siteDiaryTaskProgress).values(taskProgress.map((item) => ({
+        diaryEntryId: row.id,
+        scheduleTaskId: item.taskId,
+        progressPercent: item.progressPercent.toString(),
+        notes: item.notes,
+      })));
+      if (consumptions.length) await tx.insert(stockMovements).values(consumptions.map((item) => ({
+        projectId,
+        materialId: item.materialId,
+        type: "saida" as const,
+        quantity: item.quantity.toString(),
+        notes: item.notes ?? "Consumo registado no Diário de Obra",
+        diaryEntryId: row.id,
+        createdByUserId: request.currentUser!.id,
+        date: entryData.date,
+      })));
+      return { row } as const;
+    });
+    if ("error" in result) return reply.code(409).send({ error: result.error });
+    return reply.code(201).send(result.row);
   });
 
   app.put("/api/site-diary/:id", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {

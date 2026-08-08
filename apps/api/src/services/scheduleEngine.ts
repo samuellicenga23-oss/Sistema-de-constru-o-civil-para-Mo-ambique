@@ -5,6 +5,7 @@ import {
   lineItems,
   measurementCertificateLines,
   measurementCertificates,
+  projects,
   scheduleDependencies,
   scheduleTasks,
   siteDiaryEntries,
@@ -15,14 +16,55 @@ import { getCompositionLabourQuantities } from "./costEngine.js";
 
 const DAY_MS = 86_400_000;
 
-export function addWorkingDays(date: string, days: number) {
+// Obra: segunda a sábado — domingo nunca é dia útil.
+export function isWorkingDay(date: string): boolean {
+  return new Date(`${date}T00:00:00Z`).getUTCDay() !== 0;
+}
+
+// Desloca uma data um número (positivo OU negativo) de dias úteis — usada para andar para a
+// frente (FS/SS com lag positivo) e para trás (calcular o início de uma tarefa a partir de um
+// fim fixo, em FF/SF).
+export function shiftWorkingDays(date: string, days: number): string {
+  if (days === 0) return date;
   const value = new Date(`${date}T00:00:00Z`);
-  let remaining = days;
+  const step = days > 0 ? 1 : -1;
+  let remaining = Math.abs(days);
   while (remaining > 0) {
-    value.setUTCDate(value.getUTCDate() + 1);
+    value.setUTCDate(value.getUTCDate() + step);
     if (value.getUTCDay() !== 0) remaining -= 1; // obra: segunda a sábado
   }
   return value.toISOString().slice(0, 10);
+}
+
+export function addWorkingDays(date: string, days: number) {
+  return shiftWorkingDays(date, days);
+}
+
+// Data de uma tarefa sucessora a partir da predecessora, do tipo de dependência e da folga
+// (lagDays, pode ser negativa = avanço). Isto é o que faltava para FS/SS/FF/SF deixarem de ser
+// só rótulos — passam a determinar mesmo as datas.
+export function computeSuccessorDates(
+  predecessor: { startDate: string; endDate: string },
+  type: "FS" | "SS" | "FF" | "SF",
+  lagDays: number,
+  durationDays: number,
+): { startDate: string; endDate: string } {
+  const duration = Math.max(1, durationDays);
+  if (type === "SS") {
+    const startDate = shiftWorkingDays(predecessor.startDate, lagDays);
+    return { startDate, endDate: addWorkingDays(startDate, duration - 1) };
+  }
+  if (type === "FF") {
+    const endDate = shiftWorkingDays(predecessor.endDate, lagDays);
+    return { startDate: shiftWorkingDays(endDate, -(duration - 1)), endDate };
+  }
+  if (type === "SF") {
+    const endDate = shiftWorkingDays(predecessor.startDate, lagDays);
+    return { startDate: shiftWorkingDays(endDate, -(duration - 1)), endDate };
+  }
+  // FS (omissão): só começa no dia útil seguinte ao fim da predecessora, mais a folga.
+  const startDate = shiftWorkingDays(predecessor.endDate, 1 + lagDays);
+  return { startDate, endDate: addWorkingDays(startDate, duration - 1) };
 }
 
 export function workingDaysInclusive(startDate: string, endDate: string) {
@@ -68,16 +110,28 @@ const HOURS_PER_WORKING_DAY = 8;
 // aproximação grosseira assumida, nunca escondida: fica marcada como tal no resultado.
 const GENERIC_MZN_PER_DAY = 12_000;
 
+const DEFAULT_MAX_CREW_SIZE = 12;
+
 // Duração de UM pacote de trabalho (item medido), calculada a partir do seu próprio conteúdo —
 // nunca de uma fatia proporcional de um total maior. Horas reais = horas/unidade da composição ×
 // quantidade medida deste item; a equipa é dimensionada ao volume do PRÓPRIO item (tecto baixo —
 // uma linha de 5 m³ de betão não ganha uma equipa de 40 pessoas só porque a obra é grande).
-export function computeItemDurationDays(item: LineItemNode, hoursCache: Map<string, number>): { days: number; basis: "horas" | "valor" | "minimo" } {
+//
+// maxCrewSize é o TECTO de trabalhadores que a obra consegue pôr numa só frente em simultâneo
+// (por omissão 12, equivalente ao comportamento anterior). A equipa "óptima" de cada item continua
+// a ser calculada por raiz quadrada das horas — nunca linear — por isso uma tarefa pequena não
+// ganha uma equipa enorme só porque há mais gente disponível; só as tarefas que já "pediam" uma
+// equipa maior (muitas horas) é que aproveitam o tecto mais alto e ficam mais rápidas.
+export function computeItemDurationDays(
+  item: LineItemNode,
+  hoursCache: Map<string, number>,
+  maxCrewSize: number = DEFAULT_MAX_CREW_SIZE,
+): { days: number; basis: "horas" | "valor" | "minimo" } {
   if (item.compositionId && item.quantity) {
     const hoursPerUnit = hoursCache.get(item.compositionId) ?? 0;
     const totalHours = hoursPerUnit * item.quantity;
     if (totalHours > 0) {
-      const crewSize = Math.max(1, Math.min(12, Math.round(Math.sqrt(totalHours / HOURS_PER_WORKING_DAY))));
+      const crewSize = Math.max(1, Math.min(maxCrewSize, Math.round(Math.sqrt(totalHours / HOURS_PER_WORKING_DAY))));
       return { days: Math.max(1, Math.round(totalHours / (crewSize * HOURS_PER_WORKING_DAY))), basis: "horas" };
     }
   }
@@ -92,6 +146,14 @@ type ScheduledNode = {
   durationDays: number;
   basis: "horas" | "valor" | "minimo" | "soma";
   children: ScheduledNode[];
+  // Fracção do valor de refCode que esta tarefa representa (ver comentário em scheduleTasks no
+  // schema). Só < 1 quando o mesmo item do mapa é repartido por vários pisos.
+  valueShare?: number;
+  // Código real do item do mapa a usar para ir buscar o valor orçamentado/executado — quando
+  // omitido, usa-se node.code (comportamento normal). Uma tarefa sintética (ex: "Pilares — Piso
+  // 1") tem node.code a null (para ganhar uma numeração WBS própria e legível) mas refCode
+  // continua a apontar ao código real do mapa, para o valor nunca se perder.
+  refCode?: string | null;
 };
 
 // Calcula a duração de cada nó da árvore de baixo para cima: um item (pacote de trabalho) tem
@@ -99,13 +161,13 @@ type ScheduledNode = {
 // subactividades (encadeadas em sequência), nunca um número inventado ao nível do capítulo. Isto
 // substitui o desenho anterior (repartir proporcionalmente um total pré-calculado), que perdia
 // detalhe e produzia números pouco realistas para pacotes de trabalho individuais.
-export function computeNodeDurations(node: LineItemNode, hoursCache: Map<string, number>): ScheduledNode | null {
+export function computeNodeDurations(node: LineItemNode, hoursCache: Map<string, number>, maxCrewSize: number = DEFAULT_MAX_CREW_SIZE): ScheduledNode | null {
   if (node.kind === "nota") return null;
   if (node.kind === "item") {
-    const { days, basis } = computeItemDurationDays(node, hoursCache);
+    const { days, basis } = computeItemDurationDays(node, hoursCache, maxCrewSize);
     return { node, durationDays: days, basis, children: [] };
   }
-  const children = node.children.map((child) => computeNodeDurations(child, hoursCache)).filter((c): c is ScheduledNode => c !== null);
+  const children = node.children.map((child) => computeNodeDurations(child, hoursCache, maxCrewSize)).filter((c): c is ScheduledNode => c !== null);
   const durationDays = children.reduce((sum, c) => sum + c.durationDays, 0) || 1;
   return { node, durationDays, basis: "soma", children };
 }
@@ -129,6 +191,7 @@ async function insertScheduledNode(
   dependencyValues: Array<typeof scheduleDependencies.$inferInsert>,
 ): Promise<typeof scheduleTasks.$inferSelect> {
   const code = node.node.code ?? fallbackCode;
+  const budgetChapterCode = node.refCode !== undefined ? node.refCode : code;
   const endDate = addWorkingDays(startDate, node.durationDays - 1);
   const [task] = await db.insert(scheduleTasks).values({
     projectId: args.projectId,
@@ -136,12 +199,13 @@ async function insertScheduledNode(
     budgetDocumentId: args.budgetDocumentId,
     code,
     name: node.node.description,
-    budgetChapterCode: code,
+    budgetChapterCode,
     startDate,
     endDate,
     baselineStartDate: startDate,
     baselineEndDate: endDate,
     durationDays: node.durationDays,
+    valueShare: String(node.valueShare ?? 1),
     sortOrder: sortOrderRef.value++,
   }).returning();
 
@@ -161,6 +225,147 @@ function collectLeafBasis(node: ScheduledNode, into: Set<string>) {
   for (const child of node.children) collectLeafBasis(child, into);
 }
 
+function normalizeText(s: string): string {
+  return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+}
+
+// Divide um total de dias em N partes o mais iguais possível, sem nenhuma parte cair a 0.
+function splitEvenly(total: number, parts: number): number[] {
+  const safeParts = Math.max(1, Math.round(parts));
+  const base = Math.floor(total / safeParts);
+  const remainder = total - base * safeParts;
+  return Array.from({ length: safeParts }, (_, i) => Math.max(1, base + (i < remainder ? 1 : 0)));
+}
+
+type StructuralStage = "limpeza" | "sapatas" | "pilares" | "vigas" | "lajes" | "apoio";
+
+// Reconhece o papel de um item de "Betões, Aços e Cofragens" pela descrição (estável mesmo
+// quando o código do item muda) — permite reordenar/repartir por piso sem depender de que o
+// utilizador tenha usado exactamente os códigos 3.1..3.8 do modelo SIGO.
+function classifyStructuralLeaf(description: string): StructuralStage | null {
+  const d = normalizeText(description);
+  if (d.includes("limpeza") && d.includes("bet")) return "limpeza";
+  if (d.includes("sapata")) return "sapatas";
+  if (d.includes("aco") || d.includes("malhasol") || d.includes("malha") || d.includes("cofragem")) return "apoio";
+  if (d.includes("pilar")) return "pilares";
+  if (d.includes("viga") || d.includes("lintel") || d.includes("linteis")) return "vigas";
+  if (d.includes("laje")) return "lajes";
+  return null;
+}
+
+function relabelLeaf(source: ScheduledNode, description: string, durationDays: number, valueShare: number): ScheduledNode {
+  return {
+    node: { ...source.node, description, code: null },
+    durationDays: Math.max(1, Math.round(durationDays)),
+    basis: source.basis,
+    children: [],
+    valueShare,
+    refCode: source.node.code,
+  };
+}
+
+function makeGroup(source: ScheduledNode, description: string, children: ScheduledNode[]): ScheduledNode {
+  return {
+    node: { ...source.node, description, code: null },
+    durationDays: children.reduce((sum, c) => sum + c.durationDays, 0) || 1,
+    basis: "soma",
+    children,
+    refCode: source.node.code,
+  };
+}
+
+// Reordena e, quando a edificação tem mais de um piso, repete a estrutura (Betões/Aços/
+// Cofragens) piso a piso — sequência real de obra: limpeza → sapatas → arranque dos pilares →
+// viga de fundação → laje de pavimento (térreo); depois, por cada piso seguinte: pilares → viga/
+// cinta → laje, terminando em "laje de cobertura" no último piso. Devolve null quando o capítulo
+// não tem os itens mínimos reconhecíveis (pilares, vigas e lajes) — nesse caso o chamador mantém
+// o comportamento genérico anterior, sem arriscar perder âmbito do mapa.
+function buildFloorAwareStructuralPlan(root: ScheduledNode, floors: number): ScheduledNode | null {
+  const stage: Record<StructuralStage, ScheduledNode[]> = { limpeza: [], sapatas: [], pilares: [], vigas: [], lajes: [], apoio: [] };
+  for (const child of root.children) {
+    if (child.children.length) return null;
+    const key = classifyStructuralLeaf(child.node.description);
+    if (!key) return null;
+    stage[key].push(child);
+  }
+  if (!stage.pilares.length || !stage.vigas.length || !stage.lajes.length) return null;
+  // Só sabemos repartir um item por piso — se o mapa tiver mais do que um item por etapa (ex:
+  // duas linhas de "pilares"), não arriscamos perder o valor de nenhuma; mantém-se o genérico.
+  if (stage.limpeza.length > 1 || stage.sapatas.length > 1 || stage.pilares.length > 1 || stage.vigas.length > 1 || stage.lajes.length > 1) return null;
+
+  const sum = (nodes: ScheduledNode[]) => nodes.reduce((s, n) => s + n.durationDays, 0);
+  const floorCount = Math.max(1, Math.min(20, Math.round(floors)));
+  const pilaresPerFloor = splitEvenly(sum(stage.pilares), floorCount);
+  const vigasPerFloor = splitEvenly(sum(stage.vigas), floorCount);
+  const lajesPerFloor = splitEvenly(sum(stage.lajes), floorCount);
+  // Cada item de apoio (aço, malhasol, cofragem...) é repartido pela SUA PRÓPRIA duração — nunca
+  // pela soma de todos, senão cada item ficaria com a duração combinada dos outros também.
+  const apoioPerFloorByItem = stage.apoio.map((item) => splitEvenly(item.durationDays, floorCount));
+
+  const floorGroups: ScheduledNode[] = [];
+  for (let floor = 0; floor < floorCount; floor++) {
+    const isGround = floor === 0;
+    const isTop = floor === floorCount - 1;
+    const children: ScheduledNode[] = [];
+    const source = stage.pilares[0];
+
+    if (isGround) {
+      if (stage.limpeza.length) children.push(relabelLeaf(stage.limpeza[0], "Betão de limpeza", sum(stage.limpeza), 1));
+      if (stage.sapatas.length) children.push(relabelLeaf(stage.sapatas[0], "Sapatas de fundação", sum(stage.sapatas), 1));
+    }
+    children.push(relabelLeaf(
+      source,
+      isGround ? "Arranque dos pilares" : floorCount > 1 ? `Pilares — Piso ${floor}` : "Pilares",
+      pilaresPerFloor[floor],
+      pilaresPerFloor[floor] / (pilaresPerFloor.reduce((a, b) => a + b, 0) || 1),
+    ));
+    children.push(relabelLeaf(
+      stage.vigas[0],
+      isGround ? "Viga de fundação" : floorCount > 1 ? `Viga/cinta — Piso ${floor}` : "Vigas e lintéis",
+      vigasPerFloor[floor],
+      vigasPerFloor[floor] / (vigasPerFloor.reduce((a, b) => a + b, 0) || 1),
+    ));
+    children.push(relabelLeaf(
+      stage.lajes[0],
+      isGround && floorCount === 1 ? "Laje de pavimento" : isGround ? "Laje de pavimento térreo" : isTop ? "Laje de cobertura" : `Laje — Piso ${floor}`,
+      lajesPerFloor[floor],
+      lajesPerFloor[floor] / (lajesPerFloor.reduce((a, b) => a + b, 0) || 1),
+    ));
+    stage.apoio.forEach((apoioSource, apoioIndex) => {
+      const perFloor = apoioPerFloorByItem[apoioIndex];
+      const totalForItem = perFloor.reduce((a, b) => a + b, 0) || 1;
+      children.push(relabelLeaf(
+        apoioSource,
+        `${apoioSource.node.description}${floorCount > 1 ? ` — Piso ${floor}` : ""}`,
+        perFloor[floor],
+        perFloor[floor] / totalForItem,
+      ));
+    });
+    const label = floorCount > 1 ? `Estrutura — Piso ${floor}` : "Estrutura";
+    floorGroups.push(makeGroup(root, label, children));
+  }
+  return makeGroup(root, root.node.description, floorGroups);
+}
+
+// Mesma lógica de repetição por piso para Alvenarias — paredes de cada piso só fazem sentido
+// depois da estrutura desse piso estar de pé, por isso seguem a mesma ordem "térreo primeiro".
+function buildFloorAwareWallsPlan(root: ScheduledNode, floors: number): ScheduledNode | null {
+  const floorCount = Math.max(1, Math.min(20, Math.round(floors)));
+  if (floorCount <= 1) return null;
+  const leaves = root.children.filter((c) => !c.children.length);
+  if (leaves.length !== root.children.length || !leaves.length) return null;
+
+  const totalPerLeaf = leaves.map((leaf) => splitEvenly(leaf.durationDays, floorCount));
+  const floorGroups: ScheduledNode[] = [];
+  for (let floor = 0; floor < floorCount; floor++) {
+    const children = leaves.map((leaf, leafIndex) =>
+      relabelLeaf(leaf, `${leaf.node.description} — Piso ${floor}`, totalPerLeaf[leafIndex][floor], totalPerLeaf[leafIndex][floor] / (totalPerLeaf[leafIndex].reduce((a, b) => a + b, 0) || 1)),
+    );
+    floorGroups.push(makeGroup(root, `Alvenarias — Piso ${floor}`, children));
+  }
+  return makeGroup(root, root.node.description, floorGroups);
+}
+
 // Gera o cronograma directamente do que foi medido: cada pacote de trabalho (item do Mapa de
 // Quantidades, em qualquer profundidade — capítulo, grupo ou item) recebe a sua própria duração,
 // calculada das suas próprias horas de mão-de-obra e quantidade — nunca de uma fatia
@@ -175,6 +380,10 @@ export async function generateSchedule(args: {
   totalDurationDays?: number;
   companyId?: string | null;
   zoneId?: string | null;
+  // Trabalhadores disponíveis por frente de trabalho — quanto maior, mais rápido ficam prontos
+  // os pacotes de trabalho que já "pedem" uma equipa grande (nunca inventa equipa numa tarefa
+  // pequena; ver computeItemDurationDays). Por omissão 12 — igual ao comportamento anterior.
+  maxCrewSize?: number;
 }) {
   const summary = await getBudgetDocumentSummary(args.budgetDocumentId);
   if (!summary) throw new Error("Mapa de Quantidades não encontrado");
@@ -184,10 +393,29 @@ export async function generateSchedule(args: {
   const hoursCache = new Map<string, number>();
   for (const root of roots) await buildLabourHoursPerUnitCache(root, args.companyId ?? null, args.zoneId ?? null, hoursCache);
 
+  const maxCrewSize = Math.max(1, Math.min(60, Math.round(args.maxCrewSize ?? DEFAULT_MAX_CREW_SIZE)));
   let scheduledRoots = roots
-    .map((root) => computeNodeDurations(root, hoursCache))
+    .map((root) => computeNodeDurations(root, hoursCache, maxCrewSize))
     .filter((node): node is ScheduledNode => node !== null);
   if (!scheduledRoots.length) throw new Error("O Mapa de Quantidades ainda não tem itens medidos para gerar a WBS");
+
+  // Sequência real de obra: quando o capítulo de Betões/Aços/Cofragens (ou de Alvenarias) é
+  // reconhecível pela descrição dos seus itens, substitui-se a ordem "tal como está no mapa" por
+  // uma sequência de construção (limpeza → sapatas → pilares → viga → laje) e, em edifícios de
+  // mais de um piso, repete-a piso a piso (térreo primeiro). Documentos que não seguem o modelo
+  // padrão do SIGO mantêm-se exactamente como antes — a transformação nunca é forçada.
+  const [project] = await db.select({ floors: projects.floors }).from(projects).where(eq(projects.id, args.projectId)).limit(1);
+  const floors = project?.floors ?? 1;
+  scheduledRoots = scheduledRoots.map((root) => {
+    const name = normalizeText(root.node.description);
+    if (name.includes("betoe") || name.includes("acos e cofrage") || (name.includes("aco") && name.includes("cofragem"))) {
+      return buildFloorAwareStructuralPlan(root, floors) ?? root;
+    }
+    if (name.includes("alvenaria")) {
+      return buildFloorAwareWallsPlan(root, floors) ?? root;
+    }
+    return root;
+  });
 
   if (args.totalDurationDays) {
     const naturalTotal = scheduledRoots.reduce((sum, root) => sum + root.durationDays, 0) || 1;
@@ -276,12 +504,15 @@ export async function getProjectSchedule(projectId: string) {
     const root = summary && task.budgetChapterCode
       ? summary.sections.flatMap((section) => section.items).map((node) => findNodeByCode([node], task.budgetChapterCode!)).find(Boolean)
       : null;
-    const plannedValue = root?.totalPrice ?? 0;
+    // valueShare < 1 quando o gerador dividiu este item do mapa por vários pisos — cada
+    // fracção reclama só a sua parte do valor real, nunca o valor inteiro do item várias vezes.
+    const valueShare = Number(task.valueShare ?? 1);
+    const plannedValue = (root?.totalPrice ?? 0) * valueShare;
     const certificate = task.budgetDocumentId ? latestByDocument.get(task.budgetDocumentId) : null;
     const executedValue = certificate && task.budgetChapterCode
       ? measured
           .filter((line) => line.certificateId === certificate.id && (line.code === task.budgetChapterCode || line.code?.startsWith(`${task.budgetChapterCode}.`)))
-          .reduce((sum, line) => sum + Number(line.qty) * Number(line.unitPrice ?? 0), 0)
+          .reduce((sum, line) => sum + Number(line.qty) * Number(line.unitPrice ?? 0), 0) * valueShare
       : 0;
     const measuredProgress = plannedValue > 0 ? Math.min(100, (executedValue / plannedValue) * 100) : 0;
     const diaryProgress = latestDiaryProgress.get(task.id) ?? 0;
@@ -407,6 +638,28 @@ export async function validateTaskDependency(projectId: string, taskId: string, 
     if (visited.has(cursor)) break;
     visited.add(cursor);
     cursor = predecessorBySuccessor.get(cursor);
+  }
+}
+
+// Depois de uma tarefa mudar de datas (edição directa, ou porque a própria predecessora dela
+// mudou), recalcula em cascata todas as tarefas que dependem dela — sem isto, mudar o início de
+// uma predecessora deixava as sucessoras "penduradas" nas datas antigas, mesmo com FS/SS/FF/SF
+// e folga configurados. `visited` evita voltar a processar a mesma tarefa (defesa extra, já que
+// validateTaskDependency impede ciclos na origem).
+export async function cascadeSuccessorDates(taskId: string, visited: Set<string> = new Set()): Promise<void> {
+  if (visited.has(taskId)) return;
+  visited.add(taskId);
+  const [task] = await db.select().from(scheduleTasks).where(eq(scheduleTasks.id, taskId)).limit(1);
+  if (!task) return;
+  const successorDeps = await db.select().from(scheduleDependencies).where(eq(scheduleDependencies.predecessorTaskId, taskId));
+  for (const dependency of successorDeps) {
+    const [successor] = await db.select().from(scheduleTasks).where(eq(scheduleTasks.id, dependency.successorTaskId)).limit(1);
+    if (!successor) continue;
+    const { startDate, endDate } = computeSuccessorDates(task, dependency.type, dependency.lagDays, successor.durationDays);
+    if (startDate !== successor.startDate || endDate !== successor.endDate) {
+      await db.update(scheduleTasks).set({ startDate, endDate, updatedAt: new Date() }).where(eq(scheduleTasks.id, successor.id));
+    }
+    await cascadeSuccessorDates(successor.id, visited);
   }
 }
 

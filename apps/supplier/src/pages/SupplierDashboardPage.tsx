@@ -379,7 +379,11 @@ export default function SupplierDashboardPage() {
                       <p className="list-row-sub">
                         {r.companyName}
                         {r.projectName ? ` · ${r.projectName}` : ""}
-                        {r.deadlineDate ? ` · Prazo: ${new Date(r.deadlineDate).toLocaleDateString("pt-PT")}` : ""}
+                        {r.deadlineDate ? (() => {
+                          const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(r.deadlineDate);
+                          const d = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(r.deadlineDate);
+                          return ` · Prazo: ${d.toLocaleDateString("pt-PT")}`;
+                        })() : ""}
                       </p>
                     </div>
                     <span className={`badge ${STATUS_BADGE[r.status]}`}>{STATUS_LABELS[r.status]}</span>

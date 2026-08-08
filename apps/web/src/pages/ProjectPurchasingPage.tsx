@@ -6,6 +6,7 @@ import { catalogApi, type Material } from "../api/catalog";
 import {
   purchasingApi,
   type PurchaseOrder,
+  type PurchaseOrderLine,
   type PurchaseOrderLineInput,
   type StockMovement,
   type StockSummaryLine,
@@ -21,6 +22,7 @@ import ProjectWorkspaceNav from "../components/ProjectWorkspaceNav";
 import Modal from "../components/Modal";
 import PageSearch from "../components/PageSearch";
 import { IconBack, IconPlus, IconTrash } from "../components/icons";
+import PurchaseSheetModal from "../components/PurchaseSheetModal";
 import { calculateVatTotals } from "@sigo/shared";
 import { useAuth } from "../auth/AuthContext";
 import { can } from "../permissions";
@@ -69,6 +71,39 @@ function stockMovementTotals(movement: StockMovement, ivaRate: number) {
   return calculateVatTotals(Number(movement.quantity) * Number(movement.unitCost ?? 0), ivaRate);
 }
 
+function LineCostCell({ line, onSave }: { line: PurchaseOrderLine; onSave: (unitCost: number) => Promise<void> }) {
+  const [value, setValue] = useState(line.unitCost);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => setValue(line.unitCost), [line.unitCost]);
+
+  async function commit() {
+    const parsed = Number(value);
+    if (!(parsed >= 0) || parsed === Number(line.unitCost)) return;
+    setSaving(true);
+    try {
+      await onSave(parsed);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <span className="inline-flex items-center justify-end gap-1">
+      <input
+        type="number"
+        step="0.01"
+        min="0"
+        value={value}
+        disabled={saving}
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={commit}
+        className={`input input-sm w-24 text-right ${Number(line.unitCost) === 0 ? "border-orange-300" : ""}`}
+      />
+      <span className="text-xs text-gray-400">{line.currency}</span>
+    </span>
+  );
+}
+
 export default function ProjectPurchasingPage() {
   const { confirm, dialog } = useConfirmDialog();
   const { user } = useAuth();
@@ -91,6 +126,7 @@ export default function ProjectPurchasingPage() {
   const [query, setQuery] = useState("");
 
   const [showOrderForm, setShowOrderForm] = useState(false);
+  const [showSheetModal, setShowSheetModal] = useState(false);
   const [supplierId, setSupplierId] = useState("");
   const [orderDate, setOrderDate] = useState(todayStr());
   const [requiredByDate, setRequiredByDate] = useState("");
@@ -291,6 +327,16 @@ export default function ProjectPurchasingPage() {
     }
   }
 
+  async function handleUpdateLineCost(lineId: string, unitCost: number) {
+    setError(null);
+    try {
+      await purchasingApi.updateOrderLineCost(lineId, unitCost);
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao actualizar preço");
+    }
+  }
+
   async function handleDeleteOrder(order: PurchaseOrder) {
     const ok = await confirm({
       title: "Eliminar ordem de compra?",
@@ -462,7 +508,7 @@ export default function ProjectPurchasingPage() {
                 </div>
                 <div className="mt-4 grid grid-cols-3 gap-2 rounded-lg bg-slate-50 p-3 text-xs">
                   <div><span className="block text-slate-500">Necessário</span><strong className="mt-1 block tabular-nums">{item.requiredQty.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {item.unit}</strong></div>
-                  <div><span className="block text-slate-500">Coberto</span><strong className="mt-1 block tabular-nums">{(item.stockQty + item.orderedQty).toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {item.unit}</strong></div>
+                  <div><span className="block text-slate-500">Coberto</span><strong className="mt-1 block tabular-nums">{(item.consumedQty + Math.max(0, item.stockQty) + item.orderedQty).toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {item.unit}</strong></div>
                   <div><span className="block text-slate-500">A comprar</span><strong className="mt-1 block tabular-nums text-orange-700">{item.suggestedOrderQty.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {item.unit}</strong></div>
                 </div>
                 {item.purchaseQty && item.purchasePackageLabel && <p className="mt-2 text-xs font-medium text-orange-700">Compra sugerida: {item.purchaseQty} × {item.purchasePackageLabel}</p>}
@@ -576,6 +622,11 @@ export default function ProjectPurchasingPage() {
               {canRequest && (
                 <button onClick={() => setShowOrderForm(true)} className="btn btn-secondary btn-sm">
                   <IconPlus className="w-3.5 h-3.5" /> Ordem com fornecedor
+                </button>
+              )}
+              {canRequest && orders.some((o) => o.status === "rascunho") && (
+                <button onClick={() => setShowSheetModal(true)} className="btn btn-secondary btn-sm">
+                  Abrir como folha
                 </button>
               )}
             </div>
@@ -924,6 +975,11 @@ export default function ProjectPurchasingPage() {
                   </div>
                 </div>
                 <div className="mt-3 divide-y divide-slate-100 rounded-lg border border-slate-100 sm:hidden">{o.lines.map((line) => <div key={`mobile-order-${line.id}`} className="p-3"><strong className="block text-sm text-slate-800">{line.materialName}</strong><div className="mt-1 flex justify-between gap-3 text-xs text-slate-500"><span>{Number(line.quantity).toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {line.unit} × {Number(line.unitCost).toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span><span className="font-semibold text-slate-800">{(Number(line.quantity) * Number(line.unitCost)).toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {line.currency}</span></div></div>)}</div>
+                {o.status === "rascunho" && o.lines.some((l) => Number(l.unitCost) === 0) && (
+                  <p className="mt-2 text-xs font-medium text-orange-700">
+                    Preço por confirmar antes de aprovar — edite os valores a 0,00 abaixo.
+                  </p>
+                )}
                 <table className="mt-2 hidden w-full text-sm sm:table">
                   <tbody>
                     {o.lines.map((l) => (
@@ -933,7 +989,11 @@ export default function ProjectPurchasingPage() {
                           {Number(l.quantity).toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {l.unit}
                         </td>
                         <td className="py-1 text-right">
-                          {Number(l.unitCost).toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {l.currency}
+                          {o.status === "rascunho" ? (
+                            <LineCostCell line={l} onSave={(cost) => handleUpdateLineCost(l.id, cost)} />
+                          ) : (
+                            <>{Number(l.unitCost).toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {l.currency}</>
+                          )}
                         </td>
                         <td className="py-1 text-right font-medium text-gray-800">
                           {(Number(l.quantity) * Number(l.unitCost)).toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {l.currency}
@@ -1006,6 +1066,9 @@ export default function ProjectPurchasingPage() {
       </div>
     </Layout>
     {dialog}
+    {showSheetModal && (
+      <PurchaseSheetModal orders={orders} onClose={() => setShowSheetModal(false)} onChanged={reload} onError={setError} />
+    )}
     </>
   );
 }

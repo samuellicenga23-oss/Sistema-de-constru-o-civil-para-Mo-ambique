@@ -1,30 +1,13 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode, type UIEvent } from "react";
-import type { ScheduleTask, ScheduleTaskInput, ScheduleTaskStatus } from "../api/schedule";
-import { scheduleApi } from "../api/schedule";
+import { useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type UIEvent } from "react";
+import type { ScheduleTask, ScheduleTaskStatus } from "../api/schedule";
 import { workingDaysInclusive, workingDayOffset, calendarDaysInclusive } from "@sigo/shared";
-import {
-  formatPredecessorLabel,
-  parsePredecessorInput,
-  validateSchedule,
-} from "../utils/scheduleValidation";
+import { formatPredecessorLabel, validateSchedule } from "../utils/scheduleValidation";
+import { useScheduleSheet } from "../hooks/useScheduleSheet";
+import { CellInput, SheetCell, STATUS_LABELS, STATUS_PILL, fmtDate } from "./ScheduleSheetCells";
 
 const DAY_MS = 86_400_000;
 const ROW_H = 36;
 const HEAD_H = 40;
-
-const STATUS_LABELS: Record<ScheduleTaskStatus, string> = {
-  nao_iniciado: "Não iniciado",
-  em_curso: "Em curso",
-  bloqueado: "Bloqueado",
-  concluido: "Concluído",
-};
-
-const STATUS_PILL: Record<ScheduleTaskStatus, string> = {
-  nao_iniciado: "bg-slate-100 text-slate-600",
-  em_curso: "bg-brand-50 text-brand-700",
-  bloqueado: "bg-red-50 text-red-700",
-  concluido: "bg-emerald-50 text-emerald-700",
-};
 
 const BAR_FILL: Record<ScheduleTaskStatus, string> = {
   nao_iniciado: "bg-slate-400",
@@ -33,7 +16,6 @@ const BAR_FILL: Record<ScheduleTaskStatus, string> = {
   concluido: "bg-emerald-500",
 };
 
-type EditCell = "name" | "duration" | "start" | "end" | "predecessors" | "progress" | "status" | "code";
 type Zoom = "compacto" | "normal" | "detalhe";
 
 type Props = {
@@ -57,76 +39,6 @@ function today() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function fmtDate(value: string) {
-  const [y, m, d] = value.split("-");
-  return `${d}/${m}/${y.slice(2)}`;
-}
-
-function CellInput({
-  value,
-  type = "text",
-  step,
-  onCommit,
-  onCancel,
-}: {
-  value: string;
-  type?: string;
-  step?: string;
-  onCommit: (next: string) => void;
-  onCancel: () => void;
-}) {
-  const ref = useRef<HTMLInputElement>(null);
-  const [draft, setDraft] = useState(value);
-  useEffect(() => {
-    ref.current?.focus();
-    ref.current?.select();
-  }, []);
-  return (
-    <input
-      ref={ref}
-      type={type}
-      step={step}
-      className="h-7 w-full rounded border border-blue-400 bg-white px-1.5 text-[12px] outline-none ring-2 ring-blue-100"
-      value={draft}
-      onChange={(e) => setDraft(e.target.value)}
-      onClick={(e) => e.stopPropagation()}
-      onBlur={() => onCommit(draft)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          onCommit(draft);
-        }
-        if (e.key === "Escape") {
-          e.preventDefault();
-          onCancel();
-        }
-      }}
-    />
-  );
-}
-
-function SheetCell({
-  children,
-  onEdit,
-  align = "left",
-  className = "",
-}: {
-  children: ReactNode;
-  onEdit?: () => void;
-  align?: "left" | "right";
-  className?: string;
-}) {
-  return (
-    <td
-      className={`border-b border-slate-100 px-2 align-middle ${align === "right" ? "text-right" : "text-left"} ${onEdit ? "cursor-text" : ""} ${className}`}
-      style={{ height: ROW_H }}
-      onDoubleClick={onEdit}
-    >
-      {children}
-    </td>
-  );
-}
-
 export default function ScheduleWorkspace({
   tasks,
   visibleTasks,
@@ -143,13 +55,17 @@ export default function ScheduleWorkspace({
   onChanged,
   onError,
 }: Props) {
-  const [editing, setEditing] = useState<{ id: string; cell: EditCell } | null>(null);
-  const [savingId, setSavingId] = useState<string | null>(null);
   const [validationOpen, setValidationOpen] = useState(false);
   const [sheetWidth, setSheetWidth] = useState(52); // %
+  const [bulkShiftDays, setBulkShiftDays] = useState("1");
+  const [bulkDuration, setBulkDuration] = useState("1");
+  const [bulkStatus, setBulkStatus] = useState<ScheduleTaskStatus>("em_curso");
   const sheetScrollRef = useRef<HTMLDivElement>(null);
   const ganttScrollRef = useRef<HTMLDivElement>(null);
   const syncing = useRef<"sheet" | "gantt" | null>(null);
+
+  const sheet = useScheduleSheet(tasks, onChanged, onError);
+  const { editing, savingId, selected, bulkBusy, setEditing, toggleSelected, toggleSelectAllVisible, startEdit, commitCell, bulkShift, bulkDuration: applyBulkDuration, bulkStatus: applyBulkStatus, bulkDelete } = sheet;
 
   const byId = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks]);
   const issues = useMemo(() => validateSchedule(tasks), [tasks]);
@@ -161,6 +77,21 @@ export default function ScheduleWorkspace({
     visibleTasks.forEach((t, i) => map.set(t.id, i + 1));
     return map;
   }, [visibleTasks]);
+
+  const selectableVisible = useMemo(() => visibleTasks.filter((t) => !t.isSummary), [visibleTasks]);
+  const allVisibleSelected = selectableVisible.length > 0 && selectableVisible.every((t) => selected.has(t.id));
+
+  async function handleBulkShift() {
+    await bulkShift(Number(bulkShiftDays));
+  }
+
+  async function handleBulkDuration() {
+    await applyBulkDuration(Number(bulkDuration));
+  }
+
+  async function handleBulkStatus() {
+    await applyBulkStatus(bulkStatus);
+  }
 
   const timeline = useMemo(() => {
     const totalWorkingDays = workingDaysInclusive(scheduleStart, scheduleEnd);
@@ -208,82 +139,6 @@ export default function ScheduleWorkspace({
     requestAnimationFrame(() => {
       syncing.current = null;
     });
-  }
-
-  async function savePatch(task: ScheduleTask, patch: ScheduleTaskInput) {
-    setSavingId(task.id);
-    onError(null);
-    try {
-      await scheduleApi.updateTask(task.id, patch);
-      setEditing(null);
-      await onChanged();
-    } catch (cause) {
-      onError(cause instanceof Error ? cause.message : "Erro ao actualizar actividade");
-    } finally {
-      setSavingId(null);
-    }
-  }
-
-  async function commitCell(task: ScheduleTask, cell: EditCell, raw: string) {
-    const value = raw.trim();
-    if (task.isSummary && !["name", "code"].includes(cell)) return setEditing(null);
-    try {
-      if (cell === "name") {
-        if (!value || value === task.name) return setEditing(null);
-        return void savePatch(task, { name: value });
-      }
-      if (cell === "code") {
-        if (!value || value === task.code) return setEditing(null);
-        return void savePatch(task, { code: value });
-      }
-      if (cell === "duration") {
-        const days = Number(value);
-        if (!Number.isFinite(days) || days < 1) throw new Error("Duração deve ser ≥ 1 dia útil");
-        if (days === task.durationDays) return setEditing(null);
-        return void savePatch(task, { startDate: task.startDate, durationDays: days });
-      }
-      if (cell === "start") {
-        if (!value || value === task.startDate) return setEditing(null);
-        return void savePatch(task, { startDate: value, durationDays: task.durationDays });
-      }
-      if (cell === "end") {
-        if (!value || value === task.endDate) return setEditing(null);
-        if (value < task.startDate) throw new Error("A data final não pode ser anterior ao início");
-        return void savePatch(task, { startDate: task.startDate, endDate: value });
-      }
-      if (cell === "progress") {
-        const pct = Number(value);
-        if (!Number.isFinite(pct) || pct < 0 || pct > 100) throw new Error("Progresso entre 0 e 100");
-        return void savePatch(task, { manualProgress: pct });
-      }
-      if (cell === "status") {
-        if (value === task.status) return setEditing(null);
-        return void savePatch(task, { status: value as ScheduleTaskStatus });
-      }
-      if (cell === "predecessors") {
-        const parsed = parsePredecessorInput(value, tasks, task.id);
-        if ("error" in parsed) throw new Error(parsed.error);
-        const same =
-          (parsed.predecessorTaskId ?? null) === (task.predecessorTaskId ?? null) &&
-          parsed.dependencyType === (task.dependencyType ?? "FS") &&
-          parsed.lagDays === (task.lagDays ?? 0);
-        if (same) return setEditing(null);
-        return void savePatch(task, {
-          predecessorTaskId: parsed.predecessorTaskId,
-          dependencyType: parsed.dependencyType,
-          lagDays: parsed.lagDays,
-        });
-      }
-    } catch (cause) {
-      onError(cause instanceof Error ? cause.message : "Valor inválido");
-      setEditing(null);
-    }
-  }
-
-  function startEdit(task: ScheduleTask, cell: EditCell) {
-    onSelect(task.id);
-    if (task.isSummary && !["name", "code"].includes(cell)) return;
-    setEditing({ id: task.id, cell });
   }
 
   function focusIssue(taskId: string) {
@@ -387,6 +242,61 @@ export default function ScheduleWorkspace({
         </div>
       )}
 
+      {selected.size > 0 && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-blue-200 bg-blue-50 px-3 py-2">
+          <span className="text-[11px] font-semibold text-blue-900">{selected.size} seleccionada(s)</span>
+          <span className="mx-1 hidden h-4 w-px bg-blue-200 sm:block" />
+          <div className="flex items-center gap-1">
+            <input
+              type="number"
+              value={bulkShiftDays}
+              onChange={(e) => setBulkShiftDays(e.target.value)}
+              className="h-7 w-14 rounded border border-slate-200 bg-white px-1.5 text-[11px]"
+              title="Dias úteis (negativo adianta)"
+            />
+            <button type="button" disabled={bulkBusy} onClick={() => void handleBulkShift()} className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 hover:border-slate-300 disabled:opacity-50">
+              Adiar/adiantar dias
+            </button>
+          </div>
+          <div className="flex items-center gap-1">
+            <input
+              type="number"
+              min="1"
+              value={bulkDuration}
+              onChange={(e) => setBulkDuration(e.target.value)}
+              className="h-7 w-14 rounded border border-slate-200 bg-white px-1.5 text-[11px]"
+              title="Duração em dias úteis"
+            />
+            <button type="button" disabled={bulkBusy} onClick={() => void handleBulkDuration()} className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 hover:border-slate-300 disabled:opacity-50">
+              Definir duração
+            </button>
+          </div>
+          <div className="flex items-center gap-1">
+            <select
+              value={bulkStatus}
+              onChange={(e) => setBulkStatus(e.target.value as ScheduleTaskStatus)}
+              className="h-7 rounded border border-slate-200 bg-white px-1.5 text-[11px]"
+            >
+              {Object.entries(STATUS_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+            <button type="button" disabled={bulkBusy} onClick={() => void handleBulkStatus()} className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 hover:border-slate-300 disabled:opacity-50">
+              Aplicar estado
+            </button>
+          </div>
+          <button type="button" disabled={bulkBusy} onClick={() => void bulkDelete()} className="rounded-md border border-red-200 bg-white px-2 py-1 text-[11px] font-semibold text-red-700 hover:border-red-300 disabled:opacity-50">
+            Eliminar seleccionadas
+          </button>
+          <button type="button" onClick={() => sheet.setSelected(new Set())} className="ml-auto rounded-md px-2 py-1 text-[11px] font-semibold text-blue-800 hover:underline">
+            Limpar selecção
+          </button>
+          <p className="w-full text-[10px] text-blue-800/80">
+            "Adiar/adiantar" só se aplica a actividades sem predecessora — as ligadas por dependência recalculam automaticamente.
+          </p>
+        </div>
+      )}
+
       {/* Split workspace */}
       <div className="relative flex min-h-[420px] max-h-[min(70vh,720px)]">
         {/* Sheet pane */}
@@ -397,6 +307,7 @@ export default function ScheduleWorkspace({
           <div ref={sheetScrollRef} onScroll={onSheetScroll} className="min-h-0 flex-1 overflow-auto">
             <table className="w-full min-w-[620px] table-fixed border-collapse text-[12px]">
               <colgroup>
+                <col className="w-7" />
                 <col className="w-9" />
                 <col className="w-12" />
                 <col />
@@ -409,6 +320,15 @@ export default function ScheduleWorkspace({
               </colgroup>
               <thead className="sticky top-0 z-[1]">
                 <tr className="bg-slate-100 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                  <th className="border-b border-slate-200 px-1.5 py-2 text-center">
+                    <input
+                      type="checkbox"
+                      checked={allVisibleSelected}
+                      onChange={() => toggleSelectAllVisible(selectableVisible)}
+                      className="h-3.5 w-3.5 rounded border-slate-300"
+                      aria-label="Seleccionar todas as actividades visíveis"
+                    />
+                  </th>
                   <th className="border-b border-slate-200 px-1.5 py-2 text-right">#</th>
                   <th className="border-b border-slate-200 px-1.5 py-2 text-left">WBS</th>
                   <th className="border-b border-slate-200 px-1.5 py-2 text-left">Nome</th>
@@ -422,7 +342,7 @@ export default function ScheduleWorkspace({
               </thead>
               <tbody>
                 {visibleTasks.map((task) => {
-                  const selected = selectedId === task.id;
+                  const rowActive = selectedId === task.id;
                   const cell = editing?.id === task.id ? editing.cell : null;
                   const predLabel = formatPredecessorLabel(task, byId);
                   return (
@@ -431,20 +351,31 @@ export default function ScheduleWorkspace({
                       id={`sched-row-${task.id}`}
                       onClick={() => onSelect(task.id)}
                       className={`${savingId === task.id ? "opacity-50" : ""} ${
-                        selected ? "bg-brand-50" : task.isSummary ? "bg-slate-50" : "bg-white hover:bg-slate-50/80"
-                      } ${selected ? "shadow-[inset_3px_0_0_#3b82f6]" : ""}`}
+                        rowActive ? "bg-brand-50" : task.isSummary ? "bg-slate-50" : "bg-white hover:bg-slate-50/80"
+                      } ${rowActive ? "shadow-[inset_3px_0_0_#3b82f6]" : ""}`}
                     >
+                      <SheetCell align="right" className="w-7">
+                        {!task.isSummary && (
+                          <input
+                            type="checkbox"
+                            checked={selected.has(task.id)}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={() => toggleSelected(task.id)}
+                            className="h-3.5 w-3.5 rounded border-slate-300"
+                          />
+                        )}
+                      </SheetCell>
                       <SheetCell align="right" className="text-[11px] tabular-nums text-slate-400">
                         {rowIndex.get(task.id)}
                       </SheetCell>
-                      <SheetCell onEdit={() => startEdit(task, "code")}>
+                      <SheetCell onEdit={() => startEdit(task, "code", onSelect)}>
                         {cell === "code" ? (
                           <CellInput value={task.code} onCommit={(v) => void commitCell(task, "code", v)} onCancel={() => setEditing(null)} />
                         ) : (
                           <span className={`font-mono text-[11px] font-semibold ${task.isSummary ? "text-slate-700" : "text-brand-700"}`}>{task.code}</span>
                         )}
                       </SheetCell>
-                      <SheetCell onEdit={() => startEdit(task, "name")} className="!whitespace-normal">
+                      <SheetCell onEdit={() => startEdit(task, "name", onSelect)} className="!whitespace-normal">
                         {cell === "name" ? (
                           <div style={{ paddingLeft: task.parentId ? 16 : 0 }}>
                             <CellInput value={task.name} onCommit={(v) => void commitCell(task, "name", v)} onCancel={() => setEditing(null)} />
@@ -471,42 +402,42 @@ export default function ScheduleWorkspace({
                           </div>
                         )}
                       </SheetCell>
-                      <SheetCell align="right" onEdit={() => startEdit(task, "duration")}>
+                      <SheetCell align="right" onEdit={() => startEdit(task, "duration", onSelect)}>
                         {cell === "duration" ? (
                           <CellInput type="number" step="1" value={String(task.durationDays)} onCommit={(v) => void commitCell(task, "duration", v)} onCancel={() => setEditing(null)} />
                         ) : (
                           <span className="tabular-nums text-slate-600">{task.durationDays}d</span>
                         )}
                       </SheetCell>
-                      <SheetCell onEdit={() => startEdit(task, "start")}>
+                      <SheetCell onEdit={() => startEdit(task, "start", onSelect)}>
                         {cell === "start" ? (
                           <CellInput type="date" value={task.startDate} onCommit={(v) => void commitCell(task, "start", v)} onCancel={() => setEditing(null)} />
                         ) : (
                           <span className="tabular-nums text-slate-600">{fmtDate(task.startDate)}</span>
                         )}
                       </SheetCell>
-                      <SheetCell onEdit={() => startEdit(task, "end")}>
+                      <SheetCell onEdit={() => startEdit(task, "end", onSelect)}>
                         {cell === "end" ? (
                           <CellInput type="date" value={task.endDate} onCommit={(v) => void commitCell(task, "end", v)} onCancel={() => setEditing(null)} />
                         ) : (
                           <span className="tabular-nums text-slate-600">{fmtDate(task.endDate)}</span>
                         )}
                       </SheetCell>
-                      <SheetCell onEdit={() => startEdit(task, "predecessors")}>
+                      <SheetCell onEdit={() => startEdit(task, "predecessors", onSelect)}>
                         {cell === "predecessors" ? (
                           <CellInput value={predLabel} onCommit={(v) => void commitCell(task, "predecessors", v)} onCancel={() => setEditing(null)} />
                         ) : (
                           <span className={`font-mono text-[11px] ${predLabel ? "text-slate-700" : "text-slate-300"}`}>{predLabel || "—"}</span>
                         )}
                       </SheetCell>
-                      <SheetCell align="right" onEdit={() => startEdit(task, "progress")}>
+                      <SheetCell align="right" onEdit={() => startEdit(task, "progress", onSelect)}>
                         {cell === "progress" ? (
                           <CellInput type="number" step="0.01" value={task.progress.toFixed(2)} onCommit={(v) => void commitCell(task, "progress", v)} onCancel={() => setEditing(null)} />
                         ) : (
                           <span className="font-semibold tabular-nums text-slate-700">{task.progress.toFixed(2)}%</span>
                         )}
                       </SheetCell>
-                      <SheetCell onEdit={() => startEdit(task, "status")}>
+                      <SheetCell onEdit={() => startEdit(task, "status", onSelect)}>
                         {cell === "status" ? (
                           <select
                             autoFocus
@@ -563,7 +494,7 @@ export default function ScheduleWorkspace({
           <div ref={ganttScrollRef} onScroll={onGanttScroll} className="min-h-0 flex-1 overflow-auto">
             <div style={{ width: Math.max(timeline.width, 480), minWidth: "100%" }}>
               {visibleTasks.map((task) => {
-                const selected = selectedId === task.id;
+                const rowActive = selectedId === task.id;
                 const left = (workingDayOffset(scheduleStart, task.startDate) / Math.max(1, timeline.totalWorkingDays - 1)) * 100;
                 const width = Math.max(1.2, (task.durationDays / timeline.totalWorkingDays) * 100);
                 const baselineLeft = task.baselineStartDate
@@ -580,7 +511,7 @@ export default function ScheduleWorkspace({
                     type="button"
                     onClick={() => onSelect(task.id)}
                     className={`relative block w-full border-b border-slate-100 text-left transition ${
-                      selected ? "bg-brand-50/70" : task.isSummary ? "bg-slate-50/50" : "bg-white hover:bg-slate-50/60"
+                      rowActive ? "bg-brand-50/70" : task.isSummary ? "bg-slate-50/50" : "bg-white hover:bg-slate-50/60"
                     }`}
                     style={{ height: ROW_H }}
                     aria-label={`Seleccionar ${task.name}`}

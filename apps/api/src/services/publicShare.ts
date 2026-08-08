@@ -13,6 +13,7 @@ import {
   contractVariations,
 } from "../db/schema.js";
 import { getMeasurementDashboard } from "./measurementEngine.js";
+import { calendarDaysUntil, localTodayIso } from "../lib/calendarDate.js";
 
 export type ShareSettings = {
   showProgress: boolean;
@@ -100,14 +101,8 @@ export async function revokePublicShareToken(projectId: string): Promise<void> {
   await db.update(projects).set({ publicShareToken: null }).where(eq(projects.id, projectId));
 }
 
-function todayIso() {
-  return new Date().toISOString().slice(0, 10);
-}
-
 function daysUntil(dueDate: string): number {
-  const due = new Date(`${dueDate}T00:00:00`);
-  const today = new Date(`${todayIso()}T00:00:00`);
-  return Math.round((due.getTime() - today.getTime()) / 86_400_000);
+  return calendarDaysUntil(dueDate);
 }
 
 export type InstallmentPublic = {
@@ -117,16 +112,18 @@ export type InstallmentPublic = {
   dueDate: string;
   amount: number;
   status: "prevista" | "parcial" | "paga" | "atrasada";
+  overdue: boolean;
   paidAmount: number;
 };
 
 function resolveInstallmentStatus(
   status: "prevista" | "parcial" | "paga",
   dueDate: string,
-): InstallmentPublic["status"] {
-  if (status === "paga") return "paga";
-  if (status === "parcial") return daysUntil(dueDate) < 0 ? "atrasada" : "parcial";
-  return daysUntil(dueDate) < 0 ? "atrasada" : "prevista";
+): { status: InstallmentPublic["status"]; overdue: boolean } {
+  const overdue = status !== "paga" && daysUntil(dueDate) < 0;
+  if (status === "paga") return { status: "paga", overdue: false };
+  if (status === "parcial") return { status: "parcial", overdue };
+  return { status: overdue ? "atrasada" : "prevista", overdue };
 }
 
 async function loadContractValue(projectId: string): Promise<number | null> {
@@ -150,7 +147,7 @@ function deriveCurrentPhase(
   if (inProgress[0]) {
     return { name: inProgress[0].name, progressPercent: Number(inProgress[0].manualProgress ?? 0) };
   }
-  const today = todayIso();
+  const today = localTodayIso();
   const upcoming = tasks
     .filter((t) => t.status !== "concluido" && t.endDate >= today)
     .sort((a, b) => a.startDate.localeCompare(b.startDate));
@@ -270,15 +267,19 @@ export async function getPublicProjectSummary(token: string): Promise<PublicProj
       .from(projectClientPaymentInstallments)
       .where(eq(projectClientPaymentInstallments.planId, plan.id))
       .orderBy(asc(projectClientPaymentInstallments.sequence), asc(projectClientPaymentInstallments.dueDate));
-    installments = rows.map((row) => ({
-      id: row.id,
-      sequence: row.sequence,
-      title: row.title,
-      dueDate: row.dueDate,
-      amount: Number(row.amount),
-      status: resolveInstallmentStatus(row.status, row.dueDate),
-      paidAmount: Number(row.paidAmount),
-    }));
+    installments = rows.map((row) => {
+      const derived = resolveInstallmentStatus(row.status, row.dueDate);
+      return {
+        id: row.id,
+        sequence: row.sequence,
+        title: row.title,
+        dueDate: row.dueDate,
+        amount: Number(row.amount),
+        status: derived.status,
+        overdue: derived.overdue,
+        paidAmount: Number(row.paidAmount),
+      };
+    });
   }
 
   const unpaid = installments.filter((i) => i.status !== "paga").sort((a, b) => a.dueDate.localeCompare(b.dueDate));

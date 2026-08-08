@@ -412,8 +412,14 @@ export default function ProjectFinancialPage() {
                       <td className="py-2">{row.dueDate}</td>
                       <td className="py-2 text-right tabular-nums">{fmt(row.amount, clientPlan.currency)}</td>
                       <td className="py-2">
-                        <span className={row.status === "atrasada" ? "font-semibold text-red-700" : row.status === "paga" ? "text-green-700" : "text-slate-600"}>
-                          {row.status === "paga" ? "Paga" : row.status === "parcial" ? `Parcial (${fmt(row.paidAmount, clientPlan.currency)})` : row.status === "atrasada" ? "Atrasada" : "Prevista"}
+                        <span className={row.overdue || row.status === "atrasada" ? "font-semibold text-red-700" : row.status === "paga" ? "text-green-700" : "text-slate-600"}>
+                          {row.status === "paga"
+                            ? "Paga"
+                            : row.status === "parcial"
+                              ? `${row.overdue ? "Atrasada · " : ""}Parcial (${fmt(row.paidAmount, clientPlan.currency)})`
+                              : row.status === "atrasada" || row.overdue
+                                ? "Atrasada"
+                                : "Prevista"}
                         </span>
                       </td>
                       <td className="py-2 pr-5 text-right">

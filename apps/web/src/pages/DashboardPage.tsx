@@ -1,13 +1,21 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { dashboardApi, type DashboardData, type CurrencyTotals } from "../api/dashboard";
+import { boqApi, type SiteManagementOverview } from "../api/boq";
 import Layout from "../components/Layout";
 import LoadingState from "../components/LoadingState";
 import ErrorState from "../components/ErrorState";
 import EmptyState from "../components/EmptyState";
 import AlertBanner from "../components/AlertBanner";
-import { IconFolder, IconDoc, IconClipboard, IconMap, IconPlus } from "../components/icons";
+import { IconFolder, IconDoc, IconClipboard, IconMap, IconPlus, IconAlertTriangle } from "../components/icons";
+
+const ALERT_LEVEL_STYLE: Record<string, string> = {
+  critical: "border-red-200 bg-red-50 text-red-800",
+  warning: "border-amber-200 bg-amber-50 text-amber-800",
+  info: "border-slate-200 bg-slate-50 text-slate-700",
+};
+const ALERT_LEVEL_WEIGHT: Record<string, number> = { critical: 0, warning: 1, info: 2 };
 
 function money(value: number, currency: string) {
   return `${value.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`;
@@ -58,6 +66,7 @@ export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [overview, setOverview] = useState<SiteManagementOverview[]>([]);
 
   function loadDashboard() {
     setLoading(true);
@@ -72,7 +81,17 @@ export default function DashboardPage() {
   useEffect(() => {
     if (user?.role === "super_admin") return;
     loadDashboard();
+    boqApi.siteManagementOverview().then(setOverview).catch(() => {});
   }, [user?.role]);
+
+  const topAlerts = useMemo(() => {
+    const projectById = new Map((data?.projects ?? []).map((p) => [p.id, p]));
+    return overview
+      .flatMap((o) => o.alerts.map((alert) => ({ ...alert, project: projectById.get(o.projectId) })))
+      .filter((a) => a.project)
+      .sort((a, b) => ALERT_LEVEL_WEIGHT[a.level] - ALERT_LEVEL_WEIGHT[b.level])
+      .slice(0, 4);
+  }, [overview, data]);
 
   if (user?.role === "super_admin") {
     return (
@@ -141,6 +160,37 @@ export default function DashboardPage() {
               <AlertBanner tone="warning">
                 <span className="font-semibold">{data.contasVencidas}</span> conta(s) vencida(s) — verifique o Financeiro de cada projecto.
               </AlertBanner>
+            )}
+
+            {topAlerts.length > 0 && (
+              <section className="card overflow-hidden border-amber-200">
+                <div className="flex items-center gap-2 border-b border-amber-100 bg-amber-50/60 px-4 py-3 sm:px-5">
+                  <IconAlertTriangle className="h-4 w-4 text-amber-700" />
+                  <h2 className="section-title text-base text-amber-900">Precisa de atenção</h2>
+                  <Link to="/gestao" className="action-link ml-auto">Ver todos →</Link>
+                </div>
+                <ul className="divide-y divide-slate-100">
+                  {topAlerts.map((alert, idx) => (
+                    <li key={`${alert.project!.id}-${alert.code}-${idx}`}>
+                      <Link
+                        to={alert.href}
+                        className="flex items-start justify-between gap-4 px-4 py-3 transition-colors hover:bg-slate-50 sm:px-5"
+                      >
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${ALERT_LEVEL_STYLE[alert.level]}`}>
+                              {alert.title}
+                            </span>
+                            <span className="truncate text-xs font-medium text-slate-600">{alert.project!.name}</span>
+                          </div>
+                          <p className="mt-1 text-xs text-slate-500">{alert.detail}</p>
+                        </div>
+                        <span className="shrink-0 text-xs font-semibold text-brand-700">Resolver →</span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </section>
             )}
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">

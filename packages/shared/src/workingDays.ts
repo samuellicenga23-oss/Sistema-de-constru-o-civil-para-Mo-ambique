@@ -22,6 +22,20 @@ export function nextWorkingDay(date: string): string {
   return addWorkingDays(date, 1);
 }
 
+/** Como addWorkingDays, mas aceita dias negativos (anda para trás) — usado para adiantar datas. */
+export function shiftWorkingDays(date: string, days: number): string {
+  const rounded = Math.round(days);
+  if (rounded === 0) return date;
+  const value = new Date(`${date}T00:00:00Z`);
+  const step = rounded > 0 ? 1 : -1;
+  let remaining = Math.abs(rounded);
+  while (remaining > 0) {
+    value.setUTCDate(value.getUTCDate() + step);
+    if (isWorkingDay(value)) remaining -= 1;
+  }
+  return value.toISOString().slice(0, 10);
+}
+
 export function workingDaysInclusive(startDate: string, endDate: string): number {
   let cursor = new Date(`${startDate}T00:00:00Z`);
   const end = new Date(`${endDate}T00:00:00Z`);

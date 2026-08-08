@@ -9,12 +9,36 @@ export type Project = {
   currency: string;
   projectType: "medicao" | "orcamento" | "hibrido";
   measurementMode: "plantas" | "manual" | "importar";
+  floors: number;
   ivaRate: string;
   contingenciasRate: string;
   siteCostsRate: string;
   indirectCostsRate: string;
   profitMarginRate: string;
   createdAt: string;
+};
+
+export type SchedulePhaseSummary = {
+  id: string;
+  name: string;
+  startDate: string;
+  endDate: string;
+  progress: number;
+  status: "nao_iniciado" | "em_curso" | "concluido" | "bloqueado";
+};
+
+export type SiteManagementOverview = {
+  projectId: string;
+  projectName: string;
+  currency: string;
+  expectedProgress: number;
+  actualProgress: number;
+  progressGap: number;
+  contractedValue: number;
+  receivedValue: number;
+  cashMargin: number;
+  alerts: Array<{ code: string; level: "critical" | "warning" | "info"; title: string; detail: string; href: string }>;
+  schedule: { startDate: string | null; endDate: string | null; phases: SchedulePhaseSummary[] };
 };
 
 export type ProjectMaterialSpecification = {
@@ -125,6 +149,7 @@ export type BudgetRepriceResult = {
 export const boqApi = {
   listProjects: () => request<Project[]>("/projects"),
   listProjectsReadyForSite: () => request<Project[]>("/projects?readyForSite=1"),
+  siteManagementOverview: () => request<SiteManagementOverview[]>("/projects/site-management-overview"),
   getProject: (id: string) => request<Project>(`/projects/${id}`),
   getProjectWorkflow: (id: string) => request<ProjectWorkflowStatus>(`/projects/${id}/workflow`),
   createProject: (data: {
@@ -134,12 +159,13 @@ export const boqApi = {
     zoneId?: string | null;
     projectType?: "medicao" | "orcamento" | "hibrido";
     measurementMode?: "plantas" | "manual" | "importar";
+    floors?: number;
     materialSpecifications?: Array<{ name: string; unit: string; specification?: string }>;
   }) =>
     request<Project & { defaultDocumentId?: string }>("/projects", { method: "POST", body: JSON.stringify(data) }),
   prepareMeasurementWorkspace: (projectId: string) =>
     request<{ document: BudgetDocument; created: boolean }>(`/projects/${projectId}/measurement-workspace`, { method: "POST" }),
-  updateProject: (id: string, data: Partial<{ name: string; client: string; zoneId: string | null }>) =>
+  updateProject: (id: string, data: Partial<{ name: string; client: string; zoneId: string | null; floors: number }>) =>
     request<Project>(`/projects/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteProject: (id: string) => request<{ ok: true }>(`/projects/${id}`, { method: "DELETE" }),
   listProjectMaterialSpecifications: (projectId: string) =>
