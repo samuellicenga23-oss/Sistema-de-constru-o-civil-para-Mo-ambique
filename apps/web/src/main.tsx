@@ -14,7 +14,7 @@ if (typeof window !== "undefined" && window.localStorage.getItem(CACHE_EPOCH_KEY
   const finish = () => window.localStorage.setItem(CACHE_EPOCH_KEY, CACHE_EPOCH);
   const tasks: Promise<unknown>[] = [];
   if ("caches" in window) {
-    tasks.push(caches.keys().then((keys) => Promise.all(keys.map((key) => caches.delete(key))));
+    tasks.push(caches.keys().then((keys) => Promise.all(keys.map((key) => caches.delete(key)))));
   }
   if ("serviceWorker" in navigator) {
     tasks.push(
