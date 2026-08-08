@@ -31,6 +31,8 @@ export type SchedulePlanningProfile = {
 export type SchedulePlanningContext = {
   floors: number;
   floorLabels: string[];
+  configuredFloors?: number;
+  floorSource?: "project" | "plant" | "combined";
   measuredItemCount: number;
   hasSigoTemplate: boolean;
   hasImportedScope: boolean;
@@ -66,6 +68,8 @@ export type SchedulePlanningSetup = {
   previewedAt: string | null;
   generatedAt: string | null;
   validationErrors: string[];
+  needsRegeneration: boolean;
+  regenerationReasons: string[];
 };
 
 export type SchedulePlanningPreview = {

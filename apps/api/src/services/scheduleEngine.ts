@@ -2,9 +2,13 @@ import { createHash } from "node:crypto";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import {
+  budgetSections,
   lineItems,
+  measurementLines,
   measurementCertificateLines,
   measurementCertificates,
+  extractedRooms,
+  plants,
   projects,
   projectSchedulePlanningProfiles,
   scheduleDependencies,
@@ -39,6 +43,7 @@ import {
   type PlanningContext,
   type SchedulePlanningProfile,
 } from "./schedulePlanningProfile.js";
+import { resolveProjectFloors } from "./scheduleFloorDetection.js";
 
 export { addWorkingDays, computeSuccessorDates, isWorkingDay, shiftWorkingDays, workingDaysInclusive } from "./schedulePlanning.js";
 
@@ -272,10 +277,34 @@ async function preparePlanning(args: {
   for (const root of allRoots) await buildLabourHoursPerUnitCache(root, args.companyId ?? null, args.zoneId ?? null, hoursCache);
 
   const fallbackCrewSize = DEFAULT_FALLBACK_CREW_SIZE;
-  const [project] = await db.select({ floors: projects.floors }).from(projects).where(eq(projects.id, args.projectId)).limit(1);
-  const floors = Math.max(1, project?.floors ?? 1);
+  const [[project], roomRows, plantRows, measurementRows] = await Promise.all([
+    db.select({ floors: projects.floors }).from(projects).where(eq(projects.id, args.projectId)).limit(1),
+    db.select({ floor: extractedRooms.floor })
+      .from(extractedRooms)
+      .innerJoin(plants, eq(extractedRooms.plantId, plants.id))
+      .where(eq(plants.projectId, args.projectId)),
+    db.select({ structuralSummary: plants.structuralSummary })
+      .from(plants)
+      .where(eq(plants.projectId, args.projectId)),
+    db.select({ description: measurementLines.description })
+      .from(measurementLines)
+      .innerJoin(lineItems, eq(measurementLines.lineItemId, lineItems.id))
+      .innerJoin(budgetSections, eq(lineItems.sectionId, budgetSections.id))
+      .where(eq(budgetSections.documentId, args.budgetDocumentId)),
+  ]);
+  const structuralLabels = plantRows.flatMap((row) => row.structuralSummary?.slabs?.map((slab) => slab.floor) ?? []);
+  const resolvedFloors = resolveProjectFloors(project?.floors ?? 1, [
+    ...roomRows.map((row) => row.floor),
+    ...structuralLabels,
+    ...measurementRows.map((row) => row.description),
+  ]);
+  const floors = resolvedFloors.floors;
   const sections = planningSections(summary, hoursCache, fallbackCrewSize, args.profile ?? null);
-  const context = buildPlanningContext(sections, floors);
+  const context = {
+    ...buildPlanningContext(sections, floors, resolvedFloors.labels),
+    configuredFloors: resolvedFloors.configuredFloors,
+    floorSource: resolvedFloors.source,
+  };
   return { summary, sections, context, floors, fallbackCrewSize };
 }
 
@@ -390,6 +419,35 @@ export async function getSchedulePlanningSetup(args: {
   const saved = await readPlanningRow(args.projectId, args.budgetDocumentId);
   const savedProfile = saved?.profile ? saved.profile as Partial<SchedulePlanningProfile> : null;
   const profile = mergeSchedulePlanningProfile(prepared.context, args.startDate, savedProfile);
+  const validationErrors = validateSchedulePlanningProfile(profile, prepared.context);
+  let needsRegeneration = false;
+  const regenerationReasons: string[] = [];
+  if (saved?.status === "generated") {
+    if (savedProfile?.floorLabels?.length !== prepared.context.floors) {
+      regenerationReasons.push(`A obra passou a ter ${prepared.context.floors} piso(s) confirmado(s).`);
+    }
+    if (!validationErrors.length) {
+      const currentPlan = buildExecutionPlan({
+        sections: prepared.sections,
+        floors: prepared.floors,
+        startDate: profile.startDate,
+        profile,
+      });
+      const currentFingerprint = planningPlanFingerprint({
+        budgetDocumentId: args.budgetDocumentId,
+        profile,
+        sections: prepared.sections,
+        plan: currentPlan,
+      });
+      needsRegeneration = !saved.lastPreviewFingerprint || saved.lastPreviewFingerprint !== currentFingerprint;
+      if (needsRegeneration && !regenerationReasons.length) {
+        regenerationReasons.push("As medições, quantidades ou regras de execução mudaram desde a última linha de base.");
+      }
+    } else {
+      needsRegeneration = true;
+      regenerationReasons.push("Os dados actuais precisam de confirmação antes de actualizar a linha de base.");
+    }
+  }
   return {
     context: prepared.context,
     questions: buildPlanningQuestions(prepared.context),
@@ -398,7 +456,9 @@ export async function getSchedulePlanningSetup(args: {
     previewFingerprint: saved?.lastPreviewFingerprint ?? null,
     previewedAt: saved?.previewedAt ?? null,
     generatedAt: saved?.generatedAt ?? null,
-    validationErrors: validateSchedulePlanningProfile(profile, prepared.context),
+    validationErrors,
+    needsRegeneration,
+    regenerationReasons,
   };
 }
 

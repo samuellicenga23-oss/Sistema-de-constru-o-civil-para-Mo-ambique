@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildPlanningQuestions,
   defaultSchedulePlanningProfile,
+  recommendedTradeFronts,
   validateSchedulePlanningProfile,
   type PlanningContext,
 } from "../src/services/schedulePlanningProfile.js";
@@ -36,18 +37,22 @@ describe("Assistente de Planeamento", () => {
     const profile = defaultSchedulePlanningProfile(ctx, startDate);
     expect(profile.locationStrategy).toBe("floors");
     const questionKeys = buildPlanningQuestions(ctx).map((question) => question.key);
-    expect(questionKeys).toContain("locationStrategy");
-    expect(questionKeys).toContain("floorLabels");
-    expect(questionKeys).toContain("floorShares");
-    expect(questionKeys).toContain("sequencePolicy");
-    expect(questionKeys).toContain("tradeResources");
-    expect(questionKeys).toContain("cureLags");
-    expect(questionKeys).not.toContain("roofKindOverride");
+    expect(questionKeys).toEqual(["floorLabels", "sequencePolicy"]);
+    expect(questionKeys).toHaveLength(2);
   });
 
-  it("pergunta pela tipologia da cobertura apenas quando o BOQ não a determina", () => {
+  it("mantém no máximo duas perguntas mesmo quando a cobertura não foi determinada", () => {
     const ctx = context({ detectedRoofKind: "unknown" });
-    expect(buildPlanningQuestions(ctx).map((question) => question.key)).toContain("roofKindOverride");
+    expect(buildPlanningQuestions(ctx)).toHaveLength(2);
+  });
+
+  it("dimensiona frentes por especialidade para edifícios altos", () => {
+    const fronts = recommendedTradeFronts({ floors: 10 });
+    expect(fronts.structure).toBe(2);
+    expect(fronts.masonry).toBe(3);
+    expect(fronts.mep).toBe(3);
+    expect(fronts.finishes).toBe(3);
+    expect(fronts.roofing).toBe(1);
   });
 
   it("não oferece repartição automática por piso num mapa importado sem metadados seguros", () => {
@@ -76,13 +81,11 @@ describe("Assistente de Planeamento", () => {
     expect(validateSchedulePlanningProfile(profile, ctx).join(" ")).toMatch(/100%/i);
   });
 
-  it("mantém 1 piso como localização estruturada e permite zonas quando o template é seguro", () => {
+  it("mantém 1 piso como localização estruturada com uma única confirmação", () => {
     const ctx = context({ floors: 1, floorLabels: ["Piso 0"] });
     expect(defaultSchedulePlanningProfile(ctx, startDate).locationStrategy).toBe("floors");
     const keys = buildPlanningQuestions(ctx).map((question) => question.key);
-    expect(keys).toContain("locationStrategy");
-    expect(keys).toContain("floorLabels");
-    expect(keys).toContain("zones");
+    expect(keys).toEqual(["floorLabels"]);
   });
 
   it("obriga cada piso/nível a ter uma designação", () => {

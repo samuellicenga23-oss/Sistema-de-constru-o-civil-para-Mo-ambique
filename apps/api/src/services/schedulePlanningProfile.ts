@@ -55,6 +55,8 @@ export type SchedulePlanningProfile = {
 export type PlanningContext = {
   floors: number;
   floorLabels: string[];
+  configuredFloors?: number;
+  floorSource?: "project" | "plant" | "combined";
   measuredItemCount: number;
   hasSigoTemplate: boolean;
   hasImportedScope: boolean;
@@ -83,24 +85,32 @@ export type PlanningQuestion = {
   options?: Array<{ value: string; label: string }>;
 };
 
-const DEFAULT_FRONTS: Record<PlanningTrade, number | null> = {
-  earthworks: null,
-  structure: null,
-  masonry: null,
-  mep: null,
-  finishes: null,
-  roofing: null,
-  external: null,
-};
+/**
+ * Capacidade recomendada por especialidade. Não multiplica equipas sem necessidade: cria uma
+ * linha de balanço em que cada especialidade pode ocupar várias localizações em paralelo quando
+ * a dimensão vertical da obra o justifica.
+ */
+export function recommendedTradeFronts(context: Pick<PlanningContext, "floors">): Record<PlanningTrade, number | null> {
+  const floors = Math.max(1, Math.round(context.floors));
+  return {
+    earthworks: floors >= 8 ? 2 : 1,
+    structure: floors >= 7 ? 2 : 1,
+    masonry: floors >= 9 ? 3 : floors >= 4 ? 2 : 1,
+    mep: floors >= 8 ? 3 : floors >= 3 ? 2 : 1,
+    finishes: floors >= 8 ? 3 : floors >= 3 ? 2 : 1,
+    roofing: 1,
+    external: floors >= 6 ? 2 : 1,
+  };
+}
 
 const DEFAULT_CREWS: Record<PlanningTrade, number | null> = {
-  earthworks: null,
-  structure: null,
-  masonry: null,
-  mep: null,
-  finishes: null,
-  roofing: null,
-  external: null,
+  earthworks: 6,
+  structure: 10,
+  masonry: 6,
+  mep: 4,
+  finishes: 6,
+  roofing: 6,
+  external: 5,
 };
 
 export function defaultSchedulePlanningProfile(context: PlanningContext, startDate: string): SchedulePlanningProfile {
@@ -113,7 +123,7 @@ export function defaultSchedulePlanningProfile(context: PlanningContext, startDa
     floorShares: context.floors === 1 ? [1] : null,
     zones: [],
     sequencePolicy: "floor_by_floor",
-    tradeFronts: { ...DEFAULT_FRONTS },
+    tradeFronts: recommendedTradeFronts(context),
     crewSizes: { ...DEFAULT_CREWS },
     cureLags: { foundations: null, columns: null, slabs: null },
     roofKindOverride: context.detectedRoofKind === "unknown" ? null : context.detectedRoofKind,
@@ -144,16 +154,15 @@ export function mergeSchedulePlanningProfile(
     ...saved,
     schemaVersion: 1,
     startDate: startDate || saved.startDate || base.startDate,
+    // A criação simplificada usa sempre a localização segura detectada no projecto/plantas.
+    locationStrategy: base.locationStrategy,
     floorLabels,
     floorShares,
-    zones: Array.isArray(saved.zones)
-      ? saved.zones.map((zone, index) => ({
-          id: String(zone.id || `zona-${index + 1}`),
-          label: String(zone.label || `Zona ${index + 1}`),
-          share: zone.share === null || zone.share === undefined ? null : Number(zone.share),
-        }))
-      : [],
-    tradeFronts: { ...base.tradeFronts, ...(saved.tradeFronts ?? {}) },
+    zones: [],
+    // As frentes são recalculadas quando as plantas/medições alteram o número de pisos. Como o
+    // assistente simplificado já não pergunta por equipas, não reutilizamos silenciosamente uma
+    // capacidade antiga que poderia serializar uma obra entretanto ampliada.
+    tradeFronts: base.tradeFronts,
     crewSizes: { ...base.crewSizes, ...(saved.crewSizes ?? {}) },
     cureLags: { ...base.cureLags, ...(saved.cureLags ?? {}) },
   };
@@ -212,65 +221,12 @@ export function buildPlanningQuestions(context: PlanningContext): PlanningQuesti
   const questions: PlanningQuestion[] = [];
   if (context.supportsFloorPlanning) {
     questions.push({
-      key: "locationStrategy",
-      group: "organizacao",
-      label: "Como pretende organizar as frentes de trabalho?",
-      help: "O âmbito continua a ser o BOQ; esta escolha define apenas localização e sequência de execução.",
-      required: true,
-      kind: "choice",
-      options: [
-        { value: "floors", label: context.floors > 1 ? "Por piso" : "Por piso / nível principal" },
-        { value: "floors_zones", label: "Por piso e zona/frente física" },
-        { value: "boq", label: "Manter exactamente os grupos do mapa" },
-      ],
-    });
-    questions.push({
       key: "floorLabels",
       group: "organizacao",
-      label: context.floors > 1 ? "Como devem ser identificados os pisos?" : "Como deve ser identificado o nível principal?",
-      help: "Use os nomes usados em obra e nas peças desenhadas, por exemplo Piso 0, Piso 1, Cobertura, Bloco A ou Rés-do-chão.",
+      label: context.floors > 1 ? "Confirme os pisos da obra" : "Confirme o nível da obra",
+      help: "O SIGO usa estes nomes para separar correctamente estrutura, alvenarias, instalações e acabamentos.",
       required: true,
       kind: "floor_labels",
-    });
-    if (context.floors > 1 && context.aggregatedFloorCodes.length) {
-      questions.push({
-        key: "floorShares",
-        group: "organizacao",
-        label: "Como se distribui o volume de trabalho entre os pisos?",
-        help: "Se não souber, mantenha distribuição uniforme. O SIGO marcará essa distribuição como hipótese, não como dado do BOQ.",
-        required: false,
-        kind: "shares",
-      });
-    }
-    questions.push({
-      key: "zones",
-      group: "organizacao",
-      label: "A obra terá zonas ou frentes físicas dentro do mesmo piso?",
-      help: "Só é usada quando escolher planeamento por piso e zona; por exemplo Bloco A/B, Ala Norte/Sul ou Fachada 1/2.",
-      required: false,
-      kind: "zones",
-    });
-  }
-
-  if (context.activeTrades.length) {
-    questions.push({
-      key: "tradeResources",
-      group: "recursos",
-      label: "Quantas frentes e trabalhadores existem por especialidade?",
-      help: "As durações usam mão-de-obra das composições e a equipa indicada; o nº de frentes limita paralelismo entre localizações. Campos vazios usam fallback explícito e ficam marcados como hipótese.",
-      required: false,
-      kind: "trade_matrix",
-    });
-  }
-
-  if (context.aggregatedStructuralCodes.length) {
-    questions.push({
-      key: "aggregatedStructureNotice",
-      group: "recursos",
-      label: "Aço/cofragem estão agregados no BOQ.",
-      help: `Itens ${context.aggregatedStructuralCodes.join(", ")} serão mantidos como pacotes transversais. O SIGO não os repartirá artificialmente por sapata/pilar/viga/laje.`,
-      required: false,
-      kind: "notice",
     });
   }
 
@@ -288,37 +244,7 @@ export function buildPlanningQuestions(context: PlanningContext): PlanningQuesti
       ],
     });
   }
-  if (context.hasStructure) {
-    questions.push({
-      key: "cureLags",
-      group: "sequencia",
-      label: "Quais tempos tecnológicos devem ser respeitados?",
-      help: "Fundações, pilares e lajes. Se não indicar, o SIGO usa valores de planeamento e identifica-os como assumidos.",
-      required: false,
-      kind: "lags",
-    });
-  }
-  if (context.hasRoof && context.detectedRoofKind === "unknown") {
-    questions.push({
-      key: "roofKindOverride",
-      group: "sequencia",
-      label: "Qual é o sistema de cobertura previsto?",
-      help: "Esta resposta só organiza itens já existentes no BOQ; nunca cria cobertura que não esteja orçamentada.",
-      required: true,
-      kind: "choice",
-      options: [
-        { value: "sheet", label: "Chapa / cobertura leve" },
-        { value: "slab", label: "Laje de cobertura" },
-      ],
-    });
-  }
-  questions.push({
-    key: "targetDurationDays",
-    group: "prazo",
-    label: "Existe prazo contratual obrigatório?",
-    help: "O SIGO calcula primeiro o prazo natural e compara com o prazo indicado antes de ajustar durações.",
-    required: false,
-    kind: "integer",
-  });
-  return questions;
+  // Equipas, frentes, curas e distribuição recebem padrões técnicos auditáveis. Esses detalhes
+  // continuam editáveis na grelha, sem transformar a criação do cronograma num questionário.
+  return questions.slice(0, 2);
 }

@@ -1,4 +1,5 @@
 import { DEFAULT_ASSUMED_FRONT_COUNT, DEFAULT_FALLBACK_CREW_SIZE, type PlanningContext, type PlanningTrade, type SchedulePlanningProfile } from "./schedulePlanningProfile.js";
+import { executionActivityName } from "./scheduleActivityNames.js";
 
 export type DurationBasis = "horas" | "valor" | "minimo";
 export type DependencyType = "FS" | "SS" | "FF" | "SF";
@@ -27,6 +28,7 @@ export type PlanningWarning = {
   code:
     | "LONG_ACTIVITY"
     | "UNSPLIT_FLOOR_ACTIVITY"
+    | "LOCATION_DURATION_MINIMUM"
     | "UNMAPPED_STANDARD_ITEM"
     | "GENERIC_STRUCTURAL_RESOURCE"
     | "UNIFORM_FLOOR_DISTRIBUTION"
@@ -193,9 +195,9 @@ export const STANDARD_RULES: Record<string, StandardRule> = {
   "3.3": { scope: "floor", stage: "structure" },
   "3.4": { scope: "floor", stage: "structure" },
   "3.5": { scope: "deck", stage: "structure" },
-  "3.6": { scope: "project", stage: "structure" },
+  "3.6": { scope: "floor", stage: "structure" },
   "3.7": { scope: "roof", stage: "structure" },
-  "3.8": { scope: "project", stage: "structure" },
+  "3.8": { scope: "floor", stage: "structure" },
   "4.1": { scope: "floor", stage: "masonry" },
   "4.2": { scope: "floor", stage: "masonry" },
   "5.1": { scope: "floor", stage: "screed" },
@@ -295,7 +297,10 @@ function allocateDuration(totalDays: number, parts: number): number[] | null {
 function allocateDurationByShares(totalDays: number, shares: number[]): number[] | null {
   const total = Math.max(1, Math.round(totalDays));
   if (shares.length <= 1) return [total];
-  if (total < shares.length) return null;
+  // Cada pacote físico precisa de pelo menos um dia executável. Manter a actividade agregada
+  // esconderia pisos/frentes reais; para edifícios altos é preferível explicitar todos os locais
+  // e tornar visível o mínimo operacional aplicado.
+  if (total < shares.length) return shares.map(() => 1);
   const positiveTotal = shares.reduce((sum, share) => sum + Math.max(0, share), 0) || 1;
   const normalized = shares.map((share) => Math.max(0, share) / positiveTotal);
   // Reserva pelo menos 1 dia por pacote e reparte o remanescente pelo método dos maiores restos.
@@ -326,7 +331,12 @@ function roofKindFromMeasuredCodes(leaves: PlanningSourceNode[]): "sheet" | "sla
   return "unknown";
 }
 
-export function buildPlanningContext(sections: PlanningSourceSection[], floorsInput: number): PlanningContext {
+export function defaultFloorLabels(floorsInput: number): string[] {
+  const floors = Math.max(1, Math.min(20, Math.round(floorsInput)));
+  return Array.from({ length: floors }, (_, index) => index === 0 ? "Piso térreo" : `Piso ${index}`);
+}
+
+export function buildPlanningContext(sections: PlanningSourceSection[], floorsInput: number, detectedFloorLabels?: string[]): PlanningContext {
   const floors = Math.max(1, Math.min(20, Math.round(floorsInput)));
   const leaves = flattenMeasuredLeaves(sections);
   const measuredSections = sections.filter((section) => section.roots.some(hasMeasuredDescendant));
@@ -347,7 +357,7 @@ export function buildPlanningContext(sections: PlanningSourceSection[], floorsIn
   const aggregatedStructuralCodes = ["3.6", "3.8"].filter((code) => leaves.some((leaf) => leaf.code === code));
   return {
     floors,
-    floorLabels: Array.from({ length: floors }, (_, floorIndex) => `Piso ${floorIndex}`),
+    floorLabels: detectedFloorLabels?.length === floors ? detectedFloorLabels : defaultFloorLabels(floors),
     measuredItemCount: leaves.length,
     hasSigoTemplate,
     hasImportedScope,
@@ -423,7 +433,7 @@ function buildFallbackNode(node: PlanningSourceNode, path: string): PlannedNode 
   if (node.kind === "nota") return null;
   if (node.kind === "item") {
     if (!measuredLeaf(node)) return null;
-    return makeActivity(node, `src:${node.id}`, node.name, node.durationDays, 1, null);
+    return makeActivity(node, `src:${node.id}`, executionActivityName(node), node.durationDays, 1, null);
   }
   const children = node.children
     .map((child, index) => buildFallbackNode(child, `${path}.${index + 1}`))
@@ -451,7 +461,7 @@ function splitLeafByRule(
 
   const floorLabels = profile.floorLabels.length === floors
     ? profile.floorLabels
-    : Array.from({ length: floors }, (_, floorIndex) => `Piso ${floorIndex}`);
+    : defaultFloorLabels(floors);
   const floorShareSet = normalizeShares(profile.floorShares, floors);
   const informedZoneShares = profile.zones.length && profile.zones.every((zone) => zone.share !== null)
     ? profile.zones.map((zone) => Number(zone.share))
@@ -553,7 +563,7 @@ function splitLeafByRule(
     return [makeActivity(
       source,
       `src:${source.id}${location.zoneId ? `:zone:${location.zoneId}` : ""}`,
-      `${source.name}${location.label}`,
+      `${executionActivityName(source)}${location.label}`,
       source.durationDays,
       1,
       location.floorIndex,
@@ -575,7 +585,16 @@ function splitLeafByRule(
       activityName: source.name,
       message: `${source.code ?? "Item"} — ${source.name}: ${source.durationDays} dia(s) não permitem repartir por ${locations.length} pacote(s) sem inflacionar a duração; o item foi mantido como pacote único.`,
     });
-    return [makeActivity(source, `src:${source.id}`, source.name, source.durationDays, 1, null, { executionStage: rule.stage })];
+    return [makeActivity(source, `src:${source.id}`, executionActivityName(source), source.durationDays, 1, null, { executionStage: rule.stage })];
+  }
+
+  if (source.durationDays < locations.length) {
+    warnings.push({
+      code: "LOCATION_DURATION_MINIMUM",
+      sourceCode: source.code,
+      activityName: source.name,
+      message: `${source.code ?? "Item"} — ${source.name}: ${locations.length} localização(ões) confirmada(s); aplicado o mínimo de 1 dia útil por localização.`,
+    });
   }
 
   const shares = (() => {
@@ -602,7 +621,7 @@ function splitLeafByRule(
   return locations.map((location, index) => makeActivity(
     source,
     `src:${source.id}:loc:${location.floorIndex ?? "x"}:${location.zoneId ?? index}`,
-    `${source.name}${location.label}`,
+    `${executionActivityName(source)}${location.label}`,
     durations[index],
     shares[index],
     location.floorIndex,
@@ -663,7 +682,7 @@ function buildStandardChapter(
   const groupLabel = root.code ? FLOOR_GROUP_LABELS[root.code] : undefined;
   const floorLabels = profile.floorLabels.length === floors
     ? profile.floorLabels
-    : Array.from({ length: floors }, (_, floorIndex) => `Piso ${floorIndex}`);
+    : defaultFloorLabels(floors);
 
   for (const floorIndex of [...floorBuckets.keys()].sort((a, b) => a - b)) {
     const bucket = floorBuckets.get(floorIndex)!;
@@ -869,10 +888,6 @@ function buildStandardDependencies(
   addUniqueDependency(deps, seen, preferredExisting(one("2.1"), prelimEnd), one("3.1"));
   addUniqueDependency(deps, seen, preferredExisting(one("3.1"), one("2.1"), prelimEnd), one("3.2"));
 
-  // Aço/cofragem globais: pacotes transversais, nunca repartidos por elemento sem base no BOQ.
-  const structuralStart = preferredExisting(one("3.1"), one("2.1"), prelimEnd);
-  for (const code of ["3.6", "3.8"]) addUniqueDependency(deps, seen, structuralStart, one(code), "SS", 0);
-
   const foundationEnd = preferredExisting(one("3.2"), one("3.1"), one("2.1"), prelimEnd);
   const deckCount = Math.max(0, floors - 1 + (roofKind === "slab" ? 1 : 0));
   const finalStructuralByZone = new Map<string | null, PlannedNode>();
@@ -883,11 +898,21 @@ function buildStandardDependencies(
       const columns = at("3.3", floor, zoneId);
       const beams = at("3.4", floor, zoneId);
       const slab = floor < deckCount ? at("3.5", floor, zoneId) : null;
-      if (floor === 0) {
-        addUniqueDependency(deps, seen, foundationEnd, columns, "FS", one("3.2") ? foundationLag : 0);
+      const reinforcement = at("3.6", floor, zoneId);
+      const formwork = at("3.8", floor, zoneId);
+      const structuralSupport = floor === 0
+        ? foundationEnd
+        : at("3.5", floor - 1, zoneId) ?? at("3.4", floor - 1, zoneId);
+      const supportLag = floor === 0
+        ? (one("3.2") ? foundationLag : 0)
+        : (structuralSupport?.sourceCode === "3.5" ? slabLag : 0);
+      addUniqueDependency(deps, seen, structuralSupport, reinforcement, "FS", supportLag);
+      addUniqueDependency(deps, seen, structuralSupport, formwork, "FS", supportLag);
+      if (reinforcement || formwork) {
+        addUniqueDependency(deps, seen, reinforcement, columns);
+        addUniqueDependency(deps, seen, formwork, columns);
       } else {
-        const lowerDeck = at("3.5", floor - 1, zoneId) ?? at("3.4", floor - 1, zoneId);
-        addUniqueDependency(deps, seen, lowerDeck, columns, "FS", lowerDeck?.sourceCode === "3.5" ? slabLag : 0);
+        addUniqueDependency(deps, seen, structuralSupport, columns, "FS", supportLag);
       }
       addUniqueDependency(deps, seen, columns ?? (floor === 0 ? foundationEnd : null), beams, "FS", columns ? columnLag : 0);
       addUniqueDependency(deps, seen, beams ?? columns, slab);
@@ -970,12 +995,6 @@ function buildStandardDependencies(
     for (const finalStructural of finalStructuralByZone.values()) {
       for (const masonryStart of masonryStarts) addUniqueDependency(deps, seen, finalStructural, masonryStart);
     }
-  }
-
-  // Pacotes estruturais globais têm de estar concluídos até ao fecho da estrutura.
-  for (const globalCode of ["3.6", "3.8"]) {
-    const globalTask = one(globalCode);
-    for (const finalStructural of finalStructuralByZone.values()) addUniqueDependency(deps, seen, globalTask, finalStructural, "FF", 0);
   }
 
   // Cobertura: apenas linhas realmente medidas; a cadeia é por zona quando o cliente a definiu.
@@ -1245,7 +1264,7 @@ function addStructuralAuditWarning(sections: PlanningSourceSection[], warnings: 
   if (codes.has("3.6") || codes.has("3.8")) {
     warnings.push({
       code: "GENERIC_STRUCTURAL_RESOURCE",
-      message: "O BOQ contém aço/cofragem genéricos (3.6/3.8), sem quantidade por sapata/pilar/viga/laje. O SIGO mantém esses pacotes transversais e não inventa repartições por elemento. Para lógica estrutural aço → cofragem → betão por elemento, subdivida essas linhas no Mapa de Quantidades.",
+      message: "Aço/cofragem estão agregados no BOQ. O SIGO reparte-os por piso, conserva 100% do valor e não inventa quantidades por elemento.",
     });
   }
 }

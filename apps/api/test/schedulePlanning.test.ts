@@ -93,8 +93,8 @@ describe("Motor profissional de WBS", () => {
     });
 
     expect(plan.roofKind).toBe("sheet");
-    expect(byCode(plan, "3.3")[0].name).toBe("Betão estrutural B25 em pilares — Piso 0");
-    expect(byCode(plan, "10.2")[0].name).toBe("Cobertura em chapa metálica — Cobertura");
+    expect(byCode(plan, "3.3")[0].name).toBe("Armar, cofrar e betonar pilares — Piso térreo");
+    expect(byCode(plan, "10.2")[0].name).toBe("Montar a cobertura metálica — Cobertura");
     expect(activities(plan).some((node) => /estrutura de cobertura/i.test(node.name))).toBe(false);
     expect(depExists(plan, byCode(plan, "10.1")[0].key, byCode(plan, "10.2")[0].key)).toBe(true);
     expect(depExists(plan, byCode(plan, "10.2")[0].key, byCode(plan, "10.3")[0].key)).toBe(true);
@@ -152,9 +152,9 @@ describe("Motor profissional de WBS", () => {
 
     expect(plan.roofKind).toBe("slab");
     const slab = byCode(plan, "3.5")[0];
-    expect(slab.name).toBe("Betão estrutural B25 em lajes — Cobertura");
+    expect(slab.name).toBe("Armar, cofrar e betonar a laje — Cobertura");
     const roofMesh = byCode(plan, "3.7")[0];
-    expect(roofMesh.name).toBe("Malhasol AQ38 aplicado — Cobertura");
+    expect(roofMesh.name).toBe("Montar malha de armadura da laje — Cobertura");
     expect(depExists(plan, roofMesh.key, slab.key)).toBe(true);
     expect(depExists(plan, slab.key, byCode(plan, "10.1")[0].key)).toBe(true);
     expect(plan.dependencies.find((dep) => dep.predecessorKey === slab.key && dep.successorKey === byCode(plan, "10.1")[0].key)?.lagDays).toBe(6);
@@ -207,7 +207,7 @@ describe("Motor profissional de WBS", () => {
     expectSharesClose(plan);
   });
 
-  it("num mapa importado não inventa pisos nem renomeia actividades", () => {
+  it("num mapa importado não inventa pisos e converte descrições em acções curtas", () => {
     const imported: PlanningSourceSection = {
       id: "imp",
       name: "Importado",
@@ -219,21 +219,40 @@ describe("Motor profissional de WBS", () => {
       ])],
     };
     const plan = makePlan({ sections: [imported], floors: 5, startDate: "2026-08-10" });
-    expect(activities(plan).map((node) => node.name)).toEqual(["Trabalho X", "Trabalho Y"]);
+    expect(activities(plan).map((node) => node.name)).toEqual(["Executar trabalho X", "Executar trabalho Y"]);
     expect(activities(plan).every((node) => node.floorIndex === null)).toBe(true);
     expect(plan.dependencies).toHaveLength(1);
     expectSharesClose(plan);
   });
 
-  it("não infla dias quando um item agregado é curto demais para repartir por pisos", () => {
+  it("mantém todos os pisos quando um item agregado tem menos dias do que localizações", () => {
     const plan = makePlan({
       sections: [standardSection([chapter("4", "ALVENARIAS", [leaf("4.1", "Alvenaria", 2)])])],
       floors: 4,
       startDate: "2026-08-10",
     });
-    expect(byCode(plan, "4.1")).toHaveLength(1);
-    expect(byCode(plan, "4.1")[0].durationDays).toBe(2);
-    expect(plan.warnings.some((warning) => warning.code === "UNSPLIT_FLOOR_ACTIVITY")).toBe(true);
+    expect(byCode(plan, "4.1")).toHaveLength(4);
+    expect(byCode(plan, "4.1").map((node) => node.durationDays)).toEqual([1, 1, 1, 1]);
+    expect(plan.warnings.some((warning) => warning.code === "LOCATION_DURATION_MINIMUM")).toBe(true);
+    expectSharesClose(plan);
+  });
+
+  it("gera uma linha de balanço completa para um edifício de dez pisos", () => {
+    const plan = makePlan({
+      sections: [standardSection([
+        chapter("3", "ESTRUTURA", [leaf("3.3", "Pilares", 30), leaf("3.4", "Vigas", 30), leaf("3.5", "Lajes", 27)]),
+        chapter("4", "ALVENARIAS", [leaf("4.1", "Alvenaria", 20)]),
+        chapter("13", "ELECTRICIDADE", [leaf("13.2", "Pontos de iluminação", 20)]),
+        chapter("7", "PINTURAS", [leaf("7.2", "Pintura interior", 20)]),
+      ])],
+      floors: 10,
+      startDate: "2026-08-10",
+    });
+    expect(byCode(plan, "3.3")).toHaveLength(10);
+    expect(byCode(plan, "4.1")).toHaveLength(10);
+    expect(byCode(plan, "13.2")).toHaveLength(10);
+    expect(byCode(plan, "7.2")).toHaveLength(10);
+    expect(new Set(byCode(plan, "3.3").map((node) => node.floorIndex)).size).toBe(10);
     expectSharesClose(plan);
   });
 
@@ -262,7 +281,7 @@ describe("Motor profissional de WBS", () => {
     expectSharesClose(plan);
   });
 
-  it("mantém aço/cofragem agregados como pacotes transversais, sem fingir elemento/piso", () => {
+  it("reparte aço/cofragem agregados por piso sem duplicar valor", () => {
     const plan = makePlan({
       sections: [standardSection([
         chapter("2", "MOVIMENTOS DE TERRA", [leaf("2.1", "Escavação", 4)]),
@@ -280,9 +299,11 @@ describe("Motor profissional de WBS", () => {
       floors: 2,
       startDate: "2026-08-10",
     });
-    expect(byCode(plan, "3.6")).toHaveLength(1);
-    expect(byCode(plan, "3.8")).toHaveLength(1);
-    expect(byCode(plan, "3.6")[0].floorIndex).toBeNull();
+    expect(byCode(plan, "3.6")).toHaveLength(2);
+    expect(byCode(plan, "3.8")).toHaveLength(2);
+    expect(byCode(plan, "3.6").map((task) => task.floorIndex)).toEqual([0, 1]);
+    expect(byCode(plan, "3.6").reduce((sum, task) => sum + task.valueShare, 0)).toBeCloseTo(1, 4);
+    expect(depExists(plan, byCode(plan, "3.6")[0].key, byCode(plan, "3.3")[0].key)).toBe(true);
     expect(plan.warnings.some((warning) => warning.code === "GENERIC_STRUCTURAL_RESOURCE")).toBe(true);
     expectSharesClose(plan);
   });
@@ -330,13 +351,13 @@ describe("Motor profissional de WBS", () => {
     expectSharesClose(plan);
   });
 
-  it("marca número de frentes não informado como hipótese explícita", () => {
+  it("aplica uma frente padrão sem obrigar o utilizador a preencher recursos", () => {
     const sections = [standardSection([chapter("4", "ALVENARIAS", [leaf("4.1", "Alvenaria", 12)])])];
     const context = buildPlanningContext(sections, 3);
     const profile = defaultSchedulePlanningProfile(context, "2026-08-10");
-    expect(profile.tradeFronts.masonry).toBeNull();
+    expect(profile.tradeFronts.masonry).toBe(1);
     const plan = buildExecutionPlan({ sections, floors: 3, startDate: profile.startDate, profile });
-    expect(plan.warnings.some((warning) => warning.code === "FRONT_COUNT_DEFAULT")).toBe(true);
+    expect(plan.warnings.some((warning) => warning.code === "FRONT_COUNT_DEFAULT")).toBe(false);
     expect(plan.warnings.some((warning) => warning.code === "FRONT_CAPACITY_APPLIED")).toBe(true);
   });
 
@@ -372,10 +393,8 @@ describe("Motor profissional de WBS", () => {
     expect(context.activeTrades).toContain("roofing");
     expect(context.detectedRoofKind).toBe("sheet");
     expect(context.aggregatedStructuralCodes).toContain("3.8");
-    expect(questions.some((question) => question.key === "locationStrategy")).toBe(true);
-    expect(questions.some((question) => question.key === "tradeResources")).toBe(true);
-    expect(questions.some((question) => question.key === "roofKindOverride")).toBe(false);
-    expect(questions.some((question) => question.key === "aggregatedStructureNotice")).toBe(true);
+    expect(questions.map((question) => question.key)).toEqual(["floorLabels", "sequencePolicy"]);
+    expect(questions).toHaveLength(2);
   });
 
   it("num mapa importado preserva o BOQ e o assistente não oferece falsa precisão por piso", () => {

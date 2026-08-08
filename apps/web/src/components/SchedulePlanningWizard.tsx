@@ -110,13 +110,13 @@ export default function SchedulePlanningWizard(props: Props) {
       <div className="border-b border-slate-100 px-5 py-4">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-blue-700">Assistente de Planeamento</p>
-            <h3 className="mt-1 text-lg font-semibold text-slate-950">Do mapa aprovado ao plano de execução</h3>
-            <p className="mt-1 max-w-3xl text-sm text-slate-500">O BOQ define o âmbito. As respostas abaixo definem apenas a forma real de executar esse âmbito.</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-blue-700">Novo cronograma</p>
+            <h3 className="mt-1 text-lg font-semibold text-slate-950">Plano de execução da obra</h3>
+            <p className="mt-1 text-sm text-slate-500">Confirme os pisos e a sequência. O SIGO organiza o restante.</p>
           </div>
           {props.onClose && <button type="button" className="btn btn-ghost btn-sm" onClick={props.onClose}>Fechar</button>}
         </div>
-        <Stepper stage={preview ? 3 : profile ? 2 : 1} />
+        <Stepper stage={preview ? 2 : 1} />
       </div>
 
       <div className="space-y-5 p-5">
@@ -143,9 +143,13 @@ export default function SchedulePlanningWizard(props: Props) {
             <div className="flex flex-wrap gap-2 text-xs text-slate-600">
               <Pill>{setup.context.measuredItemCount} linhas medidas</Pill>
               <Pill>{setup.context.floors} piso(s)</Pill>
-              <Pill>{setup.context.supportsFloorPlanning ? "Metadados seguros para repartição" : "Hierarquia contratual preservada"}</Pill>
+              {setup.context.floorSource === "plant" && <Pill>Detectados nas plantas</Pill>}
+              {setup.context.floorSource === "combined" && <Pill>Plantas confirmadas</Pill>}
+              {!setup.context.supportsFloorPlanning && <Pill>Ordem do mapa preservada</Pill>}
               {setup.context.detectedRoofKind !== "unknown" && <Pill>Cobertura: {setup.context.detectedRoofKind === "sheet" ? "chapa/telha" : "laje"}</Pill>}
             </div>
+
+            {setup.needsRegeneration && <AlertBanner tone="warning"><div><p className="font-semibold">A linha de base precisa de actualização</p><p className="mt-0.5 text-xs">{setup.regenerationReasons[0] ?? "Existem alterações posteriores à geração do cronograma."}</p></div></AlertBanner>}
 
             {setup.validationErrors.length > 0 && <AlertBanner tone="warning"><ul className="list-disc pl-5">{setup.validationErrors.map((message) => <li key={message}>{message}</li>)}</ul></AlertBanner>}
 
@@ -154,7 +158,7 @@ export default function SchedulePlanningWizard(props: Props) {
             </div>
 
             <div className="flex justify-end border-t border-slate-100 pt-4">
-              <button type="button" className="btn btn-primary" disabled={saving} onClick={previewStrategy}>{saving ? "A validar…" : "Pré-visualizar estratégia"}</button>
+              <button type="button" className="btn btn-primary" disabled={saving} onClick={previewStrategy}>{saving ? "A organizar…" : "Rever cronograma"}</button>
             </div>
           </>
         )}
@@ -185,7 +189,7 @@ function QuestionCard({ question, profile, context, updateProfile }: {
         })}>{option.label}</button>;
       })}</div>}
 
-      {question.kind === "floor_labels" && <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{profile.floorLabels.map((label, index) => <label key={`floor-label-${index}`} className="text-xs text-slate-500">Piso {index}<input className="input mt-1" value={label} onChange={(event) => updateProfile((value) => ({ ...value, floorLabels: value.floorLabels.map((row, i) => i === index ? event.target.value : row) }))} /></label>)}</div>}
+      {question.kind === "floor_labels" && <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{profile.floorLabels.map((label, index) => <label key={`floor-label-${index}`} className="text-xs text-slate-500">Nível {index + 1}<input className="input mt-1" value={label} onChange={(event) => updateProfile((value) => ({ ...value, floorLabels: value.floorLabels.map((row, i) => i === index ? event.target.value : row) }))} /></label>)}</div>}
       {question.kind === "shares" && <div><div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{profile.floorLabels.map((label, index) => <label key={`${label}-${index}`} className="text-xs text-slate-500">{label}<div className="relative mt-1"><input className="input pr-8" type="number" min="0" max="100" step="0.1" placeholder="%" value={profile.floorShares ? (profile.floorShares[index] * 100).toFixed(2).replace(/\.00$/, "") : ""} onChange={(event) => updateProfile((value) => {
         const next = value.floorShares ? [...value.floorShares] : value.floorLabels.map(() => 0);
         next[index] = Number(event.target.value || 0) / 100;
@@ -207,18 +211,29 @@ function QuestionCard({ question, profile, context, updateProfile }: {
 
 function PreviewPanel({ preview, saving, hasExistingSchedule, onBack, onGenerate }: { preview: SchedulePlanningPreview; saving: boolean; hasExistingSchedule: boolean; onBack: () => void; onGenerate: () => void }) {
   return <section className="space-y-4 border-t border-slate-100 pt-5">
-    <div><h4 className="text-base font-semibold text-slate-950">Pré-visualização da estratégia</h4><p className="text-sm text-slate-500">Esta é a estratégia exacta que o backend irá aceitar para geração.</p></div>
+    <div><h4 className="text-base font-semibold text-slate-950">Cronograma pronto para gerar</h4><p className="text-sm text-slate-500">Confira as primeiras actividades, duração e sequência.</p></div>
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><Card label="Organização" value={preview.strategy.locationStrategy === 'floors_zones' ? 'Piso + zona' : preview.strategy.locationStrategy === 'floors' ? 'Por piso' : 'BOQ'} /><Card label="Sequência" value={preview.strategy.sequencePolicy === 'floor_by_floor' ? 'Piso a piso' : 'Estrutura completa primeiro'} /><Card label="Prazo natural" value={`${preview.naturalDurationDays} d.u.`} /><Card label="Prazo planeado" value={`${preview.plannedDurationDays} d.u.`} note={preview.targetDurationDays ? `Meta: ${preview.targetDurationDays} d.u.` : undefined} /></div>
+    <details className="rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-sm"><summary className="cursor-pointer font-semibold text-slate-800">Frentes simultâneas calculadas automaticamente</summary><div className="mt-2 flex flex-wrap gap-2">{preview.strategy.activeTrades.map((trade) => <Pill key={trade}>{TRADE_SHORT_LABELS[trade]} · {preview.strategy.tradeFronts[trade] ?? 1}</Pill>)}</div></details>
     <div className="grid gap-3 sm:grid-cols-3"><Metric label="Actividades" value={preview.validation.activityCount} /><Metric label="Dependências" value={preview.validation.dependencyCount} /><Metric label="Cobertura BOQ" value={`${preview.validation.coverage.plannedSourceLineItemCount}/${preview.validation.coverage.measuredSourceLineItemCount}`} /></div>
     <div className="max-h-72 overflow-auto rounded-xl border border-slate-200"><table className="w-full text-sm"><thead className="sticky top-0 bg-slate-50 text-left text-xs text-slate-500"><tr><th className="px-3 py-2">WBS</th><th className="px-3 py-2">Actividade</th><th className="px-3 py-2">Duração</th><th className="px-3 py-2">Base</th><th className="px-3 py-2">Repartição</th></tr></thead><tbody className="divide-y divide-slate-100">{preview.validation.sampleActivities.map((activity) => <tr key={`${activity.code}-${activity.name}`}><td className="px-3 py-2 font-mono text-xs font-semibold text-blue-700">{activity.code}</td><td className="px-3 py-2">{activity.name}</td><td className="px-3 py-2">{activity.durationDays} d</td><td className="px-3 py-2">{activity.durationBasis}</td><td className="px-3 py-2">{activity.allocationBasis}</td></tr>)}</tbody></table></div>
-    {preview.assumptions.length > 0 && <AlertBanner tone="info"><div><p className="font-semibold">Hipóteses registadas</p><ul className="mt-1 list-disc pl-5">{preview.assumptions.map((value) => <li key={value}>{value}</li>)}</ul></div></AlertBanner>}
-    {preview.warnings.length > 0 && <AlertBanner tone="warning"><div><p className="font-semibold">Avisos técnicos</p><ul className="mt-1 list-disc pl-5">{preview.warnings.slice(0, 8).map((warning, index) => <li key={`${warning.code}-${index}`}>{warning.message}</li>)}</ul></div></AlertBanner>}
+    {preview.assumptions.length > 0 && <details className="rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-3 text-sm text-blue-950"><summary className="cursor-pointer font-semibold">{preview.assumptions.length} critério(s) de planeamento aplicado(s)</summary><ul className="mt-2 list-disc space-y-1 pl-5 text-xs">{preview.assumptions.map((value) => <li key={value}>{value}</li>)}</ul></details>}
+    {preview.warnings.length > 0 && <details className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950"><summary className="cursor-pointer font-semibold">{preview.warnings.length} ponto(s) para revisão técnica</summary><ul className="mt-2 list-disc space-y-1 pl-5 text-xs">{preview.warnings.slice(0, 8).map((warning, index) => <li key={`${warning.code}-${index}`}>{warning.message}</li>)}</ul></details>}
     {!preview.valid && <AlertBanner tone="error"><ul className="list-disc pl-5">{preview.errors.map((value) => <li key={value}>{value}</li>)}</ul></AlertBanner>}
-    <div className="flex items-center justify-between gap-3"><button type="button" className="btn btn-secondary" onClick={onBack}>Alterar estratégia</button><div className="text-right"><p className="mb-2 text-xs text-slate-500">Gerar EAP → validação automática → cronograma</p><button type="button" className="btn btn-primary" disabled={saving || !preview.readyToGenerate} onClick={onGenerate}>{saving ? 'A gerar…' : hasExistingSchedule ? 'Recriar EAP validada' : 'Gerar EAP validada'}</button></div></div>
+    <div className="flex flex-wrap items-center justify-between gap-3"><button type="button" className="btn btn-secondary" onClick={onBack}>Voltar</button><button type="button" className="btn btn-primary" disabled={saving || !preview.readyToGenerate} onClick={onGenerate}>{saving ? 'A gerar…' : hasExistingSchedule ? 'Recriar cronograma' : 'Gerar cronograma'}</button></div>
   </section>;
 }
 
-function Stepper({ stage }: { stage: number }) { const labels = ["Mapa aprovado", "Assistente", "Pré-visualização", "Gerar EAP", "Validação", "Cronograma"]; return <div className="mt-4 grid gap-1 sm:grid-cols-3 xl:grid-cols-6">{labels.map((label, index) => <div key={label} className={`flex items-center gap-2 rounded-lg px-2 py-2 text-xs ${index + 1 <= stage ? 'bg-blue-50 font-semibold text-blue-800' : 'bg-slate-50 text-slate-400'}`}><span className={`grid h-5 w-5 place-items-center rounded-full text-[10px] ${index + 1 <= stage ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-500'}`}>{index + 1}</span><span className="truncate">{label}</span></div>)}</div>; }
+function Stepper({ stage }: { stage: number }) { const labels = ["1 · Confirmar", "2 · Gerar"]; return <div className="mt-4 grid max-w-sm grid-cols-2 gap-1">{labels.map((label, index) => <div key={label} className={`rounded-lg px-3 py-2 text-center text-xs ${index + 1 <= stage ? 'bg-blue-50 font-semibold text-blue-800' : 'bg-slate-50 text-slate-400'}`}>{label}</div>)}</div>; }
 function Pill({ children }: { children: ReactNode }) { return <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1">{children}</span>; }
 function Card({ label, value, note }: { label: string; value: string; note?: string }) { return <div className="rounded-xl border border-slate-200 p-3"><p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</p><p className="mt-1 text-sm font-semibold text-slate-950">{value}</p>{note && <p className="mt-1 text-xs text-slate-500">{note}</p>}</div>; }
 function Metric({ label, value }: { label: string; value: string | number }) { return <div className="rounded-lg bg-slate-50 px-3 py-2"><p className="text-xs text-slate-500">{label}</p><p className="mt-0.5 text-lg font-semibold tabular-nums text-slate-900">{value}</p></div>; }
+
+const TRADE_SHORT_LABELS: Record<SchedulePlanningPreview["strategy"]["activeTrades"][number], string> = {
+  earthworks: "Terras/fundações",
+  structure: "Estrutura",
+  masonry: "Alvenarias",
+  mep: "Instalações",
+  finishes: "Acabamentos",
+  roofing: "Cobertura",
+  external: "Exteriores",
+};
