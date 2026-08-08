@@ -15,6 +15,7 @@ import {
   purchaseOrderLines,
   purchaseOrders,
   supplierInvoiceCreditNotes,
+  supplierInvoiceFiscalDocuments,
   supplierInvoiceLines,
   supplierInvoicePayments,
   supplierInvoices,
@@ -212,7 +213,6 @@ const invoiceInput = z.object({
 });
 const rejectInput = z.object({ reason: z.string().trim().min(5).max(3000) });
 const approvalInput = z.object({ varianceReason: z.string().trim().min(8).max(4000).optional(), buyerNotes: z.string().trim().max(4000).optional() });
-const paymentInput = z.object({ amount: z.number().positive(), paymentDate: z.string().min(1), method: z.string().trim().min(1).max(50).default("transferencia"), reference: z.string().trim().max(160).optional(), notes: z.string().trim().max(3000).optional() });
 const creditNoteInput = z.object({ creditNumber: z.string().trim().min(1).max(120), issueDate: z.string().min(1), amount: z.number().positive(), reason: z.string().trim().min(5).max(3000), nonconformityId: z.string().uuid().optional().nullable() });
 const ncrResponseInput = z.object({ resolutionType: z.enum(["substituicao", "nota_credito", "devolucao", "aceite_com_desconto", "outro"]), replacementQty: z.number().positive().optional(), creditAmount: z.number().positive().optional(), response: z.string().trim().min(5).max(4000) });
 const resolveInput = z.object({ notes: z.string().trim().min(5).max(4000) });
@@ -369,6 +369,15 @@ export async function procurementAccountsPayableRoutes(app: FastifyInstance) {
     const row = await buyerInvoice(id, companyIdOf(request));
     if (!row) return reply.code(404).send({ error: "Factura não encontrada" });
     if (!["submetida", "em_revisao", "divergente"].includes(row.invoice.status)) return reply.code(409).send({ error: "Esta factura já não pode ser aprovada" });
+    const [latestFiscalDocument] = await db
+      .select({ id: supplierInvoiceFiscalDocuments.id, version: supplierInvoiceFiscalDocuments.version, status: supplierInvoiceFiscalDocuments.status })
+      .from(supplierInvoiceFiscalDocuments)
+      .where(eq(supplierInvoiceFiscalDocuments.supplierInvoiceId, id))
+      .orderBy(desc(supplierInvoiceFiscalDocuments.version))
+      .limit(1);
+    if (!latestFiscalDocument || latestFiscalDocument.status !== "validado") {
+      return reply.code(409).send({ error: "Valide a versão mais recente do documento fiscal antes de aprovar a factura" });
+    }
 
     let approved: typeof supplierInvoices.$inferSelect;
     let match: ThreeWayMatchResult;
@@ -434,35 +443,11 @@ export async function procurementAccountsPayableRoutes(app: FastifyInstance) {
     return updated;
   });
 
-  app.post("/api/supplier-invoices/:id/payments", { preHandler: reviewPermission }, async (request, reply) => {
-    const { id } = request.params as { id: string };
-    if (!isFinanceApprover(request)) return reply.code(403).send({ error: "O registo de pagamento exige administrador da empresa" });
-    const parsed = paymentInput.safeParse(request.body);
-    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
-    const row = await buyerInvoice(id, companyIdOf(request));
-    if (!row || !PAYABLE_INVOICE_STATUSES.has(row.invoice.status)) return reply.code(404).send({ error: "Factura não disponível para pagamento" });
-    try {
-      const result = await db.transaction(async (tx) => {
-        await tx.execute(sql`select id from supplier_invoices where id = ${id} for update`);
-        const [locked] = await tx.select().from(supplierInvoices).where(eq(supplierInvoices.id, id)).limit(1);
-        if (!locked || !PAYABLE_INVOICE_STATUSES.has(locked.status)) throw new Error("A factura já não está disponível para pagamento");
-        const [payments, credits] = await Promise.all([
-          tx.select().from(supplierInvoicePayments).where(eq(supplierInvoicePayments.supplierInvoiceId, id)),
-          tx.select().from(supplierInvoiceCreditNotes).where(eq(supplierInvoiceCreditNotes.supplierInvoiceId, id)),
-        ]);
-        const before = computePayableBalance({ grossAmount: Number(locked.totalAmount), payments: payments.map((p: any) => Number(p.amount)), acceptedCreditNotes: credits.filter((c: any) => c.status === "aceite").map((c: any) => Number(c.amount)) });
-        if (parsed.data.amount > before.outstanding + 0.005) throw new Error(`Pagamento excede o saldo da factura (${before.outstanding.toFixed(2)} ${locked.currency})`);
-        const [payment] = await tx.insert(supplierInvoicePayments).values({ supplierInvoiceId: id, amount: parsed.data.amount.toFixed(2), paymentDate: parsed.data.paymentDate, method: parsed.data.method, reference: parsed.data.reference ?? null, notes: parsed.data.notes ?? null, createdByUserId: request.currentUser!.id }).returning();
-        const after = computePayableBalance({ grossAmount: Number(locked.totalAmount), payments: [...payments.map((p: any) => Number(p.amount)), parsed.data.amount], acceptedCreditNotes: credits.filter((c: any) => c.status === "aceite").map((c: any) => Number(c.amount)) });
-        await tx.update(supplierInvoices).set({ status: after.status, updatedAt: new Date() }).where(eq(supplierInvoices.id, id));
-        await tx.update(financialEntries).set({ status: after.status === "paga" ? "pago" : "pendente", paidDate: after.status === "paga" ? parsed.data.paymentDate : null }).where(and(eq(financialEntries.sourceType, "supplier_invoice"), eq(financialEntries.sourceId, id)));
-        return { payment, balance: after };
-      });
-      await recordAuditEvent({ companyId: companyIdOf(request), projectId: row.invoice.projectId, actorUserId: request.currentUser!.id, entityType: "supplier_invoice_payment", entityId: result.payment.id, action: "created", after: { invoiceId: id, amount: result.payment.amount, paymentDate: result.payment.paymentDate, method: result.payment.method } });
-      return reply.code(201).send(result);
-    } catch (cause) {
-      return reply.code(409).send({ error: cause instanceof Error ? cause.message : "Não foi possível registar o pagamento" });
-    }
+  app.post("/api/supplier-invoices/:id/payments", { preHandler: reviewPermission }, async (_request, reply) => {
+    return reply.code(409).send({
+      error: "O pagamento directo foi substituído pelo controlo de pagamentos. Crie, submeta e aprove um pedido de pagamento antes da execução ou reconciliação bancária.",
+      code: "PAYMENT_REQUEST_REQUIRED",
+    });
   });
 
   app.post("/api/supplier-invoice-credit-notes/:id/review", { preHandler: reviewPermission }, async (request, reply) => {

@@ -60,6 +60,10 @@ import {
   procurementDocumentSequences,
   procurementGoodsReturns,
   procurementNonconformities,
+  procurementBankReconciliations,
+  procurementBankStatementImports,
+  procurementBankTransactions,
+  procurementPaymentRequests,
   procurementRfqInvitations,
   procurementRfqLines,
   procurementRfqs,
@@ -68,6 +72,7 @@ import {
   purchaseRequisitionLines,
   purchaseRequisitions,
   supplierInvoiceCreditNotes,
+  supplierInvoiceFiscalDocuments,
   supplierInvoiceLines,
   supplierInvoicePayments,
   supplierInvoices,
@@ -326,12 +331,24 @@ export async function collectCompanyFullBackup(companyId: string) {
   ]);
   const supplierInvoiceIds = idsOf(supplierInvoiceRows);
   const nonconformityIds = idsOf(nonconformityRows);
-  const [supplierInvoiceLineRows, supplierInvoicePaymentRows, supplierInvoiceCreditRows, goodsReturnRows] = await Promise.all([
+  const [supplierInvoiceLineRows, supplierInvoicePaymentRows, supplierInvoiceCreditRows, supplierInvoiceFiscalRows, goodsReturnRows, paymentRequestRows, bankImportRows, bankTransactionRows] = await Promise.all([
     supplierInvoiceIds.length ? db.select().from(supplierInvoiceLines).where(inArray(supplierInvoiceLines.supplierInvoiceId, supplierInvoiceIds)) : Promise.resolve([]),
     supplierInvoiceIds.length ? db.select().from(supplierInvoicePayments).where(inArray(supplierInvoicePayments.supplierInvoiceId, supplierInvoiceIds)) : Promise.resolve([]),
     supplierInvoiceIds.length ? db.select().from(supplierInvoiceCreditNotes).where(inArray(supplierInvoiceCreditNotes.supplierInvoiceId, supplierInvoiceIds)) : Promise.resolve([]),
+    supplierInvoiceIds.length ? db.select().from(supplierInvoiceFiscalDocuments).where(inArray(supplierInvoiceFiscalDocuments.supplierInvoiceId, supplierInvoiceIds)) : Promise.resolve([]),
     nonconformityIds.length ? db.select().from(procurementGoodsReturns).where(inArray(procurementGoodsReturns.nonconformityId, nonconformityIds)) : Promise.resolve([]),
+    projectIds.length ? db.select().from(procurementPaymentRequests).where(inArray(procurementPaymentRequests.projectId, projectIds)) : Promise.resolve([]),
+    projectIds.length ? db.select().from(procurementBankStatementImports).where(inArray(procurementBankStatementImports.projectId, projectIds)) : Promise.resolve([]),
+    projectIds.length ? db.select().from(procurementBankTransactions).where(inArray(procurementBankTransactions.projectId, projectIds)) : Promise.resolve([]),
   ]);
+  const paymentRequestIds = idsOf(paymentRequestRows);
+  const bankTransactionIds = idsOf(bankTransactionRows);
+  const bankReconciliationRows = bankTransactionIds.length && paymentRequestIds.length
+    ? await db.select().from(procurementBankReconciliations).where(and(
+        inArray(procurementBankReconciliations.bankTransactionId, bankTransactionIds),
+        inArray(procurementBankReconciliations.paymentRequestId, paymentRequestIds),
+      ))
+    : [];
 
   const [shipmentRows, goodsReceiptRows, supplierEventRows] = await Promise.all([
     purchaseOrderIds.length
@@ -519,6 +536,20 @@ export async function collectCompanyFullBackup(companyId: string) {
     if (meta) pushFile(files, absolute, `files/payment-proofs/${proof.id}_${base}`, "payment_proof", meta);
   }
 
+  for (const fiscal of supplierInvoiceFiscalRows) {
+    const meta = await fileMeta(fiscal.filePath);
+    if (meta) pushFile(files, fiscal.filePath, `files/procurement/fiscal/${fiscal.supplierInvoiceId}/${fiscal.id}_${path.basename(fiscal.filePath)}`, "supplier_invoice_fiscal", meta);
+  }
+  for (const request of paymentRequestRows) {
+    if (!request.executionProofFilePath) continue;
+    const meta = await fileMeta(request.executionProofFilePath);
+    if (meta) pushFile(files, request.executionProofFilePath, `files/procurement/payment-proofs/${request.id}_${path.basename(request.executionProofFilePath)}`, "supplier_payment_proof", meta);
+  }
+  for (const bankImport of bankImportRows) {
+    const meta = await fileMeta(bankImport.filePath);
+    if (meta) pushFile(files, bankImport.filePath, `files/procurement/bank-statements/${bankImport.id}_${path.basename(bankImport.filePath)}`, "bank_statement", meta);
+  }
+
   const presentFiles = files.filter((f) => !f.missing);
   const missingFiles = files.filter((f) => f.missing);
 
@@ -602,6 +633,11 @@ export async function collectCompanyFullBackup(companyId: string) {
       supplierInvoiceLines: supplierInvoiceLineRows,
       supplierInvoicePayments: supplierInvoicePaymentRows,
       supplierInvoiceCreditNotes: supplierInvoiceCreditRows,
+      supplierInvoiceFiscalDocuments: supplierInvoiceFiscalRows,
+      paymentRequests: paymentRequestRows,
+      bankStatementImports: bankImportRows,
+      bankTransactions: bankTransactionRows,
+      bankReconciliations: bankReconciliationRows,
     },
     purchaseOrders: purchaseOrderRows,
     purchaseOrderLines: purchaseLineRows,

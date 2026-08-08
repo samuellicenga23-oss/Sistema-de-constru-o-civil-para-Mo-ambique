@@ -24,6 +24,7 @@ function zodFlattenToMessage(raw: unknown): string | null {
 }
 
 export async function request<T>(path: string, options?: RequestInit & { timeoutMs?: number }): Promise<T> {
+  const hasFormData = typeof FormData !== "undefined" && options?.body instanceof FormData;
   const { timeoutMs = DEFAULT_TIMEOUT_MS, ...fetchOptions } = options ?? {};
   const timeoutSignal =
     typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function" ? AbortSignal.timeout(timeoutMs) : undefined;
@@ -36,7 +37,7 @@ export async function request<T>(path: string, options?: RequestInit & { timeout
       ...fetchOptions,
       signal,
       headers: {
-        ...(fetchOptions.body ? { "Content-Type": "application/json" } : {}),
+        ...(fetchOptions.body && !hasFormData ? { "Content-Type": "application/json" } : {}),
         ...fetchOptions.headers,
       },
     });

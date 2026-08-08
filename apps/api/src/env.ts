@@ -91,4 +91,8 @@ export const env = {
   // Monitorização de erros (Sentry, tier grátis até 5k eventos/mês). Sem isto definido, os erros
   // continuam só no log do servidor — não deixa de funcionar, só não avisa proactivamente.
   sentryDsn: process.env.SENTRY_DSN || null,
+  // Extractor fiscal opcional (OCR/IA). Sem configuração o fluxo mantém conferência manual;
+  // o resultado deste serviço nunca aprova uma factura automaticamente.
+  fiscalExtractorUrl: process.env.FISCAL_EXTRACTOR_URL || null,
+  fiscalExtractorToken: process.env.FISCAL_EXTRACTOR_TOKEN || null,
 };

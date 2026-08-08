@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { accountsPayableApi, type ProcurementNcr, type SupplierInvoiceDetail, type SupplierInvoiceSummary } from "../api/procurementAccountsPayable";
+import ProcurementFiscalControlPanel from "./ProcurementFiscalControlPanel";
 
 function money(value: number, currency = "MZN") {
   return new Intl.NumberFormat("pt-MZ", { style: "currency", currency, maximumFractionDigits: 2 }).format(value);
@@ -15,9 +16,6 @@ export default function ProcurementAccountsPayablePanel({ projectId, canApprove,
   const [error, setError] = useState<string | null>(null);
   const [varianceReason, setVarianceReason] = useState("");
   const [rejectReason, setRejectReason] = useState("");
-  const [paymentAmount, setPaymentAmount] = useState("");
-  const [paymentDate, setPaymentDate] = useState(today());
-  const [paymentRef, setPaymentRef] = useState("");
   const [returnQty, setReturnQty] = useState<Record<string, string>>({});
   const [resolutionNotes, setResolutionNotes] = useState<Record<string, string>>({});
 
@@ -41,17 +39,16 @@ export default function ProcurementAccountsPayablePanel({ projectId, canApprove,
 
   async function openInvoice(id: string) {
     setError(null);
-    try { const detail = await accountsPayableApi.invoice(id); setSelected(detail); setPaymentAmount(detail.balance.outstanding > 0 ? String(detail.balance.outstanding) : ""); }
+    try { const detail = await accountsPayableApi.invoice(id); setSelected(detail); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "Não foi possível abrir a factura"); }
   }
-  async function act(action: "review" | "approve" | "reject" | "pay") {
+  async function act(action: "review" | "approve" | "reject") {
     if (!selected) return;
     setSaving(true); setError(null);
     try {
       if (action === "review") await accountsPayableApi.review(selected.id);
       if (action === "approve") await accountsPayableApi.approve(selected.id, { varianceReason: selected.currentMatch.softVariances.length ? varianceReason : undefined });
       if (action === "reject") await accountsPayableApi.reject(selected.id, rejectReason);
-      if (action === "pay") await accountsPayableApi.pay(selected.id, { amount: Number(paymentAmount), paymentDate, reference: paymentRef || undefined });
       await reload(); onChanged?.();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Operação não concluída"); }
     finally { setSaving(false); }
@@ -88,7 +85,7 @@ export default function ProcurementAccountsPayablePanel({ projectId, canApprove,
         <textarea className="input" rows={2} placeholder="Motivo de rejeição, se aplicável" value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} />
         <div className="flex flex-wrap gap-2"><button className="btn" disabled={saving} onClick={() => void act("review")}>Recalcular match</button><button className="btn btn-primary" disabled={saving || selected.currentMatch.hardBlocks.length > 0 || (selected.currentMatch.softVariances.length > 0 && varianceReason.trim().length < 8)} onClick={() => void act("approve")}>Aprovar factura</button><button className="btn" disabled={saving || rejectReason.trim().length < 5} onClick={() => void act("reject")}>Rejeitar</button></div>
       </div>}
-      {canApprove && ["aprovada", "parcialmente_paga"].includes(selected.status) && selected.balance.outstanding > 0 && <div className="rounded-xl border p-3 grid md:grid-cols-4 gap-2 items-end"><label className="text-xs">Valor<input type="number" className="input mt-1" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} /></label><label className="text-xs">Data<input type="date" className="input mt-1" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} /></label><label className="text-xs">Referência<input className="input mt-1" value={paymentRef} onChange={(e) => setPaymentRef(e.target.value)} /></label><button className="btn btn-primary" disabled={saving || !(Number(paymentAmount) > 0)} onClick={() => void act("pay")}>Registar pagamento</button></div>}
+      <ProcurementFiscalControlPanel projectId={projectId} invoiceId={selected.id} invoiceStatus={selected.status} outstanding={selected.balance.outstanding} currency={selected.currency} canApprove={canApprove} onChanged={() => void reload()} />
       {selected.creditNotes.length > 0 && <div><h4 className="font-medium text-sm mb-2">Notas de crédito</h4>{selected.creditNotes.map((credit) => <div key={credit.id} className="border rounded-xl p-3 mb-2 flex justify-between gap-3"><div><strong className="text-sm">{credit.creditNumber}</strong><p className="text-xs text-gray-500">{credit.reason} · {credit.status}</p></div>{canApprove && credit.status === "submetida" && <div className="flex gap-2"><button className="btn" onClick={async () => { await accountsPayableApi.reviewCredit(credit.id, "rejeitada"); await reload(); }}>Rejeitar</button><button className="btn btn-primary" onClick={async () => { await accountsPayableApi.reviewCredit(credit.id, "aceite"); await reload(); }}>Aceitar {money(Number(credit.amount), selected.currency)}</button></div>}</div>)}</div>}
     </div>}
 

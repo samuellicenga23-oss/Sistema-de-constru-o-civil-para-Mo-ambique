@@ -1483,6 +1483,15 @@ export const goodsReceiptStatusEnum = pgEnum("goods_receipt_status", ["rascunho"
 export const supplierInvoiceStatusEnum = pgEnum("supplier_invoice_status", [
   "rascunho", "submetida", "em_revisao", "divergente", "aprovada", "rejeitada", "parcialmente_paga", "paga", "cancelada",
 ]);
+export const supplierInvoiceFiscalDocumentStatusEnum = pgEnum("supplier_invoice_fiscal_document_status", [
+  "carregado", "extraido", "requer_revisao", "validado", "rejeitado",
+]);
+export const procurementPaymentRequestStatusEnum = pgEnum("procurement_payment_request_status", [
+  "rascunho", "submetido", "aprovado", "rejeitado", "executado", "cancelado",
+]);
+export const procurementBankTransactionStatusEnum = pgEnum("procurement_bank_transaction_status", [
+  "importado", "sugerido", "reconciliado", "ignorado",
+]);
 export const supplierInvoiceCreditNoteStatusEnum = pgEnum("supplier_invoice_credit_note_status", [
   "submetida", "aceite", "rejeitada", "cancelada",
 ]);
@@ -1948,6 +1957,134 @@ export const supplierInvoicePayments = pgTable("supplier_invoice_payments", {
   createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (table) => [index("supplier_invoice_payment_invoice_date_idx").on(table.supplierInvoiceId, table.paymentDate)]);
+
+// Fase 4 — documento fiscal original. O ficheiro é append-only/versionado e hashado; dados
+// extraídos por OCR/IA são apenas proposta de leitura. `reviewedData` é a versão conferida
+// manualmente e `validationSnapshot` guarda o resultado comparado com factura/fornecedor/empresa.
+export const supplierInvoiceFiscalDocuments = pgTable("supplier_invoice_fiscal_documents", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+  supplierInvoiceId: uuid("supplier_invoice_id").notNull().references(() => supplierInvoices.id, { onDelete: "cascade" }),
+  version: integer("version").notNull().default(1),
+  status: supplierInvoiceFiscalDocumentStatusEnum("status").notNull().default("carregado"),
+  filePath: text("file_path").notNull(),
+  originalName: varchar("original_name", { length: 300 }).notNull(),
+  mimeType: varchar("mime_type", { length: 120 }).notNull(),
+  fileSizeBytes: integer("file_size_bytes").notNull(),
+  sha256: varchar("sha256", { length: 64 }).notNull(),
+  extractionProvider: varchar("extraction_provider", { length: 120 }),
+  extractionConfidence: numeric("extraction_confidence", { precision: 6, scale: 5 }),
+  extractedData: jsonb("extracted_data").$type<Record<string, unknown>>(),
+  reviewedData: jsonb("reviewed_data").$type<Record<string, unknown>>(),
+  extractionMessage: text("extraction_message"),
+  extractedAt: timestamp("extracted_at"),
+  validationSnapshot: jsonb("validation_snapshot").$type<Record<string, unknown>>(),
+  validatedByUserId: uuid("validated_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  validatedAt: timestamp("validated_at"),
+  rejectionReason: text("rejection_reason"),
+  uploadedBySupplierAccountId: uuid("uploaded_by_supplier_account_id").references((): AnyPgColumn => supplierAccounts.id, { onDelete: "set null" }),
+  uploadedByUserId: uuid("uploaded_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [
+  unique("supplier_invoice_fiscal_document_version_unique").on(table.supplierInvoiceId, table.version),
+  unique("supplier_invoice_fiscal_document_hash_unique").on(table.companyId, table.sha256),
+  index("supplier_invoice_fiscal_document_invoice_idx").on(table.supplierInvoiceId, table.createdAt),
+]);
+
+// Pedido de pagamento separado do pagamento executado. A aprovação reserva saldo mas não cria
+// caixa; `supplier_invoice_payments` só é criado na execução/reconciliação bancária.
+export const procurementPaymentRequests = pgTable("procurement_payment_requests", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+  projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  supplierInvoiceId: uuid("supplier_invoice_id").notNull().references(() => supplierInvoices.id, { onDelete: "cascade" }),
+  reference: varchar("reference", { length: 50 }).notNull(),
+  status: procurementPaymentRequestStatusEnum("status").notNull().default("rascunho"),
+  amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
+  currency: currencyEnum("currency").notNull().default("MZN"),
+  requestedPaymentDate: date("requested_payment_date"),
+  method: varchar("method", { length: 50 }).notNull().default("transferencia"),
+  payeeBankName: varchar("payee_bank_name", { length: 160 }),
+  payeeAccountName: varchar("payee_account_name", { length: 200 }),
+  payeeAccountNumber: varchar("payee_account_number", { length: 120 }),
+  reason: text("reason"),
+  notes: text("notes"),
+  requestedByUserId: uuid("requested_by_user_id").notNull().references(() => users.id),
+  submittedAt: timestamp("submitted_at"),
+  approvedByUserId: uuid("approved_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  approvedAt: timestamp("approved_at"),
+  approvalOverrideReason: text("approval_override_reason"),
+  rejectedByUserId: uuid("rejected_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  rejectedAt: timestamp("rejected_at"),
+  rejectionReason: text("rejection_reason"),
+  executedByUserId: uuid("executed_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  executedAt: timestamp("executed_at"),
+  executionDate: date("execution_date"),
+  executionReference: varchar("execution_reference", { length: 160 }),
+  executionOverrideReason: text("execution_override_reason"),
+  supplierInvoicePaymentId: uuid("supplier_invoice_payment_id").references(() => supplierInvoicePayments.id, { onDelete: "set null" }),
+  executionProofFilePath: text("execution_proof_file_path"),
+  executionProofOriginalName: varchar("execution_proof_original_name", { length: 300 }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => [
+  unique("procurement_payment_request_reference_unique").on(table.companyId, table.reference),
+  index("procurement_payment_request_invoice_status_idx").on(table.supplierInvoiceId, table.status),
+  index("procurement_payment_request_project_idx").on(table.projectId, table.createdAt),
+]);
+
+export const procurementBankStatementImports = pgTable("procurement_bank_statement_imports", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+  projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  bankName: varchar("bank_name", { length: 160 }).notNull(),
+  accountLabel: varchar("account_label", { length: 160 }),
+  currency: currencyEnum("currency").notNull().default("MZN"),
+  originalName: varchar("original_name", { length: 300 }).notNull(),
+  filePath: text("file_path").notNull(),
+  sha256: varchar("sha256", { length: 64 }).notNull(),
+  rowCount: integer("row_count").notNull().default(0),
+  importedByUserId: uuid("imported_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [
+  unique("procurement_bank_statement_hash_unique").on(table.companyId, table.sha256),
+  index("procurement_bank_statement_project_idx").on(table.projectId, table.createdAt),
+]);
+
+export const procurementBankTransactions = pgTable("procurement_bank_transactions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+  projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  statementImportId: uuid("statement_import_id").notNull().references(() => procurementBankStatementImports.id, { onDelete: "cascade" }),
+  status: procurementBankTransactionStatusEnum("status").notNull().default("importado"),
+  transactionDate: date("transaction_date").notNull(),
+  valueDate: date("value_date"),
+  amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
+  currency: currencyEnum("currency").notNull().default("MZN"),
+  description: text("description"),
+  reference: varchar("reference", { length: 240 }),
+  counterparty: varchar("counterparty", { length: 240 }),
+  fingerprint: varchar("fingerprint", { length: 64 }).notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [
+  unique("procurement_bank_transaction_fingerprint_unique").on(table.companyId, table.fingerprint),
+  index("procurement_bank_transaction_project_status_idx").on(table.projectId, table.status, table.transactionDate),
+]);
+
+export const procurementBankReconciliations = pgTable("procurement_bank_reconciliations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+  bankTransactionId: uuid("bank_transaction_id").notNull().references(() => procurementBankTransactions.id, { onDelete: "cascade" }),
+  paymentRequestId: uuid("payment_request_id").notNull().references(() => procurementPaymentRequests.id, { onDelete: "cascade" }),
+  matchMethod: varchar("match_method", { length: 30 }).notNull().default("manual"),
+  matchScore: integer("match_score"),
+  notes: text("notes"),
+  reconciledByUserId: uuid("reconciled_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  reconciledAt: timestamp("reconciled_at").notNull().defaultNow(),
+}, (table) => [
+  unique("procurement_bank_reconciliation_transaction_unique").on(table.bankTransactionId),
+  unique("procurement_bank_reconciliation_payment_unique").on(table.paymentRequestId),
+]);
 
 export const supplierInvoiceCreditNotes = pgTable("supplier_invoice_credit_notes", {
   id: uuid("id").primaryKey().defaultRandom(),
