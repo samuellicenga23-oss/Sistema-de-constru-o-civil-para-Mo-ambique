@@ -163,15 +163,14 @@ export default function ProcurementFulfillmentPanel({ projectId, canReceive, onC
   return <div className="space-y-5">
     {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
 
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      <MetricCard label="OCs em execução" value={active.length} note={`${active.filter((order) => order.supplierConfirmationStatus === "pendente").length} por confirmar`} />
+    <div className="grid gap-3 sm:grid-cols-3">
+      <MetricCard label="Pedidos em curso" value={active.length} note={`${active.filter((order) => order.supplierConfirmationStatus === "pendente").length} aguardam fornecedor`} />
       <MetricCard label="Em risco de prazo" value={atRisk.length} tone={atRisk.length ? "warning" : "positive"} note="Promessa posterior à necessidade" />
-      <MetricCard label="Recepções parciais" value={partial.length} note="Com saldo ainda por entregar" />
-      <MetricCard label="Recepções confirmadas" value={receipts.filter((receipt) => receipt.status === "confirmado").length} tone="positive" />
+      <MetricCard label="Entregas confirmadas" value={receipts.filter((receipt) => receipt.status === "confirmado").length} tone="positive" note={partial.length ? `${partial.length} parcial(is)` : undefined} />
     </div>
 
     <section className="card overflow-hidden">
-      <SectionHeader title="Ordens em execução" description="Confirmação do fornecedor, expedição, recepção e saldo por entregar" />
+      <SectionHeader title="Entregas por receber" description="Acompanhe o pedido e confirme o que entrou na obra" />
       <div className="divide-y divide-slate-100">
         {orders.map((order) => {
           const perf = performance[order.supplierId];
@@ -190,18 +189,23 @@ export default function ProcurementFulfillmentPanel({ projectId, canReceive, onC
               </div>
             </div>
             <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-slate-900" style={{ width: `${Math.min(100, order.summary.fillRatePct)}%` }} /></div>
-            <div className="mt-3 grid gap-2 text-xs sm:grid-cols-5">
-              <div><span className="text-slate-500">Score fornecedor</span><strong className="block">{perf?.score == null ? "—" : `${perf.score.toFixed(0)}/100`}</strong></div>
-              <div><span className="text-slate-500">OTIF / aceitação</span><strong className="block">{fmt(perf?.otifPct ?? null)} · {fmt(perf?.acceptanceRatePct ?? null)}</strong></div>
-              <div><span className="text-slate-500">Chegou até necessidade</span><strong className="block">{fmt(perf?.needByHitRatePct ?? null)}</strong></div>
-              <div><span className="text-slate-500">Atraso vs promessa</span><strong className="block">{fmt(perf?.averageDelayDays ?? null, " d")}</strong></div>
-              <div className="flex items-end justify-end">{canReceive && order.status === "aprovado" && order.summary.fillRatePct < 100 && <button className="btn btn-primary btn-sm" onClick={() => openReceipt(order)}>Registar recepção</button>}</div>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+              <details className="text-xs text-slate-500">
+                <summary className="cursor-pointer font-semibold text-slate-700">Desempenho do fornecedor</summary>
+                <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1">
+                  <span>Score <strong className="text-slate-900">{perf?.score == null ? "—" : `${perf.score.toFixed(0)}/100`}</strong></span>
+                  <span>Entrega no prazo <strong className="text-slate-900">{fmt(perf?.otifPct ?? null)}</strong></span>
+                  <span>Aceitação <strong className="text-slate-900">{fmt(perf?.acceptanceRatePct ?? null)}</strong></span>
+                  <span>Atraso médio <strong className="text-slate-900">{fmt(perf?.averageDelayDays ?? null, " d")}</strong></span>
+                </div>
+              </details>
+              {canReceive && order.status === "aprovado" && order.summary.fillRatePct < 100 && <button className="btn btn-primary btn-sm" onClick={() => openReceipt(order)}>Confirmar entrega</button>}
             </div>
             {order.supplierConfirmationStatus === "alteracao_solicitada" && order.supplierResponseNotes && <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"><strong>Alteração solicitada:</strong> {order.supplierResponseNotes}</div>}
-            {order.supplierConfirmationStatus === "recusado" && order.supplierResponseNotes && <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800"><strong>OC recusada:</strong> {order.supplierResponseNotes}</div>}
+            {order.supplierConfirmationStatus === "recusado" && order.supplierResponseNotes && <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800"><strong>Pedido recusado:</strong> {order.supplierResponseNotes}</div>}
           </article>;
         })}
-        {!orders.length && <div className="p-6 text-sm text-slate-500">Ainda não existem ordens de compra para acompanhar.</div>}
+        {!orders.length && <div className="p-6 text-sm text-slate-500">Ainda não há pedidos por receber.</div>}
       </div>
     </section>
 

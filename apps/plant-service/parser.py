@@ -43,6 +43,7 @@ class Opening:
     confidence: float
     source: str
     needs_confirmation: bool
+    designation: str | None = None
 
 
 @dataclass
@@ -88,11 +89,23 @@ class Staircase:
 
 
 @dataclass
+class SlabRebarLayer:
+    x_diameter_mm: float
+    x_spacing_cm: float
+    y_diameter_mm: float
+    y_spacing_cm: float
+
+
+@dataclass
 class Slab:
     floor: str | None
     layer: str  # "inferior" | "superior"
     thickness_cm: float
     page: int
+    rebar: SlabRebarLayer | None = None
+    concrete_class: str | None = None
+    steel_grade: str | None = None
+    cover_cm: float | None = None
 
 
 @dataclass
@@ -101,6 +114,14 @@ class SlabSummary:
     thickness_cm: float
     layers: list[str]
     pages: list[int]
+    top_rebar: SlabRebarLayer | None = None
+    bottom_rebar: SlabRebarLayer | None = None
+    top_steel_weight_kg: float = 0.0
+    bottom_steel_weight_kg: float = 0.0
+    steel_by_diameter: dict[str, float] = field(default_factory=dict)
+    concrete_class: str | None = None
+    steel_grade: str | None = None
+    cover_cm: float | None = None
 
 
 @dataclass
@@ -546,8 +567,8 @@ LENGTH_VALUE_LINE = re.compile(r"^([\d.,]+)\s*m$")
 OPENING_SCHEDULE_PATTERN = re.compile(
     r"(?im)^\s*(?P<code>(?:WD|DOO|P|D|J|W)\s*[-.]?\s*\d{1,3})\s+"
     r"(?P<label>[^\n]{0,90}?)\s+"
-    r"(?P<width>\d(?:[.,]\d{1,3})?)\s*(?:m\s*)?[x×]\s*"
-    r"(?P<height>\d(?:[.,]\d{1,3})?)\s*(?:m)?"
+    r"(?P<width>\d{1,4}(?:[.,]\d{1,3})?)\s*(?:mm|cm|m)?\s*[x×]\s*"
+    r"(?P<height>\d{1,4}(?:[.,]\d{1,3})?)\s*(?:mm|cm|m)?"
     r"(?:\s+(?P<quantity>\d{1,3}))?\s*$"
 )
 OPENING_CODE_PATTERN = re.compile(
@@ -555,7 +576,7 @@ OPENING_CODE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 OPENING_MAP_DIM_PATTERN = re.compile(
-    r"^(?P<width>\d(?:[.,]\d{1,3})?)\s*[x×]\s*(?P<height>\d(?:[.,]\d{1,3})?)$",
+    r"^(?P<width>\d{1,4}(?:[.,]\d{1,3})?)\s*(?:mm|cm|m)?\s*[x×]\s*(?P<height>\d{1,4}(?:[.,]\d{1,3})?)\s*(?:mm|cm|m)?$",
     re.IGNORECASE,
 )
 DECIMAL_DIMENSION_PATTERN = re.compile(r"^\d[,.]\d{1,3}$")
@@ -590,6 +611,13 @@ INTEGER_VALUE = re.compile(r"^(\d+)$")
 # planta como "h=20" (cm) — mesmo valor em toda a folha, uma ocorrência chega.
 SLAB_PAGE_TITLE_PATTERN = re.compile(r"ARMADURA\s+(INFERIOR|SUPERIOR)", re.IGNORECASE)
 SLAB_THICKNESS_LINE = re.compile(r"^h\s*=\s*(\d+(?:[.,]\d+)?)$", re.IGNORECASE)
+SLAB_MESH_SPEC_PATTERN = re.compile(
+    r"[ØøΦ]\s*(?P<diameter>\d{1,2})\s*(?:a\s*/\s*|@\s*)(?P<spacing>\d+(?:[.,]\d+)?)",
+    re.IGNORECASE,
+)
+CONCRETE_CLASS_PATTERN = re.compile(r"\b(?:BET(?:ÃO|AO)\s*)?(B\s*[-/]?\s*(?:15|20|25|30|35|40))\b", re.IGNORECASE)
+STEEL_GRADE_PATTERN = re.compile(r"\b([AS]\s*[-/]?\s*(?:235|240|400|500))\b", re.IGNORECASE)
+COVER_PATTERN = re.compile(r"\b(?:recobrimento|rec\.?|cobrimento)\s*[:=]?\s*(\d+(?:[.,]\d+)?)\s*(mm|cm)?", re.IGNORECASE)
 # Formato alternativo (planta geral de elementos estruturais, sem folha de armadura própria
 # por laje): referência "L1" seguida imediatamente da espessura "h=15".
 SLAB_REF_LINE = re.compile(r"^L\d+$")
@@ -676,6 +704,16 @@ def _normalise_opening_code(raw_code: str) -> str:
     return f"{match.group(1)}-{match.group(2)}"
 
 
+def _opening_dimension_to_m(raw_value: str) -> float:
+    """Aceita metros, centímetros ou milímetros usados em mapas de vãos."""
+    value = _to_float(raw_value)
+    if value >= 300:
+        return value / 1000
+    if value > 20:
+        return value / 100
+    return value
+
+
 def extract_opening_schedule(text: str, page_number: int) -> list[Opening]:
     floor, _ = detect_floor_label(text)
     openings: list[Opening] = []
@@ -683,8 +721,8 @@ def extract_opening_schedule(text: str, page_number: int) -> list[Opening]:
         raw_code = _normalise_opening_code(match.group("code"))
         label = match.group("label").strip()
         kind = _opening_kind_from_code(raw_code, label)
-        width = _to_float(match.group("width"))
-        height = _to_float(match.group("height"))
+        width = _opening_dimension_to_m(match.group("width"))
+        height = _opening_dimension_to_m(match.group("height"))
         if not (0.3 <= width <= 8 and 0.3 <= height <= 5):
             continue
         openings.append(
@@ -702,6 +740,7 @@ def extract_opening_schedule(text: str, page_number: int) -> list[Opening]:
                 confidence=0.96,
                 source="quadro",
                 needs_confirmation=False,
+                designation=label or None,
             )
         )
     openings.extend(extract_opening_map_table(text, page_number, floor))
@@ -750,7 +789,7 @@ def extract_opening_map_table(text: str, page_number: int, floor: str | None = N
         elif mode == "dim":
             dim_match = OPENING_MAP_DIM_PATTERN.fullmatch(line)
             if dim_match:
-                dims.append((_to_float(dim_match.group("width")), _to_float(dim_match.group("height"))))
+                dims.append((_opening_dimension_to_m(dim_match.group("width")), _opening_dimension_to_m(dim_match.group("height"))))
             else:
                 mode = None
 
@@ -1664,10 +1703,67 @@ def extract_staircases(text: str, page_number: int) -> list[Staircase]:
     return staircases
 
 
+def extract_slab_rebar_layer(text: str) -> SlabRebarLayer | None:
+    """Lê a malha predominante da folha sem inventar uma direcção ausente.
+
+    Quando X/Y aparecem explicitamente, cada direcção mantém o seu diâmetro e
+    espaçamento. Quando a folha apresenta apenas uma chamada repetida (formato
+    corrente em plantas CYPE), a chamada aplica-se às duas direcções.
+    """
+    directional: dict[str, list[tuple[float, float]]] = {"x": [], "y": []}
+    all_specs: list[tuple[float, float]] = []
+    for raw_line in text.splitlines():
+        matches = list(SLAB_MESH_SPEC_PATTERN.finditer(raw_line))
+        for match in matches:
+            diameter = float(match.group("diameter"))
+            spacing = _to_float(match.group("spacing"))
+            if not (4 <= diameter <= 40 and 5 <= spacing <= 40):
+                continue
+            spec = (diameter, spacing)
+            all_specs.append(spec)
+            prefix = raw_line[max(0, match.start() - 28):match.start()].lower()
+            suffix = raw_line[match.end():match.end() + 18].lower()
+            direction_match = re.search(r"(?:direc(?:ção|cao)|dir\.?\s*)?\b([xy])\b", prefix + " " + suffix)
+            if direction_match:
+                directional[direction_match.group(1)].append(spec)
+
+    if not all_specs:
+        return None
+
+    dominant = Counter((round(d, 2), round(s, 2)) for d, s in all_specs).most_common(1)[0][0]
+
+    def dominant_for(direction: str) -> tuple[float, float]:
+        specs = directional[direction]
+        return Counter((round(d, 2), round(s, 2)) for d, s in specs).most_common(1)[0][0] if specs else dominant
+
+    x_diameter, x_spacing = dominant_for("x")
+    y_diameter, y_spacing = dominant_for("y")
+    return SlabRebarLayer(x_diameter, x_spacing, y_diameter, y_spacing)
+
+
+def extract_structural_material_specs(text: str) -> tuple[str | None, str | None, float | None]:
+    concrete_match = CONCRETE_CLASS_PATTERN.search(text)
+    steel_match = STEEL_GRADE_PATTERN.search(text)
+    cover_match = COVER_PATTERN.search(text)
+    concrete_class = re.sub(r"[^A-Z0-9]", "", concrete_match.group(1).upper()) if concrete_match else None
+    if steel_match:
+        compact_grade = re.sub(r"[^A-Z0-9]", "", steel_match.group(1).upper())
+        steel_grade = f"{compact_grade[0]}-{compact_grade[1:]}"
+    else:
+        steel_grade = None
+    cover_cm = None
+    if cover_match:
+        cover_cm = _to_float(cover_match.group(1))
+        if (cover_match.group(2) or "cm").lower() == "mm":
+            cover_cm /= 10
+    return concrete_class, steel_grade, cover_cm
+
+
 def extract_slabs(text: str, page_number: int) -> list[Slab]:
     slabs: list[Slab] = []
     floor_label, _ = detect_floor_label(text)
     lines = [l.strip() for l in text.split("\n")]
+    concrete_class, steel_grade, cover_cm = extract_structural_material_specs(text)
 
     # Formato 1 (CYPE CAD): folha dedicada por piso+camada, título "ARMADURA
     # INFERIOR"/"ARMADURA SUPERIOR", espessura "h=20" repetida na planta.
@@ -1675,8 +1771,20 @@ def extract_slabs(text: str, page_number: int) -> list[Slab]:
     if title_match:
         layer = title_match.group(1).lower()
         thicknesses = [_to_float(m.group(1)) for m in (SLAB_THICKNESS_LINE.match(l) for l in lines) if m]
-        if thicknesses:
-            slabs.append(Slab(floor=floor_label, layer=layer, thickness_cm=thicknesses[0], page=page_number))
+        # Em muitos projectos CYPE, a espessura aparece na planta de elementos
+        # (ex.: páginas 41–43) e o mapa de aço inferior/superior vem noutras
+        # páginas (ex.: 62–67). A página de aço não pode ser descartada só por
+        # não repetir h=; espessura 0 significa "ligar à laje do mesmo piso".
+        slabs.append(Slab(
+            floor=floor_label,
+            layer=layer,
+            thickness_cm=thicknesses[0] if thicknesses else 0.0,
+            page=page_number,
+            rebar=extract_slab_rebar_layer(text),
+            concrete_class=concrete_class,
+            steel_grade=steel_grade,
+            cover_cm=cover_cm,
+        ))
 
     # Formato 2 (planta geral de elementos estruturais, sem folha de armadura própria):
     # referência "L1" seguida imediatamente pela espessura "h=15".
@@ -1684,7 +1792,15 @@ def extract_slabs(text: str, page_number: int) -> list[Slab]:
         if SLAB_REF_LINE.match(line) and idx + 1 < len(lines):
             thickness_match = SLAB_THICKNESS_LINE.match(lines[idx + 1])
             if thickness_match:
-                slabs.append(Slab(floor=floor_label, layer="geral", thickness_cm=_to_float(thickness_match.group(1)), page=page_number))
+                slabs.append(Slab(
+                    floor=floor_label,
+                    layer="geral",
+                    thickness_cm=_to_float(thickness_match.group(1)),
+                    page=page_number,
+                    concrete_class=concrete_class,
+                    steel_grade=steel_grade,
+                    cover_cm=cover_cm,
+                ))
 
     return slabs
 
@@ -1703,7 +1819,12 @@ def summarise_slabs(slabs: list[Slab]) -> list[SlabSummary]:
                 (
                     group
                     for group in groups
-                    if group["floor"] == slab.floor and abs(group["thickness_cm"] - slab.thickness_cm) < 0.01
+                    if group["floor"] == slab.floor
+                    and (
+                        slab.thickness_cm <= 0
+                        or group["thickness_cm"] <= 0
+                        or abs(group["thickness_cm"] - slab.thickness_cm) < 0.01
+                    )
                 ),
                 None,
             )
@@ -1738,10 +1859,24 @@ def summarise_slabs(slabs: list[Slab]) -> list[SlabSummary]:
                 "layers": set(),
                 "pages": set(),
                 "general_page": slab.page if slab.layer == "geral" else None,
+                "top_rebar": None,
+                "bottom_rebar": None,
+                "concrete_class": slab.concrete_class,
+                "steel_grade": slab.steel_grade,
+                "cover_cm": slab.cover_cm,
             }
             groups.append(target)
         target["layers"].add(slab.layer)
         target["pages"].add(slab.page)
+        if target["thickness_cm"] <= 0 < slab.thickness_cm:
+            target["thickness_cm"] = slab.thickness_cm
+        if slab.layer == "superior" and slab.rebar:
+            target["top_rebar"] = slab.rebar
+        elif slab.layer == "inferior" and slab.rebar:
+            target["bottom_rebar"] = slab.rebar
+        target["concrete_class"] = target["concrete_class"] or slab.concrete_class
+        target["steel_grade"] = target["steel_grade"] or slab.steel_grade
+        target["cover_cm"] = target["cover_cm"] if target["cover_cm"] is not None else slab.cover_cm
 
     return [
         SlabSummary(
@@ -1749,6 +1884,11 @@ def summarise_slabs(slabs: list[Slab]) -> list[SlabSummary]:
             thickness_cm=group["thickness_cm"],
             layers=sorted(group["layers"]),
             pages=sorted(group["pages"]),
+            top_rebar=group["top_rebar"],
+            bottom_rebar=group["bottom_rebar"],
+            concrete_class=group["concrete_class"],
+            steel_grade=group["steel_grade"],
+            cover_cm=group["cover_cm"],
         )
         for group in groups
     ]
@@ -1791,6 +1931,19 @@ def build_structural_summary(
     # o nº de folhas distintas, e a espessura (h=X) é igual em todas neste tipo de ficheiro.
     slab_summaries = summarise_slabs(slabs)
     slab_thicknesses = [s.thickness_cm for s in slab_summaries]
+    page_layers = {(slab.page, slab.layer) for slab in slabs}
+    for summary in slab_summaries:
+        by_diameter: dict[str, float] = defaultdict(float)
+        for line in rebar_schedules:
+            if line.page not in summary.pages:
+                continue
+            layer = next((name for page, name in page_layers if page == line.page), "geral")
+            if layer == "superior":
+                summary.top_steel_weight_kg += line.weight_kg
+            elif layer == "inferior":
+                summary.bottom_steel_weight_kg += line.weight_kg
+            by_diameter[f"{line.diameter_mm:g}"] += line.weight_kg
+        summary.steel_by_diameter = {diameter: round(weight, 2) for diameter, weight in sorted(by_diameter.items(), key=lambda item: float(item[0]))}
 
     return StructuralSummary(
         footings_count=len(footing_refs),

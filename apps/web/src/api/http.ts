@@ -1,3 +1,13 @@
+export type ApiErrorDetails = {
+  blockers?: string[];
+  readiness?: {
+    measuredItems?: number;
+    missingUnit?: number;
+    missingPrice?: number;
+    missingDetectedQuantities?: string[];
+  };
+};
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -5,6 +15,7 @@ export class ApiError extends Error {
     public code?: string,
     public upgradeHint?: string,
     public actionPath?: string,
+    public details?: ApiErrorDetails,
   ) {
     super(message);
   }
@@ -72,6 +83,10 @@ export async function request<T>(path: string, options?: RequestInit & { timeout
       typeof body.code === "string" ? body.code : undefined,
       typeof body.upgradeHint === "string" ? body.upgradeHint : undefined,
       typeof body.actionPath === "string" ? body.actionPath : undefined,
+      {
+        blockers: Array.isArray(body.blockers) ? body.blockers.filter((item: unknown): item is string => typeof item === "string") : undefined,
+        readiness: body.readiness && typeof body.readiness === "object" ? body.readiness as ApiErrorDetails["readiness"] : undefined,
+      },
     );
   }
   return res.json();

@@ -38,6 +38,9 @@ export type StructuralSlab = {
     coverCm?: number | null;
     topRebar?: SlabRebarLayer | null;
     bottomRebar?: SlabRebarLayer | null;
+    topSteelWeightKg?: number;
+    bottomSteelWeightKg?: number;
+    steelByDiameter?: Record<string, number>;
     notes?: string | null;
 };
 

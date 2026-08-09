@@ -247,6 +247,8 @@ def parse_ai_payload(data: dict[str, Any], page: int) -> tuple[list[Room], list[
         floor_text = str(floor).strip()[:80] if floor not in (None, "") else None
         material = item.get("material")
         material_text = str(material).strip()[:80] if material not in (None, "") else None
+        designation = item.get("designation") or item.get("designacao") or item.get("nome")
+        designation_text = str(designation).strip()[:160] if designation not in (None, "") else None
         sill = _to_float(item.get("sillHeightM") or item.get("sill_height_m") or item.get("peitoril"))
         openings.append(
             Opening(
@@ -263,6 +265,7 @@ def parse_ai_payload(data: dict[str, Any], page: int) -> tuple[list[Room], list[
                 confidence=0.45,
                 source="ia",
                 needs_confirmation=True,
+                designation=designation_text,
             )
         )
 
@@ -275,7 +278,7 @@ def extract_page_with_ai(page_text: str, page: int) -> tuple[list[Room], list[Op
         "Extrai compartimentos com área em m² e vãos (portas/janelas) com medidas quando existirem.\n"
         "JSON exacto:\n"
         '{"rooms":[{"name":"Sala","number":null,"areaM2":18.5,"floor":"Piso Térreo","perimeterM":null}],'
-        '"openings":[{"kind":"porta","code":"P01","widthM":0.9,"heightM":2.1,"quantity":1,'
+        '"openings":[{"kind":"porta","code":"P01","designation":"Porta interior","widthM":0.9,"heightM":2.1,"quantity":1,'
         '"floor":"Piso Térreo","location":"interior"}]}\n'
         "Se não houver dados, devolve {\"rooms\":[],\"openings\":[]}.\n\n"
         f"TEXTO:\n{_clip_page_text(page_text)}"

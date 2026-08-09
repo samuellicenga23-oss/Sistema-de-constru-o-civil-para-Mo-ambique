@@ -879,6 +879,9 @@ export const plants = pgTable("plants", {
       coverCm?: number | null;
       topRebar?: { xDiameterMm: number; xSpacingCm: number; yDiameterMm: number; ySpacingCm: number } | null;
       bottomRebar?: { xDiameterMm: number; xSpacingCm: number; yDiameterMm: number; ySpacingCm: number } | null;
+      topSteelWeightKg?: number;
+      bottomSteelWeightKg?: number;
+      steelByDiameter?: Record<string, number>;
       notes?: string | null;
     }>;
     totalSteelWeightKg: number;

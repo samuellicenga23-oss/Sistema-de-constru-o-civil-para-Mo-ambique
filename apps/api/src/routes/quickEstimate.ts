@@ -26,6 +26,18 @@ const floorSlabSchema = z.object({
   label: z.string().min(1),
   areaM2: z.number().positive(),
   thicknessM: z.number().positive(),
+  topRebar: z.object({
+    xDiameterMm: z.number().positive().max(50),
+    xSpacingCm: z.number().positive().max(100),
+    yDiameterMm: z.number().positive().max(50),
+    ySpacingCm: z.number().positive().max(100),
+  }).nullable().optional(),
+  bottomRebar: z.object({
+    xDiameterMm: z.number().positive().max(50),
+    xSpacingCm: z.number().positive().max(100),
+    yDiameterMm: z.number().positive().max(50),
+    ySpacingCm: z.number().positive().max(100),
+  }).nullable().optional(),
 });
 
 const openingSchema = z.object({
@@ -72,6 +84,14 @@ const quickEstimateSchema = z.object({
   beamConcreteVolumeM3: z.number().positive().optional(),
   floorSlabThicknessM: z.number().positive().optional(),
   floorSlabs: z.array(floorSlabSchema).optional(),
+  pavementReinforcement: z.enum(["bars_6_20", "welded_mesh", "none"]).optional(),
+  foundationMembrane: z.boolean().optional(),
+  groundBeam: z.object({
+    enabled: z.boolean(),
+    lengthM: z.number().positive().optional(),
+    longitudinalBars: z.number().int().min(2).max(12).optional(),
+    diameterMm: z.number().min(6).max(40).optional(),
+  }).optional(),
   openings: z.array(openingSchema).optional(),
   columnConcreteVolumeM3: z.number().positive().optional(),
   formworkAreaM2: z.number().positive().optional(),
@@ -90,6 +110,15 @@ const quickEstimateSchema = z.object({
     if (geometryRequired && !data.floors?.length) ctx.addIssue({ code: "custom", path: ["floors"], message: "Indique pelo menos um piso para os trabalhos seleccionados." });
     if (structureRequired && !data.foundationType) ctx.addIssue({ code: "custom", path: ["foundationType"], message: "Confirme o tipo de fundação." });
     if (scopes.has("cobertura") && (!data.roofType || !data.roofArea)) ctx.addIssue({ code: "custom", path: ["roofArea"], message: "Confirme o tipo e a área de cobertura." });
+    if (scopes.has("vaos") && !data.openings?.some((opening) =>
+      opening.confirmed && opening.location !== "desconhecida" && opening.widthM > 0 && opening.heightM > 0,
+    )) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["openings"],
+        message: "Confirme pelo menos uma porta ou janela com dimensões e parede interior/exterior.",
+      });
+    }
   } else {
     if (!data.floors?.length) ctx.addIssue({ code: "custom", path: ["floors"], message: "Indique pelo menos um piso." });
     if (!data.foundationType) ctx.addIssue({ code: "custom", path: ["foundationType"], message: "Confirme o tipo de fundação." });

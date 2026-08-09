@@ -11,9 +11,8 @@ Compartimentos
   L5 Assistente IA (Ollama)
 
 Vãos
-  L1 Quadro / mapa (P, J, WD, DOO)
-  L2 Geometria espacial
-  L3 Assistente IA (Ollama)
+  L1 Quadro/mapa + geometria espacial, consolidados sem duplicar códigos
+  L2 Assistente IA (Ollama), apenas quando a leitura determinística não encontra nada
 
 Aço
   L1 Resumo Total+10% (kg por Ø)
@@ -105,13 +104,11 @@ def resolve_openings_cascade(
 ) -> tuple[list, CascadeResult]:
     from parser import merge_openings
 
-    def level_quadro():
-        items = merge_openings(quadro_openings, document_text)
-        return items, f"{len(items)} vão(s)"
-
-    def level_spatial():
-        items = merge_openings(spatial_openings, document_text)
-        return items, f"{len(items)} vão(s)"
+    def level_deterministic():
+        # Um quadro pode listar apenas alguns modelos enquanto a planta contém outros vãos.
+        # Combinar os dois sinais evita que o primeiro resultado parcial encerre a cascata.
+        items = merge_openings([*quadro_openings, *spatial_openings], document_text)
+        return items, f"{len(items)} vão(s): quadro {len(quadro_openings)}, geometria {len(spatial_openings)}"
 
     def level_ai():
         try:
@@ -137,9 +134,8 @@ def resolve_openings_cascade(
     return run_cascade(
         "vaos",
         [
-            (1, "quadro / mapa de vãos", level_quadro),
-            (2, "geometria espacial", level_spatial),
-            (3, "assistente (Ollama)", level_ai),
+            (1, "quadro + geometria", level_deterministic),
+            (2, "assistente (Ollama)", level_ai),
         ],
         min_count=1,
     )

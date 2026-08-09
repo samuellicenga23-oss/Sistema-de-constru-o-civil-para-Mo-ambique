@@ -17,6 +17,8 @@ export type PlantRoom = {
 export type PlantOpening = {
   id: string;
   kind: "porta" | "janela";
+  code?: string | null;
+  designation?: string | null;
   widthM: number | null;
   heightM: number | null;
   quantity: number;
@@ -67,14 +69,11 @@ export function deduplicatePlantRooms(rooms: PlantRoom[]): PlantRoom[] {
 export function deduplicatePlantOpenings(openings: PlantOpening[]): PlantOpening[] {
   const seen = new Set<string>();
   return openings.filter((opening) => {
-    const key = [
-      opening.kind,
-      normalizeText(opening.floor ?? "piso-nao-identificado"),
-      opening.location,
-      opening.widthM?.toFixed(3) ?? "",
-      opening.heightM?.toFixed(3) ?? "",
-      opening.quantity,
-    ].join("|");
+    // O código P/J é a identidade fiável entre folhas repetidas. Sem código, duas janelas
+    // iguais podem ser vãos físicos distintos; preservá-las é mais seguro do que perder área.
+    const key = opening.code?.trim()
+      ? [opening.kind, normalizeText(opening.floor ?? "piso-nao-identificado"), normalizeText(opening.code)].join("|")
+      : `uncoded:${opening.id}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -167,7 +166,7 @@ export function buildMeasurementLinesFromPlant(itemCode: string, rooms: PlantRoo
               : null;
     if (selected === null) return null;
     return selected.map((opening, index) => ({
-      description: `${opening.floor ?? "Piso por confirmar"} — ${opening.kind}`,
+      description: [opening.floor ?? "Piso por confirmar", opening.designation ?? opening.code ?? opening.kind].join(" — "),
       count: opening.quantity,
       length: itemCode === "15.3" ? opening.widthM : itemCode === "15.4" ? opening.widthM : null,
       width: itemCode === "15.3" ? opening.heightM : itemCode === "15.4" ? 1 : null,
@@ -336,8 +335,8 @@ export async function loadProjectPlantContext(projectId: string): Promise<{
     return { rooms: [], openings: [], identityConflict: true };
   }
 
-  let selectedRooms: PlantRoom[] = [];
-  let selectedOpenings: PlantOpening[] = [];
+  const selectedRooms: PlantRoom[] = [];
+  const selectedOpenings: PlantOpening[] = [];
   for (const plant of plantRows) {
     if (plant.processingStatus !== "concluido") continue;
     if (plant.documentAnalysis?.requiresIdentityConfirmation && !plant.documentAnalysis.identityConfirmed) continue;
@@ -345,29 +344,30 @@ export async function loadProjectPlantContext(projectId: string): Promise<{
       db.select().from(extractedRooms).where(eq(extractedRooms.plantId, plant.id)),
       db.select().from(extractedOpenings).where(eq(extractedOpenings.plantId, plant.id)),
     ]);
-    if (selectedRooms.length === 0 && rooms.length > 0) {
-      selectedRooms = rooms.map((r) => ({
+    if (rooms.length > 0) {
+      selectedRooms.push(...rooms.map((r) => ({
         id: r.id,
         name: r.name,
         number: r.number,
         areaM2: Number(r.areaM2),
         perimeterM: r.perimeterM == null ? null : Number(r.perimeterM),
         floor: r.floor,
-      }));
+      })));
     }
-    if (selectedOpenings.length === 0 && openings.length > 0) {
-      selectedOpenings = openings.map((opening) => ({
+    if (openings.length > 0) {
+      selectedOpenings.push(...openings.map((opening) => ({
         id: opening.id,
         kind: opening.kind as PlantOpening["kind"],
+        code: opening.code,
+        designation: opening.designation,
         widthM: opening.widthM == null ? null : Number(opening.widthM),
         heightM: opening.heightM == null ? null : Number(opening.heightM),
         quantity: opening.quantity,
         floor: opening.floor,
         location: opening.location as PlantOpening["location"],
         needsConfirmation: opening.needsConfirmation,
-      }));
+      })));
     }
-    if (selectedRooms.length > 0 && selectedOpenings.length > 0) break;
   }
   return {
     rooms: deduplicatePlantRooms(selectedRooms),

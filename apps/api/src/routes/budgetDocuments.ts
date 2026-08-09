@@ -278,7 +278,18 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
       }
     }
     if (parsed.data.status !== document.status && !transitions[document.status].includes(parsed.data.status)) {
-      return reply.code(409).send({ error: `O documento em ${document.status} não pode passar para ${parsed.data.status}` });
+      const blockers = document.status === "rascunho" && parsed.data.status === "aprovado"
+        ? ["Este plano exige submissão antes da aprovação", "Submeta o documento e peça a aprovação a um administrador da empresa"]
+        : document.status === "aprovado"
+          ? ["O documento aprovado está protegido", "Crie uma nova revisão para fazer alterações"]
+          : [`Transição permitida a partir de ${document.status}: ${transitions[document.status].join(" ou ") || "nenhuma"}`];
+      return reply.code(409).send({
+        code: "DOCUMENT_TRANSITION_INVALID",
+        error: blockers[0],
+        blockers,
+        currentStatus: document.status,
+        requestedStatus: parsed.data.status,
+      });
     }
 
     if (parsed.data.status === "submetido" || parsed.data.status === "aprovado") {
@@ -301,7 +312,9 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
       );
       if (!readiness.ready) {
         return reply.code(409).send({
+          code: "DOCUMENT_NOT_READY",
           error: `Documento incompleto: ${readiness.blockers.join("; ")}.`,
+          blockers: readiness.blockers,
           readiness,
         });
       }

@@ -20,6 +20,7 @@ import ProcurementAccountsPayablePanel from "../components/ProcurementAccountsPa
 import ProcurementIntelligencePanel from "../components/ProcurementIntelligencePanel";
 
 type View = "necessidades" | "requisicoes" | "cotacoes" | "ordens" | "recepcoes" | "facturas" | "stock" | "inteligencia";
+type Stage = "comprar" | "cotacoes" | "pedidos" | "stock" | "controlo";
 type DraftRequisitionLine = { materialId: string; materialName: string; unit: string; quantity: number; specification?: string };
 type AwardDraft = Record<string, Array<{ quoteId: string; quantity: string }>>;
 type NextStep = { title: string; detail: string; view: View; actionLabel?: string; onAction?: () => void };
@@ -30,7 +31,7 @@ const REQ_LABEL: Record<PurchaseRequisition["status"], string> = {
   aprovada: "Aprovada",
   em_cotacao: "Em cotação",
   adjudicada: "Adjudicada",
-  comprada: "OC criada",
+  comprada: "Pedido criado",
   fechada: "Fechada",
   cancelada: "Cancelada",
 };
@@ -54,6 +55,22 @@ function defaultDeadline() {
   const d = new Date();
   d.setDate(d.getDate() + 5);
   return d.toISOString().slice(0, 10);
+}
+
+const STAGE_DEFAULT_VIEW: Record<Stage, View> = {
+  comprar: "necessidades",
+  cotacoes: "cotacoes",
+  pedidos: "ordens",
+  stock: "stock",
+  controlo: "inteligencia",
+};
+
+function stageForView(view: View): Stage {
+  if (view === "necessidades" || view === "requisicoes") return "comprar";
+  if (view === "cotacoes") return "cotacoes";
+  if (view === "ordens" || view === "recepcoes") return "pedidos";
+  if (view === "stock") return "stock";
+  return "controlo";
 }
 
 function sortInviteableSuppliers(suppliers: MarketplaceSupplier[], projectZoneId: string | null | undefined) {
@@ -168,7 +185,7 @@ export default function ProjectProcurementPage() {
         setMarketSuppliers(sortInviteableSuppliers(marketResult.data.suppliers, projectData.zoneId));
       }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Erro ao carregar procurement");
+      setError(cause instanceof Error ? cause.message : "Não foi possível carregar as compras");
     } finally {
       setLoading(false);
     }
@@ -214,6 +231,7 @@ export default function ProjectProcurementPage() {
   const awaitingReceipt = orders.filter((o) => o.status === "aprovado");
   const rfqsReadyToCompare = openRfqs.filter((r) => (r.responseCount ?? 0) > 0);
   const hasShortage = requirements.length > 0 || (plan?.shortageTotal ?? 0) > 0;
+  const stage = stageForView(view);
 
   const nextStep = useMemo((): NextStep | null => {
     if (reqApproval.length) {
@@ -236,10 +254,10 @@ export default function ProjectProcurementPage() {
     }
     if (approvedForRfq.length && canRequest) {
       return {
-        title: "Abrir pedido de cotação (RFQ)",
+        title: "Pedir cotações",
         detail: `${approvedForRfq[0].reference} está aprovada. Convide fornecedores do marketplace com conta no Portal.`,
         view: "requisicoes",
-        actionLabel: "Abrir RFQ",
+        actionLabel: "Pedir preços",
         onAction: () => startRfq(approvedForRfq[0]),
       };
     }
@@ -255,9 +273,9 @@ export default function ProjectProcurementPage() {
     if (openRfqs.length) {
       return {
         title: "Aguardar propostas",
-        detail: `${openRfqs.length} RFQ(s) aberta(s). As respostas aparecem em Cotações.`,
+        detail: `${openRfqs.length} pedido(s) de cotação aguardam resposta dos fornecedores.`,
         view: "cotacoes",
-        actionLabel: "Ver RFQs",
+        actionLabel: "Ver cotações",
         onAction: () => setView("cotacoes"),
       };
     }
@@ -272,8 +290,8 @@ export default function ProjectProcurementPage() {
     }
     if (hasShortage && canRequest && requisitions.length === 0) {
       return {
-        title: "Criar requisição a partir das necessidades",
-        detail: "Há materiais em falta. Transforme a necessidade em requisição interna.",
+        title: "Preparar a próxima compra",
+        detail: "Há materiais em falta. Confirme as quantidades antes de pedir preços.",
         view: "necessidades",
         actionLabel: "Ver necessidades",
         onAction: () => setView("necessidades"),
@@ -396,7 +414,7 @@ export default function ProjectProcurementPage() {
       });
       setRfqOpen(false); setView("cotacoes"); await reload();
     } catch (cause) {
-      const message = cause instanceof Error ? cause.message : "Não foi possível abrir a RFQ";
+      const message = cause instanceof Error ? cause.message : "Não foi possível pedir as cotações";
       setRfqError(message);
       setError(message);
     } finally { setSaving(false); }
@@ -436,17 +454,17 @@ export default function ProjectProcurementPage() {
     try {
       await procurementApi.award(comparison.rfq.id, { decisionReason: awardReason, allocations });
       setComparisonOpen(false); setView("ordens"); await reload();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Não foi possível adjudicar a RFQ"); }
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Não foi possível escolher o fornecedor"); }
     finally { setSaving(false); }
   }
 
-  if (loading || !project) return <LoadingState fullScreen label="A carregar procurement..." />;
+  if (loading || !project) return <LoadingState fullScreen label="A carregar compras..." />;
 
   return (
     <Layout
-      title={`Procurement — ${project.name}`}
-      subtitle="Da necessidade da obra à ordem de compra, com rastreabilidade de ponta a ponta"
-      actions={<div className="flex items-center gap-2">{canRequest && <button type="button" className="btn btn-primary btn-sm" onClick={openManualRequisition}><IconPlus className="h-4 w-4" /> Nova requisição</button>}<Link className="btn btn-ghost btn-sm" to={`/projectos/${project.id}${faseQuery}`}><IconBack className="h-4 w-4" /> Projecto</Link></div>}
+      title={`Compras e stock — ${project.name}`}
+      subtitle="Comprar, receber e controlar materiais da obra"
+      actions={<div className="flex flex-wrap items-center gap-2">{canRequest && <button type="button" className="btn btn-primary btn-sm" onClick={openManualRequisition}><IconPlus className="h-4 w-4" /> Adicionar compra</button>}<Link className="btn btn-secondary btn-sm" to="/gestao/fornecedores">Fornecedores</Link><Link className="btn btn-ghost btn-sm" to={`/projectos/${project.id}${faseQuery}`}><IconBack className="h-4 w-4" /> Projecto</Link></div>}
     >
       <div className="mx-auto w-full max-w-[1500px] space-y-5">
         <ProjectWorkspaceNav projectId={project.id} />
@@ -454,10 +472,10 @@ export default function ProjectProcurementPage() {
         {marketLocked && <AlertBanner tone="warning">{marketLocked}</AlertBanner>}
 
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <MetricCard label="Por adquirir" value={money(plan?.shortageTotal ?? 0, project.currency)} note="Necessidade líquida prevista" />
-          <MetricCard label="Requisições por aprovar" value={reqApproval.length} tone={reqApproval.length ? "warning" : "neutral"} />
-          <MetricCard label="RFQs abertas" value={openRfqs.length} note="Processos competitivos" />
-          <MetricCard label="Ordens de compra" value={orders.length} note={`${orders.filter((o) => o.status === "aprovado").length} aprovadas`} />
+          <MetricCard label="Falta comprar" value={money(plan?.shortageTotal ?? 0, project.currency)} note="Materiais ainda não cobertos" />
+          <MetricCard label="Por aprovar" value={reqApproval.length} tone={reqApproval.length ? "warning" : "neutral"} />
+          <MetricCard label="Cotações abertas" value={openRfqs.length} note="Aguardam fornecedores" />
+          <MetricCard label="Por receber" value={awaitingReceipt.length} note="Pedidos já aprovados" />
         </div>
 
         {nextStep && (
@@ -467,35 +485,41 @@ export default function ProjectProcurementPage() {
               <p className="mt-1 text-sm font-semibold text-slate-900">{nextStep.title}</p>
               <p className="mt-1 text-sm text-slate-600">{nextStep.detail}</p>
             </div>
-            <div className="flex gap-2">
-              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setView(nextStep.view)}>Ir ao estágio</button>
-              {nextStep.onAction && nextStep.actionLabel && (
-                <button type="button" className="btn btn-primary btn-sm" onClick={nextStep.onAction}>{nextStep.actionLabel}</button>
-              )}
-            </div>
+            {nextStep.onAction && nextStep.actionLabel
+              ? <button type="button" className="btn btn-primary btn-sm" onClick={nextStep.onAction}>{nextStep.actionLabel}</button>
+              : <button type="button" className="btn btn-primary btn-sm" onClick={() => setView(nextStep.view)}>Continuar</button>}
           </section>
         )}
 
         <section className="card p-2">
-          <div className="grid gap-1 md:grid-cols-4 xl:grid-cols-8">
+          <div className="grid gap-1 sm:grid-cols-2 lg:grid-cols-5">
             {([
-              ["necessidades", "1. Necessidades", requirements.length],
-              ["requisicoes", "2. Requisições", requisitions.length],
-              ["cotacoes", "3. Cotações", rfqs.length],
-              ["ordens", "4. Ordens de compra", orders.length],
-              ["recepcoes", "5. Entregas e recepções", orders.filter((order) => order.status === "aprovado" || order.status === "recebido").length],
-              ["facturas", "6. Facturas e AP", null],
-              ["stock", "7. Stock", stock.length],
-              ["inteligencia", "8. Inteligência & Tesouraria", null],
-            ] as Array<[View, string, number | null]>).map(([id, label, count]) => (
-              <button key={id} type="button" onClick={() => { setView(id); setQuery(""); }} className={`flex items-center justify-between rounded-lg px-3 py-3 text-sm font-semibold ${view === id ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-100"}`}>
-                <span>{label}</span><span className={`rounded-full px-2 py-0.5 text-xs ${view === id ? "bg-white/15" : "bg-slate-100 text-slate-500"}`}>{count}</span>
+              ["comprar", "Comprar", requirements.length + requisitions.length],
+              ["cotacoes", "Cotações", rfqs.length],
+              ["pedidos", "Pedidos e entregas", orders.length],
+              ["stock", "Stock", stock.length],
+              ["controlo", "Pagamentos e análise", null],
+            ] as Array<[Stage, string, number | null]>).map(([id, label, count]) => (
+              <button key={id} type="button" onClick={() => { setView(STAGE_DEFAULT_VIEW[id]); setQuery(""); }} className={`flex items-center justify-between rounded-lg px-3 py-3 text-sm font-semibold ${stage === id ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-100"}`}>
+                <span>{label}</span>{count !== null && <span className={`rounded-full px-2 py-0.5 text-xs ${stage === id ? "bg-white/15" : "bg-slate-100 text-slate-500"}`}>{count}</span>}
               </button>
             ))}
           </div>
+          {stage === "comprar" && <div className="mt-2 flex gap-1 border-t border-slate-100 pt-2">
+            <button type="button" className={`rounded-md px-3 py-2 text-xs font-semibold ${view === "necessidades" ? "bg-brand-50 text-brand-800" : "text-slate-500 hover:bg-slate-50"}`} onClick={() => setView("necessidades")}>A comprar ({requirements.length})</button>
+            <button type="button" className={`rounded-md px-3 py-2 text-xs font-semibold ${view === "requisicoes" ? "bg-brand-50 text-brand-800" : "text-slate-500 hover:bg-slate-50"}`} onClick={() => setView("requisicoes")}>Aprovações ({requisitions.length})</button>
+          </div>}
+          {stage === "pedidos" && <div className="mt-2 flex flex-wrap gap-1 border-t border-slate-100 pt-2">
+            <button type="button" className={`rounded-md px-3 py-2 text-xs font-semibold ${view === "ordens" ? "bg-brand-50 text-brand-800" : "text-slate-500 hover:bg-slate-50"}`} onClick={() => setView("ordens")}>Pedidos ({orders.length})</button>
+            <button type="button" className={`rounded-md px-3 py-2 text-xs font-semibold ${view === "recepcoes" ? "bg-brand-50 text-brand-800" : "text-slate-500 hover:bg-slate-50"}`} onClick={() => setView("recepcoes")}>Receber ({awaitingReceipt.length})</button>
+          </div>}
+          {stage === "controlo" && <div className="mt-2 flex gap-1 border-t border-slate-100 pt-2">
+            <button type="button" className={`rounded-md px-3 py-2 text-xs font-semibold ${view === "inteligencia" ? "bg-brand-50 text-brand-800" : "text-slate-500 hover:bg-slate-50"}`} onClick={() => setView("inteligencia")}>Análise</button>
+            <button type="button" className={`rounded-md px-3 py-2 text-xs font-semibold ${view === "facturas" ? "bg-brand-50 text-brand-800" : "text-slate-500 hover:bg-slate-50"}`} onClick={() => setView("facturas")}>Pagamentos</button>
+          </div>}
         </section>
 
-        {view !== "inteligencia" && <section className="card p-4"><PageSearch value={query} onChange={setQuery} placeholder="Pesquisar neste estágio do procurement…" resultLabel="" /></section>}
+        {view !== "inteligencia" && view !== "facturas" && <section className="card p-3"><PageSearch value={query} onChange={setQuery} placeholder="Pesquisar materiais, pedidos ou fornecedores…" resultLabel="" /></section>}
 
         {view === "necessidades" && (
           <section className="card overflow-hidden">
@@ -504,9 +528,9 @@ export default function ProjectProcurementPage() {
               <div className="p-5">
                 <EmptyState
                   title={needle ? "Nenhum material corresponde à pesquisa" : "Sem necessidades por adquirir"}
-                  detail={needle ? "Limpe a pesquisa ou escolha outro termo." : "Quando o plano indicar faltas, pode criar requisições a partir daqui."}
+                  detail={needle ? "Limpe a pesquisa ou escolha outro termo." : "Quando houver materiais em falta, prepare a compra a partir daqui."}
                 >
-                  {canRequest && <button type="button" className="btn btn-secondary btn-sm" onClick={openManualRequisition}>Nova requisição manual</button>}
+                  {canRequest && <button type="button" className="btn btn-secondary btn-sm" onClick={openManualRequisition}>Adicionar compra manual</button>}
                 </EmptyState>
               </div>
             ) : (
@@ -515,7 +539,7 @@ export default function ProjectProcurementPage() {
                   <article key={item.materialId} className="bg-white p-5">
                     <div className="flex items-start justify-between gap-3"><div><strong>{item.materialName}</strong><p className="mt-1 text-xs text-slate-500">{item.phases.map((p) => p.label).join(" · ")}</p></div><span className="badge badge-brand">{item.suggestedOrderQty.toLocaleString("pt-MZ")} {item.unit}</span></div>
                     <div className="mt-4 grid grid-cols-3 gap-2 rounded-lg bg-slate-50 p-3 text-xs"><div><span className="text-slate-500">Saldo restante</span><strong className="block">{item.requiredQty.toLocaleString("pt-MZ")} {item.unit}</strong><small className="text-slate-400">BOQ {(item.designQty ?? item.requiredQty).toLocaleString("pt-MZ")} − exec. {(item.executedQty ?? 0).toLocaleString("pt-MZ")}</small></div><div><span className="text-slate-500">Coberto</span><strong className="block">{(item.stockQty + item.orderedQty).toLocaleString("pt-MZ")} {item.unit}</strong></div><div><span className="text-slate-500">Comprar</span><strong className="block text-orange-700">{item.suggestedOrderQty.toLocaleString("pt-MZ")} {item.unit}</strong></div></div>
-                    <div className="mt-4 flex items-center justify-between gap-3"><div className="text-xs text-slate-500">{item.requiredByDate ? <>Necessário até <strong>{dateLabel(item.requiredByDate)}</strong></> : "Sem data crítica definida"}</div>{canRequest && <button className="btn btn-primary btn-sm" type="button" onClick={() => addRequirementToRequisition(item)}><IconPlus className="h-4 w-4" /> Requisitar</button>}</div>
+                    <div className="mt-4 flex flex-wrap items-center justify-between gap-3"><div className="text-xs text-slate-500">{item.requiredByDate ? <>Necessário até <strong>{dateLabel(item.requiredByDate)}</strong></> : "Sem data crítica definida"}</div>{canRequest && <button className="btn btn-primary btn-sm" type="button" onClick={() => addRequirementToRequisition(item)}><IconPlus className="h-4 w-4" /> Preparar compra</button>}</div>
                   </article>
                 ))}
               </div>
@@ -525,22 +549,22 @@ export default function ProjectProcurementPage() {
 
         {view === "requisicoes" && (
           <section className="space-y-3">
-            <SectionHeader title="Requisições internas" description="O pedido da obra é aprovado antes de contactar o mercado" />
+            <SectionHeader title="Aprovações de compra" description="Confirme internamente antes de pedir preços aos fornecedores" />
             {visibleReqs.length === 0 ? (
               <EmptyState
-                title="Ainda não há requisições"
-                detail="Crie a partir das necessidades da obra ou adicione uma requisição manual."
+                title="Ainda não há compras para aprovar"
+                detail="Prepare uma compra com os materiais necessários ou adicione-a manualmente."
               >
                 {canRequest && (
                   <>
                     <button type="button" className="btn btn-primary btn-sm" onClick={() => setView("necessidades")}>Ver necessidades</button>
-                    <button type="button" className="btn btn-secondary btn-sm" onClick={openManualRequisition}>Nova requisição</button>
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={openManualRequisition}>Adicionar manualmente</button>
                   </>
                 )}
               </EmptyState>
             ) : visibleReqs.map((req) => (
               <article key={req.id} className="card p-5">
-                <div className="flex flex-wrap items-start justify-between gap-3"><div><div className="flex items-center gap-2"><strong className="text-base">{req.reference}</strong><span className="badge badge-gray">{REQ_LABEL[req.status]}</span><span className="badge badge-gray">{req.priority}</span></div><p className="mt-1 text-xs text-slate-500">Necessário até {dateLabel(req.requiredByDate)} · {req.lines.length} item(ns)</p></div><div className="flex gap-2">{req.status === "rascunho" && canRequest && <button className="btn btn-secondary btn-sm" onClick={() => submitReq(req)}>Submeter</button>}{req.status === "submetida" && canApprove && <button className="btn btn-primary btn-sm" onClick={() => approveReq(req)}>Aprovar</button>}{req.status === "aprovada" && canRequest && <button className="btn btn-primary btn-sm" onClick={() => startRfq(req)}>Abrir RFQ</button>}</div></div>
+                <div className="flex flex-wrap items-start justify-between gap-3"><div><div className="flex flex-wrap items-center gap-2"><strong className="text-base">{req.reference}</strong><span className="badge badge-gray">{REQ_LABEL[req.status]}</span><span className="badge badge-gray">{req.priority}</span></div><p className="mt-1 text-xs text-slate-500">Necessário até {dateLabel(req.requiredByDate)} · {req.lines.length} item(ns)</p></div><div className="flex flex-wrap gap-2">{req.status === "rascunho" && canRequest && <button className="btn btn-secondary btn-sm" onClick={() => submitReq(req)}>Enviar para aprovação</button>}{req.status === "submetida" && canApprove && <button className="btn btn-primary btn-sm" onClick={() => approveReq(req)}>Aprovar</button>}{req.status === "aprovada" && canRequest && <button className="btn btn-primary btn-sm" onClick={() => startRfq(req)}>Pedir preços</button>}</div></div>
                 <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">{req.lines.map((line) => <div key={line.id} className="rounded-lg border border-slate-200 p-3 text-sm"><strong>{line.materialName}</strong><span className="ml-2 text-slate-500">{Number(line.requestedQty).toLocaleString("pt-MZ")} {line.unit}</span>{line.specification && <p className="mt-1 text-xs text-slate-500">{line.specification}</p>}</div>)}</div>
               </article>
             ))}
@@ -549,13 +573,13 @@ export default function ProjectProcurementPage() {
 
         {view === "cotacoes" && (
           <section className="space-y-3">
-            <SectionHeader title="RFQs multi-fornecedor" description="Todos os convidados respondem ao mesmo âmbito; o comparativo usa apenas propostas submetidas" />
+            <SectionHeader title="Cotações" description="Compare os fornecedores que responderam e escolha a melhor proposta" />
             {visibleRfqs.length === 0 ? (
               <EmptyState
-                title="Nenhuma RFQ nesta obra"
-                detail="Aprove uma requisição e abra um pedido de cotação com fornecedores do marketplace."
+                title="Ainda não há pedidos de cotação"
+                detail="Aprove uma compra e envie os mesmos itens aos fornecedores para comparar preços."
               >
-                <button type="button" className="btn btn-primary btn-sm" onClick={() => setView("requisicoes")}>Ir a requisições</button>
+                <button type="button" className="btn btn-primary btn-sm" onClick={() => setView("requisicoes")}>Ver aprovações</button>
               </EmptyState>
             ) : visibleRfqs.map((rfq) => (
               <article key={rfq.id} className="card p-5">
@@ -574,11 +598,11 @@ export default function ProjectProcurementPage() {
 
         {view === "ordens" && (
           <section className="space-y-3">
-            <SectionHeader title="Ordens de compra" description="As adjudicações geram OCs sem redigitar fornecedor, quantidade ou preço" />
+            <SectionHeader title="Pedidos aos fornecedores" description="Criados automaticamente depois de escolher uma cotação" />
             {visibleOrders.length === 0 ? (
               <EmptyState
-                title="Ainda sem ordens de compra"
-                detail="Depois de adjudicar uma RFQ, as OCs aparecem aqui automaticamente."
+                title="Ainda não há pedidos aos fornecedores"
+                detail="Depois de escolher um fornecedor, o pedido de compra aparece aqui automaticamente."
               >
                 <button type="button" className="btn btn-secondary btn-sm" onClick={() => setView("cotacoes")}>Ver cotações</button>
               </EmptyState>
@@ -616,7 +640,7 @@ export default function ProjectProcurementPage() {
                   title={needle ? "Nenhum material no stock corresponde à pesquisa" : "Stock vazio nesta obra"}
                   detail={
                     hasShortage
-                      ? "O saldo só é actualizado depois de confirmar a recepção de materiais. Enquanto houver necessidade, continue o fluxo Necessidades → RFQ → OC → Recepção."
+                      ? "O stock actualiza quando a entrega é confirmada. Existem materiais por comprar ou receber."
                       : "Quando houver entradas de material, o saldo aparece aqui."
                   }
                 >
@@ -644,7 +668,7 @@ export default function ProjectProcurementPage() {
       </div>
 
       {reqOpen && (
-        <Modal onClose={() => setReqOpen(false)} title="Nova requisição de compra" maxWidth="max-w-4xl">
+        <Modal onClose={() => setReqOpen(false)} title="Preparar compra" maxWidth="max-w-4xl">
           <div className="space-y-4">
             <div className="grid gap-3 md:grid-cols-2">
               <label><span className="label">Prioridade</span><select className="input" value={reqPriority} onChange={(e) => setReqPriority(e.target.value as PurchaseRequisition["priority"])}><option value="baixa">Baixa</option><option value="normal">Normal</option><option value="alta">Alta</option><option value="urgente">Urgente</option></select></label>
@@ -656,7 +680,7 @@ export default function ProjectProcurementPage() {
                 <select className="input flex-1" value={manualMaterialId} onChange={(e) => setManualMaterialId(e.target.value)}>{catalogMaterials.map((material) => <option key={material.id} value={material.id}>{material.name} · {material.unit}</option>)}</select>
                 <button type="button" className="btn btn-secondary" onClick={addManualMaterial}>Adicionar</button>
               </div>
-              <p className="mt-1 text-xs text-slate-500">Materiais fora da necessidade automática podem ser requisitados, mas devem ser justificados.</p>
+              <p className="mt-1 text-xs text-slate-500">Use esta opção apenas para materiais que não aparecem na lista automática.</p>
             </div>
             <div className="space-y-2">
               {reqLines.map((line, index) => (
@@ -673,7 +697,7 @@ export default function ProjectProcurementPage() {
             <label><span className="label">Justificação / contexto da obra</span><textarea className="input min-h-24" value={reqJustification} onChange={(e) => setReqJustification(e.target.value)} /></label>
             <div className="flex justify-end gap-2">
               <button className="btn btn-secondary" onClick={() => setReqOpen(false)}>Cancelar</button>
-              <button className="btn btn-primary" disabled={saving || !reqLines.length} onClick={createRequisition}>Criar requisição</button>
+              <button className="btn btn-primary" disabled={saving || !reqLines.length} onClick={createRequisition}>Guardar compra</button>
             </div>
           </div>
         </Modal>
@@ -713,7 +737,7 @@ export default function ProjectProcurementPage() {
                       {rfqSupplierQuery.trim() ? "Nenhum fornecedor corresponde à pesquisa" : "Nenhum fornecedor convidável encontrado"}
                     </p>
                     <p className="mt-2">
-                      As RFQs formais só podem ir a fornecedores do marketplace nacional com conta activa no Portal do Fornecedor
+                      Apenas fornecedores activos no SIGO podem receber este pedido
                       {project.zoneId ? " (todas as zonas; os da zona da obra aparecem primeiro)" : ""}.
                     </p>
                     <Link to="/gestao/fornecedores" className="mt-3 inline-block text-sm font-semibold text-brand-700 hover:underline">
@@ -767,7 +791,7 @@ export default function ProjectProcurementPage() {
                 disabled={saving || Boolean(marketLocked) || !rfqTitle || !rfqDeadline || !rfqSupplierIds.length || (rfqSupplierIds.length === 1 && !singleSourceReason.trim())}
                 onClick={createRfq}
               >
-                Enviar RFQ a {rfqSupplierIds.length} fornecedor(es)
+                Pedir preço a {rfqSupplierIds.length} fornecedor(es)
               </button>
             </div>
           </div>
@@ -775,7 +799,7 @@ export default function ProjectProcurementPage() {
       )}
 
       {comparisonOpen && (
-        <Modal onClose={() => setComparisonOpen(false)} title={`Comparativo — ${comparison?.rfq.reference ?? "RFQ"}`} maxWidth="max-w-7xl">
+        <Modal onClose={() => setComparisonOpen(false)} title={`Comparar cotações — ${comparison?.rfq.reference ?? "Pedido"}`} maxWidth="max-w-7xl">
           {comparison && (
             <div className="space-y-5">
               <div>
@@ -864,7 +888,7 @@ export default function ProjectProcurementPage() {
               </label>
               <div className="flex justify-end gap-2">
                 <button className="btn btn-secondary" onClick={() => setComparisonOpen(false)}>Fechar</button>
-                <button className="btn btn-primary" disabled={saving || awardReason.trim().length < 8} onClick={awardRfq}>Adjudicar e gerar OC</button>
+                <button className="btn btn-primary" disabled={saving || awardReason.trim().length < 8} onClick={awardRfq}>Escolher e criar pedido</button>
               </div>
             </div>
           )}

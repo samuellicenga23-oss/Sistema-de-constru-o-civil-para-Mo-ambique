@@ -134,6 +134,32 @@ function containsBudgetMatch(items: LineItemNode[], needle: string): boolean {
   );
 }
 
+function normalizePlantKey(value: string | null | undefined) {
+  return (value ?? "").normalize("NFD").replace(/\p{Diacritic}/gu, "").trim().toLocaleLowerCase("pt");
+}
+
+function mergePlantRooms(groups: ExtractedRoom[][]): ExtractedRoom[] {
+  const seen = new Set<string>();
+  return groups.flat().filter((room) => {
+    const key = [normalizePlantKey(room.floor), normalizePlantKey(room.name), normalizePlantKey(room.number), Number(room.areaM2).toFixed(2)].join("|");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function mergePlantOpenings(groups: ExtractedOpening[][]): ExtractedOpening[] {
+  const seen = new Set<string>();
+  return groups.flat().filter((opening) => {
+    const key = opening.code?.trim()
+      ? [opening.kind, normalizePlantKey(opening.floor), normalizePlantKey(opening.code)].join("|")
+      : `uncoded:${opening.id}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 export default function BudgetDocumentPage() {
   const { user } = useAuth();
   const canManageCommercial = can(user, "escritorio.gerir");
@@ -148,6 +174,7 @@ export default function BudgetDocumentPage() {
   const [newSectionName, setNewSectionName] = useState("");
   const [addingIn, setAddingIn] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [errorBlockers, setErrorBlockers] = useState<string[]>([]);
   const [showWizard, setShowWizard] = useState(false);
   const [showReport, setShowReport] = useState(false);
   const [showMaterialsByPhase, setShowMaterialsByPhase] = useState(false);
@@ -237,7 +264,10 @@ export default function BudgetDocumentPage() {
         ]);
         setCompositions(c);
         setDashboard(d);
-        const processed = plants.filter((p) => p.processingStatus === "concluido");
+        const processed = plants.filter((p) =>
+          p.processingStatus === "concluido"
+          && (!p.documentAnalysis?.requiresIdentityConfirmation || p.documentAnalysis.identityConfirmed),
+        );
         const newestFirst = [...processed].reverse();
 
         // A planta estrutural é escolhida pelo que ela TEM (resumo estrutural real), não só
@@ -250,20 +280,17 @@ export default function BudgetDocumentPage() {
           newestFirst.find((p) => p.structuralSummary);
         setStructuralPlant(structural ?? null);
 
-        // Idem para compartimentos: procura em TODAS as plantas processadas (não só nas
-        // etiquetadas "arquitectura") a primeira que realmente tenha compartimentos extraídos —
-        // evita que uma planta sem compartimentos (ex: um projecto estrutural mal etiquetado,
-        // que o `.find` anterior escolhia por ser a primeira "arquitectura" da lista) bloqueie a
-        // procura antes de chegar à planta que os tem mesmo.
-        for (const p of newestFirst) {
-          const detail = await plantsApi.detail(p.id);
-          if (detail.rooms.length > 0) {
-            setArchitecturePlant(p);
-            setArchitectureRooms(detail.rooms);
-            setArchitectureOpenings(detail.openings);
-            break;
-          }
-        }
+        // Um projecto pode distribuir pisos e mapas de vãos por vários PDFs. Consolidar todos
+        // os ficheiros válidos evita que o primeiro PDF com salas esconda portas/janelas que só
+        // aparecem noutra prancha ou num mapa separado.
+        const plantDetails = await Promise.all(newestFirst.map(async (plant) => ({ plant, detail: await plantsApi.detail(plant.id) })));
+        const architectural = plantDetails.filter(({ detail }) => detail.rooms.length > 0 || detail.openings.length > 0);
+        const needsOpeningReview = architectural.find(({ detail }) => detail.openings.some((opening) =>
+          opening.needsConfirmation || !opening.widthM || !opening.heightM || opening.location === "desconhecida",
+        ));
+        setArchitecturePlant(needsOpeningReview?.plant ?? architectural[0]?.plant ?? null);
+        setArchitectureRooms(mergePlantRooms(architectural.map(({ detail }) => detail.rooms)));
+        setArchitectureOpenings(mergePlantOpenings(architectural.map(({ detail }) => detail.openings)));
       })
       .catch((err) => setError(err.message))
       .finally(() => setPlantContextLoading(false));
@@ -540,11 +567,13 @@ export default function BudgetDocumentPage() {
     if (!ok) return;
     setChangingStatus(true);
     setError(null);
+    setErrorBlockers([]);
     try {
       await boqApi.updateBudgetDocumentStatus(documentId, status);
       await reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao actualizar o estado do documento");
+      setErrorBlockers(err instanceof ApiError ? err.details?.blockers ?? [] : []);
     } finally {
       setChangingStatus(false);
     }
@@ -925,7 +954,18 @@ export default function BudgetDocumentPage() {
 
         {/* Coluna principal: secções e itens */}
         <div className="min-w-0 space-y-5">
-          {error && <AlertBanner tone="error" onDismiss={() => setError(null)}>{error}</AlertBanner>}
+          {error && (
+            <AlertBanner tone="error" onDismiss={() => { setError(null); setErrorBlockers([]); }}>
+              <div>
+                <p className="font-semibold">{error}</p>
+                {errorBlockers.length > 0 && (
+                  <ul className="mt-2 list-disc space-y-1 pl-5 text-xs">
+                    {errorBlockers.map((blocker) => <li key={blocker}>{blocker}</li>)}
+                  </ul>
+                )}
+              </div>
+            </AlertBanner>
+          )}
 
           {isMeasurementDocument && !isReadOnly && (
             <section className="card overflow-hidden border-l-4 border-l-brand-500">

@@ -2,6 +2,7 @@ import { eq, and, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { budgetSections, lineItems, measurementLines, budgetDocuments } from "../db/schema.js";
 import { STANDARD_CHAPTERS } from "./boqTemplate.js";
+import { computeSlabRebarWeightLines, DEFAULT_SLAB_LAP_FACTOR, rebarWeightPerMeter } from "@sigo/shared";
 
 // Motor de estimativa rápida de medições: a partir de parâmetros simples do edifício
 // (pisos, pé-direito, perímetro, lista de compartimentos), calcula quantidades aproximadas
@@ -15,7 +16,14 @@ import { STANDARD_CHAPTERS } from "./boqTemplate.js";
 
 export type RoomInput = { name: string; type: "seco" | "humido"; length: number; width: number; perimeterM?: number };
 export type FloorInput = { label?: string; ceilingHeight: number; perimeter: number; rooms: RoomInput[] };
-export type FloorSlabInput = { label: string; areaM2: number; thicknessM: number };
+export type SlabRebarLayerInput = { xDiameterMm: number; xSpacingCm: number; yDiameterMm: number; ySpacingCm: number };
+export type FloorSlabInput = {
+  label: string;
+  areaM2: number;
+  thicknessM: number;
+  topRebar?: SlabRebarLayerInput | null;
+  bottomRebar?: SlabRebarLayerInput | null;
+};
 export type OpeningInput = {
   kind: "porta" | "janela";
   widthM: number;
@@ -125,6 +133,9 @@ export type QuickEstimateInput = {
   beamConcreteVolumeM3?: number; // idem, calculado a partir do comprimento×secção reais das vigas
   floorSlabThicknessM?: number; // compatibilidade com medições antigas de espessura única
   floorSlabs?: FloorSlabInput[]; // cada laje física mantém área e espessura próprias
+  pavementReinforcement?: "bars_6_20" | "welded_mesh" | "none";
+  foundationMembrane?: boolean;
+  groundBeam?: { enabled: boolean; lengthM?: number; longitudinalBars?: number; diameterMm?: number };
   openings?: OpeningInput[];
   hydraulic?: HydraulicInput;
   // Opcional: só quando o projecto usa saneamento autónomo (sem ligação à rede pública de
@@ -239,7 +250,58 @@ export function computeQuantities(input: QuickEstimateInput) {
   // edifícios residenciais correntes em betão armado — ajustar depois item a item.
   const concreteVolume = totalBuiltArea * 0.12;
   const concreteStructural = concreteVolume * 0.95;
-  const steelWeight = input.steelWeightKg ?? concreteStructural * 80;
+  const detailedSlabSteelLines = (input.floorSlabs ?? []).flatMap((slab) => {
+    const layers = [
+      slab.bottomRebar ? {
+        label: `${slab.label} inferior`,
+        directions: [
+          { role: "X", diameterMm: slab.bottomRebar.xDiameterMm, spacingCm: slab.bottomRebar.xSpacingCm },
+          { role: "Y", diameterMm: slab.bottomRebar.yDiameterMm, spacingCm: slab.bottomRebar.ySpacingCm },
+        ],
+      } : null,
+      slab.topRebar ? {
+        label: `${slab.label} superior`,
+        directions: [
+          { role: "X", diameterMm: slab.topRebar.xDiameterMm, spacingCm: slab.topRebar.xSpacingCm },
+          { role: "Y", diameterMm: slab.topRebar.yDiameterMm, spacingCm: slab.topRebar.ySpacingCm },
+        ],
+      } : null,
+    ].filter((layer): layer is NonNullable<typeof layer> => layer !== null);
+    return computeSlabRebarWeightLines({ areaM2: slab.areaM2, layers, lapFactor: DEFAULT_SLAB_LAP_FACTOR });
+  });
+  const detailedSlabSteelWeight = detailedSlabSteelLines.reduce((sum, line) => sum + line.weightKg, 0);
+
+  // Pavimento térreo: premissa de orçamento, não dimensionamento estrutural. O utilizador
+  // escolhe varão Ø6/20 nas duas direcções, malha electrossoldada ou nenhuma armadura.
+  const pavementReinforcement = input.pavementReinforcement ?? "bars_6_20";
+  const pavementBarLines = pavementReinforcement === "bars_6_20"
+    ? computeSlabRebarWeightLines({
+        areaM2: groundFloorArea,
+        layers: [{
+          label: "pavimento térreo",
+          directions: [
+            { role: "X", diameterMm: 6, spacingCm: 20 },
+            { role: "Y", diameterMm: 6, spacingCm: 20 },
+          ],
+        }],
+        lapFactor: DEFAULT_SLAB_LAP_FACTOR,
+      })
+    : [];
+  const pavementBarWeight = pavementBarLines.reduce((sum, line) => sum + line.weightKg, 0);
+  const groundBeamEnabled = input.groundBeam?.enabled ?? true;
+  const groundBeamLengthM = input.groundBeam?.lengthM ?? groundFloor.perimeter;
+  const groundBeamBars = input.groundBeam?.longitudinalBars ?? 4;
+  const groundBeamDiameterMm = input.groundBeam?.diameterMm ?? 8;
+  const groundBeamLongitudinalWeight = groundBeamEnabled
+    ? groundBeamLengthM * groundBeamBars * rebarWeightPerMeter(groundBeamDiameterMm) * DEFAULT_SLAB_LAP_FACTOR
+    : 0;
+  const genericStructuralSteelWeight = concreteStructural * 80;
+  // Quando só a armadura das lajes foi lida, ela funciona como mínimo auditável;
+  // os restantes elementos continuam cobertos pela estimativa global até existir mapa de aço.
+  const estimatedSteelBase = Math.max(genericStructuralSteelWeight, detailedSlabSteelWeight);
+  // Um mapa de aço explícito já representa o projecto completo e nunca recebe acréscimos
+  // silenciosos. As premissas de pavimento/viga só complementam a estimativa sem mapa.
+  const steelWeight = input.steelWeightKg ?? estimatedSteelBase + pavementBarWeight + groundBeamLongitudinalWeight;
   const formworkArea = concreteStructural * 6;
   // Vigas: quando há dados reais do projecto estrutural (comprimento × secção de cada vão),
   // usa-se esse volume directamente em vez do rácio genérico.
@@ -318,7 +380,7 @@ export function computeQuantities(input: QuickEstimateInput) {
     "2.3": input.backfillEarthVolumeM3 ?? groundFloorArea * 0.5,
     // Enrocamento é m³: área × espessura típica do leito (15 cm sob pavimento/fundações).
     "2.4": groundFloorArea * 0.15,
-    "2.5": groundFloorArea,
+    "2.5": input.foundationMembrane === false ? 0 : groundFloorArea,
 
     "3.1": footingConcreteVolume * 0.15,
     "3.2": footingConcreteVolume,
@@ -326,7 +388,7 @@ export function computeQuantities(input: QuickEstimateInput) {
     "3.4": beamConcreteVolume,
     "3.5": slabConcreteVolume,
     "3.6": steelWeight,
-    "3.7": roofType_isFlat(roofType) ? roofArea : 0,
+    "3.7": pavementReinforcement === "welded_mesh" ? groundFloorArea * DEFAULT_SLAB_LAP_FACTOR : 0,
     "3.8": input.formworkAreaM2 ?? formworkArea,
 
     "4.1": totalExteriorWallArea,
@@ -398,7 +460,14 @@ export function computeQuantities(input: QuickEstimateInput) {
     "estimativa",
     `Área do piso térreo (${fmt(groundFloorArea)} m²) × 0.15 m (espessura típica do leito de enrocamento)`,
   );
-  push("2.5", byCode["2.5"], "medido", `Área do piso térreo (${fmt(groundFloorArea)} m²)`);
+  push(
+    "2.5",
+    byCode["2.5"],
+    input.foundationMembrane === false ? "medido" : "estimativa",
+    input.foundationMembrane === false
+      ? "Membrana desactivada pelo utilizador"
+      : `Área do piso térreo (${fmt(groundFloorArea)} m²) — plástico/membrana sob o pavimento como premissa confirmável`,
+  );
 
   push("3.1", byCode["3.1"], footingSource, `Volume de betão de fundação (${fmt(footingConcreteVolume)} m³) × 0.15 (rácio genérico de betão de limpeza)`);
   push("3.2", byCode["3.2"], footingSource, footingFormula);
@@ -434,13 +503,22 @@ export function computeQuantities(input: QuickEstimateInput) {
     steelSource,
     steelSource === "real"
       ? `Peso total de aço indicado ou confirmado no Assistente de Medições: ${fmt(steelWeight)} kg`
-      : `Volume estrutural de betão (${fmt(concreteStructural)} m³) × 80 kg/m³ (rácio genérico de aço — sem planta estrutural com resumo de peso)`
+      : [
+          `Estimativa estrutural base: ${fmt(estimatedSteelBase)} kg`,
+          detailedSlabSteelWeight > 0 ? `armadura de lajes lida: ${fmt(detailedSlabSteelWeight)} kg (mínimo auditável)` : "armadura de lajes sem mapa completo",
+          pavementReinforcement === "bars_6_20" ? `pavimento Ø6/20 X+Y: ${fmt(pavementBarWeight)} kg` : "pavimento sem varão avulso",
+          groundBeamEnabled ? `viga de pavimento ${groundBeamBars}Ø${groundBeamDiameterMm}: ${fmt(groundBeamLongitudinalWeight)} kg em ${fmt(groundBeamLengthM)} m (sem estribos não especificados)` : "viga de pavimento desactivada",
+        ].join("; ")
   );
   push(
     "3.7",
     byCode["3.7"],
-    "medido",
-    roofType_isFlat(roofType) ? roofFormula : "Cobertura leve (chapa metálica) — não leva malhasol"
+    pavementReinforcement === "welded_mesh" ? "estimativa" : "medido",
+    pavementReinforcement === "welded_mesh"
+      ? `Área do pavimento térreo (${fmt(groundFloorArea)} m²) × ${DEFAULT_SLAB_LAP_FACTOR.toFixed(2)} para recortes/sobreposição`
+      : pavementReinforcement === "bars_6_20"
+        ? "Pavimento armado com varão Ø6/20 em X+Y; quantidade incluída no aço A400"
+        : "Pavimento sem malha seleccionada",
   );
   push(
     "3.8",

@@ -8,8 +8,23 @@ import ModalPortal from "./ModalPortal";
 
 type RoomForm = { key: string; name: string; type: "seco" | "humido"; length: string; width: string; perimeterM?: string; areaOnly?: boolean };
 type FloorForm = { key: string; label?: string; ceilingHeight: string; perimeter: string; rooms: RoomForm[] };
-type SlabForm = { key: string; label: string; areaM2: string; thicknessM: string; source: "planta" | "manual" };
-type OpeningForm = { key: string; kind: "porta" | "janela"; code: string; widthM: string; heightM: string; quantity: string; location: "interior" | "exterior" | "desconhecida"; confirmed: boolean };
+type SlabRebarForm = { xDiameterMm: string; xSpacingCm: string; yDiameterMm: string; ySpacingCm: string };
+type SlabForm = {
+  key: string;
+  label: string;
+  areaM2: string;
+  thicknessM: string;
+  source: "planta" | "manual";
+  topRebar: SlabRebarForm | null;
+  bottomRebar: SlabRebarForm | null;
+  topSteelWeightKg: number;
+  bottomSteelWeightKg: number;
+  steelByDiameter: Record<string, number>;
+  concreteClass: string;
+  steelGrade: string;
+  coverCm: string;
+};
+type OpeningForm = { key: string; kind: "porta" | "janela"; code: string; designation: string; floor: string; widthM: string; heightM: string; quantity: string; location: "interior" | "exterior" | "desconhecida"; confirmed: boolean };
 
 const UNASSIGNED_FLOOR = "Piso não identificado";
 
@@ -145,6 +160,20 @@ function initialSlabs(floors: FloorForm[], summary?: StructuralSummary | null): 
         areaM2: slab.areaM2 ? slab.areaM2.toFixed(2) : floorFormArea(matchingFloor ?? fallbackFloor).toFixed(2),
         thicknessM: (slab.thicknessCm / 100).toFixed(2),
         source: "planta",
+        topRebar: slab.topRebar ? {
+          xDiameterMm: String(slab.topRebar.xDiameterMm), xSpacingCm: String(slab.topRebar.xSpacingCm),
+          yDiameterMm: String(slab.topRebar.yDiameterMm), ySpacingCm: String(slab.topRebar.ySpacingCm),
+        } : null,
+        bottomRebar: slab.bottomRebar ? {
+          xDiameterMm: String(slab.bottomRebar.xDiameterMm), xSpacingCm: String(slab.bottomRebar.xSpacingCm),
+          yDiameterMm: String(slab.bottomRebar.yDiameterMm), ySpacingCm: String(slab.bottomRebar.ySpacingCm),
+        } : null,
+        topSteelWeightKg: slab.topSteelWeightKg ?? 0,
+        bottomSteelWeightKg: slab.bottomSteelWeightKg ?? 0,
+        steelByDiameter: slab.steelByDiameter ?? {},
+        concreteClass: slab.concreteClass ?? "",
+        steelGrade: slab.steelGrade ?? "",
+        coverCm: slab.coverCm != null ? String(slab.coverCm) : "",
       };
     });
   }
@@ -248,6 +277,8 @@ export default function QuickEstimateWizard({
     key: opening.id,
     kind: opening.kind,
     code: opening.code ?? "",
+    designation: opening.designation ?? "",
+    floor: opening.floor ?? UNASSIGNED_FLOOR,
     widthM: opening.widthM ?? "",
     heightM: opening.heightM ?? "",
     quantity: String(opening.quantity),
@@ -258,6 +289,10 @@ export default function QuickEstimateWizard({
     structuralSummary?.totalSteelWeightKg ? structuralSummary.totalSteelWeightKg.toFixed(2) : ""
   );
   const [concreteClass, setConcreteClass] = useState<"B20" | "B25" | "B30">("B25");
+  const [pavementReinforcement, setPavementReinforcement] = useState<"bars_6_20" | "welded_mesh" | "none">("bars_6_20");
+  const [foundationMembrane, setFoundationMembrane] = useState(true);
+  const [groundBeamEnabled, setGroundBeamEnabled] = useState(true);
+  const [groundBeamLengthM, setGroundBeamLengthM] = useState("");
   const [roofType, setRoofType] = useState<RoofType>("laje_plana");
   const [roofArea, setRoofArea] = useState("");
   const [roofAreaTouched, setRoofAreaTouched] = useState(false);
@@ -353,7 +388,12 @@ export default function QuickEstimateWizard({
   function addFloor() {
     const floor = newFloor();
     setFloors((fs) => [...fs, floor]);
-    setFloorSlabs((slabs) => [...slabs, { key: nextKey(), label: `Laje ${slabs.length + 1}`, areaM2: "", thicknessM: "", source: "manual" }]);
+    setFloorSlabs((slabs) => [...slabs, {
+      key: nextKey(), label: `Laje ${slabs.length + 1}`, areaM2: "", thicknessM: "", source: "manual",
+      topRebar: null, bottomRebar: null,
+      topSteelWeightKg: 0, bottomSteelWeightKg: 0, steelByDiameter: {},
+      concreteClass: "", steelGrade: "", coverCm: "",
+    }]);
   }
   function removeFloor(key: string) {
     setFloors((fs) => (fs.length > 1 ? fs.filter((f) => f.key !== key) : fs));
@@ -380,8 +420,25 @@ export default function QuickEstimateWizard({
     setFloorSlabs((slabs) => slabs.map((slab) => (slab.key === key ? { ...slab, ...patch, source: "manual" } : slab)));
   }
 
+  function updateSlabRebar(key: string, layer: "topRebar" | "bottomRebar", patch: Partial<SlabRebarForm>) {
+    setFloorSlabs((slabs) => slabs.map((slab) => slab.key === key
+      ? { ...slab, source: "manual", [layer]: { ...(slab[layer] ?? { xDiameterMm: "6", xSpacingCm: "20", yDiameterMm: "6", ySpacingCm: "20" }), ...patch } }
+      : slab));
+  }
+
+  function toggleSlabRebar(key: string, layer: "topRebar" | "bottomRebar", enabled: boolean) {
+    setFloorSlabs((slabs) => slabs.map((slab) => slab.key === key
+      ? { ...slab, source: "manual", [layer]: enabled ? (slab[layer] ?? { xDiameterMm: "6", xSpacingCm: "20", yDiameterMm: "6", ySpacingCm: "20" }) : null }
+      : slab));
+  }
+
   function addSlab() {
-    setFloorSlabs((slabs) => [...slabs, { key: nextKey(), label: `Laje ${slabs.length + 1}`, areaM2: "", thicknessM: "", source: "manual" }]);
+    setFloorSlabs((slabs) => [...slabs, {
+      key: nextKey(), label: `Laje ${slabs.length + 1}`, areaM2: "", thicknessM: "", source: "manual",
+      topRebar: null, bottomRebar: null,
+      topSteelWeightKg: 0, bottomSteelWeightKg: 0, steelByDiameter: {},
+      concreteClass: "", steelGrade: "", coverCm: "",
+    }]);
   }
 
   function removeSlab(key: string) {
@@ -436,7 +493,18 @@ export default function QuickEstimateWizard({
   );
 
   const step1Valid = scopes.length > 0 && (!requiresGeometry || geometryValid);
-  const slabsValid = floorSlabs.length === 0 || floorSlabs.every((slab) => slab.label.trim() && Number(slab.areaM2) > 0 && Number(slab.thicknessM) > 0);
+  const validOpenings = openings.filter((opening) =>
+    opening.confirmed
+    && opening.location !== "desconhecida"
+    && Number(opening.widthM) > 0
+    && Number(opening.heightM) > 0
+    && Number(opening.quantity) > 0,
+  );
+  const openingsReady = !scopes.includes("vaos") || validOpenings.length > 0;
+  const rebarLayerValid = (layer: SlabRebarForm | null) => !layer || Object.values(layer).every((value) => Number(value) > 0);
+  const slabsValid = floorSlabs.length === 0 || floorSlabs.every((slab) =>
+    slab.label.trim() && Number(slab.areaM2) > 0 && Number(slab.thicknessM) > 0
+    && rebarLayerValid(slab.topRebar) && rebarLayerValid(slab.bottomRebar));
   const foundationValid = foundationType === "laje"
     ? Number(slabThickness) > 0
     : Number(footingCount) > 0 && Number(footingAvgArea) > 0 && Number(footingAvgDepth) > 0;
@@ -454,6 +522,7 @@ export default function QuickEstimateWizard({
       { label: "Lajes por nível", ready: slabsValid, impact: "Cada laje pode ter área e espessura próprias.", targetStep: 1 },
     ] : []),
     ...(usesHydraulics ? [{ label: "Redes hidráulicas", ready: true, impact: "Confirme aparelhos e comprimentos disponíveis.", targetStep: 2 }] : []),
+    ...(scopes.includes("vaos") ? [{ label: "Portas e janelas", ready: openingsReady, impact: "Confirme dimensões e parede interior/exterior.", targetStep: 2 }] : []),
     ...(!catalogLoading ? [{
       label: "Custos críticos do catálogo",
       ready: criticalCostsReady,
@@ -467,7 +536,7 @@ export default function QuickEstimateWizard({
   function canProceed() {
     if (step === 0) return step1Valid;
     if (step === 1) return step2Valid;
-    return true;
+    return openingsReady;
   }
 
   function goNext() {
@@ -507,9 +576,24 @@ export default function QuickEstimateWizard({
           label: slab.label.trim(),
           areaM2: Number(slab.areaM2),
           thicknessM: Number(slab.thicknessM),
+          topRebar: slab.topRebar ? {
+            xDiameterMm: Number(slab.topRebar.xDiameterMm), xSpacingCm: Number(slab.topRebar.xSpacingCm),
+            yDiameterMm: Number(slab.topRebar.yDiameterMm), ySpacingCm: Number(slab.topRebar.ySpacingCm),
+          } : null,
+          bottomRebar: slab.bottomRebar ? {
+            xDiameterMm: Number(slab.bottomRebar.xDiameterMm), xSpacingCm: Number(slab.bottomRebar.xSpacingCm),
+            yDiameterMm: Number(slab.bottomRebar.yDiameterMm), ySpacingCm: Number(slab.bottomRebar.ySpacingCm),
+          } : null,
         })) : undefined,
-        openings: scopes.includes("vaos") ? openings
-          .filter((opening) => Number(opening.widthM) > 0 && Number(opening.heightM) > 0 && Number(opening.quantity) > 0)
+        pavementReinforcement: requiresStructure ? pavementReinforcement : undefined,
+        foundationMembrane: requiresStructure ? foundationMembrane : undefined,
+        groundBeam: requiresStructure ? {
+          enabled: groundBeamEnabled,
+          lengthM: groundBeamLengthM && Number(groundBeamLengthM) > 0 ? Number(groundBeamLengthM) : undefined,
+          longitudinalBars: 4,
+          diameterMm: 8,
+        } : undefined,
+        openings: scopes.includes("vaos") ? validOpenings
           .map((opening) => ({
             kind: opening.kind,
             widthM: Number(opening.widthM),
@@ -859,24 +943,83 @@ export default function QuickEstimateWizard({
                       </div>
                       <div className="space-y-2">
                         {floorSlabs.map((slab, index) => (
-                          <div key={slab.key} className="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:grid-cols-[minmax(150px,1fr)_120px_120px_40px] sm:items-end">
-                            <div>
-                              <label className="label" htmlFor={`slab-label-${slab.key}`}>Nível</label>
-                              <input id={`slab-label-${slab.key}`} className="input" value={slab.label} onChange={(event) => updateSlab(slab.key, { label: event.target.value })} />
+                          <div key={slab.key} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                            <div className="grid gap-2 sm:grid-cols-[minmax(150px,1fr)_120px_120px_40px] sm:items-end">
+                              <div>
+                                <label className="label" htmlFor={`slab-label-${slab.key}`}>Nível</label>
+                                <input id={`slab-label-${slab.key}`} className="input" value={slab.label} onChange={(event) => updateSlab(slab.key, { label: event.target.value })} />
+                              </div>
+                              <div>
+                                <label className="label" htmlFor={`slab-area-${slab.key}`}>Área (m²)</label>
+                                <input id={`slab-area-${slab.key}`} aria-label={`Área da ${slab.label || `laje ${index + 1}`} (m²)`} className="input" type="number" min="0" step="0.01" value={slab.areaM2} onChange={(event) => updateSlab(slab.key, { areaM2: event.target.value })} />
+                              </div>
+                              <div>
+                                <label className="label" htmlFor={`slab-thickness-${slab.key}`}>Espessura (m)</label>
+                                <input id={`slab-thickness-${slab.key}`} aria-label={`Espessura da ${slab.label || `laje ${index + 1}`} (m)`} className="input" type="number" min="0" step="0.01" value={slab.thicknessM} onChange={(event) => updateSlab(slab.key, { thicknessM: event.target.value })} />
+                              </div>
+                              <button type="button" onClick={() => removeSlab(slab.key)} className="btn-icon h-10 w-10" aria-label={`Remover ${slab.label || `laje ${index + 1}`}`}><IconTrash className="h-4 w-4" /></button>
                             </div>
-                            <div>
-                              <label className="label" htmlFor={`slab-area-${slab.key}`}>Área (m²)</label>
-                              <input id={`slab-area-${slab.key}`} aria-label={`Área da ${slab.label || `laje ${index + 1}`} (m²)`} className="input" type="number" min="0" step="0.01" value={slab.areaM2} onChange={(event) => updateSlab(slab.key, { areaM2: event.target.value })} />
-                            </div>
-                            <div>
-                              <label className="label" htmlFor={`slab-thickness-${slab.key}`}>Espessura (m)</label>
-                              <input id={`slab-thickness-${slab.key}`} aria-label={`Espessura da ${slab.label || `laje ${index + 1}`} (m)`} className="input" type="number" min="0" step="0.01" value={slab.thicknessM} onChange={(event) => updateSlab(slab.key, { thicknessM: event.target.value })} />
-                            </div>
-                            <button type="button" onClick={() => removeSlab(slab.key)} className="btn-icon h-10 w-10" aria-label={`Remover ${slab.label || `laje ${index + 1}`}`}><IconTrash className="h-4 w-4" /></button>
+                            <details className="mt-2 border-t border-slate-200 pt-2">
+                              <summary className="cursor-pointer text-xs font-medium text-brand-700">
+                                Armadura {slab.bottomRebar || slab.topRebar || slab.topSteelWeightKg || slab.bottomSteelWeightKg ? "detectada/confirmada" : "por indicar"}
+                                {(slab.topSteelWeightKg + slab.bottomSteelWeightKg) > 0 && ` · ${(slab.topSteelWeightKg + slab.bottomSteelWeightKg).toFixed(2)} kg`}
+                              </summary>
+                              <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                                {Object.keys(slab.steelByDiameter).length > 0 && <p className="lg:col-span-2 text-xs text-slate-600">
+                                  {Object.entries(slab.steelByDiameter).map(([diameter, weight]) => `Ø${diameter}: ${weight.toFixed(2)} kg`).join(" · ")}
+                                </p>}
+                                {(slab.concreteClass || slab.steelGrade || slab.coverCm) && <p className="lg:col-span-2 text-xs text-slate-600">
+                                  {[slab.concreteClass, slab.steelGrade, slab.coverCm ? `Recobrimento ${slab.coverCm} cm` : ""].filter(Boolean).join(" · ")}
+                                </p>}
+                                {(["bottomRebar", "topRebar"] as const).map((layer) => {
+                                  const value = slab[layer];
+                                  const title = layer === "bottomRebar" ? "Inferior" : "Superior";
+                                  return <div key={layer} className="rounded-md border border-slate-200 bg-white p-3">
+                                    <label className="mb-2 flex items-center gap-2 text-xs font-semibold text-slate-800">
+                                      <input type="checkbox" checked={!!value} onChange={(event) => toggleSlabRebar(slab.key, layer, event.target.checked)} />
+                                      {title}
+                                    </label>
+                                    {value && <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                                      {(["xDiameterMm", "xSpacingCm", "yDiameterMm", "ySpacingCm"] as const).map((field) => <div key={field}>
+                                        <label className="label">{{ xDiameterMm: "Ø X", xSpacingCm: "Esp. X", yDiameterMm: "Ø Y", ySpacingCm: "Esp. Y" }[field]}</label>
+                                        <input className="input" type="number" min="1" step="1" value={value[field]} onChange={(event) => updateSlabRebar(slab.key, layer, { [field]: event.target.value })} />
+                                      </div>)}
+                                    </div>}
+                                  </div>;
+                                })}
+                              </div>
+                            </details>
                           </div>
                         ))}
                       </div>
                     </div>
+                  </section>
+
+                  <section className="rounded-xl border border-slate-200 bg-white p-4">
+                    <h3 className="text-sm font-semibold text-slate-900">Pavimento térreo</h3>
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                      <div>
+                        <label className="label">Armadura do pavimento</label>
+                        <select className="input" value={pavementReinforcement} onChange={(event) => setPavementReinforcement(event.target.value as typeof pavementReinforcement)}>
+                          <option value="bars_6_20">Varão Ø6/20, X+Y</option>
+                          <option value="welded_mesh">Malhasol</option>
+                          <option value="none">Sem armadura</option>
+                        </select>
+                      </div>
+                      <label className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-800">
+                        <input type="checkbox" checked={foundationMembrane} onChange={(event) => setFoundationMembrane(event.target.checked)} />
+                        Plástico/membrana sob o pavimento
+                      </label>
+                      <label className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-800">
+                        <input type="checkbox" checked={groundBeamEnabled} onChange={(event) => setGroundBeamEnabled(event.target.checked)} />
+                        Viga de pavimento 4Ø8
+                      </label>
+                      {groundBeamEnabled && <div>
+                        <label className="label">Comprimento da viga (m)</label>
+                        <input className="input" type="number" min="0" step="0.01" value={groundBeamLengthM} onChange={(event) => setGroundBeamLengthM(event.target.value)} placeholder="Usar perímetro do piso" />
+                      </div>}
+                    </div>
+                    <p className="mt-2 text-[11px] text-slate-500">Premissas de orçamento editáveis. O projecto estrutural confirmado prevalece.</p>
                   </section>
 
                   <div>
@@ -1091,13 +1234,28 @@ export default function QuickEstimateWizard({
                   {scopes.includes("vaos") && <div className="rounded-xl border border-slate-200 p-4">
                     <div className="mb-3 flex items-center justify-between gap-3">
                       <div><p className="font-semibold text-slate-900">Portas e janelas</p><p className="text-xs text-slate-500">Só os vãos confirmados e localizados são descontados das paredes.</p></div>
-                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => setOpenings((items) => [...items, { key: nextKey(), kind: "janela", code: "", widthM: "", heightM: "", quantity: "1", location: "exterior", confirmed: true }])}><IconPlus className="h-3.5 w-3.5" />Adicionar</button>
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => setOpenings((items) => [...items, { key: nextKey(), kind: "janela", code: "", designation: "", floor: floors[0]?.label ?? UNASSIGNED_FLOOR, widthM: "", heightM: "", quantity: "1", location: "exterior", confirmed: true }])}><IconPlus className="h-3.5 w-3.5" />Adicionar</button>
                     </div>
+                    {openings.length > 0 && (
+                      <div className={`mb-3 rounded-lg px-3 py-2 text-xs ${openingsReady ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-900"}`}>
+                        <strong>{validOpenings.length} pronto(s)</strong> · {openings.length - validOpenings.length} por confirmar. Um vão só entra no cálculo com largura, altura, quantidade e parede definidas.
+                      </div>
+                    )}
                     {openings.length === 0 ? <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">Nenhum vão confirmado. Adicione portas e janelas para obter áreas líquidas.</p> : (
                       <div className="space-y-2">
-                        {openings.map((opening) => (
-                          <div key={opening.key} className="grid gap-2 rounded-lg bg-slate-50 p-3 sm:grid-cols-[100px_90px_90px_80px_130px_110px_40px] sm:items-end">
+                        {openings.map((opening) => {
+                          const issues = [
+                            !opening.confirmed ? "confirmar" : null,
+                            !(Number(opening.widthM) > 0) || !(Number(opening.heightM) > 0) ? "dimensões" : null,
+                            opening.location === "desconhecida" ? "parede" : null,
+                          ].filter(Boolean);
+                          return (
+                          <div key={opening.key} className={`rounded-lg border p-3 ${issues.length ? "border-amber-200 bg-amber-50/50" : "border-slate-200 bg-slate-50"}`}>
+                            <div className="mb-2 flex items-center justify-between gap-2"><strong className="text-xs text-slate-800">{opening.designation || opening.code || (opening.kind === "porta" ? "Porta" : "Janela")}</strong>{issues.length > 0 && <span className="text-[11px] font-semibold text-amber-700">Falta: {issues.join(", ")}</span>}</div>
+                            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8 xl:items-end">
                             <div><label className="label">Tipo</label><select className="input" value={opening.kind} onChange={(event) => setOpenings((items) => items.map((item) => item.key === opening.key ? { ...item, kind: event.target.value as OpeningForm["kind"] } : item))}><option value="porta">Porta</option><option value="janela">Janela</option></select></div>
+                            <div><label className="label">Código</label><input className="input" value={opening.code} placeholder={opening.kind === "porta" ? "P-01" : "J-01"} onChange={(event) => setOpenings((items) => items.map((item) => item.key === opening.key ? { ...item, code: event.target.value } : item))} /></div>
+                            <div><label className="label">Piso</label><input className="input" value={opening.floor} onChange={(event) => setOpenings((items) => items.map((item) => item.key === opening.key ? { ...item, floor: event.target.value } : item))} /></div>
                             <div><label className="label">Largura</label><input className="input" type="number" min="0" step="0.01" value={opening.widthM} onChange={(event) => setOpenings((items) => items.map((item) => item.key === opening.key ? { ...item, widthM: event.target.value } : item))} /></div>
                             <div><label className="label">Altura</label><input className="input" type="number" min="0" step="0.01" value={opening.heightM} onChange={(event) => setOpenings((items) => items.map((item) => item.key === opening.key ? { ...item, heightM: event.target.value } : item))} /></div>
                             <div><label className="label">Qtd.</label><input className="input" type="number" min="1" step="1" value={opening.quantity} onChange={(event) => setOpenings((items) => items.map((item) => item.key === opening.key ? { ...item, quantity: event.target.value } : item))} /></div>
@@ -1105,7 +1263,8 @@ export default function QuickEstimateWizard({
                             <label className="flex h-10 items-center gap-2 text-xs font-medium text-slate-700"><input type="checkbox" checked={opening.confirmed} onChange={(event) => setOpenings((items) => items.map((item) => item.key === opening.key ? { ...item, confirmed: event.target.checked } : item))} />Confirmado</label>
                             <button type="button" className="btn-icon h-10 w-10" aria-label="Remover vão" onClick={() => setOpenings((items) => items.filter((item) => item.key !== opening.key))}><IconTrash className="h-4 w-4" /></button>
                           </div>
-                        ))}
+                          </div>
+                        );})}
                       </div>
                     )}
                   </div>}

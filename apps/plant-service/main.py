@@ -20,7 +20,7 @@ app = FastAPI(title="SIGO Plant Service")
 # em produção, permissivo em dev sem configuração" (achado da auditoria).
 PLANT_SERVICE_TOKEN = os.environ.get("PLANT_SERVICE_TOKEN")
 IS_PRODUCTION = os.environ.get("ENVIRONMENT") == "production"
-PARSER_VERSION = "2026.08-identity-1"
+PARSER_VERSION = "2026.08-openings-2"
 PARSER_CONCURRENCY = max(1, min(2, int(os.environ.get("PLANT_PARSER_CONCURRENCY", "1"))))
 PARSER_CACHE_SIZE = max(1, min(20, int(os.environ.get("PLANT_PARSER_CACHE_SIZE", "6"))))
 parser_slots = asyncio.Semaphore(PARSER_CONCURRENCY)
@@ -83,11 +83,26 @@ class StaircaseOut(BaseModel):
     page: int
 
 
+class SlabRebarLayerOut(BaseModel):
+    xDiameterMm: float
+    xSpacingCm: float
+    yDiameterMm: float
+    ySpacingCm: float
+
+
 class SlabOut(BaseModel):
     floor: str | None
     thicknessCm: float
     layers: list[str]
     pages: list[int]
+    topRebar: SlabRebarLayerOut | None = None
+    bottomRebar: SlabRebarLayerOut | None = None
+    topSteelWeightKg: float = 0
+    bottomSteelWeightKg: float = 0
+    steelByDiameter: dict[str, float] = Field(default_factory=dict)
+    concreteClass: str | None = None
+    steelGrade: str | None = None
+    coverCm: float | None = None
 
 
 class OpeningOut(BaseModel):
@@ -104,6 +119,7 @@ class OpeningOut(BaseModel):
     confidence: float
     source: str
     needsConfirmation: bool
+    designation: str | None = None
 
 
 class StructuralSummaryOut(BaseModel):
@@ -182,6 +198,7 @@ def build_parse_response(result) -> ParseResponse:
                 confidence=o.confidence,
                 source=o.source,
                 needsConfirmation=o.needs_confirmation,
+                designation=o.designation,
             )
             for o in result.openings
         ],
@@ -213,6 +230,24 @@ def build_parse_response(result) -> ParseResponse:
                     thicknessCm=slab.thickness_cm,
                     layers=slab.layers,
                     pages=slab.pages,
+                    topRebar=SlabRebarLayerOut(
+                        xDiameterMm=slab.top_rebar.x_diameter_mm,
+                        xSpacingCm=slab.top_rebar.x_spacing_cm,
+                        yDiameterMm=slab.top_rebar.y_diameter_mm,
+                        ySpacingCm=slab.top_rebar.y_spacing_cm,
+                    ) if slab.top_rebar else None,
+                    bottomRebar=SlabRebarLayerOut(
+                        xDiameterMm=slab.bottom_rebar.x_diameter_mm,
+                        xSpacingCm=slab.bottom_rebar.x_spacing_cm,
+                        yDiameterMm=slab.bottom_rebar.y_diameter_mm,
+                        ySpacingCm=slab.bottom_rebar.y_spacing_cm,
+                    ) if slab.bottom_rebar else None,
+                    topSteelWeightKg=slab.top_steel_weight_kg,
+                    bottomSteelWeightKg=slab.bottom_steel_weight_kg,
+                    steelByDiameter=slab.steel_by_diameter,
+                    concreteClass=slab.concrete_class,
+                    steelGrade=slab.steel_grade,
+                    coverCm=slab.cover_cm,
                 )
                 for slab in summary.slabs
             ],

@@ -22,6 +22,7 @@ export type ExtractedRebarLine = z.infer<typeof extractedRebarLineSchema>;
 export const extractedOpeningSchema = z.object({
   kind: z.enum(["porta", "janela"]),
   code: z.string().nullable(),
+  designation: z.string().nullable().default(null),
   widthM: z.number().positive().nullable(),
   heightM: z.number().positive().nullable(),
   sillHeightM: z.number().nonnegative().nullable().default(null),
@@ -55,6 +56,9 @@ export const extractedSlabSchema = z.object({
   coverCm: z.number().nonnegative().max(20).nullable().optional(),
   topRebar: slabRebarLayerSchema.nullable().optional(),
   bottomRebar: slabRebarLayerSchema.nullable().optional(),
+  topSteelWeightKg: z.number().nonnegative().optional().default(0),
+  bottomSteelWeightKg: z.number().nonnegative().optional().default(0),
+  steelByDiameter: z.record(z.string(), z.number().nonnegative()).optional().default({}),
   notes: z.string().trim().max(1000).nullable().optional(),
 });
 export type ExtractedSlab = z.infer<typeof extractedSlabSchema>;

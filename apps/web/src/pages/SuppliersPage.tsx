@@ -99,23 +99,15 @@ export default function SuppliersPage() {
     return items;
   }, [sigoPrecos, marketplace, offerFilter, sortBy]);
 
-  const filters: Array<{ id: OfferFilter; label: string }> = [
-    { id: "all", label: "Todos" },
-    { id: "materials", label: "Materiais" },
-    { id: "labour", label: "Mão-de-obra" },
-    { id: "equipment", label: "Máquinas" },
-    { id: "with_prices", label: "Com preços" },
-  ];
-
   return (
     <Layout
-      title="Fornecedores"
-      subtitle="SIGO Preços e marketplace nacional — pesquise por zona, material ou especialidade"
+      title="Fornecedores e preços"
+      subtitle="Encontre quem fornece o material e compare preços por zona"
       actions={
         <div className="flex flex-wrap items-center gap-2">
           <Link to="/gestao/cotacoes" className="btn btn-secondary btn-sm">
             <IconClipboard className="h-3.5 w-3.5" />
-            Pedidos de cotação
+            Cotações avulsas
             {openQuotes > 0 && <span className="ml-1 rounded-full bg-amber-100 px-1.5 text-[10px] font-bold text-amber-800">{openQuotes}</span>}
           </Link>
           <a href="/fornecedor/registar" target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm">
@@ -128,40 +120,20 @@ export default function SuppliersPage() {
         <GestaoTabs />
         {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
 
-        <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">No marketplace</p>
-            <p className="mt-1 font-display text-2xl font-bold text-slate-950">{marketplaceCount}</p>
-            <p className="text-xs text-slate-500">{zoneId ? "Nesta zona" : "Todas as zonas"}</p>
+        <section className="card flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+            <span><strong className="text-slate-950">{marketplaceCount}</strong> fornecedores</span>
+            <span><strong className="text-slate-950">{sigoPrecos?.referenceMaterialCount ?? 0}</strong> preços de referência</span>
+            {openQuotes > 0 && <span className="text-amber-700"><strong>{openQuotes}</strong> cotações em curso</span>}
           </div>
-          <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">SIGO Preços</p>
-            <p className="mt-1 font-display text-2xl font-bold text-slate-950">{sigoPrecos ? "Activo" : "—"}</p>
-            <p className="text-xs text-slate-500">{sigoPrecos?.referenceMaterialCount ?? 0} materiais de referência</p>
-          </div>
-          <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Cotações abertas</p>
-            <p className="mt-1 font-display text-2xl font-bold text-slate-950">{openQuotes}</p>
-            <p className="text-xs text-slate-500">Enviadas ou já respondidas</p>
-          </div>
-          <div className="rounded-xl border border-teal-100 bg-teal-50/60 px-4 py-3">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-teal-700">Como funciona</p>
-            <p className="mt-1 text-xs leading-5 text-slate-700">
-              Veja preços publicados, peça cotação com quantidades e aceite a resposta no módulo de cotações.
-            </p>
-          </div>
+          <span className="text-xs text-slate-500">Nas compras da obra, estes fornecedores aparecem automaticamente.</span>
         </section>
 
         <section className="card overflow-hidden">
           <div className="border-b border-slate-200 p-4 sm:p-5">
-            <div className="mb-4 flex items-start gap-2">
+            <div className="mb-4 flex items-center gap-2">
               <IconBuilding className="mt-0.5 h-4 w-4 shrink-0 text-brand-700" />
-              <div>
-                <h2 className="section-title text-base">Fornecedores disponíveis</h2>
-                <p className="mt-0.5 text-xs text-slate-500">
-                  Pesquise por nome do fornecedor ou por material (ex.: «cimento»). O portal do fornecedor é gratuito — os preços vêm do próprio.
-                </p>
-              </div>
+              <h2 className="section-title text-base">Fornecedores disponíveis</h2>
             </div>
             <div className="flex flex-wrap items-center gap-3">
               <select value={zoneId} onChange={(e) => setZoneId(e.target.value)} className="input max-w-xs" aria-label="Filtrar por zona">
@@ -178,25 +150,18 @@ export default function SuppliersPage() {
                 placeholder="Fornecedor ou material…"
                 resultLabel={`${listed.length} resultado(s)`}
               />
+              <select value={offerFilter} onChange={(e) => setOfferFilter(e.target.value as OfferFilter)} className="input max-w-[11rem]" aria-label="Filtrar oferta">
+                <option value="all">Toda a oferta</option>
+                <option value="materials">Materiais</option>
+                <option value="labour">Mão-de-obra</option>
+                <option value="equipment">Máquinas</option>
+                <option value="with_prices">Com preços</option>
+              </select>
               <select value={sortBy} onChange={(e) => setSortBy(e.target.value as typeof sortBy)} className="input max-w-[11rem]" aria-label="Ordenar">
                 <option value="name">Ordenar: nome</option>
                 <option value="materials">Mais materiais</option>
                 <option value="coverage">Maior cobertura</option>
               </select>
-            </div>
-            <div className="mt-3 flex flex-wrap gap-1.5">
-              {filters.map((f) => (
-                <button
-                  key={f.id}
-                  type="button"
-                  onClick={() => setOfferFilter(f.id)}
-                  className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold ${
-                    offerFilter === f.id ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                  }`}
-                >
-                  {f.label}
-                </button>
-              ))}
             </div>
           </div>
 
@@ -233,7 +198,7 @@ export default function SuppliersPage() {
                         </p>
                         <div className="mt-auto flex items-center gap-2 pt-5">
                           <button type="button" onClick={() => setMaterialsModalSupplier(supplier)} className="btn btn-primary btn-sm flex-1">
-                            Ver / editar preços
+                            Ver preços
                           </button>
                         </div>
                       </article>
@@ -275,10 +240,10 @@ export default function SuppliersPage() {
                       )}
                       <div className="mt-auto flex items-center gap-2 pt-5">
                         <button type="button" onClick={() => setViewSupplier(supplier)} className="btn btn-secondary btn-sm flex-1">
-                          Ver preços
+                          Preços
                         </button>
                         <button type="button" onClick={() => setQuoteSupplier(supplier)} className="btn btn-primary btn-sm flex-1">
-                          Pedir cotação
+                          Pedir preço
                         </button>
                       </div>
                     </article>
@@ -294,23 +259,6 @@ export default function SuppliersPage() {
               </div>
             </>
           )}
-        </section>
-
-        <section className="grid gap-3 lg:grid-cols-3">
-          <div className="rounded-xl border border-slate-200 bg-white p-4">
-            <h3 className="text-sm font-semibold text-slate-900">1. Filtrar pela zona da obra</h3>
-            <p className="mt-1 text-xs leading-5 text-slate-500">Os fornecedores publicam preços na região onde operam — alinhe com a zona do projecto.</p>
-          </div>
-          <div className="rounded-xl border border-slate-200 bg-white p-4">
-            <h3 className="text-sm font-semibold text-slate-900">2. Pedir cotação com quantidades</h3>
-            <p className="mt-1 text-xs leading-5 text-slate-500">Confirme preço e stock no Portal do Fornecedor; não edite preços de marketplace no SIGO.</p>
-          </div>
-          <div className="rounded-xl border border-slate-200 bg-white p-4">
-            <h3 className="text-sm font-semibold text-slate-900">3. Aceitar e orçamentar</h3>
-            <p className="mt-1 text-xs leading-5 text-slate-500">
-              Em <Link to="/gestao/cotacoes" className="font-semibold text-brand-700 hover:underline">Pedidos de cotação</Link> aceite a resposta e use o PDF de comparação.
-            </p>
-          </div>
         </section>
 
         {materialsModalSupplier && <SupplierMaterialsModal supplier={materialsModalSupplier} onClose={() => setMaterialsModalSupplier(null)} />}

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 import re
+import unicodedata
 from collections import Counter, defaultdict
 from typing import TYPE_CHECKING, Iterable
 
@@ -185,7 +186,7 @@ def estimate_footing_rebar(footings: list, page_texts: dict[int, str]) -> list:
     ]
 
 
-def estimate_slab_rebar_from_area(rooms: list, slabs: list, structure_page_texts: dict[int, str]) -> list:
+def _estimate_slab_rebar_legacy(rooms: list, slabs: list, structure_page_texts: dict[int, str]) -> list:
     """Malha de laje: área dos compartimentos × Ø/espaçamento dominante nas folhas de armadura."""
     if not rooms:
         return []
@@ -227,6 +228,81 @@ def estimate_slab_rebar_from_area(rooms: list, slabs: list, structure_page_texts
 
     page = slabs[0].page if slabs else 0
     return [_rebar_line(f"Cálculo laje Ø{int(d)}", d, round(w, 2), page) for d, w in sorted(by_diameter.items()) if w > 0.05]
+
+
+def estimate_slab_rebar_from_area(rooms: list, slabs: list, structure_page_texts: dict[int, str]) -> list:
+    """Calcula cada laje física separadamente antes de agregar por diâmetro.
+
+    A armadura explicitamente ligada à folha da laje prevalece. A leitura
+    dominante do documento fica apenas como contingência quando nenhuma folha
+    trouxe uma malha utilizável.
+    """
+    if not rooms:
+        return []
+    total_area = sum(room.area_m2 for room in rooms)
+    if total_area <= 0:
+        return []
+
+    def normalized(value: str | None) -> str:
+        plain = unicodedata.normalize("NFKD", value or "")
+        ascii_text = "".join(char for char in plain if not unicodedata.combining(char))
+        return re.sub(r"[^a-z0-9]+", " ", ascii_text.lower()).strip()
+
+    room_area_by_floor: dict[str, float] = defaultdict(float)
+    floor_order: list[str] = []
+    for room in rooms:
+        floor_key = normalized(getattr(room, "floor", None))
+        if floor_key not in floor_order:
+            floor_order.append(floor_key)
+        room_area_by_floor[floor_key] += room.area_m2
+
+    known_thickness_by_floor = {
+        normalized(slab.floor): round(slab.thickness_cm, 2)
+        for slab in slabs
+        if slab.thickness_cm > 0
+    }
+    slab_groups: dict[tuple[str, float], list] = defaultdict(list)
+    for slab in slabs:
+        floor_key = normalized(slab.floor)
+        effective_thickness = round(slab.thickness_cm, 2) if slab.thickness_cm > 0 else known_thickness_by_floor.get(floor_key, 0)
+        slab_groups[(floor_key, effective_thickness)].append(slab)
+
+    def slab_area(floor_key: str) -> float:
+        if room_area_by_floor.get(floor_key, 0) > 0:
+            return room_area_by_floor[floor_key]
+        for room_floor, area in room_area_by_floor.items():
+            if floor_key and room_floor and (floor_key in room_floor or room_floor in floor_key):
+                return area
+        if "cobertura" in floor_key and floor_order:
+            return room_area_by_floor[floor_order[-1]]
+        # Não repetir a área global inteira em todas as lajes quando o piso não
+        # pôde ser associado com segurança.
+        return total_area / max(1, len(slab_groups))
+
+    explicit_lines = []
+    for (floor_key, _thickness), physical_slabs in slab_groups.items():
+        area_m2 = slab_area(floor_key)
+        floor_label = physical_slabs[0].floor or "não identificada"
+        for slab in physical_slabs:
+            layer = getattr(slab, "rebar", None)
+            if layer is None:
+                continue
+            for direction, diameter, spacing in (
+                ("X", layer.x_diameter_mm, layer.x_spacing_cm),
+                ("Y", layer.y_diameter_mm, layer.y_spacing_cm),
+            ):
+                weight = area_m2 * mesh_weight_kg_per_m2(diameter, spacing) * DEFAULT_LAP_FACTOR
+                explicit_lines.append(_rebar_line(
+                    f"Laje {floor_label} - {slab.layer} {direction}",
+                    diameter,
+                    round(weight, 2),
+                    slab.page,
+                ))
+
+    if explicit_lines:
+        return merge_rebar_lines(explicit_lines)
+
+    return _estimate_slab_rebar_legacy(rooms, slabs, structure_page_texts)
 
 
 def estimate_beam_rebar(beam_spans: list, page_texts: dict[int, str]) -> list:

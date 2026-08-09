@@ -24,4 +24,44 @@ describe("medição de lajes por nível", () => {
     expect(slab?.formula).toContain("Laje do 1º Piso");
     expect(slab?.formula).toContain("Laje de cobertura");
   });
+
+  it("mantém a armadura de cada laje no diagnóstico e não usa malhasol da cobertura", () => {
+    const result = computeQuantities({
+      floors: [
+        { label: "Piso Térreo", ceilingHeight: 2.8, perimeter: 40, rooms: [{ name: "Sala", type: "seco", length: 10, width: 10 }] },
+      ],
+      foundationType: "sapata_isolada",
+      footing: { count: 8, avgArea: 1.2, avgDepth: 0.45 },
+      concreteClass: "B25",
+      roofType: "laje_plana",
+      roofArea: 100,
+      pavementReinforcement: "bars_6_20",
+      groundBeam: { enabled: false },
+      floorSlabs: [{
+        label: "Cobertura",
+        areaM2: 100,
+        thicknessM: 0.12,
+        bottomRebar: { xDiameterMm: 8, xSpacingCm: 20, yDiameterMm: 10, ySpacingCm: 15 },
+      }],
+    });
+
+    expect(result.report.find((entry) => entry.code === "3.6")?.formula).toContain("armadura de lajes lida");
+    expect(result.report.find((entry) => entry.code === "3.7")?.value).toBe(0);
+    expect(result.report.find((entry) => entry.code === "3.7")?.formula).toContain("Ø6/20");
+  });
+
+  it("mede malhasol no pavimento térreo com sobreposição, não na cobertura", () => {
+    const result = computeQuantities({
+      floors: [{ label: "Piso Térreo", ceilingHeight: 2.8, perimeter: 40, rooms: [{ name: "Sala", type: "seco", length: 10, width: 10 }] }],
+      foundationType: "sapata_isolada",
+      footing: { count: 4, avgArea: 1, avgDepth: 0.4 },
+      concreteClass: "B25",
+      roofType: "chapa_metalica",
+      roofArea: 120,
+      pavementReinforcement: "welded_mesh",
+      groundBeam: { enabled: false },
+    });
+
+    expect(result.report.find((entry) => entry.code === "3.7")?.value).toBeCloseTo(110);
+  });
 });

@@ -12,10 +12,13 @@ from parser import (
     extract_rooms,
     extract_rooms_spatial,
     extract_opening_schedule,
+    extract_slabs,
     detect_plan_type,
     is_room_area_page,
     parse_pdf,
     Slab,
+    RebarLine,
+    build_structural_summary,
     summarise_slabs,
 )
 
@@ -34,6 +37,17 @@ P02 Porta interior de madeira 0,90 x 2,10 m 6
         self.assertEqual((openings[0].width_m, openings[0].height_m, openings[0].material), (1.5, 1.2, "Alum\u00ednio"))
         self.assertEqual((openings[1].kind, openings[1].location, openings[1].quantity), ("porta", "interior", 6))
 
+    def test_extracts_opening_dimensions_written_in_centimetres_and_millimetres(self):
+        text = """MAPA DE VÃOS PISO TÃ‰RREO
+P01 Porta principal 900 x 2100 mm 1
+J02 Janela da sala 150 x 120 cm 2
+"""
+        openings = extract_opening_schedule(text, 3)
+        self.assertEqual(len(openings), 2)
+        self.assertEqual((openings[0].width_m, openings[0].height_m), (0.9, 2.1))
+        self.assertEqual((openings[1].width_m, openings[1].height_m), (1.5, 1.2))
+        self.assertEqual(openings[0].designation, "Porta principal")
+
     def test_groups_slab_layers_but_keeps_different_floor_thicknesses(self):
         slabs = summarise_slabs([
             Slab("1º Piso", "inferior", 15, 12),
@@ -45,6 +59,43 @@ P02 Porta interior de madeira 0,90 x 2,10 m 6
         self.assertEqual(len(slabs), 2)
         self.assertEqual([(slab.floor, slab.thickness_cm) for slab in slabs], [("1º Piso", 15), ("Cobertura", 12)])
         self.assertEqual(slabs[0].layers, ["inferior", "superior"])
+
+    def test_reads_each_slab_layer_mesh_and_keeps_it_on_the_physical_slab(self):
+        lower = extract_slabs(
+            "PLANTA DE ARMADURA INFERIOR - 1º PISO\nh=15\nBetão B25\nS-400\nRecobrimento 25 mm\nDirecção X Ø10a/15\nDirecção Y Ø8a/20",
+            12,
+        )
+        upper = extract_slabs(
+            "PLANTA DE ARMADURA SUPERIOR - 1º PISO\nh=15\nØ8a/20",
+            13,
+        )
+        slabs = summarise_slabs([*lower, *upper])
+
+        self.assertEqual(len(slabs), 1)
+        self.assertEqual(slabs[0].layers, ["inferior", "superior"])
+        self.assertEqual(slabs[0].bottom_rebar.x_diameter_mm, 10)
+        self.assertEqual(slabs[0].bottom_rebar.y_spacing_cm, 20)
+        self.assertEqual(slabs[0].top_rebar.x_spacing_cm, 20)
+        self.assertEqual((slabs[0].concrete_class, slabs[0].steel_grade, slabs[0].cover_cm), ("B25", "S-400", 2.5))
+
+    def test_links_separate_rebar_pages_to_the_slab_geometry_by_floor(self):
+        slabs = [
+            Slab("1º Piso", "geral", 15, 41),
+            Slab("1º Piso", "inferior", 0, 62),
+            Slab("1º Piso", "superior", 0, 65),
+        ]
+        summary = build_structural_summary(
+            [], [], [],
+            [RebarLine("Armadura inferior", 8, 97.5, 62), RebarLine("Armadura superior", 10, 59.5, 65)],
+            [], slabs,
+        )
+
+        self.assertEqual(summary.slabs_count, 1)
+        slab = summary.slabs[0]
+        self.assertEqual((slab.thickness_cm, slab.pages), (15, [41, 62, 65]))
+        self.assertEqual(slab.bottom_steel_weight_kg, 97.5)
+        self.assertEqual(slab.top_steel_weight_kg, 59.5)
+        self.assertEqual(slab.steel_by_diameter, {"8": 97.5, "10": 59.5})
 
     def test_accepts_mixed_case_and_common_area_labels(self):
         text = """Planta Cotada Piso Térreo
