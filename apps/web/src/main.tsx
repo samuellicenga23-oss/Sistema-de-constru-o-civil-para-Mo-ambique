@@ -8,7 +8,7 @@ import { applyTheme, getStoredTheme } from "./theme.ts";
 import { initMonitoring } from "./monitoring.ts";
 
 // Ao mudar CACHE_EPOCH, browsers com PWA antigo apagam Cache Storage e pedem update do SW.
-const CACHE_EPOCH = "20260809b";
+const CACHE_EPOCH = "20260809c";
 const CACHE_EPOCH_KEY = "sigo-cache-epoch";
 if (typeof window !== "undefined" && window.localStorage.getItem(CACHE_EPOCH_KEY) !== CACHE_EPOCH) {
   const finish = () => window.localStorage.setItem(CACHE_EPOCH_KEY, CACHE_EPOCH);

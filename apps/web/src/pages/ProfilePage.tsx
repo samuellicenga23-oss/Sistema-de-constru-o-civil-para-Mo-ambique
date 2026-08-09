@@ -282,13 +282,14 @@ export default function ProfilePage() {
                 onClick={() => {
                   try {
                     window.localStorage.removeItem(`sigo-onboarding-v1:${user.id}`);
+                    window.localStorage.removeItem(`sigo-onboarding-v2:${user.id}`);
                   } catch {
                     /* ignore */
                   }
                   window.location.assign("/painel");
                 }}
               >
-                Repetir tour de introdução
+                Repetir introdução
               </button>
             </div>
           </div>
