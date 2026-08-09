@@ -16,6 +16,7 @@ import { LogoFull, LogoIcon } from "./Logo";
 import { useLanguage } from "../i18n";
 import type { CompanyModuleKey } from "../api/companies";
 import { can, canSeeEscritorio, canSeeGestao, isSiteManagementModuleEnabled } from "../permissions";
+import OnboardingTour from "./OnboardingTour";
 
 type NavItem = {
   to: string;
@@ -27,7 +28,17 @@ type NavItem = {
   siteModules?: boolean;
   permission?: string | string[];
   section?: "fases" | "ferramentas" | "admin";
+  tourId?: string;
 };
+
+function tourIdForPath(path: string): string | undefined {
+  if (path === "/painel") return "nav-painel";
+  if (path === "/medicoes") return "nav-medicoes";
+  if (path === "/orcamentos") return "nav-orcamentos";
+  if (path === "/gestao") return "nav-gestao";
+  if (path === "/perfil") return "nav-perfil";
+  return undefined;
+}
 
 function initials(name: string | undefined): string {
   if (!name) return "?";
@@ -172,6 +183,7 @@ export default function Layout({
               <Link
                 key={item.to}
                 to={item.to}
+                data-tour={item.tourId ?? tourIdForPath(item.to)}
                 title={sidebarCollapsed ? item.label : undefined}
                 className={`flex items-center rounded-xl text-[13px] font-medium transition-colors ${
                   sidebarCollapsed ? "h-11 justify-center px-2" : "gap-3 px-3 py-2.5"
@@ -285,7 +297,7 @@ export default function Layout({
               </div>
 
               <div className="border-b border-slate-200 p-3">
-                <Link to="/perfil" className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-3 shadow-sm">
+                <Link to="/perfil" data-tour="nav-perfil" className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-3 shadow-sm">
                   {user?.avatarUrl ? (
                     <img src={user.avatarUrl} alt="" className="h-10 w-10 rounded-full object-cover" />
                   ) : (
@@ -316,6 +328,7 @@ export default function Layout({
                     <Link
                       key={item.to}
                       to={item.to}
+                      data-tour={item.tourId ?? tourIdForPath(item.to)}
                       className={`flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium ${
                         active ? "bg-white text-slate-950 shadow-sm ring-1 ring-brand-200" : "text-slate-600 hover:bg-slate-200/60 hover:text-slate-950"
                       }`}
@@ -364,6 +377,8 @@ export default function Layout({
           <div className="mx-auto w-full max-w-[1500px]">{children}</div>
         </main>
 
+        <OnboardingTour />
+
         <nav className="fixed inset-x-0 bottom-0 z-30 flex items-stretch border-t border-slate-200 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md md:hidden">
           {bottomBarItems.map((item) => {
             const active = isActive(item);
@@ -372,6 +387,7 @@ export default function Layout({
               <Link
                 key={item.to}
                 to={item.to}
+                data-tour={item.tourId ?? tourIdForPath(item.to)}
                 className={`relative flex min-w-0 flex-1 flex-col items-center justify-center gap-1 px-1 py-2.5 text-[10px] font-semibold leading-tight ${
                   active ? "text-brand-700" : "text-slate-400"
                 }`}

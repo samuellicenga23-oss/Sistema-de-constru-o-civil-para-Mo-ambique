@@ -64,6 +64,7 @@ export default function UserMenu({ compact = false }: { compact?: boolean }) {
           </div>
           <Link
             to="/perfil"
+            data-tour="nav-perfil"
             onClick={() => setOpen(false)}
             className="mt-1 flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium text-slate-800 hover:bg-slate-50"
             role="menuitem"

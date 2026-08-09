@@ -176,10 +176,14 @@ export default function ProfilePage() {
         {error && <AlertBanner tone="error" onDismiss={() => setError(null)}>{error}</AlertBanner>}
 
         {user.mustChangePassword && (
-          <AlertBanner tone="warning">
-            <p className="font-semibold">Defina a sua palavra-passe</p>
-            <p className="mt-1 text-sm opacity-90">Está a usar uma credencial temporária. Escolha uma palavra-passe pessoal para continuar.</p>
-            <button onClick={() => setShowChangePassword(true)} className="btn btn-primary btn-sm mt-3">Definir palavra-passe</button>
+          <AlertBanner tone="info">
+            <p className="font-semibold">Palavra-passe temporária</p>
+            <p className="mt-1 text-sm opacity-90">
+              Pode continuar a trabalhar normalmente. Quando quiser, defina uma palavra-passe pessoal em Perfil.
+            </p>
+            <button onClick={() => setShowChangePassword(true)} className="btn btn-secondary btn-sm mt-3">
+              Alterar palavra-passe
+            </button>
           </AlertBanner>
         )}
 
@@ -253,7 +257,7 @@ export default function ProfilePage() {
 
         <section className="card card-pad">
           <h2 className="section-title mb-3">{t("preferences")}</h2>
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <div>
               <p className="label mb-1.5">Tema</p>
               <div className="flex gap-2">
@@ -269,6 +273,23 @@ export default function ProfilePage() {
                 <option value="en">{t("english")}</option>
               </select>
               {languageSaved && <p className="mt-1 text-xs text-emerald-600">{t("languageSaved")}</p>}
+            </div>
+            <div>
+              <p className="label mb-1.5">Ajuda</p>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => {
+                  try {
+                    window.localStorage.removeItem(`sigo-onboarding-v1:${user.id}`);
+                  } catch {
+                    /* ignore */
+                  }
+                  window.location.assign("/painel");
+                }}
+              >
+                Repetir tour de introdução
+              </button>
             </div>
           </div>
         </section>

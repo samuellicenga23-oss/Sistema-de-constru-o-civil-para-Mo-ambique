@@ -71,7 +71,7 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       const loggedInUser = await login(email.trim(), password);
-      navigate(loggedInUser.mustChangePassword ? "/perfil?password=required" : loggedInUser.role === "super_admin" ? "/admin" : "/painel");
+      navigate(loggedInUser.role === "super_admin" ? "/admin" : "/painel");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Erro ao entrar");
       setNeedsVerification(err instanceof ApiError && err.code === "EMAIL_NAO_VERIFICADO");

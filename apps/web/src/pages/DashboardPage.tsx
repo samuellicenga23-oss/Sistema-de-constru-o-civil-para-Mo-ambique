@@ -126,6 +126,12 @@ export default function DashboardPage() {
     >
       <div className="space-y-5 md:space-y-6">
         {error && <ErrorState message={error} onRetry={loadDashboard} />}
+        {user?.mustChangePassword && (
+          <AlertBanner tone="info">
+            Está a usar uma palavra-passe temporária. Pode continuar a trabalhar — altere-a em{" "}
+            <Link to="/perfil" className="font-semibold underline">Perfil</Link> quando quiser.
+          </AlertBanner>
+        )}
 
         <section className="card overflow-hidden">
           <div className="border-b border-slate-200 bg-gradient-to-r from-brand-50/80 to-transparent px-4 py-3.5 sm:px-5">
