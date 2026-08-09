@@ -260,8 +260,8 @@ export async function getProjectWorkflowStatus(projectId: string): Promise<Proje
     const totalItems = unpricedBudgets.reduce((sum, item) => sum + item.count, 0);
     const message =
       unpricedBudgets.length === 1
-        ? `${unpricedBudgets[0].count} item(ns) em «${unpricedBudgets[0].title}» não têm composição nem preço unitário. Ligue cada item ao catálogo ou preencha manualmente antes de submeter.`
-        : `${unpricedBudgets.length} orçamentos têm itens sem preço (${totalItems} no total). Ligue cada item ao catálogo ou preencha o preço antes de submeter.`;
+        ? `${unpricedBudgets[0].count} item(ns) em «${unpricedBudgets[0].title}» não têm composição nem preço unitário. Ligue cada item ao catálogo ou preencha manualmente antes de aprovar.`
+        : `${unpricedBudgets.length} orçamentos têm itens sem preço (${totalItems} no total). Ligue cada item ao catálogo ou preencha o preço antes de aprovar.`;
     guidance.push({
       id: "orcamento_sem_preco",
       severity: "warning",

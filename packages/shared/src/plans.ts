@@ -252,6 +252,11 @@ export function normalizePlanKey(key: string | null | undefined): PublicSubscrip
   return LEGACY_PLAN_MIGRATION[key] ?? "individual";
 }
 
+/** Plano Individual (1 utilizador): medições/orçamentos aprovam-se directamente, sem passo «Submeter». */
+export function planUsesDirectDocumentApproval(plan: string | null | undefined): boolean {
+  return normalizePlanKey(plan) === "individual";
+}
+
 /** Compat: maxUsers/maxProjects no topo (código legado). */
 export type CompatiblePlanView = PlanDefinition & {
   maxUsers: number | null;

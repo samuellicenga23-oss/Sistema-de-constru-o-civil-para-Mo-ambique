@@ -33,7 +33,8 @@ import { loadProjectPlantContext } from "../services/plantMeasurementLink.js";
 import { recordAuditEvent } from "../services/auditTrail.js";
 import { sendEmail, emailLayout } from "../services/mailer.js";
 import { env } from "../env.js";
-import { CURRENCIES, DEFAULT_IVA_RATE, UNITS, LINE_ITEM_KINDS, fixedSigo } from "@sigo/shared";
+import { CURRENCIES, DEFAULT_IVA_RATE, UNITS, LINE_ITEM_KINDS, fixedSigo, planUsesDirectDocumentApproval } from "@sigo/shared";
+import { getCompanySubscription } from "../services/subscriptionEntitlements.js";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista"] as const;
 
@@ -246,8 +247,10 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
     const parsed = z.object({ status: z.enum(["rascunho", "submetido", "aprovado"]), decisionNote: z.string().trim().max(1000).optional() }).safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
 
+    const subscription = await getCompanySubscription(companyId);
+    const directApproval = planUsesDirectDocumentApproval(subscription?.plan);
     const transitions: Record<typeof document.status, (typeof document.status)[]> = {
-      rascunho: ["submetido"],
+      rascunho: directApproval ? ["submetido", "aprovado"] : ["submetido"],
       submetido: ["rascunho", "aprovado"],
       aprovado: [],
     };
@@ -255,7 +258,9 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
       if (request.currentUser!.role !== "admin_empresa") {
         return reply.code(403).send({ error: "A aprovação do documento exige um administrador da empresa" });
       }
-      if (document.submittedByUserId === request.currentUser!.id) {
+      // Plano Individual: o único utilizador aprova directamente a partir do rascunho.
+      // Nos outros planos, quem submeteu não pode auto-aprovar salvo se for o único admin.
+      if (!directApproval && document.submittedByUserId === request.currentUser!.id) {
         const otherAdmins = await db
           .select({ id: users.id })
           .from(users)
@@ -302,10 +307,11 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
       }
     }
 
+    const approvingFromDraft = parsed.data.status === "aprovado" && document.status === "rascunho";
     const [updated] = await db.update(budgetDocuments).set({
       status: parsed.data.status,
       submittedByUserId:
-        parsed.data.status === "submetido"
+        parsed.data.status === "submetido" || approvingFromDraft
           ? request.currentUser!.id
           : parsed.data.status === "rascunho"
             ? null

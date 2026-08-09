@@ -15,7 +15,8 @@ import ProjectWorkflowBanner from "../components/ProjectWorkflowBanner";
 import PublicShareModal from "../components/PublicShareModal";
 import { IconDoc, IconClipboard, IconMap, IconPlus, IconRuler, IconTrash, IconUpload } from "../components/icons";
 import { useAuth } from "../auth/AuthContext";
-import { UNITS, type Unit } from "@sigo/shared";
+import { UNITS, type Unit, planUsesDirectDocumentApproval } from "@sigo/shared";
+import { companiesApi } from "../api/companies";
 
 const PLANT_STATUS_BADGE: Record<Plant["processingStatus"], { label: string; cls: string }> = {
   pendente: { label: "Pendente", cls: "badge-gray" },
@@ -70,6 +71,14 @@ export default function ProjectDetailPage() {
   const [newMaterial, setNewMaterial] = useState<{ name: string; unit: Unit; specification: string }>({ name: "", unit: "un", specification: "" });
   const [addingMaterial, setAddingMaterial] = useState(false);
   const [workflowStatus, setWorkflowStatus] = useState<ProjectWorkflowStatus | null>(null);
+  const [directApproval, setDirectApproval] = useState(false);
+
+  useEffect(() => {
+    companiesApi
+      .me()
+      .then((data) => setDirectApproval(planUsesDirectDocumentApproval(data.company.subscription?.plan)))
+      .catch(() => setDirectApproval(false));
+  }, []);
 
   async function reload() {
     if (!projectId) return;
@@ -342,7 +351,7 @@ export default function ProjectDetailPage() {
         { label: "1. Projecto", detail: "Dados da obra registados", done: true },
         { label: "2. Preços", detail: project.zoneId ? "Zona definida" : "Definir zona e cotações", done: Boolean(project.zoneId) },
         { label: "3. Orçamento", detail: budgetDocuments.length ? "Mapa criado" : "Criar ou receber da medição", done: budgetDocuments.length > 0 },
-        { label: "4. Aprovar", detail: approvedBudgetDocuments.length ? "Pronto para gestão" : "Submeter e aprovar", done: approvedBudgetDocuments.length > 0 },
+        { label: "4. Aprovar", detail: approvedBudgetDocuments.length ? "Pronto para gestão" : (directApproval ? "Aprovar o orçamento" : "Submeter e aprovar"), done: approvedBudgetDocuments.length > 0 },
       ]
     : usesPlants
       ? [

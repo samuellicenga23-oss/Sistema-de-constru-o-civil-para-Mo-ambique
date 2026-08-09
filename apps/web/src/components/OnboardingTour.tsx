@@ -70,7 +70,7 @@ function buildSteps(opts: {
       body: "Comece aqui. Crie o mapa de quantidades da obra a partir de plantas, Excel ou medição manual.",
       bullets: [
         "Crie uma obra e escolha o modo de medição",
-        "Revise quantidades e submeta para aprovação",
+        "Revise quantidades e aprove a medição",
         "A medição aprovada alimenta o orçamento",
       ],
       ctaLabel: "Ir a Medições",
@@ -86,7 +86,7 @@ function buildSteps(opts: {
       bullets: [
         "Crie o orçamento a partir da medição aprovada",
         "Ligue itens ao catálogo ou ajuste preços",
-        "Submeta e aprove antes de planear a obra",
+        "Aprove o orçamento antes de planear a obra",
       ],
       ctaLabel: "Ir a Orçamentos",
       ctaTo: "/orcamentos",

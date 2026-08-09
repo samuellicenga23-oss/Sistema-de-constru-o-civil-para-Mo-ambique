@@ -24,6 +24,8 @@ import { IconChart, IconClipboard, IconDoc, IconDownload, IconPencil, IconPlus, 
 import { useAuth } from "../auth/AuthContext";
 import { can } from "../permissions";
 import { practiceApi } from "../api/practice";
+import { companiesApi } from "../api/companies";
+import { planUsesDirectDocumentApproval } from "@sigo/shared";
 import { collectUnpricedItems, filterTreeToUnpricedOnly } from "../utils/boqHelpers";
 import { ApiError } from "../api/http";
 
@@ -179,6 +181,14 @@ export default function BudgetDocumentPage() {
   const [showCommercialProposal, setShowCommercialProposal] = useState(false);
   const [proposalAttachMode, setProposalAttachMode] = useState<"nada" | "resumo" | "mapa">("resumo");
   const [creatingProposal, setCreatingProposal] = useState(false);
+  const [directApproval, setDirectApproval] = useState(false);
+
+  useEffect(() => {
+    companiesApi
+      .me()
+      .then((data) => setDirectApproval(planUsesDirectDocumentApproval(data.company.subscription?.plan)))
+      .catch(() => setDirectApproval(false));
+  }, []);
 
   async function handleGenerateCommercialProposal() {
     if (!documentId) return;
@@ -513,9 +523,13 @@ export default function BudgetDocumentPage() {
     const prompts = {
       aprovado: {
         title: isMed ? "Aprovar medição?" : "Aprovar orçamento?",
-        message: isMed
-          ? "A medição fica protegida e pode ser enviada para Orçamentos."
-          : "Passa a ser a referência do cronograma e dos autos.",
+        message: directApproval
+          ? (isMed
+            ? "Confirma a medição. Fica protegida e pode criar o orçamento de seguida."
+            : "Confirma o orçamento. Passa a ser a referência do cronograma e dos autos.")
+          : (isMed
+            ? "A medição fica protegida e pode ser enviada para Orçamentos."
+            : "Passa a ser a referência do cronograma e dos autos."),
         confirmLabel: "Aprovar",
         danger: false,
       },
@@ -691,7 +705,12 @@ export default function BudgetDocumentPage() {
         : `Orçamento · revisão ${document.revision ?? "-"} · ${currency} · ${document.status}`}
       actions={
         <>
-          {!isClientView && document.status === "rascunho" && (
+          {!isClientView && document.status === "rascunho" && directApproval && user?.role === "admin_empresa" && (
+            <button onClick={() => handleStatusChange("aprovado")} disabled={changingStatus} className="btn btn-success btn-sm">
+              <IconChart className="w-3.5 h-3.5" /> Aprovar
+            </button>
+          )}
+          {!isClientView && document.status === "rascunho" && !directApproval && (
             <button onClick={() => handleStatusChange("submetido")} disabled={changingStatus} className="btn btn-secondary btn-sm">
               <IconChart className="w-3.5 h-3.5" /> Submeter
             </button>
@@ -735,7 +754,9 @@ export default function BudgetDocumentPage() {
             </button>
           )}
           {isMeasurementDocument && !isClientView && document.status !== "aprovado" && (
-            <span className="hidden text-xs text-slate-500 sm:inline">Aprove a medição para enviar a Orçamentos</span>
+            <span className="hidden text-xs text-slate-500 sm:inline">
+              {directApproval ? "Aprove a medição para criar o orçamento" : "Aprove a medição para enviar a Orçamentos"}
+            </span>
           )}
           {!isMeasurementDocument && document.status !== "rascunho" && !isClientView && (
             <button
