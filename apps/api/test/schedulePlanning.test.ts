@@ -401,21 +401,37 @@ describe("Motor profissional de WBS", () => {
     expect(questions).toHaveLength(2);
   });
 
-  it("num mapa importado preserva o BOQ e o assistente não oferece falsa precisão por piso", () => {
+  it("classifica trabalhos reconhecíveis de um mapa importado e reparte-os por piso", () => {
     const imported: PlanningSourceSection = {
       id: "imp-2",
       name: "Importado",
       sortOrder: 0,
       templateKey: null,
-      roots: [chapter("A", "Capítulo", [{ ...leaf("A.1", "Trabalho", 5), sortOrder: 0 }])],
+      roots: [chapter("A", "Alvenarias", [{ ...leaf("A.1", "Elevação de paredes em bloco", 8), sortOrder: 0 }])],
     };
     const context = buildPlanningContext([imported], 4);
     const questions = buildPlanningQuestions(context);
     const profile = defaultSchedulePlanningProfile(context, "2026-08-10");
+    const plan = buildExecutionPlan({ sections: [imported], floors: 4, startDate: profile.startDate, profile });
+    expect(context.supportsFloorPlanning).toBe(true);
+    expect(context.hasImportedScope).toBe(true);
+    expect(profile.locationStrategy).toBe("floors");
+    expect(questions.map((question) => question.key)).toEqual(["floorLabels", "sequencePolicy"]);
+    expect(byCode(plan, "A.1")).toHaveLength(4);
+    expect(new Set(byCode(plan, "A.1").map((row) => row.floorIndex))).toEqual(new Set([0, 1, 2, 3]));
+  });
+
+  it("mantém no BOQ um item importado cujo significado não é seguro", () => {
+    const imported: PlanningSourceSection = {
+      id: "imp-unknown",
+      name: "Importado",
+      sortOrder: 0,
+      templateKey: null,
+      roots: [chapter("X", "Outros", [{ ...leaf("X.1", "Serviço especial do adjudicatário", 5), sortOrder: 0 }])],
+    };
+    const context = buildPlanningContext([imported], 3);
     expect(context.supportsFloorPlanning).toBe(false);
-    expect(profile.locationStrategy).toBe("boq");
-    expect(questions.some((question) => question.key === "locationStrategy")).toBe(false);
-    expect(questions.some((question) => question.key === "tradeResources")).toBe(false);
+    expect(defaultSchedulePlanningProfile(context, "2026-08-10").locationStrategy).toBe("boq");
   });
 
   it("expõe prazo natural separadamente do prazo contratual ajustado", () => {

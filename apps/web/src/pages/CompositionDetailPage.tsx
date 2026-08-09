@@ -17,9 +17,10 @@ type SupplierSummary = { count: number; cheapest: { supplierName: string; unitCo
 function formatSupplierHint(summaries: Map<string, SupplierSummary>, refId: string): string | null {
   const s = summaries.get(refId);
   if (!s) return null;
-  const plural = s.count === 1 ? "fornecedor" : "fornecedores";
-  return `${s.count} ${plural} cadastrado(s) · desde ${money(s.cheapest.unitCost)} ${s.cheapest.currency} (${s.cheapest.supplierName})`;
+  return `${s.count} oferta(s) · melhor ${money(s.cheapest.unitCost)} ${s.cheapest.currency}`;
 }
+
+type ResourceTab = "materials" | "labour" | "equipment";
 
 // Resolve por NOME, nunca pelo id da linha: composições ainda não clonadas para esta empresa
 // apontam para o recurso GLOBAL, mas os preços de fornecedor ficam sempre ligados ao recurso da
@@ -80,8 +81,11 @@ function LineEditor({
 }) {
   const [newRefId, setNewRefId] = useState("");
   const [newQty, setNewQty] = useState("");
+  const [newQuery, setNewQuery] = useState("");
 
-  const available = options.filter((o) => !lines.some((l) => l.refId === o.id));
+  const query = newQuery.trim().toLocaleLowerCase("pt");
+  const remainingOptions = options.filter((o) => !lines.some((l) => l.refId === o.id));
+  const available = remainingOptions.filter((o) => !query || o.name.toLocaleLowerCase("pt").includes(query));
 
   function resolveName(refId: string): string {
     return options.find((o) => o.id === refId)?.name ?? fallback.get(refId)?.name ?? "Recurso removido do catálogo";
@@ -204,8 +208,9 @@ function LineEditor({
       </table>
       </div>
 
-      {available.length > 0 && (
-        <div className="grid gap-3 border-t border-slate-200 bg-slate-50/70 p-4 sm:grid-cols-[minmax(0,1fr)_9rem_auto] sm:items-end">
+      {remainingOptions.length > 0 && (
+        <div className="grid gap-3 border-t border-slate-200 bg-slate-50/70 p-4 sm:grid-cols-[minmax(10rem,.8fr)_minmax(0,1fr)_8rem_auto] sm:items-end">
+          <input type="search" value={newQuery} onChange={(e) => setNewQuery(e.target.value)} className="input input-sm" placeholder="Pesquisar recurso..." />
           <select value={newRefId} onChange={(e) => setNewRefId(e.target.value)} className="input input-sm flex-1">
             <option value="">— escolher recurso —</option>
             {available.map((o) => (
@@ -213,6 +218,7 @@ function LineEditor({
                 {o.name}
               </option>
             ))}
+            {available.length === 0 && <option disabled>Nenhum resultado</option>}
           </select>
           <input type="number" step="0.01" placeholder={unitLabel} value={newQty} onChange={(e) => setNewQty(e.target.value)} className="input input-sm w-full" />
           <button onClick={addLine} type="button" className="btn btn-secondary btn-sm w-full sm:w-auto">
@@ -254,6 +260,7 @@ export default function CompositionDetailPage() {
   const [supplierSummaryByMaterial, setSupplierSummaryByMaterial] = useState<Map<string, SupplierSummary>>(new Map());
   const [supplierSummaryByLabour, setSupplierSummaryByLabour] = useState<Map<string, SupplierSummary>>(new Map());
   const [supplierSummaryByEquipment, setSupplierSummaryByEquipment] = useState<Map<string, SupplierSummary>>(new Map());
+  const [resourceTab, setResourceTab] = useState<ResourceTab>("materials");
 
   async function reload(loadId: string) {
     const [d, lc, m, eq] = await Promise.all([
@@ -384,95 +391,60 @@ export default function CompositionDetailPage() {
       actions={
         <>
           <span className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold tabular-nums text-slate-900">{money(unitCost)} MZN/{detail.outputUnit}</span>
-          <label className="flex min-h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600"><input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} /> Disponível</label>
           <button onClick={handleSave} disabled={saving} className="btn btn-primary btn-sm">{saving ? "A guardar..." : "Guardar"}</button>
-          <Link to="/catalogo" className="btn btn-ghost btn-sm"><IconBack className="w-3.5 h-3.5" /> Catálogo</Link>
         </>
       }
     >
       <div className="mx-auto w-full max-w-6xl space-y-5">
         <div className="space-y-5 min-w-0">
+          <Link to="/catalogo" className="inline-flex items-center gap-1.5 text-sm font-semibold text-brand-700 hover:underline"><IconBack className="h-3.5 w-3.5" /> Voltar ao catálogo</Link>
           {error && <AlertBanner tone="error" onDismiss={() => setError(null)}>{error}</AlertBanner>}
           {message && <AlertBanner tone="success" onDismiss={() => setMessage(null)}>{message}</AlertBanner>}
 
-          <section className="card card-pad space-y-3">
-            <div>
-              <h2 className="section-title">Descrição e critérios técnicos</h2>
-              <p className="mt-1 text-xs text-slate-500">Aparecem no orçamento quando um item está ligado a esta composição — inclui acabamentos, normas e modo de medição.</p>
-            </div>
-            <div className="grid gap-3 lg:grid-cols-2">
-              <div className="lg:col-span-2">
-                <label className="label">Descrição / especificação resumida</label>
-                <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} className="input text-sm" placeholder="Ex.: Sanita completa com autoclismo dual, assento e ligações..." />
-              </div>
-              <div>
-                <label className="label">Critério de medição</label>
-                <textarea value={measurementCriteria} onChange={(e) => setMeasurementCriteria(e.target.value)} rows={2} className="input text-sm" placeholder="Ex.: Por unidade instalada e ensaiada" />
-              </div>
-              <div>
-                <label className="label">Notas de execução</label>
-                <textarea value={executionNotes} onChange={(e) => setExecutionNotes(e.target.value)} rows={2} className="input text-sm" placeholder="Ex.: Fixação, vedação, ensaio de estanqueidade..." />
-              </div>
-              <div>
-                <label className="label">Código interno</label>
-                <input value={code} onChange={(e) => setCode(e.target.value)} className="input" placeholder="Opcional" />
-              </div>
-              <div>
-                <label className="label">Categoria</label>
-                <input value={category} onChange={(e) => setCategory(e.target.value)} className="input" />
-              </div>
-            </div>
+          <section className="card grid overflow-hidden grid-cols-2 lg:grid-cols-4">
+            {[["Materiais", materialCost], ["Mão-de-obra", labourCost], ["Equipamento", equipmentCost], ["Custo directo", directCost]].map(([label, value], index) => <div key={String(label)} className={`p-4 ${index === 1 || index === 3 ? "border-l" : ""} ${index === 2 ? "border-t lg:border-l lg:border-t-0" : index === 3 ? "border-t lg:border-t-0" : ""} border-slate-200`}><span className="text-xs text-slate-500">{label}</span><strong className={`mt-1 block tabular-nums ${index === 3 ? "text-xl text-brand-800" : "text-base text-slate-950"}`}>{money(Number(value))} MZN</strong></div>)}
           </section>
 
-          <LineEditor
-            title="Mão-de-obra"
-            unitLabel={`h / ${detail.outputUnit}`}
-            lines={labourLines}
-            setLines={setLabourLines}
-            options={labourCategories.filter((item) => item.isActive)}
-            optionCost={(refId) => Number(labourCategories.find((o) => o.id === refId)?.hourlyRate ?? 0)}
-            fallback={labourFallback}
-            hint={(refId) => formatSupplierHint(supplierSummaryByLabour, refId)}
-          />
-          <LineEditor
-            title="Materiais"
-            unitLabel={`qtd / ${detail.outputUnit}`}
-            lines={materialLines}
-            setLines={setMaterialLines}
-            options={materials.filter((item) => item.isActive)}
-            optionCost={(refId) => {
-              const mat = materials.find((o) => o.id === refId);
-              return Number(mat?.baseUnitCost ?? 0) * Number(mat?.importFactor ?? 1);
-            }}
-            fallback={materialFallback}
-            hint={(refId) => {
-              const mat = materials.find((o) => o.id === refId);
-              const supplier = formatSupplierHint(supplierSummaryByMaterial, refId);
-              const parts = [mat?.specification, supplier].filter(Boolean);
-              return parts.length ? parts.join(" · ") : null;
-            }}
-            supportsWaste
-            optionDefaultWaste={(refId) => Number(materials.find((o) => o.id === refId)?.defaultWastePct ?? 0)}
-          />
-          <LineEditor
-            title="Máquinas / Equipamento"
-            unitLabel={`h / ${detail.outputUnit}`}
-            lines={equipmentLines}
-            setLines={setEquipmentLines}
-            options={equipment}
-            optionCost={(refId) => Number(equipment.find((o) => o.id === refId)?.hourlyCost ?? 0)}
-            fallback={equipmentFallback}
-            hint={(refId) => formatSupplierHint(supplierSummaryByEquipment, refId)}
-          />
-          <CompositionTechnicalV2Panel compositionId={detail.id} onChanged={() => void reload(detail.id)} />
+          <div className="workspace-tabs">
+            {([
+              ["materials", "Materiais", materialLines.length, materialCost],
+              ["labour", "Mão-de-obra", labourLines.length, labourCost],
+              ["equipment", "Equipamento", equipmentLines.length, equipmentCost],
+            ] as const).map(([value, label, count, cost]) => (
+              <button key={value} type="button" onClick={() => setResourceTab(value)} className={`workspace-tab ${resourceTab === value ? "workspace-tab-active" : ""}`}>
+                {label} <span className="ml-1 text-xs opacity-70">{count} · {money(cost)}</span>
+              </button>
+            ))}
+          </div>
+
+          {resourceTab === "materials" && <LineEditor title="Materiais" unitLabel={`consumo / ${detail.outputUnit}`} lines={materialLines} setLines={setMaterialLines} options={materials.filter((item) => item.isActive)} optionCost={(refId) => { const mat = materials.find((o) => o.id === refId); return Number(mat?.baseUnitCost ?? 0) * Number(mat?.importFactor ?? 1); }} fallback={materialFallback} hint={(refId) => { const mat = materials.find((o) => o.id === refId); return [mat?.specification, formatSupplierHint(supplierSummaryByMaterial, refId)].filter(Boolean).join(" · ") || null; }} supportsWaste optionDefaultWaste={(refId) => Number(materials.find((o) => o.id === refId)?.defaultWastePct ?? 0)} />}
+          {resourceTab === "labour" && <LineEditor title="Mão-de-obra" unitLabel={`h / ${detail.outputUnit}`} lines={labourLines} setLines={setLabourLines} options={labourCategories.filter((item) => item.isActive)} optionCost={(refId) => Number(labourCategories.find((o) => o.id === refId)?.hourlyRate ?? 0)} fallback={labourFallback} hint={(refId) => formatSupplierHint(supplierSummaryByLabour, refId)} />}
+          {resourceTab === "equipment" && <LineEditor title="Equipamento" unitLabel={`h / ${detail.outputUnit}`} lines={equipmentLines} setLines={setEquipmentLines} options={equipment} optionCost={(refId) => Number(equipment.find((o) => o.id === refId)?.hourlyCost ?? 0)} fallback={equipmentFallback} hint={(refId) => formatSupplierHint(supplierSummaryByEquipment, refId)} />}
+
+          <details className="card overflow-hidden">
+            <summary className="cursor-pointer px-5 py-4 text-sm font-semibold text-slate-800">Dados da composição</summary>
+            <div className="grid gap-3 border-t border-slate-200 p-5 lg:grid-cols-2">
+              <div className="lg:col-span-2"><label className="label">Nome</label><input value={name} onChange={(e) => setName(e.target.value)} className="input" /></div>
+              <div><label className="label">Código</label><input value={code} onChange={(e) => setCode(e.target.value)} className="input" placeholder="Opcional" /></div>
+              <div><label className="label">Categoria</label><input value={category} onChange={(e) => setCategory(e.target.value)} className="input" /></div>
+              <div className="lg:col-span-2"><label className="label">Descrição resumida</label><textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} className="input text-sm" /></div>
+              <div><label className="label">Como medir</label><textarea value={measurementCriteria} onChange={(e) => setMeasurementCriteria(e.target.value)} rows={2} className="input text-sm" /></div>
+              <div><label className="label">Notas de execução</label><textarea value={executionNotes} onChange={(e) => setExecutionNotes(e.target.value)} rows={2} className="input text-sm" /></div>
+              <div><label className="label">Fonte</label><input value={sourceName} onChange={(e) => setSourceName(e.target.value)} className="input" /></div>
+              <div><label className="label">Referência</label><input value={sourceReference} onChange={(e) => setSourceReference(e.target.value)} className="input" /></div>
+              <label className="flex items-center gap-2 text-sm text-slate-700 lg:col-span-2"><input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} /> Disponível para novos orçamentos</label>
+            </div>
+          </details>
+
+          <details className="card overflow-hidden">
+            <summary className="cursor-pointer px-5 py-4 text-sm font-semibold text-slate-800">Cálculo avançado e subcomposições</summary>
+            <div className="border-t border-slate-200"><CompositionTechnicalV2Panel compositionId={detail.id} onChanged={() => void reload(detail.id)} /></div>
+          </details>
           <div className="flex justify-end">
             <button onClick={handleDelete} className="btn btn-ghost btn-sm text-red-600 hover:bg-red-50"><IconTrash className="h-3.5 w-3.5" /> Eliminar composição</button>
           </div>
         </div>
 
-        <section className="card grid overflow-hidden sm:grid-cols-4">
-          {[["Mão-de-obra", labourCost], ["Materiais", materialCost], ["Máquinas", equipmentCost], ["Custo directo", directCost]].map(([label, value], index) => <div key={String(label)} className={`p-4 ${index ? "border-t sm:border-l sm:border-t-0" : ""} border-slate-200`}><span className="text-xs text-slate-500">{label}</span><strong className="mt-1 block text-lg tabular-nums text-slate-950">{money(Number(value))} MZN</strong></div>)}
-        </section>
       </div>
       {dialog}
     </Layout>

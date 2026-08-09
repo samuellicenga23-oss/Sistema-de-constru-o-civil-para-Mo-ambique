@@ -143,11 +143,18 @@ export default function SchedulePlanningWizard(props: Props) {
             <div className="flex flex-wrap gap-2 text-xs text-slate-600">
               <Pill>{setup.context.measuredItemCount} linhas medidas</Pill>
               <Pill>{setup.context.floors} piso(s)</Pill>
+              {setup.context.supportsFloorPlanning && <Pill>EAP adaptativa</Pill>}
               {setup.context.floorSource === "plant" && <Pill>Detectados nas plantas</Pill>}
               {setup.context.floorSource === "combined" && <Pill>Plantas confirmadas</Pill>}
               {!setup.context.supportsFloorPlanning && <Pill>Ordem do mapa preservada</Pill>}
               {setup.context.detectedRoofKind !== "unknown" && <Pill>Cobertura: {setup.context.detectedRoofKind === "sheet" ? "chapa/telha" : "laje"}</Pill>}
             </div>
+
+            {setup.context.unclassifiedItemCount > 0 && (
+              <AlertBanner tone="info">
+                {setup.context.classifiedItemCount} de {setup.context.measuredItemCount} actividades foram organizadas automaticamente. As restantes mantêm a ordem do mapa e podem ser ajustadas no cronograma.
+              </AlertBanner>
+            )}
 
             {setup.needsRegeneration && <AlertBanner tone="warning"><div><p className="font-semibold">A linha de base precisa de actualização</p><p className="mt-0.5 text-xs">{setup.regenerationReasons[0] ?? "Existem alterações posteriores à geração do cronograma."}</p></div></AlertBanner>}
 

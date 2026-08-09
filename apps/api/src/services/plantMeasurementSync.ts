@@ -17,7 +17,13 @@ export async function syncProjectPlantMeasurements(projectId: string): Promise<{
   if (!documents.length) return { updatedItems: 0 };
 
   const context = await loadProjectPlantContext(projectId);
-  if (!context.rooms.length && !context.openings.length) return { updatedItems: 0 };
+  // Conflito de identidade: contextualizou-se a vazio de propósito. Limpar quantidades
+  // com origem «planta» evita deixar saldos obsoletos a parecerem actuais enquanto
+  // o utilizador não confirma a identidade da planta.
+  if (!context.rooms.length && !context.openings.length) {
+    if (!context.identityConflict) return { updatedItems: 0 };
+    return clearPlantOriginQuantities(documents.map((document) => document.id));
+  }
 
   const items = await db.select({
     id: lineItems.id,
@@ -69,4 +75,26 @@ export async function syncProjectPlantMeasurements(projectId: string): Promise<{
     updatedItems++;
   }
   return { updatedItems };
+}
+
+async function clearPlantOriginQuantities(documentIds: string[]): Promise<{ updatedItems: number }> {
+  const plantItems = await db.select({
+    id: lineItems.id,
+  }).from(lineItems)
+    .innerJoin(budgetSections, eq(lineItems.sectionId, budgetSections.id))
+    .where(and(
+      inArray(budgetSections.documentId, documentIds),
+      eq(lineItems.kind, "item"),
+      eq(lineItems.origin, "planta"),
+      inArray(lineItems.code, supportedPlantItemCodes()),
+    ));
+  if (!plantItems.length) return { updatedItems: 0 };
+
+  await db.transaction(async (tx) => {
+    await tx.delete(measurementLines).where(inArray(measurementLines.lineItemId, plantItems.map((item) => item.id)));
+    await tx.update(lineItems)
+      .set({ quantity: "0", origin: "planta" })
+      .where(inArray(lineItems.id, plantItems.map((item) => item.id)));
+  });
+  return { updatedItems: plantItems.length };
 }

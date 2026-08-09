@@ -51,6 +51,7 @@ export default function PlantReviewPage() {
   const [savingRoomId, setSavingRoomId] = useState<string | null>(null);
   const [reprocessing, setReprocessing] = useState(false);
   const [preparingMeasurements, setPreparingMeasurements] = useState(false);
+  const [confirmingIdentity, setConfirmingIdentity] = useState(false);
   const [savingOpeningId, setSavingOpeningId] = useState<string | null>(null);
   const [catalogMaterials, setCatalogMaterials] = useState<Material[]>([]);
   const [openingPrices, setOpeningPrices] = useState<Record<string, string>>({});
@@ -163,6 +164,20 @@ export default function PlantReviewPage() {
       setError(err instanceof Error ? err.message : "Não foi possível preparar as medições");
     } finally {
       setPreparingMeasurements(false);
+    }
+  }
+
+  async function handleConfirmIdentity() {
+    if (!plant) return;
+    setConfirmingIdentity(true);
+    setError(null);
+    try {
+      const updated = await plantsApi.confirmIdentity(plant.id);
+      setPlant(updated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível confirmar as disciplinas");
+    } finally {
+      setConfirmingIdentity(false);
     }
   }
 
@@ -454,6 +469,15 @@ export default function PlantReviewPage() {
   }
 
   const totalRoomsArea = rooms.reduce((s, r) => s + Number(r.areaM2), 0);
+  const identityBlocked = Boolean(
+    plant.documentAnalysis?.requiresIdentityConfirmation
+    && !plant.documentAnalysis.identityConfirmed,
+  );
+  const identityFieldLabels = {
+    owner: "Dono / cliente",
+    location: "Localização",
+    project_title: "Título da obra",
+  } as const;
   const totalRebarWeight = rebarSchedules.reduce((s, r) => s + Number(r.weightKg), 0);
   const rebarPurchasePlan = buildRebarPurchasePlan(
     rebarSchedules.map((line) => ({ diameterMm: Number(line.diameterMm), weightKg: Number(line.weightKg) })),
@@ -548,7 +572,7 @@ export default function PlantReviewPage() {
             <button
               type="button"
               onClick={handleContinueToMeasurements}
-              disabled={plant.processingStatus !== "concluido" || preparingMeasurements}
+              disabled={plant.processingStatus !== "concluido" || preparingMeasurements || identityBlocked}
               className="btn btn-primary"
             >
               <IconRuler className="h-4 w-4" />
@@ -558,10 +582,38 @@ export default function PlantReviewPage() {
             </div>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-5 py-3 text-xs text-slate-600">
-            <span>Tem outra disciplina? Adicione-a antes ou depois; os dados serão combinados automaticamente.</span>
+            <span>{identityBlocked ? "A combinação automática está suspensa até confirmar as disciplinas." : "Tem outra disciplina? Adicione-a antes ou depois; os dados serão combinados automaticamente."}</span>
             <Link to={`/projectos/${plant.projectId}#plantas-do-projecto`} className="font-semibold text-brand-700 hover:underline">Adicionar outro projecto →</Link>
           </div>
         </section>
+
+        {identityBlocked && plant.documentAnalysis && (
+          <section className="card overflow-hidden border-amber-300 bg-amber-50">
+            <div className="p-5">
+              <p className="text-xs font-bold uppercase tracking-wide text-amber-700">Confirmação necessária</p>
+              <h2 className="mt-1 text-lg font-bold text-slate-950">As disciplinas podem pertencer a obras diferentes</h2>
+              <p className="mt-1 text-sm text-slate-700">As medições não serão combinadas até validar os dados abaixo.</p>
+              <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                {plant.documentAnalysis.identityConflicts.map((conflict) => (
+                  <div key={conflict.field} className="rounded-xl border border-amber-200 bg-white p-4">
+                    <p className="text-xs font-bold uppercase tracking-wide text-slate-500">{identityFieldLabels[conflict.field]}</p>
+                    <div className="mt-2 space-y-2">
+                      {conflict.values.map((entry) => (
+                        <div key={`${conflict.field}-${entry.value}`} className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4">
+                          <span className="font-semibold text-slate-900">{entry.value}</span>
+                          <span className="text-xs text-slate-500">{entry.disciplines.join(", ")} · pág. {entry.pages.join(", ")}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <button type="button" onClick={handleConfirmIdentity} disabled={confirmingIdentity} className="btn btn-primary mt-4">
+                {confirmingIdentity ? "A confirmar..." : "Confirmar que pertencem à mesma obra"}
+              </button>
+            </div>
+          </section>
+        )}
 
         {plant.documentAnalysis && (
           <details className="card overflow-hidden">
@@ -574,6 +626,13 @@ export default function PlantReviewPage() {
                       <p className="text-sm font-bold">{section.label}</p>
                       <p className="mt-0.5 text-xs opacity-75">{pageRange(section.startPage, section.endPage)} · {section.pageCount} página(s)</p>
                       <p className="mt-1 text-[10px] font-semibold uppercase tracking-wide opacity-70">Secção organizada</p>
+                      {section.identity && (section.identity.owner || section.identity.location || section.identity.projectTitle) && (
+                        <div className="mt-2 space-y-0.5 text-[11px] leading-snug opacity-80">
+                          {section.identity.projectTitle && <p><span className="font-semibold">Obra:</span> {section.identity.projectTitle}</p>}
+                          {section.identity.owner && <p><span className="font-semibold">Dono:</span> {section.identity.owner}</p>}
+                          {section.identity.location && <p><span className="font-semibold">Local:</span> {section.identity.location}</p>}
+                        </div>
+                      )}
                     </div>
                     <span className="rounded-full bg-white/70 px-2 py-0.5 text-[10px] font-semibold tabular-nums">{Math.round(section.confidence * 100)}%</span>
                   </div>
@@ -610,7 +669,7 @@ export default function PlantReviewPage() {
             <button
               type="button"
               onClick={handleContinueToMeasurements}
-              disabled={preparingMeasurements}
+              disabled={preparingMeasurements || identityBlocked}
               className="btn btn-secondary btn-sm mt-3"
             >
               <IconRuler className="h-3.5 w-3.5" />

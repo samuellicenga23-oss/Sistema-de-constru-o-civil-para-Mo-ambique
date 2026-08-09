@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import { and, count, eq, ilike, isNull, or, sql, inArray } from "drizzle-orm";
+import { and, count, eq, ilike, isNull, isNotNull, or, sql, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { suppliers, priceZones, supplierMaterialPrices, supplierLabourPrices, supplierEquipmentPrices, materials } from "../db/schema.js";
 import { requireCompanyUser } from "../auth/middleware.js";
@@ -11,18 +11,29 @@ function companyIdOf(request: FastifyRequest): string {
   return request.currentUser!.companyId!;
 }
 
+function truthyQuery(value: string | undefined): boolean {
+  return value === "1" || value === "true" || value === "yes";
+}
+
 // SIGO Fornecedores — o marketplace nacional de fornecedores registados directamente (fora do
 // painel de qualquer empresa, ver routes/supplierAuth.ts:register). Abaixo do plano Profissional,
 // a empresa só vê quantos fornecedores existem por zona (teaser para o upgrade), nunca as fichas.
 export async function marketplaceRoutes(app: FastifyInstance) {
   app.get("/api/marketplace/suppliers", { preHandler: requireCompanyUser }, async (request, reply) => {
     const companyId = companyIdOf(request);
-    const { zoneId, q } = request.query as { zoneId?: string; q?: string };
+    const { zoneId, q, inviteable } = request.query as { zoneId?: string; q?: string; inviteable?: string };
     const needle = (q ?? "").trim();
+    const inviteableOnly = truthyQuery(inviteable);
 
     const blocked = await assertSupplierMarketplaceAccess(companyId);
 
-    const filter = zoneId ? and(isNull(suppliers.companyId), eq(suppliers.zoneId, zoneId)) : isNull(suppliers.companyId);
+    const filter = and(
+      ...[
+        isNull(suppliers.companyId),
+        zoneId ? eq(suppliers.zoneId, zoneId) : undefined,
+        inviteableOnly ? isNotNull(suppliers.supplierAccountId) : undefined,
+      ].filter((clause): clause is NonNullable<typeof clause> => clause != null),
+    );
 
     if (blocked) {
       const [{ value }] = await db.select({ value: count() }).from(suppliers).where(filter);

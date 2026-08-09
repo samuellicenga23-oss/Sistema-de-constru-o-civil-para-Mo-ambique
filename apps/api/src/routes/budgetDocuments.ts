@@ -3,7 +3,7 @@ import { z } from "zod";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { createHash } from "node:crypto";
 import { db } from "../db/index.js";
-import { budgetDocuments, budgetSections, lineItems, measurementLines, measurementCertificates, projects, users } from "../db/schema.js";
+import { budgetDocuments, budgetSections, lineItems, measurementLines, measurementCertificates, plants, projects, users } from "../db/schema.js";
 import { requireCompanyUser, requireRole } from "../auth/middleware.js";
 import { getBudgetDocumentSummary, hideInternalPricing } from "../services/boqEngine.js";
 import { computeCompositionUnitCostV2 } from "../services/costEngineV2.js";
@@ -29,6 +29,7 @@ import {
   getMeasurementImportJob,
 } from "../services/measurementImportJobs.js";
 import { documentLockedMessage, evaluateDocumentReadiness } from "../services/documentRules.js";
+import { loadProjectPlantContext } from "../services/plantMeasurementLink.js";
 import { recordAuditEvent } from "../services/auditTrail.js";
 import { sendEmail, emailLayout } from "../services/mailer.js";
 import { env } from "../env.js";
@@ -43,6 +44,7 @@ function companyIdOf(request: FastifyRequest): string {
 async function getDocumentItems(documentId: string) {
   return db
     .select({
+      code: lineItems.code,
       kind: lineItems.kind,
       description: lineItems.description,
       unit: lineItems.unit,
@@ -52,6 +54,45 @@ async function getDocumentItems(documentId: string) {
     .from(lineItems)
     .innerJoin(budgetSections, eq(lineItems.sectionId, budgetSections.id))
     .where(eq(budgetSections.documentId, documentId));
+}
+
+async function detectedRequiredItemCodes(projectId: string): Promise<string[]> {
+  const completedPlants = await db
+    .select({ structuralSummary: plants.structuralSummary, documentAnalysis: plants.documentAnalysis })
+    .from(plants)
+    .where(and(eq(plants.projectId, projectId), eq(plants.processingStatus, "concluido")))
+    .orderBy(desc(plants.uploadedAt));
+  const structural = completedPlants.find((plant) =>
+    plant.structuralSummary
+    && (!plant.documentAnalysis?.requiresIdentityConfirmation || plant.documentAnalysis.identityConfirmed)
+  )?.structuralSummary;
+  const required = new Set<string>();
+  if (structural) {
+    if (structural.footingsCount > 0) ["2.1", "3.1", "3.2", "3.8"].forEach((code) => required.add(code));
+    if (structural.columnsCount > 0) ["3.3", "3.8"].forEach((code) => required.add(code));
+    if (structural.beamsCount > 0) ["3.4", "3.8"].forEach((code) => required.add(code));
+    if (structural.slabsCount > 0) required.add("3.5");
+    if (structural.totalSteelWeightKg > 0) required.add("3.6");
+  }
+  const { openings } = await loadProjectPlantContext(projectId);
+  const confirmed = openings.filter((opening) => !opening.needsConfirmation && opening.widthM != null && opening.heightM != null);
+  if (confirmed.some((opening) => opening.kind === "porta" && opening.location === "interior")) required.add("15.1");
+  if (confirmed.some((opening) => opening.kind === "porta" && opening.location === "exterior")) required.add("15.2");
+  if (confirmed.some((opening) => opening.kind === "janela")) required.add("15.3");
+  if (confirmed.length > 0) required.add("15.4");
+  return [...required];
+}
+
+async function unresolvedPlantIdentityConflicts(projectId: string) {
+  const completedPlants = await db
+    .select({ id: plants.id, filename: plants.originalFileName, documentAnalysis: plants.documentAnalysis })
+    .from(plants)
+    .where(and(eq(plants.projectId, projectId), eq(plants.processingStatus, "concluido")))
+    .orderBy(desc(plants.uploadedAt));
+  return completedPlants.filter((plant) =>
+    plant.documentAnalysis?.requiresIdentityConfirmation
+    && !plant.documentAnalysis.identityConfirmed
+  );
 }
 
 function measurementFingerprint(
@@ -236,7 +277,23 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
     }
 
     if (parsed.data.status === "submetido" || parsed.data.status === "aprovado") {
-      const readiness = evaluateDocumentReadiness(document.documentType === "medicao" ? "medicao" : "orcamento", await getDocumentItems(id));
+      const identityConflicts = await unresolvedPlantIdentityConflicts(document.projectId);
+      if (identityConflicts.length > 0) {
+        return reply.code(409).send({
+          code: "PLANT_IDENTITY_CONFLICT",
+          error: "Confirme primeiro se todas as disciplinas pertencem à mesma obra.",
+          plants: identityConflicts.map((plant) => ({
+            id: plant.id,
+            filename: plant.filename,
+            conflicts: plant.documentAnalysis?.identityConflicts ?? [],
+          })),
+        });
+      }
+      const readiness = evaluateDocumentReadiness(
+        document.documentType === "medicao" ? "medicao" : "orcamento",
+        await getDocumentItems(id),
+        await detectedRequiredItemCodes(document.projectId),
+      );
       if (!readiness.ready) {
         return reply.code(409).send({
           error: `Documento incompleto: ${readiness.blockers.join("; ")}.`,
@@ -335,7 +392,20 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
       .safeParse(request.body ?? {});
     if (!options.success) return reply.code(400).send({ error: options.error.flatten() });
 
-    const readiness = evaluateDocumentReadiness("medicao", await getDocumentItems(id));
+    const identityConflicts = await unresolvedPlantIdentityConflicts(source.projectId);
+    if (identityConflicts.length > 0) {
+      return reply.code(409).send({
+        code: "PLANT_IDENTITY_CONFLICT",
+        error: "Confirme primeiro se todas as disciplinas pertencem à mesma obra.",
+        plants: identityConflicts.map((plant) => ({
+          id: plant.id,
+          filename: plant.filename,
+          conflicts: plant.documentAnalysis?.identityConflicts ?? [],
+        })),
+      });
+    }
+
+    const readiness = evaluateDocumentReadiness("medicao", await getDocumentItems(id), await detectedRequiredItemCodes(source.projectId));
     if (!readiness.ready) {
       return reply.code(409).send({ error: `Medição incompleta: ${readiness.blockers.join("; ")}.`, readiness });
     }

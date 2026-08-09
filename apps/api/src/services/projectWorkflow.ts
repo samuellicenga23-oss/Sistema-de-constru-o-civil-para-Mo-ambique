@@ -7,8 +7,11 @@ import {
   budgetDocuments,
   budgetSections,
   lineItems,
+  scheduleTasks,
+  siteDiaryEntries,
+  purchaseRequisitions,
 } from "../db/schema.js";
-import { getStandardSectionId } from "./quickEstimate.js";
+import { buildProjectWorkflowControl, type ProjectWorkflowControl } from "./projectWorkflowControl.js";
 
 export type WorkflowCycleId =
   | "preparar_obra"
@@ -24,8 +27,7 @@ export type WorkflowCycleId =
   | "pronto_para_orcamento"
   | "orcamento_sem_preco"
   | "orcamento_nao_aprovado"
-  | "certificacao_disponivel"
-  | "mapa_nao_padrao";
+  | "certificacao_disponivel";
 
 export type WorkflowAction = {
   label: string;
@@ -46,30 +48,35 @@ export type ProjectWorkflowStatus = {
   projectId: string;
   measurementMode: string;
   projectType: string;
+  control: ProjectWorkflowControl;
   guidance: WorkflowGuidanceItem[];
 };
 
 async function countLeafItemsWithoutPrice(documentId: string): Promise<number> {
   const rows = await db
-    .select({ id: lineItems.id, unitPrice: lineItems.unitPrice, compositionId: lineItems.compositionId })
+    .select({ quantity: lineItems.quantity, unitPrice: lineItems.unitPrice, compositionId: lineItems.compositionId })
     .from(lineItems)
     .innerJoin(budgetSections, eq(lineItems.sectionId, budgetSections.id))
     .where(and(eq(budgetSections.documentId, documentId), eq(lineItems.kind, "item")));
-  return rows.filter((r) => r.unitPrice === null && r.compositionId === null).length;
+  // Linhas opcionais a zero não entram na proposta. Itens já ligados a composição
+  // resolvem o preço pelo catálogo — não contam como «sem preço».
+  return rows.filter((row) =>
+    Number(row.quantity ?? 0) > 0
+    && !row.compositionId
+    && Number(row.unitPrice ?? 0) <= 0
+  ).length;
 }
 
-async function countLeafItemsWithoutQuantity(documentId: string): Promise<number> {
+async function countMeasuredLeafItems(documentId: string): Promise<number> {
   const [row] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(lineItems)
     .innerJoin(budgetSections, eq(lineItems.sectionId, budgetSections.id))
-    .where(
-      and(
-        eq(budgetSections.documentId, documentId),
-        eq(lineItems.kind, "item"),
-        sql`(${lineItems.quantity} IS NULL OR ${lineItems.quantity} = 0)`,
-      ),
-    );
+    .where(and(
+      eq(budgetSections.documentId, documentId),
+      eq(lineItems.kind, "item"),
+      sql`${lineItems.quantity} > 0`,
+    ));
   return row?.count ?? 0;
 }
 
@@ -78,10 +85,20 @@ export async function getProjectWorkflowStatus(projectId: string): Promise<Proje
   if (!project) return null;
 
   const guidance: WorkflowGuidanceItem[] = [];
-  const plantRows = await db.select().from(plants).where(eq(plants.projectId, projectId));
-  const docs = await db.select().from(budgetDocuments).where(eq(budgetDocuments.projectId, projectId));
+  const [plantRows, docs, scheduleRows, diaryRows, requisitionRows] = await Promise.all([
+    db.select().from(plants).where(eq(plants.projectId, projectId)),
+    db.select().from(budgetDocuments).where(eq(budgetDocuments.projectId, projectId)),
+    db.select({ id: scheduleTasks.id }).from(scheduleTasks).where(eq(scheduleTasks.projectId, projectId)),
+    db.select({ id: siteDiaryEntries.id }).from(siteDiaryEntries).where(eq(siteDiaryEntries.projectId, projectId)),
+    db.select({ id: purchaseRequisitions.id }).from(purchaseRequisitions).where(eq(purchaseRequisitions.projectId, projectId)),
+  ]);
   const measurementDocs = docs.filter((d) => d.documentType === "medicao");
   const budgetDocs = docs.filter((d) => d.documentType === "orcamento");
+  const primaryMeasurement = measurementDocs
+    .slice()
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0] ?? null;
+  const measuredItemCount = primaryMeasurement ? await countMeasuredLeafItems(primaryMeasurement.id) : 0;
+  const measurementReady = Boolean(primaryMeasurement && measuredItemCount > 0 && primaryMeasurement.status === "aprovado");
 
   const usesPlants = project.measurementMode === "plantas";
   const usesImport = project.measurementMode === "importar";
@@ -91,8 +108,7 @@ export async function getProjectWorkflowStatus(projectId: string): Promise<Proje
       id: "preparar_obra",
       severity: "warning",
       title: "Prepare a obra antes de medir e orçamentar",
-      message:
-        "Defina a zona de preços e confirme cotações/composições no catálogo. Assim, ao enviar a medição para orçamento, os custos unitários já vêm correctos — evita vários mapas sem preço.",
+      message: "Defina a zona. O SIGO aplicará os preços e composições disponíveis ao orçamento.",
       actions: [
         { label: "Preparar obra", anchor: "preparar-obra" },
         { label: "Catálogo", path: "/catalogo" },
@@ -106,8 +122,8 @@ export async function getProjectWorkflowStatus(projectId: string): Promise<Proje
       guidance.push({
         id: "sem_plantas",
         severity: "info",
-        title: "Sem plantas carregadas",
-        message: "Este projecto foi criado para usar plantas, mas ainda não há PDFs. Pode carregar desenhos ou passar à medição manual no Mapa de Quantidades.",
+        title: "Carregue os desenhos",
+        message: "O SIGO identifica disciplinas, pisos e elementos antes de preparar a medição.",
         actions: [
           { label: "Carregar PDF", anchor: "plantas-do-projecto" },
           { label: "Medição manual", path: measurementDocs[0] ? `/documentos/${measurementDocs[0].id}?assistente=1` : undefined, hint: "Abre o assistente sem planta" },
@@ -159,7 +175,7 @@ export async function getProjectWorkflowStatus(projectId: string): Promise<Proje
           id: "planta_em_processamento",
           severity: "info",
           title: "Análise em curso",
-          message: `${processing.length} ficheiro(s) ainda a ser processado(s). Pode aguardar ou começar a medição manual em paralelo.`,
+          message: `${processing.length} ficheiro(s) em análise. Pode sair desta página; o processamento continua em segundo plano.`,
           actions: [{ label: "Ver progresso", anchor: "plantas-do-projecto" }],
         });
       }
@@ -187,13 +203,12 @@ export async function getProjectWorkflowStatus(projectId: string): Promise<Proje
   }
 
   if (usesImport && measurementDocs.length > 0) {
-    const emptyQty = await countLeafItemsWithoutQuantity(measurementDocs[0].id);
-    if (emptyQty > 0) {
+    if (measuredItemCount === 0) {
       guidance.push({
         id: "import_excel_pendente",
         severity: "warning",
-        title: "Importação incompleta ou categorias diferentes",
-        message: `${emptyQty} item(ns) ainda sem quantidade. Se o Excel usa secções/disciplinas com nomes diferentes do documento, renomeie a folha para coincidir com a secção do mapa ou crie os itens em falta manualmente.`,
+        title: "Importação sem quantidades",
+        message: "Nenhuma linha medida foi reconhecida. Reveja apenas as correspondências assinaladas.",
         actions: [
           { label: "Importar Excel", path: `/documentos/${measurementDocs[0].id}` },
           { label: "Editar mapa", path: `/documentos/${measurementDocs[0].id}` },
@@ -203,8 +218,7 @@ export async function getProjectWorkflowStatus(projectId: string): Promise<Proje
   }
 
   if (!usesPlants && !usesImport && measurementDocs.length > 0) {
-    const emptyQty = await countLeafItemsWithoutQuantity(measurementDocs[0].id);
-    if (emptyQty > 5) {
+    if (measuredItemCount === 0) {
       guidance.push({
         id: "medicoes_sem_assistente",
         severity: "info",
@@ -216,27 +230,13 @@ export async function getProjectWorkflowStatus(projectId: string): Promise<Proje
   }
 
   if (measurementDocs.length > 0) {
-    const standardOk = await getStandardSectionId(measurementDocs[0].id);
-    if (!standardOk) {
-      guidance.push({
-        id: "mapa_nao_padrao",
-        severity: "info",
-        title: "Mapa com estrutura personalizada",
-        message: "O Assistente automático e a ligação «Da planta» funcionam melhor com o mapa padrão SIGO. Com capítulos próprios, use a régua ou importação Excel linha a linha.",
-        actions: [{ label: "Ver documento", path: `/documentos/${measurementDocs[0].id}` }],
-      });
-    }
-  }
-
-  if (measurementDocs.length > 0) {
-    const emptyQty = await countLeafItemsWithoutQuantity(measurementDocs[0].id);
-    if (emptyQty === 0 && budgetDocs.length === 0) {
+    if (measurementReady && budgetDocs.length === 0) {
       guidance.push({
         id: "pronto_para_orcamento",
         severity: "info",
-        title: "Medições completas — pronto para orçamento",
-        message: "Todas as quantidades estão preenchidas. Envie para orçamento para aplicar composições e preços.",
-        actions: [{ label: "Ir à medição", path: `/documentos/${measurementDocs[0].id}` }],
+        title: "Medição aprovada",
+        message: "Crie o orçamento; quantidades, estrutura e ligações serão transportadas automaticamente.",
+        actions: [{ label: "Criar orçamento", path: `/documentos/${primaryMeasurement!.id}` }],
       });
     }
   }
@@ -306,10 +306,36 @@ export async function getProjectWorkflowStatus(projectId: string): Promise<Proje
     });
   }
 
+  const completedPlants = plantRows.filter((plant) => plant.processingStatus === "concluido").length;
+  const processingPlants = plantRows.filter((plant) => ["pendente", "processando"].includes(plant.processingStatus)).length;
+  const allPlantsFailed = plantRows.length > 0 && plantRows.every((plant) => plant.processingStatus === "erro");
+  const sourceReady = usesPlants
+    ? completedPlants > 0
+    : usesImport
+      ? measuredItemCount > 0
+      : primaryMeasurement !== null;
+  const sourceStatus: "concluido" | "actual" | "pendente" | "bloqueado" = sourceReady
+    ? "concluido"
+    : allPlantsFailed
+      ? "bloqueado"
+      : processingPlants > 0
+        ? "actual"
+        : "pendente";
+  const rawChecks: ProjectWorkflowControl["checks"] = [
+    { id: "dados", label: "Obra configurada", status: project.zoneId ? "concluido" : "pendente" },
+    { id: "fonte", label: usesPlants ? "Desenhos analisados" : usesImport ? "Mapa importado" : "Medição aberta", status: sourceStatus },
+    { id: "medicao", label: "Medição aprovada", status: measurementReady ? "concluido" : measuredItemCount > 0 ? "actual" : "pendente" },
+    { id: "orcamento", label: "Orçamento aprovado", status: hasApprovedBudget ? "concluido" : budgetDocs.length > 0 ? "actual" : "pendente" },
+    { id: "planeamento", label: "Cronograma gerado", status: scheduleRows.length > 0 ? "concluido" : "pendente" },
+    { id: "execucao", label: "Execução ligada", status: diaryRows.length > 0 || requisitionRows.length > 0 ? "concluido" : "pendente" },
+  ];
+  const control = buildProjectWorkflowControl(rawChecks, guidance.map((item) => item.severity));
+
   return {
     projectId,
     measurementMode: project.measurementMode,
     projectType: project.projectType,
+    control,
     guidance,
   };
 }

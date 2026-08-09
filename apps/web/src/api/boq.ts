@@ -472,6 +472,17 @@ export type ProjectWorkflowStatus = {
   projectId: string;
   measurementMode: string;
   projectType: string;
+  control: {
+    score: number;
+    mode: "automatico" | "assistido" | "bloqueado";
+    completed: number;
+    total: number;
+    checks: Array<{
+      id: "dados" | "fonte" | "medicao" | "orcamento" | "planeamento" | "execucao";
+      label: string;
+      status: "concluido" | "actual" | "pendente" | "bloqueado";
+    }>;
+  };
   guidance: Array<{
     id: string;
     severity: "info" | "warning" | "error";

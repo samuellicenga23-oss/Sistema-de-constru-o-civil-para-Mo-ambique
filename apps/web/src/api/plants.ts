@@ -50,12 +50,26 @@ export type DocumentSection = {
   pageCount: number;
   confidence: number;
   evidence: string[];
+  identity: {
+    owner: string | null;
+    location: string | null;
+    projectTitle: string | null;
+    pages: number[];
+  } | null;
+};
+export type DocumentIdentityConflict = {
+  field: "owner" | "location" | "project_title";
+  severity: "warning" | "critical";
+  values: Array<{ value: string; disciplines: DocumentDiscipline[]; pages: number[] }>;
 };
 export type DocumentAnalysis = {
   pageCount: number;
   isMultiDiscipline: boolean;
   matchedTags: string[];
   sections: DocumentSection[];
+  identityConflicts: DocumentIdentityConflict[];
+  requiresIdentityConfirmation: boolean;
+  identityConfirmed: boolean;
 };
 export type PlantUploadDiscipline = "auto" | "arquitectura" | "estrutura";
 
@@ -251,6 +265,9 @@ export const plantsApi = {
 
   updateSlabs: (plantId: string, slabs: StructuralSlab[]) =>
     request<Plant>(`/plants/${plantId}/slabs`, { method: "PUT", body: JSON.stringify({ slabs }) }),
+
+  confirmIdentity: (plantId: string) =>
+    request<Plant>(`/plants/${plantId}/confirm-identity`, { method: "POST", body: JSON.stringify({ confirmed: true }) }),
 
   createOpening: (plantId: string, input: OpeningInput) =>
     request<ExtractedOpening>(`/plants/${plantId}/openings`, { method: "POST", body: JSON.stringify(input) }),

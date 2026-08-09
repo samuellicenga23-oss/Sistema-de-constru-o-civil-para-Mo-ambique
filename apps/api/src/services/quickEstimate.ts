@@ -26,6 +26,18 @@ export type OpeningInput = {
 };
 export type FoundationType = "sapata_isolada" | "sapata_corrida" | "laje";
 export type RoofType = "laje_plana" | "chapa_metalica";
+export type MeasurementScope = "preliminares" | "terraplenagem" | "estrutura" | "arquitectura" | "drenagem" | "cobertura" | "hidraulica" | "electricidade" | "vaos";
+
+const SCOPE_CHAPTER_CODES: Record<MeasurementScope, string[]> = {
+  preliminares: ["1"], terraplenagem: ["2"], estrutura: ["3"],
+  arquitectura: ["4", "5", "6", "7"], drenagem: ["8", "9"],
+  cobertura: ["10"], hidraulica: ["11"], electricidade: ["13"], vaos: ["15"],
+};
+
+function selectedChapterCodes(scopes?: MeasurementScope[]): Set<string> {
+  const selected = scopes?.length ? scopes : (Object.keys(SCOPE_CHAPTER_CODES) as MeasurementScope[]);
+  return new Set(selected.flatMap((scope) => SCOPE_CHAPTER_CODES[scope]));
+}
 
 // Sapatas isoladas/corridas: contadas uma a uma (nº, área e profundidade médias) — mais
 // preciso do que estimar por um rácio genérico da área do piso térreo. Fundação em laje:
@@ -101,12 +113,13 @@ export type HydraulicInput = {
 };
 
 export type QuickEstimateInput = {
-  floors: FloorInput[];
-  foundationType: FoundationType;
+  scopes?: MeasurementScope[];
+  floors?: FloorInput[];
+  foundationType?: FoundationType;
   footing?: FootingDetail; // obrigatório para sapata_isolada/sapata_corrida
   slabThickness?: number; // obrigatório para foundationType === "laje" (m)
-  concreteClass: "B20" | "B25" | "B30";
-  roofType: RoofType;
+  concreteClass?: "B20" | "B25" | "B30";
+  roofType?: RoofType;
   roofArea?: number; // se omitido, estima-se a partir da área do último piso
   steelWeightKg?: number; // se vier de um projecto estrutural real, substitui o rácio kg/m3
   beamConcreteVolumeM3?: number; // idem, calculado a partir do comprimento×secção reais das vigas
@@ -167,9 +180,10 @@ function roomPerimeter(r: RoomInput) {
 }
 
 export function computeQuantities(input: QuickEstimateInput) {
-  const { floors } = input;
-  const groundFloor = floors[0];
-  const topFloor = floors[floors.length - 1];
+  const floors = input.floors ?? [];
+  const emptyFloor: FloorInput = { label: "Sem geometria", ceilingHeight: 0, perimeter: 0, rooms: [] };
+  const groundFloor = floors[0] ?? emptyFloor;
+  const topFloor = floors[floors.length - 1] ?? emptyFloor;
 
   const groundFloorArea = groundFloor.rooms.reduce((s, r) => s + roomArea(r), 0);
   const topFloorArea = topFloor.rooms.reduce((s, r) => s + roomArea(r), 0);
@@ -243,7 +257,9 @@ export function computeQuantities(input: QuickEstimateInput) {
   // o utilizador sabe (ou o projectista indicou) estes valores.
   let footingConcreteVolume: number;
   let excavationVolume: number;
-  if (input.foundationType === "laje") {
+  const foundationType = input.foundationType ?? "sapata_isolada";
+  const roofType = input.roofType ?? "laje_plana";
+  if (foundationType === "laje") {
     const thickness = input.slabThickness ?? 0.35;
     footingConcreteVolume = groundFloorArea * thickness;
     excavationVolume = footingConcreteVolume * FOOTING_EXCAVATION_MARGIN;
@@ -254,8 +270,8 @@ export function computeQuantities(input: QuickEstimateInput) {
   }
   const backfillVolume = Math.max(0, excavationVolume - footingConcreteVolume);
 
-  const avgCeilingHeight = floors.reduce((s, f) => s + f.ceilingHeight, 0) / floors.length;
-  const avgPerimeter = floors.reduce((s, f) => s + f.perimeter, 0) / floors.length;
+  const avgCeilingHeight = floors.length ? floors.reduce((s, f) => s + f.ceilingHeight, 0) / floors.length : 0;
+  const avgPerimeter = floors.length ? floors.reduce((s, f) => s + f.perimeter, 0) / floors.length : 0;
   const downpipeCount = Math.max(1, Math.round(avgPerimeter / 12));
 
   const h = input.hydraulic;
@@ -269,7 +285,7 @@ export function computeQuantities(input: QuickEstimateInput) {
   // mesma base de cálculo (volume de betão de fundação e a escavação à sua volta).
   let footingSource: CalculationSource;
   let footingFormula: string;
-  if (input.foundationType === "laje") {
+  if (foundationType === "laje") {
     footingSource = input.slabThickness !== undefined ? "medido" : "estimativa";
     const thickness = input.slabThickness ?? 0.35;
     footingFormula = `Área do piso térreo (${fmt(groundFloorArea)} m²) × espessura da laje de fundação (${fmt(thickness)} m${input.slabThickness === undefined ? ", valor por omissão — não indicado" : ""})`;
@@ -310,7 +326,7 @@ export function computeQuantities(input: QuickEstimateInput) {
     "3.4": beamConcreteVolume,
     "3.5": slabConcreteVolume,
     "3.6": steelWeight,
-    "3.7": roofType_isFlat(input.roofType) ? roofArea : 0,
+    "3.7": roofType_isFlat(roofType) ? roofArea : 0,
     "3.8": input.formworkAreaM2 ?? formworkArea,
 
     "4.1": totalExteriorWallArea,
@@ -333,9 +349,9 @@ export function computeQuantities(input: QuickEstimateInput) {
 
     "9.1": input.downpipeLengthM ?? downpipeCount * avgCeilingHeight * floors.length,
 
-    "10.1": roofType_isFlat(input.roofType) ? roofArea : 0,
-    "10.2": roofType_isFlat(input.roofType) ? 0 : roofArea,
-    "10.3": roofType_isFlat(input.roofType) ? 0 : avgPerimeter * 0.6,
+    "10.1": roofType_isFlat(roofType) ? roofArea : 0,
+    "10.2": roofType_isFlat(roofType) ? 0 : roofArea,
+    "10.3": roofType_isFlat(roofType) ? 0 : avgPerimeter * 0.6,
 
     "11.1": h?.toilets ?? 0,
     "11.2": h?.sinks ?? 0,
@@ -424,7 +440,7 @@ export function computeQuantities(input: QuickEstimateInput) {
     "3.7",
     byCode["3.7"],
     "medido",
-    roofType_isFlat(input.roofType) ? roofFormula : "Cobertura leve (chapa metálica) — não leva malhasol"
+    roofType_isFlat(roofType) ? roofFormula : "Cobertura leve (chapa metálica) — não leva malhasol"
   );
   push(
     "3.8",
@@ -476,13 +492,13 @@ export function computeQuantities(input: QuickEstimateInput) {
       : `${downpipeCount} tubo(s) de queda (1 por cada 12m de perímetro médio, ${fmt(avgPerimeter)} m) × ${fmt(avgCeilingHeight)} m (pé-direito médio) × ${floors.length} piso(s)`
   );
 
-  push("10.1", byCode["10.1"], "medido", roofType_isFlat(input.roofType) ? roofFormula : "Cobertura leve (chapa metálica) — não leva impermeabilização de laje");
-  push("10.2", byCode["10.2"], "medido", roofType_isFlat(input.roofType) ? "Laje plana — não leva chapa metálica" : roofFormula);
+  push("10.1", byCode["10.1"], "medido", roofType_isFlat(roofType) ? roofFormula : "Cobertura leve (chapa metálica) — não leva impermeabilização de laje");
+  push("10.2", byCode["10.2"], "medido", roofType_isFlat(roofType) ? "Laje plana — não leva chapa metálica" : roofFormula);
   push(
     "10.3",
     byCode["10.3"],
-    roofType_isFlat(input.roofType) ? "medido" : "estimativa",
-    roofType_isFlat(input.roofType) ? "Laje plana — não leva cumeeira/remates de chapa" : `Perímetro médio (${fmt(avgPerimeter)} m) × 0.60 (rácio genérico de cumeeira/remates)`
+    roofType_isFlat(roofType) ? "medido" : "estimativa",
+    roofType_isFlat(roofType) ? "Laje plana — não leva cumeeira/remates de chapa" : `Perímetro médio (${fmt(avgPerimeter)} m) × 0.60 (rácio genérico de cumeeira/remates)`
   );
 
   push("11.1", byCode["11.1"], "medido", `Nº de sanitas indicado no Assistente (Passo Hidráulica): ${h?.toilets ?? 0}`);
@@ -545,9 +561,13 @@ export function computeQuantities(input: QuickEstimateInput) {
   push("15.3", byCode["15.3"], "medido", `Soma largura × altura × quantidade das janelas confirmadas: ${fmt(windowArea)} m²`);
   push("15.4", byCode["15.4"], "medido", `Soma das larguras de portas e janelas confirmadas: ${fmt(openingLintelLength)} ml`);
 
+  const chapterCodes = selectedChapterCodes(input.scopes);
+  if (input.septicTank) chapterCodes.add("12");
+  const isSelected = (code: string) => chapterCodes.has(code.split(".")[0]);
+
   return {
-    byCode,
-    report,
+    byCode: Object.fromEntries(Object.entries(byCode).filter(([code]) => isSelected(code))),
+    report: report.filter((entry) => isSelected(entry.code)),
     summary: {
       totalBuiltArea,
       groundFloorArea,
@@ -575,6 +595,7 @@ function roofType_isFlat(roofType: RoofType) {
 // substitui as suas medições por uma única linha calculada — mantendo tudo revisável depois
 // (o utilizador pode abrir "medições" no item e ajustar/adicionar linhas normalmente).
 export async function applyQuickEstimate(documentId: string, sectionId: string, input: QuickEstimateInput) {
+  await ensureSelectedChapters(sectionId, input);
   const { byCode, summary, report } = computeQuantities(input);
   const reportByCode = new Map(report.map((r) => [r.code, r]));
 
@@ -608,6 +629,37 @@ export async function applyQuickEstimate(documentId: string, sectionId: string, 
     .where(eq(budgetDocuments.id, documentId));
 
   return { itemsUpdated, summary, report };
+}
+
+async function ensureSelectedChapters(sectionId: string, input: QuickEstimateInput) {
+  const selectedCodes = selectedChapterCodes(input.scopes);
+  if (input.septicTank) selectedCodes.add("12");
+  const existing = await db.select().from(lineItems).where(eq(lineItems.sectionId, sectionId));
+  const chaptersByCode = new Map(existing.filter((item) => item.kind === "capitulo" && item.code).map((item) => [item.code!, item]));
+  const itemCodes = new Set(existing.filter((item) => item.kind === "item" && item.code).map((item) => item.code!));
+  let chapterSortOrder = chaptersByCode.size;
+
+  for (const templateChapter of STANDARD_CHAPTERS.filter((chapter) => selectedCodes.has(chapter.code))) {
+    let chapter = chaptersByCode.get(templateChapter.code);
+    if (!chapter) {
+      [chapter] = await db.insert(lineItems).values({
+        sectionId, parentId: null, kind: "capitulo", code: templateChapter.code,
+        description: templateChapter.name, origin: "manual", sortOrder: chapterSortOrder++,
+      }).returning();
+      chaptersByCode.set(templateChapter.code, chapter);
+    }
+
+    let itemSortOrder = existing.filter((item) => item.parentId === chapter.id).length;
+    for (const templateItem of templateChapter.items) {
+      if (itemCodes.has(templateItem.code)) continue;
+      await db.insert(lineItems).values({
+        sectionId, parentId: chapter.id, kind: "item", code: templateItem.code,
+        description: templateItem.description, unit: templateItem.unit, quantity: "0",
+        unitPrice: null, compositionId: null, origin: "manual", sortOrder: itemSortOrder++,
+      });
+      itemCodes.add(templateItem.code);
+    }
+  }
 }
 
 export async function getStandardSectionId(documentId: string): Promise<string | null> {

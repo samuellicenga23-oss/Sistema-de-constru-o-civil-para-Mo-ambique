@@ -1139,7 +1139,14 @@ export default function BudgetDocumentPage() {
 
               <div className="px-3 py-2 overflow-x-auto">
                 {section.items.length === 0 ? (
-                  <p className="text-sm text-gray-400 py-4 text-center">Secção vazia — adicione o primeiro capítulo abaixo.</p>
+                  <div className="py-8 text-center">
+                    <p className="text-sm font-medium text-slate-700">Comece pelos trabalhos desta medição</p>
+                    <p className="mt-1 text-xs text-slate-500">Escolha o âmbito no assistente ou crie um capítulo livre.</p>
+                    {!isReadOnly && <div className="mt-4 flex flex-wrap justify-center gap-2">
+                      {isMeasurementDocument && <button type="button" onClick={() => setShowWizard(true)} className="btn btn-primary btn-sm"><IconRuler className="h-3.5 w-3.5" />Escolher trabalhos</button>}
+                      <button type="button" onClick={() => setAddingIn(section.id)} className="btn btn-secondary btn-sm"><IconPlus className="h-3.5 w-3.5" />Criar manualmente</button>
+                    </div>}
+                  </div>
                 ) : (
                   <table className="w-full min-w-[500px] border-collapse sm:min-w-[720px]">
                     <BoqHeaderRow measurementOnly={isMeasurementDocument} />
@@ -1163,7 +1170,7 @@ export default function BudgetDocumentPage() {
                 )}
               </div>
 
-              {!isReadOnly && <div className="px-3 pb-3">
+              {!isReadOnly && section.items.length > 0 && <div className="px-3 pb-3">
                 {addingIn === section.id ? (
                   <AddChildForm
                     sectionId={section.id}

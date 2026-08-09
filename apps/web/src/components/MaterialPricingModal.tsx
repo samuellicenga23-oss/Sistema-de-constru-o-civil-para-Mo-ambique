@@ -28,33 +28,39 @@ export default function MaterialPricingModal({ material, onClose }: { material: 
   useEffect(() => {
     catalogApi
       .listMaterialSuppliers(material.id)
-      .then((rows) => setSupplierRows(rows as MaterialSupplierRow[]))
+      .then((rows) => setSupplierRows((rows as MaterialSupplierRow[]).sort((a, b) => Number(a.unitCost) - Number(b.unitCost))))
       .catch((err) => setError(err instanceof Error ? err.message : String(err)));
   }, [material.id]);
 
   return (
     <Modal
-      title={`Preços e fornecedores — ${material.name}`}
-      subtitle={`Preço base do catálogo (orçamentos): ${money(material.baseUnitCost)} ${material.currency} / ${material.unit}. Abaixo: cotações publicadas pelos fornecedores (só leitura).`}
+      title={`Cotações — ${material.name}`}
+      subtitle={`Referência do catálogo: ${money(material.effectiveUnitCost)} ${material.currency}/${material.unit}`}
       onClose={onClose}
       maxWidth="max-w-2xl"
     >
       {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
 
       <section>
-        <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h3 className="text-sm font-semibold text-gray-700">Quem vende este material</h3>
-            <p className="mt-1 text-xs text-gray-500">
-              Para confirmar preço e stock, peça cotação em Fornecedores com as quantidades necessárias. Os fornecedores gerem os seus preços no Portal.
-            </p>
-          </div>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <h3 className="text-sm font-semibold text-gray-700">{supplierRows.length} fornecedor(es)</h3>
           <Link to="/gestao/fornecedores" className="text-xs font-medium text-brand-700 hover:underline">
-            Pesquisar fornecedores →
+            Gerir fornecedores →
           </Link>
         </div>
 
-        <div className="overflow-hidden rounded-lg border border-gray-200">
+        <div className="space-y-2 md:hidden">
+          {supplierRows.map((row, index) => (
+            <article key={`mobile-${row.id}`} className="rounded-xl border border-slate-200 p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div><strong className="text-sm text-slate-900">{row.supplierName}</strong><p className="mt-0.5 text-xs text-slate-500">{row.zoneName ?? "Preço geral"}</p></div>
+                <div className="text-right"><strong className="text-sm tabular-nums text-slate-950">{money(row.unitCost)} {row.currency}</strong>{index === 0 && <span className="mt-1 block text-[10px] font-semibold text-emerald-700">Melhor preço</span>}</div>
+              </div>
+              {row.supplierContact && <a href={`tel:${row.supplierContact}`} className="mt-2 inline-block text-xs font-semibold text-brand-700">{row.supplierContact}</a>}
+            </article>
+          ))}
+        </div>
+        <div className="hidden overflow-x-auto rounded-lg border border-gray-200 md:block">
           <table className="w-full text-sm">
             <thead>
               <tr className="table-head-row">
@@ -65,7 +71,7 @@ export default function MaterialPricingModal({ material, onClose }: { material: 
               </tr>
             </thead>
             <tbody>
-              {supplierRows.map((r) => (
+              {supplierRows.map((r, index) => (
                 <tr key={r.id} className="table-row">
                   <td className="px-3 py-1.5">
                     <span className="font-medium text-slate-900">{r.supplierName}</span>
@@ -84,6 +90,7 @@ export default function MaterialPricingModal({ material, onClose }: { material: 
                   </td>
                   <td className="pr-3 text-right tabular-nums">
                     {money(r.unitCost)} {r.currency}
+                    {index === 0 && <span className="ml-2 text-[10px] font-semibold text-emerald-700">Melhor</span>}
                   </td>
                 </tr>
               ))}
@@ -97,6 +104,7 @@ export default function MaterialPricingModal({ material, onClose }: { material: 
             </tbody>
           </table>
         </div>
+        {supplierRows.length === 0 && <p className="py-6 text-center text-sm text-slate-500 md:hidden">Ainda não há cotações publicadas.</p>}
       </section>
     </Modal>
   );

@@ -118,20 +118,17 @@ export function MaterialEditor({
   }
 
   return (
-    <Modal title={item ? "Ficha técnica do material" : "Novo material"} subtitle="Especificação, unidade de medição, compra, perdas e rastreabilidade do preço." onClose={onClose} maxWidth="max-w-4xl">
+    <Modal title={item ? "Editar material" : "Novo material"} subtitle="Dados usados nas composições e compras." onClose={onClose} maxWidth="max-w-3xl">
       <form onSubmit={submit} className="space-y-5">
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <Field label="Código"><input className="input" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} placeholder="MAT-CIM-001" /></Field>
+        <div className="flex items-center justify-between gap-4 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3">
+          <span className="text-sm font-semibold text-blue-900">Preço aplicado</span>
+          <strong className="text-lg tabular-nums text-blue-950">{(numeric(form.baseUnitCost) * numeric(form.importFactor, 1)).toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MZN/{form.unit}</strong>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Material"><input required className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Cimento Portland 32,5" /></Field>
           <Field label="Categoria / grupo"><input required className="input" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} list="material-category-suggestions" placeholder="Cimento, Agregados, Aços, Alvenaria…" /></Field>
           <Field label="Unidade de medição"><select className="input" value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })}>{["m", "m2", "m3", "ml", "kg", "un", "vg", "h"].map((u) => <option key={u}>{u}</option>)}</select></Field>
           <Field label="Preço base (MZN)"><input required min="0" type="number" step="0.01" className="input" value={form.baseUnitCost} onChange={(e) => setForm({ ...form, baseUnitCost: e.target.value })} /></Field>
-          <Field label="Data do preço"><input type="date" className="input" value={form.priceDate} onChange={(e) => setForm({ ...form, priceDate: e.target.value })} /></Field>
-          <Field label="Perda padrão (%)" hint="Sugestão ao adicionar o material a uma composição; pode ser ajustada por serviço."><input min="0" max="100" type="number" step="0.01" className="input" value={form.defaultWastePct} onChange={(e) => setForm({ ...form, defaultWastePct: e.target.value })} /></Field>
-          <Field label="Factor de importação"><input min="0.0001" type="number" step="0.01" className="input" value={form.importFactor} onChange={(e) => setForm({ ...form, importFactor: e.target.value })} /></Field>
-          <Field label="Fonte do preço"><input className="input" value={form.priceSourceName} onChange={(e) => setForm({ ...form, priceSourceName: e.target.value })} placeholder="Fornecedor / INE / cotação" /></Field>
-          <Field label="Unidade de compra"><input className="input" value={form.purchasePackageLabel} onChange={(e) => setForm({ ...form, purchasePackageLabel: e.target.value })} placeholder="Saco 50 kg" /></Field>
-          <Field label="Conteúdo da embalagem"><input min="0.0001" type="number" step="0.01" className="input" value={form.purchasePackageQty} onChange={(e) => setForm({ ...form, purchasePackageQty: e.target.value })} placeholder="50" /></Field>
         </div>
         <datalist id="material-category-suggestions">
           <option value="Cimento" />
@@ -149,9 +146,27 @@ export function MaterialEditor({
           <option value="Estaleiro e segurança" />
           <option value="Outros" />
         </datalist>
-        <Field label="Especificação técnica"><textarea className="input min-h-20" value={form.specification} onChange={(e) => setForm({ ...form, specification: e.target.value })} placeholder="Marca e classe (ex. Limak CEM II/A-V 42,5 N), dimensões, norma — use um material distinto por marca/classe quando o preço difere" /></Field>
-        <Field label="Referência da fonte"><textarea className="input min-h-16" value={form.sourceReference} onChange={(e) => setForm({ ...form, sourceReference: e.target.value })} placeholder="N.º da cotação, documento, URL ou observação" /></Field>
-        <div className="flex flex-wrap gap-5"><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.includesVat} onChange={(e) => setForm({ ...form, includesVat: e.target.checked })} /> Preço inclui IVA</label><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.isActive} onChange={(e) => setForm({ ...form, isActive: e.target.checked })} /> Disponível para novas composições</label></div>
+        <details className="rounded-xl border border-slate-200 bg-slate-50/60">
+          <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-800">Compra e perdas</summary>
+          <div className="grid gap-4 border-t border-slate-200 p-4 sm:grid-cols-2">
+            <Field label="Unidade de compra"><input className="input" value={form.purchasePackageLabel} onChange={(e) => setForm({ ...form, purchasePackageLabel: e.target.value })} placeholder="Saco 50 kg" /></Field>
+            <Field label="Conteúdo da embalagem"><input min="0.0001" type="number" step="0.01" className="input" value={form.purchasePackageQty} onChange={(e) => setForm({ ...form, purchasePackageQty: e.target.value })} placeholder="50" /></Field>
+            <Field label="Perda padrão (%)"><input min="0" max="100" type="number" step="0.01" className="input" value={form.defaultWastePct} onChange={(e) => setForm({ ...form, defaultWastePct: e.target.value })} /></Field>
+            <Field label="Factor de importação"><input min="0.0001" type="number" step="0.01" className="input" value={form.importFactor} onChange={(e) => setForm({ ...form, importFactor: e.target.value })} /></Field>
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.includesVat} onChange={(e) => setForm({ ...form, includesVat: e.target.checked })} /> Preço inclui IVA</label>
+          </div>
+        </details>
+        <details className="rounded-xl border border-slate-200 bg-slate-50/60">
+          <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-800">Especificação e fonte do preço</summary>
+          <div className="grid gap-4 border-t border-slate-200 p-4 sm:grid-cols-2">
+            <Field label="Código"><input className="input" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} placeholder="MAT-CIM-001" /></Field>
+            <Field label="Data do preço"><input type="date" className="input" value={form.priceDate} onChange={(e) => setForm({ ...form, priceDate: e.target.value })} /></Field>
+            <Field label="Fonte do preço"><input className="input" value={form.priceSourceName} onChange={(e) => setForm({ ...form, priceSourceName: e.target.value })} placeholder="Fornecedor / INE / cotação" /></Field>
+            <div className="sm:col-span-2"><Field label="Especificação"><textarea className="input min-h-20" value={form.specification} onChange={(e) => setForm({ ...form, specification: e.target.value })} placeholder="Marca, classe, dimensões ou norma" /></Field></div>
+            <div className="sm:col-span-2"><Field label="Referência da fonte"><textarea className="input min-h-16" value={form.sourceReference} onChange={(e) => setForm({ ...form, sourceReference: e.target.value })} /></Field></div>
+          </div>
+        </details>
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.isActive} onChange={(e) => setForm({ ...form, isActive: e.target.checked })} /> Disponível para novas composições</label>
         <div className="flex justify-end gap-2"><button type="button" onClick={onClose} className="btn btn-ghost">Cancelar</button><button disabled={saving} className="btn btn-primary">{saving ? "A guardar..." : "Guardar material"}</button></div>
       </form>
     </Modal>

@@ -60,12 +60,13 @@ const septicTankSchema = z.object({
 });
 
 const quickEstimateSchema = z.object({
-  floors: z.array(floorSchema).min(1),
-  foundationType: z.enum(["sapata_isolada", "sapata_corrida", "laje"]),
+  scopes: z.array(z.enum(["preliminares", "terraplenagem", "estrutura", "arquitectura", "drenagem", "cobertura", "hidraulica", "electricidade", "vaos"])).min(1).optional(),
+  floors: z.array(floorSchema).optional(),
+  foundationType: z.enum(["sapata_isolada", "sapata_corrida", "laje"]).optional(),
   footing: footingSchema.optional(),
   slabThickness: z.number().positive().optional(),
-  concreteClass: z.enum(["B20", "B25", "B30"]),
-  roofType: z.enum(["laje_plana", "chapa_metalica"]),
+  concreteClass: z.enum(["B20", "B25", "B30"]).optional(),
+  roofType: z.enum(["laje_plana", "chapa_metalica"]).optional(),
   roofArea: z.number().positive().optional(),
   steelWeightKg: z.number().positive().optional(),
   beamConcreteVolumeM3: z.number().positive().optional(),
@@ -81,6 +82,19 @@ const quickEstimateSchema = z.object({
   waterSupplyPipeM: z.number().min(0).optional(),
   hydraulic: hydraulicSchema.optional(),
   septicTank: septicTankSchema.optional(),
+}).superRefine((data, ctx) => {
+  const scopes = new Set(data.scopes ?? []);
+  const geometryRequired = scopes.has("preliminares") || scopes.has("arquitectura") || scopes.has("electricidade");
+  const structureRequired = scopes.has("estrutura") || scopes.has("terraplenagem");
+  if (data.scopes) {
+    if (geometryRequired && !data.floors?.length) ctx.addIssue({ code: "custom", path: ["floors"], message: "Indique pelo menos um piso para os trabalhos seleccionados." });
+    if (structureRequired && !data.foundationType) ctx.addIssue({ code: "custom", path: ["foundationType"], message: "Confirme o tipo de fundação." });
+    if (scopes.has("cobertura") && (!data.roofType || !data.roofArea)) ctx.addIssue({ code: "custom", path: ["roofArea"], message: "Confirme o tipo e a área de cobertura." });
+  } else {
+    if (!data.floors?.length) ctx.addIssue({ code: "custom", path: ["floors"], message: "Indique pelo menos um piso." });
+    if (!data.foundationType) ctx.addIssue({ code: "custom", path: ["foundationType"], message: "Confirme o tipo de fundação." });
+    if (!data.concreteClass || !data.roofType) ctx.addIssue({ code: "custom", path: [], message: "Confirme a estrutura e a cobertura." });
+  }
 });
 
 export async function quickEstimateRoutes(app: FastifyInstance) {

@@ -10,6 +10,7 @@ import re
 import unicodedata
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
+from difflib import SequenceMatcher
 
 import fitz  # PyMuPDF
 
@@ -135,6 +136,21 @@ class PlantMetadata:
 
 
 @dataclass
+class DocumentIdentity:
+    owner: str | None = None
+    location: str | None = None
+    project_title: str | None = None
+    pages: list[int] = field(default_factory=list)
+
+
+@dataclass
+class DocumentIdentityConflict:
+    field: str
+    severity: str
+    values: list[dict] = field(default_factory=list)
+
+
+@dataclass
 class DocumentSection:
     discipline: str
     label: str
@@ -143,6 +159,7 @@ class DocumentSection:
     page_count: int
     confidence: float
     evidence: list[str] = field(default_factory=list)
+    identity: DocumentIdentity | None = None
 
 
 @dataclass
@@ -151,6 +168,9 @@ class DocumentAnalysis:
     is_multi_discipline: bool
     sections: list[DocumentSection] = field(default_factory=list)
     matched_tags: list[str] = field(default_factory=list)
+    identity_conflicts: list[DocumentIdentityConflict] = field(default_factory=list)
+    requires_identity_confirmation: bool = False
+    identity_confirmed: bool = False
 
 
 @dataclass
@@ -296,7 +316,127 @@ def classify_document_pages(
     return classifications
 
 
-def build_document_analysis(classifications: list[PageClassification]) -> DocumentAnalysis:
+IDENTITY_FALLBACK_PATTERNS = {
+    "owner": [
+        re.compile(r"(?im)^[ \t]*(?:propriet[áa]rio|dono[ \t]+da[ \t]+obra|cliente)[ \t]*[:\-][ \t]*([^\n\r:]{3,100})"),
+    ],
+    "location": [
+        re.compile(r"(?im)^[ \t]*(?:localiza[çc][ãa]o|local|distrito)[ \t]*[:\-][ \t]*([^\n\r:]{2,120})"),
+    ],
+    "project_title": [
+        re.compile(r"(?im)^[ \t]*(?:projecto|projeto|obra|empreendimento)[ \t]*[:\-][ \t]*(?!arquitect|arquitet|estrutur|hidr|el[ée]ct)([^\n\r:]{3,140})"),
+    ],
+}
+
+IDENTITY_INVALID_VALUES = {
+    "FASE",
+    "LEGENDA",
+    "LEGENDA OBSERVACOES",
+    "OBSERVACOES",
+    "PROJECTOU",
+    "PROJETOU",
+    "DESENHOU",
+    "VERIFICOU",
+}
+
+
+def _clean_identity_value(value: str | None) -> str | None:
+    if not value:
+        return None
+    cleaned = re.sub(r"\s+", " ", value).strip(" .,:;|-/")
+    if len(cleaned) < 2 or len(cleaned) > 160:
+        return None
+    if _normalise_key(cleaned) in IDENTITY_INVALID_VALUES:
+        return None
+    return cleaned
+
+
+def _fallback_identity_value(text: str, field_name: str) -> str | None:
+    for pattern in IDENTITY_FALLBACK_PATTERNS[field_name]:
+        match = pattern.search(text)
+        if match:
+            value = _clean_identity_value(match.group(1))
+            if value:
+                return value
+    return None
+
+
+def _section_identity(page_texts: list[str], start_page: int, end_page: int) -> DocumentIdentity | None:
+    candidates: dict[str, list[tuple[str, int]]] = defaultdict(list)
+    for page_number in range(start_page, end_page + 1):
+        if page_number < 1 or page_number > len(page_texts):
+            continue
+        text = page_texts[page_number - 1]
+        metadata = extract_metadata(text)
+        owner = _clean_identity_value(metadata.proprietario) or _fallback_identity_value(text, "owner")
+        location = _clean_identity_value(metadata.distrito) or _fallback_identity_value(text, "location")
+        project_title = _fallback_identity_value(text, "project_title")
+        for field_name, value in (("owner", owner), ("location", location), ("project_title", project_title)):
+            if value:
+                candidates[field_name].append((value, page_number))
+
+    selected: dict[str, str | None] = {"owner": None, "location": None, "project_title": None}
+    pages: set[int] = set()
+    for field_name, values in candidates.items():
+        grouped: list[list[tuple[str, int]]] = []
+        for value, page in values:
+            equivalent_group = next(
+                (group for group in grouped if _identity_equivalent(group[0][0], value)),
+                None,
+            )
+            if equivalent_group is None:
+                grouped.append([(value, page)])
+            else:
+                equivalent_group.append((value, page))
+        if not grouped:
+            continue
+        occurrences = max(grouped, key=lambda group: (len(group), -group[0][1]))
+        spelling_counts = Counter(value for value, _ in occurrences)
+        selected[field_name] = max(spelling_counts, key=lambda value: (spelling_counts[value], -len(value)))
+        pages.update(page for _, page in occurrences)
+    if not any(selected.values()):
+        return None
+    return DocumentIdentity(
+        owner=selected["owner"],
+        location=selected["location"],
+        project_title=selected["project_title"],
+        pages=sorted(pages),
+    )
+
+
+def _identity_equivalent(left: str, right: str) -> bool:
+    a, b = _normalise_key(left), _normalise_key(right)
+    if not a or not b:
+        return True
+    if a == b or (min(len(a), len(b)) >= 6 and (a in b or b in a)):
+        return True
+    return SequenceMatcher(None, a, b).ratio() >= 0.84
+
+
+def _identity_conflicts(sections: list[DocumentSection]) -> list[DocumentIdentityConflict]:
+    conflicts: list[DocumentIdentityConflict] = []
+    for field_name in ("owner", "location", "project_title"):
+        values: list[dict] = []
+        for section in sections:
+            if section.discipline == "outro" or not section.identity:
+                continue
+            value = getattr(section.identity, field_name)
+            if not value:
+                continue
+            existing = next((item for item in values if _identity_equivalent(item["value"], value)), None)
+            if existing:
+                if section.discipline not in existing["disciplines"]:
+                    existing["disciplines"].append(section.discipline)
+                existing["pages"] = sorted(set(existing["pages"] + section.identity.pages))
+            else:
+                values.append({"value": value, "disciplines": [section.discipline], "pages": section.identity.pages[:]})
+        represented_disciplines = {discipline for item in values for discipline in item["disciplines"]}
+        if len(values) > 1 and len(represented_disciplines) > 1:
+            conflicts.append(DocumentIdentityConflict(field=field_name, severity="critical", values=values))
+    return conflicts
+
+
+def build_document_analysis(classifications: list[PageClassification], page_texts: list[str] | None = None) -> DocumentAnalysis:
     if not classifications:
         return DocumentAnalysis(page_count=0, is_multi_discipline=False)
     sections: list[DocumentSection] = []
@@ -318,14 +458,18 @@ def build_document_analysis(classifications: list[PageClassification]) -> Docume
                 page_count=len(section_pages),
                 confidence=round(sum(page.confidence for page in section_pages) / len(section_pages), 2),
                 evidence=evidence,
+                identity=_section_identity(page_texts, section_pages[0].page, section_pages[-1].page) if page_texts else None,
             )
         )
         start = end + 1
     recognized = {section.discipline for section in sections if section.discipline != "outro"}
+    conflicts = _identity_conflicts(sections)
     return DocumentAnalysis(
         page_count=len(classifications),
         is_multi_discipline=len(recognized) > 1,
         sections=sections,
+        identity_conflicts=conflicts,
+        requires_identity_confirmation=any(conflict.severity == "critical" for conflict in conflicts),
     )
 
 
@@ -904,7 +1048,7 @@ def is_room_area_page(text: str) -> bool:
 
 
 METADATA_LABELS = {
-    "proprietario": r"Propriet[áa]rio\s*:\s*([^\n:]+?)(?=\s{2,}|$|Fase\s*:|Bairro\s*:)",
+    "proprietario": r"Propriet[áa]rio[ \t]*:[ \t]*([^\n:]+?)(?=[ \t]{2,}|$|Fase[ \t]*:|Bairro[ \t]*:)",
     "fase": r"Fase\s*:\s*([^\n:]+?)(?=\s{2,}|$|Especialidade\s*:)",
     "bairro": r"Bairro\s*:\s*([^\n:]+?)(?=\s{2,}|$|Talh[ãa]o\s*:)",
     "talhao": r"Talh[ãa]o\s*:\s*([^\n:]+?)(?=\s{2,}|$|Distrito\s*:)",
@@ -1760,7 +1904,7 @@ def parse_pdf(file_bytes: bytes, progress_callback=None, detection_tags: list[st
         page_hints[page].append(("estrutura", 8, "elementos estruturais reconhecidos"))
 
     classifications = classify_document_pages(document_text_parts, page_hints)
-    document_analysis = build_document_analysis(classifications)
+    document_analysis = build_document_analysis(classifications, document_text_parts)
     normalised_document = _normalise_key("\n".join(document_text_parts))
     document_analysis.matched_tags = sorted({
         tag.strip().lower()

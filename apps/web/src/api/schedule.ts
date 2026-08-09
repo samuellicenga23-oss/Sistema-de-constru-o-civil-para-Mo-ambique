@@ -34,6 +34,8 @@ export type SchedulePlanningContext = {
   configuredFloors?: number;
   floorSource?: "project" | "plant" | "combined";
   measuredItemCount: number;
+  classifiedItemCount: number;
+  unclassifiedItemCount: number;
   hasSigoTemplate: boolean;
   hasImportedScope: boolean;
   supportsFloorPlanning: boolean;

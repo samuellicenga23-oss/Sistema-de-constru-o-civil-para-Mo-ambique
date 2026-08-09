@@ -23,6 +23,12 @@ function todayStr() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+type FinancialAction =
+  | { kind: "issue"; invoice: ProjectInvoice }
+  | { kind: "receipt"; invoice: ProjectInvoice }
+  | { kind: "credit"; invoice: ProjectInvoice }
+  | { kind: "installment"; installmentId: string; outstanding: number; currency: string };
+
 export default function ProjectFinancialPage() {
   const { confirm, dialog } = useConfirmDialog();
   const { projectId } = useParams<{ projectId: string }>();
@@ -50,6 +56,13 @@ export default function ProjectFinancialPage() {
   const [saving, setSaving] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [query, setQuery] = useState("");
+  const [financialAction, setFinancialAction] = useState<FinancialAction | null>(null);
+  const [actionNumber, setActionNumber] = useState("");
+  const [actionAmount, setActionAmount] = useState("");
+  const [actionReference, setActionReference] = useState("");
+  const [actionReason, setActionReason] = useState("");
+  const [actionRetention, setActionRetention] = useState("0");
+  const [actionDate, setActionDate] = useState(todayStr());
 
   const [type, setType] = useState<"receita" | "despesa">("despesa");
   const [category, setCategory] = useState("Materiais");
@@ -129,47 +142,65 @@ export default function ProjectFinancialPage() {
     }
   }
 
-  async function handleIssueInvoice(invoice: ProjectInvoice) {
-    const invoiceNumber = window.prompt("Número da factura", invoice.invoiceNumber ?? "");
-    if (!invoiceNumber?.trim()) return;
-    const retention = window.prompt("Retenção (%)", (Number(invoice.retentionRate) * 100).toString());
-    if (retention === null) return;
-    const retentionRate = Number(retention) / 100;
-    if (Number.isNaN(retentionRate) || retentionRate < 0 || retentionRate > 1) { setError("Indique uma retenção entre 0% e 100%."); return; }
-    setError(null);
-    try {
-      await financialApi.issueInvoice(invoice.id, { invoiceNumber: invoiceNumber.trim(), issueDate: todayStr(), dueDate: todayStr(), retentionRate });
-      await reload();
-    } catch (err) { setError(err instanceof Error ? err.message : "Não foi possível emitir a factura"); }
+  function openIssueInvoice(invoice: ProjectInvoice) {
+    setFinancialAction({ kind: "issue", invoice });
+    setActionNumber(invoice.invoiceNumber ?? "");
+    setActionRetention((Number(invoice.retentionRate) * 100).toFixed(2));
+    setActionDate(todayStr());
   }
 
-  async function handleInvoiceReceipt(invoice: ProjectInvoice) {
-    const value = window.prompt(`Recebimento (saldo ${fmt(invoice.outstandingAmount, invoice.currency)})`, invoice.outstandingAmount.toFixed(2));
-    if (value === null) return;
-    const amount = Number(value);
-    if (!(amount > 0)) { setError("Indique um valor de recebimento válido."); return; }
-    const reference = window.prompt("Referência do pagamento (opcional)") ?? undefined;
-    setError(null);
-    try {
-      await financialApi.addReceipt(invoice.id, { amount, receivedDate: todayStr(), reference });
-      await reload();
-    } catch (err) { setError(err instanceof Error ? err.message : "Não foi possível registar o recebimento"); }
+  function openInvoiceReceipt(invoice: ProjectInvoice) {
+    setFinancialAction({ kind: "receipt", invoice });
+    setActionAmount(invoice.outstandingAmount.toFixed(2));
+    setActionReference("");
+    setActionDate(todayStr());
   }
 
-  async function handleCreditNote(invoice: ProjectInvoice) {
-    const creditNumber = window.prompt("Número da nota de crédito");
-    if (!creditNumber?.trim()) return;
-    const value = window.prompt(`Valor da nota (máximo ${fmt(invoice.outstandingAmount, invoice.currency)})`);
-    if (value === null) return;
-    const creditAmount = Number(value);
-    if (!(creditAmount > 0)) { setError("Indique um valor de crédito válido."); return; }
-    const reason = window.prompt("Motivo da nota de crédito");
-    if (!reason?.trim() || reason.trim().length < 5) { setError("Indique o motivo da nota de crédito."); return; }
+  function openCreditNote(invoice: ProjectInvoice) {
+    setFinancialAction({ kind: "credit", invoice });
+    setActionNumber("");
+    setActionAmount(invoice.outstandingAmount.toFixed(2));
+    setActionReason("");
+    setActionDate(todayStr());
+  }
+
+  async function handleFinancialAction(e: FormEvent) {
+    e.preventDefault();
+    if (!financialAction) return;
     setError(null);
+    setSaving(true);
     try {
-      await financialApi.createCreditNote(invoice.id, { creditNumber: creditNumber.trim(), issueDate: todayStr(), amount: creditAmount, reason: reason.trim() });
+      if (financialAction.kind === "issue") {
+        const retentionRate = Number(actionRetention) / 100;
+        if (!actionNumber.trim() || !Number.isFinite(retentionRate) || retentionRate < 0 || retentionRate > 1) {
+          throw new Error("Indique o número da factura e uma retenção entre 0% e 100%.");
+        }
+        await financialApi.issueInvoice(financialAction.invoice.id, {
+          invoiceNumber: actionNumber.trim(), issueDate: todayStr(), dueDate: actionDate, retentionRate,
+        });
+      } else if (financialAction.kind === "receipt") {
+        const value = Number(actionAmount);
+        if (!(value > 0) || value > financialAction.invoice.outstandingAmount) throw new Error("O recebimento deve ser positivo e não pode exceder o saldo.");
+        await financialApi.addReceipt(financialAction.invoice.id, { amount: value, receivedDate: actionDate, reference: actionReference.trim() || undefined });
+      } else if (financialAction.kind === "credit") {
+        const value = Number(actionAmount);
+        if (!actionNumber.trim() || !(value > 0) || value > financialAction.invoice.outstandingAmount || actionReason.trim().length < 5) {
+          throw new Error("Preencha o número, um valor dentro do saldo e o motivo da nota de crédito.");
+        }
+        await financialApi.createCreditNote(financialAction.invoice.id, { creditNumber: actionNumber.trim(), issueDate: actionDate, amount: value, reason: actionReason.trim() });
+      } else {
+        const value = Number(actionAmount);
+        if (!(value > 0) || value > financialAction.outstanding) throw new Error("O pagamento parcial deve ser positivo e não pode exceder o saldo da parcela.");
+        if (!projectId) return;
+        await clientPaymentsApi.markPaid(projectId, financialAction.installmentId, { paidAmount: value });
+      }
+      setFinancialAction(null);
       await reload();
-    } catch (err) { setError(err instanceof Error ? err.message : "Não foi possível preparar a nota de crédito"); }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível concluir a operação");
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function handleIssueCreditNote(noteId: string) {
@@ -236,19 +267,11 @@ export default function ProjectFinancialPage() {
     }
   }
 
-  async function handleMarkInstallmentPaid(id: string, partial?: boolean) {
+  async function handleMarkInstallmentPaid(id: string) {
     if (!projectId) return;
     setError(null);
     try {
-      if (partial) {
-        const raw = window.prompt("Valor pago parcialmente:");
-        if (raw == null) return;
-        const paidAmount = Number(raw);
-        if (!(paidAmount >= 0)) return;
-        await clientPaymentsApi.markPaid(projectId, id, { paidAmount });
-      } else {
-        await clientPaymentsApi.markPaid(projectId, id);
-      }
+      await clientPaymentsApi.markPaid(projectId, id);
       await reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Não foi possível actualizar a parcela");
@@ -428,7 +451,11 @@ export default function ProjectFinancialPage() {
                           {row.status !== "paga" && (
                             <>
                               <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleMarkInstallmentPaid(row.id)}>Marcar paga</button>
-                              <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleMarkInstallmentPaid(row.id, true)}>Parcial</button>
+                              <button type="button" className="btn btn-ghost btn-sm" onClick={() => {
+                                const outstanding = Math.max(0, row.amount - row.paidAmount);
+                                setFinancialAction({ kind: "installment", installmentId: row.id, outstanding, currency: clientPlan.currency });
+                                setActionAmount(outstanding.toFixed(2));
+                              }}>Parcial</button>
                             </>
                           )}
                           {planMode === "parcelado" && (
@@ -490,7 +517,7 @@ export default function ProjectFinancialPage() {
             <article key={invoice.id} className="px-5 py-4">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                 <div><div className="flex flex-wrap items-center gap-2"><strong className="text-sm text-slate-900">{invoice.invoiceNumber ?? "Factura por emitir"}</strong><span className={`badge ${invoice.status === "paga" ? "badge-green" : invoice.status === "rascunho" ? "badge-yellow" : "badge-blue"}`}>{invoice.status === "rascunho" ? "Rascunho" : invoice.status === "emitida" ? "Emitida" : invoice.status === "parcial" ? "Parcial" : invoice.status === "paga" ? "Paga" : "Cancelada"}</span></div><p className="mt-1 text-xs text-slate-500">{invoice.clientName ?? "Cliente por definir"} · IVA {(Number(invoice.ivaRate) * 100).toFixed(2)}% · Retenção {(Number(invoice.retentionRate) * 100).toFixed(2)}%</p></div>
-                <div className="flex flex-wrap items-center gap-2"><div className="mr-2 text-right text-xs"><strong className="block text-sm tabular-nums text-slate-900">{fmt(Number(invoice.netAmount), invoice.currency)}</strong>{invoice.creditAmount > 0 && <span className="block text-red-600">Crédito −{fmt(invoice.creditAmount, invoice.currency)}</span>}<span className="text-slate-500">Saldo {fmt(invoice.outstandingAmount, invoice.currency)}</span></div>{invoice.status === "rascunho" && <button type="button" className="btn btn-primary btn-sm" onClick={() => handleIssueInvoice(invoice)}>Emitir</button>}{(invoice.status === "emitida" || invoice.status === "parcial") && <button type="button" className="btn btn-secondary btn-sm text-green-700" onClick={() => handleInvoiceReceipt(invoice)}>Recebimento</button>}{invoice.status !== "rascunho" && invoice.status !== "cancelada" && <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleCreditNote(invoice)}>Nota de crédito</button>}{invoice.status !== "rascunho" && invoice.status !== "cancelada" && <a className="btn btn-ghost btn-sm" href={financialApi.invoicePdfUrl(invoice.id)} target="_blank" rel="noreferrer">PDF</a>}</div>
+                <div className="flex flex-wrap items-center gap-2"><div className="mr-2 text-right text-xs"><strong className="block text-sm tabular-nums text-slate-900">{fmt(Number(invoice.netAmount), invoice.currency)}</strong>{invoice.creditAmount > 0 && <span className="block text-red-600">Crédito −{fmt(invoice.creditAmount, invoice.currency)}</span>}<span className="text-slate-500">Saldo {fmt(invoice.outstandingAmount, invoice.currency)}</span></div>{invoice.status === "rascunho" && <button type="button" className="btn btn-primary btn-sm" onClick={() => openIssueInvoice(invoice)}>Emitir</button>}{(invoice.status === "emitida" || invoice.status === "parcial") && <button type="button" className="btn btn-secondary btn-sm text-green-700" onClick={() => openInvoiceReceipt(invoice)}>Recebimento</button>}{invoice.status !== "rascunho" && invoice.status !== "cancelada" && <button type="button" className="btn btn-secondary btn-sm" onClick={() => openCreditNote(invoice)}>Nota de crédito</button>}{invoice.status !== "rascunho" && invoice.status !== "cancelada" && <a className="btn btn-ghost btn-sm" href={financialApi.invoicePdfUrl(invoice.id)} target="_blank" rel="noreferrer">PDF</a>}</div>
               </div>
               {(invoice.receipts.length > 0 || invoice.creditNotes.length > 0) && <details className="mt-3 border-t border-slate-100 pt-3"><summary className="cursor-pointer text-xs font-semibold text-blue-700">Documentos e movimentos ({invoice.receipts.length + invoice.creditNotes.length})</summary><div className="mt-3 grid gap-3 lg:grid-cols-2">
                 {invoice.receipts.length > 0 && <div className="rounded-lg border border-slate-200"><strong className="block border-b border-slate-100 px-3 py-2 text-xs">Recebimentos</strong>{invoice.receipts.map((receipt) => <div key={receipt.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-xs"><span>{receipt.receivedDate} · {fmt(Number(receipt.amount), invoice.currency)}</span>{receipt.proofUrl ? <a className="font-semibold text-blue-700" href={receipt.proofUrl} target="_blank" rel="noreferrer">Ver comprovativo</a> : <label className="btn btn-secondary btn-sm cursor-pointer">Anexar comprovativo<input className="sr-only" type="file" accept="application/pdf,image/png,image/jpeg,image/webp,image/gif" onChange={(event) => handleReceiptProof(receipt.id, event.target.files?.[0])} /></label>}</div>)}</div>}
@@ -630,6 +657,39 @@ export default function ProjectFinancialPage() {
         </section>
       </div>
     </Layout>
+    {financialAction && <Modal
+      title={financialAction.kind === "issue" ? "Emitir factura" : financialAction.kind === "receipt" ? "Registar recebimento" : financialAction.kind === "credit" ? "Nota de crédito" : "Pagamento parcial"}
+      subtitle={financialAction.kind === "installment"
+        ? `Saldo da parcela: ${fmt(financialAction.outstanding, financialAction.currency)}`
+        : `Saldo da factura: ${fmt(financialAction.invoice.outstandingAmount, financialAction.invoice.currency)}`}
+      onClose={() => !saving && setFinancialAction(null)}
+      maxWidth="max-w-xl"
+    >
+      <form onSubmit={handleFinancialAction} className="space-y-4">
+        {(financialAction.kind === "issue" || financialAction.kind === "credit") && <div>
+          <label className="label">{financialAction.kind === "issue" ? "Número da factura" : "Número da nota de crédito"}</label>
+          <input autoFocus required className="input" value={actionNumber} onChange={(event) => setActionNumber(event.target.value)} />
+        </div>}
+        {(financialAction.kind === "receipt" || financialAction.kind === "credit" || financialAction.kind === "installment") && <div>
+          <label className="label">Valor ({financialAction.kind === "installment" ? financialAction.currency : financialAction.invoice.currency})</label>
+          <input autoFocus={financialAction.kind !== "credit"} required type="number" min="0.01" step="0.01" className="input" value={actionAmount} onChange={(event) => setActionAmount(event.target.value)} />
+        </div>}
+        {financialAction.kind === "issue" && <div className="grid gap-3 sm:grid-cols-2">
+          <div><label className="label">Retenção (%)</label><input required type="number" min="0" max="100" step="0.01" className="input" value={actionRetention} onChange={(event) => setActionRetention(event.target.value)} /></div>
+          <div><label className="label">Vencimento</label><input required type="date" className="input" value={actionDate} onChange={(event) => setActionDate(event.target.value)} /></div>
+        </div>}
+        {(financialAction.kind === "receipt" || financialAction.kind === "credit") && <div>
+          <label className="label">{financialAction.kind === "receipt" ? "Data do recebimento" : "Data da nota"}</label>
+          <input required type="date" className="input" value={actionDate} onChange={(event) => setActionDate(event.target.value)} />
+        </div>}
+        {financialAction.kind === "receipt" && <div><label className="label">Referência (opcional)</label><input className="input" value={actionReference} onChange={(event) => setActionReference(event.target.value)} /></div>}
+        {financialAction.kind === "credit" && <div><label className="label">Motivo</label><textarea required minLength={5} rows={3} className="input resize-y" value={actionReason} onChange={(event) => setActionReason(event.target.value)} /></div>}
+        <div className="flex flex-col-reverse gap-2 border-t border-slate-200 pt-4 sm:flex-row sm:justify-end">
+          <button type="button" className="btn btn-secondary" onClick={() => setFinancialAction(null)}>Cancelar</button>
+          <button disabled={saving} className="btn btn-primary">{saving ? "A guardar..." : "Confirmar"}</button>
+        </div>
+      </form>
+    </Modal>}
     {dialog}
     </>
   );

@@ -7,6 +7,16 @@ export type FloorSlabInput = { label: string; areaM2: number; thicknessM: number
 export type OpeningInput = { kind: "porta" | "janela"; widthM: number; heightM: number; quantity: number; location: "interior" | "exterior" | "desconhecida"; confirmed: boolean };
 export type FoundationType = "sapata_isolada" | "sapata_corrida" | "laje";
 export type RoofType = "laje_plana" | "chapa_metalica";
+export type MeasurementScope =
+  | "preliminares"
+  | "terraplenagem"
+  | "estrutura"
+  | "arquitectura"
+  | "drenagem"
+  | "cobertura"
+  | "hidraulica"
+  | "electricidade"
+  | "vaos";
 
 export type FootingDetail = { count: number; avgArea: number; avgDepth: number };
 
@@ -28,12 +38,13 @@ export type SepticTankInput = {
 };
 
 export type QuickEstimateInput = {
-  floors: FloorInput[];
-  foundationType: FoundationType;
+  scopes?: MeasurementScope[];
+  floors?: FloorInput[];
+  foundationType?: FoundationType;
   footing?: FootingDetail;
   slabThickness?: number;
-  concreteClass: "B20" | "B25" | "B30";
-  roofType: RoofType;
+  concreteClass?: "B20" | "B25" | "B30";
+  roofType?: RoofType;
   roofArea?: number;
   steelWeightKg?: number;
   beamConcreteVolumeM3?: number;

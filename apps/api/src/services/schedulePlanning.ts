@@ -253,9 +253,37 @@ export const STANDARD_RULES: Record<string, StandardRule> = {
   "15.4": { scope: "floor", stage: "openings" },
 };
 
-export function planningTradeForCode(code: string | null): PlanningTrade | null {
-  if (!code) return null;
-  const rule = STANDARD_RULES[code];
+function plainText(value: string): string {
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+}
+
+/**
+ * Classifica linhas novas ou importadas sem depender da numeração do catálogo SIGO.
+ * A regra explícita continua a ter prioridade; a inferência só determina organização física e
+ * sequência, nunca cria quantidades nem altera o texto contratual do mapa.
+ */
+export function inferPlanningRule(source: Pick<PlanningSourceNode, "code" | "name">): StandardRule | null {
+  if (source.code && STANDARD_RULES[source.code]) return STANDARD_RULES[source.code];
+  const text = plainText(`${source.code ?? ""} ${source.name}`);
+  if (/mobiliza|desmobiliza|estaleiro|implant|marcacao|limpeza do terreno|preliminar/.test(text)) return { scope: "project", stage: "prelim" };
+  if (/escav|aterro|terraplen|enrocamento|compacta|movimento de terra/.test(text)) return { scope: /sapata|fundac/.test(text) ? "footing" : "project", stage: "earth" };
+  if (/sapata|fundac|estaca|maci[cç]o|bloco de fundacao/.test(text)) return { scope: "footing", stage: "foundation" };
+  if (/laje|pavimento estrutural|deck/.test(text) && !/fundac/.test(text)) return { scope: /cobertura|telhado/.test(text) ? "roof" : "deck", stage: "structure" };
+  if (/pilar|viga|armadura|vergalh|aco |ferro |betao armado|cofragem|escoramento|estrutura/.test(text)) return { scope: "floor", stage: "structure" };
+  if (/alvenaria|parede|bloco|tijolo/.test(text)) return { scope: "room_wall", stage: "masonry" };
+  if (/esgoto|drenagem|tubagem|canaliza|rede de agua|electri|eletri|cabo|tomada|ilumin|quadro/.test(text)) return { scope: "floor", stage: "mep_rough" };
+  if (/reboco|estuque|chapisco/.test(text)) return { scope: "floor", stage: "plaster" };
+  if (/betonilha|regulariza[cç]ao de pavimento/.test(text)) return { scope: "floor", stage: "screed" };
+  if (/porta|janela|caixilh|vidro|verga|peitoril/.test(text)) return { scope: "floor", stage: "openings" };
+  if (/pintura|tinta|primario|verniz/.test(text)) return { scope: "floor", stage: "paint" };
+  if (/mosaico|ceram|revestimento|pavimento|rodape|tecto falso|forro/.test(text)) return { scope: "floor", stage: "finish" };
+  if (/sanita|lavatorio|chuveiro|torneira|louca|equipamento|aparelho/.test(text)) return { scope: "floor", stage: "fixtures" };
+  if (/cobertura|telhado|impermeabiliza|chapa|cumeeira|caleira/.test(text)) return { scope: "roof", stage: "roof" };
+  if (/fossa|infiltra|muro|vedacao|arranjo exterior|passeio|jardim|estacionamento/.test(text)) return { scope: "project", stage: "external" };
+  return null;
+}
+
+function planningTradeForRule(rule: StandardRule | null): PlanningTrade | null {
   if (!rule) return null;
   if (rule.stage === "earth" || rule.stage === "prelim" || rule.stage === "foundation") return "earthworks";
   if (rule.stage === "structure") return "structure";
@@ -264,6 +292,14 @@ export function planningTradeForCode(code: string | null): PlanningTrade | null 
   if (rule.stage === "roof") return "roofing";
   if (rule.stage === "external") return "external";
   return "finishes";
+}
+
+export function planningTradeForCode(code: string | null): PlanningTrade | null {
+  return code ? planningTradeForRule(STANDARD_RULES[code] ?? null) : null;
+}
+
+export function planningTradeForSource(source: Pick<PlanningSourceNode, "code" | "name">): PlanningTrade | null {
+  return planningTradeForRule(inferPlanningRule(source));
 }
 
 const FLOOR_GROUP_LABELS: Record<string, string> = {
@@ -347,6 +383,9 @@ function roofKindFromMeasuredCodes(leaves: PlanningSourceNode[]): "sheet" | "sla
   if (positiveCodes.has("10.2")) return "sheet";
   // 3.7 é Malhasol de cobertura no template padrão (o Quick Estimate só o mede em cobertura plana).
   if (positiveCodes.has("10.1") || positiveCodes.has("3.7")) return "slab";
+  const roofText = plainText(leaves.filter(measuredLeaf).map((leaf) => leaf.name).join(" "));
+  if (/chapa|metalica|fibrocimento|telha/.test(roofText)) return "sheet";
+  if (/laje de cobertura|cobertura em betao|impermeabiliza[cç]ao da cobertura/.test(roofText)) return "slab";
   return "unknown";
 }
 
@@ -361,16 +400,13 @@ export function buildPlanningContext(sections: PlanningSourceSection[], floorsIn
   const measuredSections = sections.filter((section) => section.roots.some(hasMeasuredDescendant));
   const hasSigoTemplate = measuredSections.some((section) => isSigoTemplate(section.templateKey));
   const hasImportedScope = measuredSections.some((section) => !isSigoTemplate(section.templateKey));
-  const standardHierarchySafe = measuredSections
-    .filter((section) => isSigoTemplate(section.templateKey))
-    .every((section) => section.roots.every((root) => !hasMeasuredDescendant(root) || (root.kind === "capitulo" && !root.children.some((child) => child.kind === "grupo"))));
-  const supportsFloorPlanning = measuredSections.length > 0 && !hasImportedScope && hasSigoTemplate && standardHierarchySafe;
   const rules = leaves
-    .map((leaf) => leaf.code ? STANDARD_RULES[leaf.code] : undefined)
+    .map((leaf) => inferPlanningRule(leaf))
     .filter((rule): rule is StandardRule => Boolean(rule));
-  const trades = new Set(leaves.map((leaf) => planningTradeForCode(leaf.code)).filter((trade): trade is PlanningTrade => Boolean(trade)));
+  const supportsFloorPlanning = measuredSections.length > 0 && rules.some((rule) => ["floor", "deck", "roof", "footing", "room_wall"].includes(rule.scope));
+  const trades = new Set(leaves.map((leaf) => planningTradeForRule(inferPlanningRule(leaf))).filter((trade): trade is PlanningTrade => Boolean(trade)));
   const aggregatedFloorCodes = leaves
-    .filter((leaf) => leaf.code && ["floor", "deck"].includes(STANDARD_RULES[leaf.code]?.scope ?? ""))
+    .filter((leaf) => leaf.code && ["floor", "deck"].includes(inferPlanningRule(leaf)?.scope ?? ""))
     .map((leaf) => leaf.code!)
     .filter((code, index, allCodes) => allCodes.indexOf(code) === index);
   const aggregatedStructuralCodes = ["3.6", "3.8"].filter((code) => leaves.some((leaf) => leaf.code === code));
@@ -378,6 +414,8 @@ export function buildPlanningContext(sections: PlanningSourceSection[], floorsIn
     floors,
     floorLabels: detectedFloorLabels?.length === floors ? detectedFloorLabels : defaultFloorLabels(floors),
     measuredItemCount: leaves.length,
+    classifiedItemCount: rules.length,
+    unclassifiedItemCount: Math.max(0, leaves.length - rules.length),
     hasSigoTemplate,
     hasImportedScope,
     supportsFloorPlanning,
@@ -417,7 +455,7 @@ function makeActivity(
     zoneId: options.zoneId ?? null,
     zoneLabel: options.zoneLabel ?? null,
     allocationBasis: options.allocationBasis ?? "boq",
-    executionStage: options.executionStage ?? (source.code ? STANDARD_RULES[source.code]?.stage ?? "boq" : "boq"),
+    executionStage: options.executionStage ?? inferPlanningRule(source)?.stage ?? "boq",
     children: [],
     startDate: "",
     endDate: "",
@@ -471,13 +509,21 @@ function makeControlActivity(key: string, name: string, durationDays: number, st
   };
 }
 
+function isSlabActivity(node: PlannedNode): boolean {
+  return node.kind === "activity" && inferPlanningRule({ code: node.sourceCode, name: node.name })?.scope === "deck";
+}
+
+function isFoundationActivity(node: PlannedNode): boolean {
+  return node.kind === "activity" && node.executionStage === "foundation";
+}
+
 function addLifecycleControls(roots: PlannedNode[], slabCureDays: number) {
   const walk = (node: PlannedNode) => {
     const expanded: PlannedNode[] = [];
     for (const child of node.children) {
       walk(child);
       expanded.push(child);
-      if (child.kind === "activity" && child.sourceCode === "3.5") {
+      if (isSlabActivity(child)) {
         const location = child.name.includes("—") ? child.name.split("—").slice(1).join("—").trim() : child.zoneLabel ?? "laje";
         const cure = makeControlActivity(`control:cure:${child.key}`, `Curar e proteger a laje — ${location}`, slabCureDays, "structure", child.floorIndex);
         const milestone = makeControlActivity(`control:milestone:slab:${child.key}`, `◆ Marco — laje curada e piso libertado — ${location}`, 1, "milestone", child.floorIndex);
@@ -488,7 +534,7 @@ function addLifecycleControls(roots: PlannedNode[], slabCureDays: number) {
   };
   roots.forEach(walk);
 
-  if (activityNodes(roots).some((node) => node.sourceCode === "3.2")) {
+  if (activityNodes(roots).some(isFoundationActivity)) {
     const foundationMilestone = makeControlActivity("control:milestone:foundations", "◆ Marco — fundações concluídas e libertadas", 1, "milestone");
     roots.push(makeSummary("control:milestones", "Marcos de controlo", null, [foundationMilestone]));
   }
@@ -498,11 +544,11 @@ function wireLifecycleControls(roots: PlannedNode[], dependencies: PlannedDepend
   const leaves = activityNodes(roots);
   const deps = [...dependencies];
   const seen = new Set(deps.map((dep) => `${dep.predecessorKey}>${dep.successorKey}>${dep.type}>${dep.lagDays}`));
-  const foundations = leaves.filter((node) => node.sourceCode === "3.2");
+  const foundations = leaves.filter(isFoundationActivity);
   const foundationMilestone = leaves.find((node) => node.key === "control:milestone:foundations");
   for (const foundation of foundations) addUniqueDependency(deps, seen, foundation, foundationMilestone, "FF");
 
-  for (const slab of leaves.filter((node) => node.sourceCode === "3.5")) {
+  for (const slab of leaves.filter(isSlabActivity)) {
     const cure = leaves.find((node) => node.key === `control:cure:${slab.key}`);
     const milestone = leaves.find((node) => node.key === `control:milestone:slab:${slab.key}`);
     if (!cure || !milestone) continue;
@@ -747,6 +793,38 @@ function splitLeafByRule(
   ));
 }
 
+function buildAdaptiveNestedNode(
+  node: PlanningSourceNode,
+  floors: number,
+  roofKind: "sheet" | "slab" | "unknown",
+  warnings: PlanningWarning[],
+  profile: SchedulePlanningProfile,
+  physical: SchedulePhysicalContext | null,
+): PlannedNode | null {
+  if (node.kind === "nota") return null;
+  if (node.kind === "item") {
+    if (!measuredLeaf(node)) return null;
+    const rule = inferPlanningRule(node);
+    if (!rule) {
+      warnings.push({
+        code: "UNMAPPED_STANDARD_ITEM",
+        sourceCode: node.code,
+        activityName: node.name,
+        message: `${node.code ?? "Item"} — ${node.name}: actividade mantida na EAP sem localização automática.`,
+      });
+      return makeActivity(node, `src:${node.id}`, executionActivityName(node), node.durationDays, 1, null);
+    }
+    const activities = splitLeafByRule(node, rule, floors, roofKind, warnings, profile, physical);
+    return activities.length === 1
+      ? activities[0]
+      : makeSummary(`src:${node.id}`, node.name, node, activities);
+  }
+  const children = node.children
+    .map((child) => buildAdaptiveNestedNode(child, floors, roofKind, warnings, profile, physical))
+    .filter((child): child is PlannedNode => child !== null);
+  return children.length ? makeSummary(`src:${node.id}`, node.name, node, children) : null;
+}
+
 function buildStandardChapter(
   root: PlanningSourceNode,
   floors: number,
@@ -756,9 +834,14 @@ function buildStandardChapter(
   physical: SchedulePhysicalContext | null,
 ): PlannedNode | null {
   if (!hasMeasuredDescendant(root)) return null;
-  // O template SIGO padrão é capítulo → itens. Se houver grupos personalizados, preservamos
-  // esses grupos em vez de reinterpretá-los como pisos/zona por inferência textual.
-  if (root.children.some((child) => child.kind === "grupo")) return buildFallbackNode(root, root.code ?? "root");
+  // Grupos personalizados mantêm a hierarquia, mas as suas folhas continuam a poder ser
+  // repartidas dinamicamente por piso/elemento quando a descrição fornece contexto seguro.
+  if (root.children.some((child) => child.kind === "grupo")) {
+    const children = root.children
+      .map((child) => buildAdaptiveNestedNode(child, floors, roofKind, warnings, profile, physical))
+      .filter((child): child is PlannedNode => child !== null);
+    return children.length ? makeSummary(`src:${root.id}`, root.name, root, children) : null;
+  }
 
   const directActivities: PlannedNode[] = [];
   const floorBuckets = new Map<number, PlannedNode[]>();
@@ -766,7 +849,7 @@ function buildStandardChapter(
 
   for (const child of root.children) {
     if (!measuredLeaf(child)) continue;
-    const rule = child.code ? STANDARD_RULES[child.code] : undefined;
+    const rule = inferPlanningRule(child);
     if (!rule) {
       warnings.push({
         code: "UNMAPPED_STANDARD_ITEM",
@@ -774,7 +857,7 @@ function buildStandardChapter(
         activityName: child.name,
         message: `${child.code ?? "Item"} — ${child.name}: sem regra explícita de execução; mantida a posição do Mapa de Quantidades.`,
       });
-      directActivities.push(makeActivity(child, `src:${child.id}`, child.name, child.durationDays, 1, null));
+      directActivities.push(makeActivity(child, `src:${child.id}`, executionActivityName(child), child.durationDays, 1, null));
       continue;
     }
     const activities = splitLeafByRule(child, rule, floors, roofKind, warnings, profile, physical);
@@ -938,6 +1021,92 @@ function buildFallbackDependencies(roots: PlannedNode[]): PlannedDependency[] {
     if (leaves.length) previousRootLast = leaves[leaves.length - 1];
   }
   return deps;
+}
+
+const EXECUTION_STAGE_ORDER: Record<string, number> = {
+  prelim: 10, earth: 20, foundation: 30, structure: 40, masonry: 50,
+  mep_rough: 55, roof: 60, plaster: 65, screed: 70, openings: 75,
+  finish: 80, paint: 85, fixtures: 90, external: 95, boq: 100,
+};
+
+/** Grafo por significado para mapas importados e capítulos novos, sem depender de códigos fixos. */
+function buildSemanticDependencies(roots: PlannedNode[], profile: SchedulePlanningProfile): PlannedDependency[] {
+  const deps: PlannedDependency[] = [];
+  const seen = new Set<string>();
+  const leaves = activityNodes(roots).filter((node) => node.sourceLineItemId);
+  const rank = (node: PlannedNode) => {
+    const base = EXECUTION_STAGE_ORDER[node.executionStage] ?? 100;
+    const text = plainText(node.name);
+    if (node.executionStage === "foundation") {
+      if (/limpeza|regulariza/.test(text)) return base;
+      if (/armadura|cofragem/.test(text)) return base + 1;
+      if (/beton|sapata|maci[cç]o/.test(text)) return base + 2;
+    }
+    if (node.executionStage === "structure") {
+      const preparation = /armadura|armar|cofragem|cofrar|escoramento/.test(text);
+      if (/pilar|coluna/.test(text)) return base + (preparation ? 0 : 1);
+      if (/viga|lintel/.test(text)) return base + (preparation ? 2 : 3);
+      if (/laje|deck/.test(text)) return base + (preparation ? 4 : 5);
+      if (preparation) return base;
+    }
+    return base;
+  };
+  const locationKey = (node: PlannedNode) => `${node.floorIndex ?? "project"}:${node.zoneId ?? "all"}`;
+  const byLocation = new Map<string, PlannedNode[]>();
+  for (const activity of leaves) {
+    const bucket = byLocation.get(locationKey(activity)) ?? [];
+    bucket.push(activity);
+    byLocation.set(locationKey(activity), bucket);
+  }
+
+  // Dentro de cada localização, especialidades do mesmo estágio podem trabalhar em paralelo;
+  // a fase seguinte espera todas as folhas da fase anterior.
+  for (const rows of byLocation.values()) {
+    const stages = new Map<number, PlannedNode[]>();
+    for (const row of rows) {
+      const bucket = stages.get(rank(row)) ?? [];
+      bucket.push(row);
+      stages.set(rank(row), bucket);
+    }
+    const ordered = [...stages.entries()].sort(([a], [b]) => a - b);
+    for (let index = 1; index < ordered.length; index++) {
+      for (const predecessor of ordered[index - 1][1]) {
+        for (const successor of ordered[index][1]) addUniqueDependency(deps, seen, predecessor, successor);
+      }
+    }
+  }
+
+  const projectRows = byLocation.get("project:all") ?? [];
+  const eligibleProjectGates = projectRows.filter((row) => rank(row) <= EXECUTION_STAGE_ORDER.foundation + 2);
+  const projectGateRank = eligibleProjectGates.length ? Math.max(...eligibleProjectGates.map(rank)) : null;
+  const projectGates = projectGateRank === null ? [] : eligibleProjectGates.filter((row) => rank(row) === projectGateRank);
+  for (const [key, rows] of byLocation) {
+    if (key === "project:all" || !projectGates.length) continue;
+    const firstRank = Math.min(...rows.map(rank));
+    for (const gate of projectGates) {
+      for (const first of rows.filter((row) => rank(row) === firstRank)) addUniqueDependency(deps, seen, gate, first);
+    }
+  }
+
+  const floorNumbers = [...new Set(leaves.map((node) => node.floorIndex).filter((value): value is number => value !== null))].sort((a, b) => a - b);
+  for (let index = 1; index < floorNumbers.length; index++) {
+    const previous = leaves.filter((node) => node.floorIndex === floorNumbers[index - 1] && node.executionStage === "structure");
+    const current = leaves.filter((node) => node.floorIndex === floorNumbers[index] && node.executionStage === "structure");
+    for (const predecessor of previous) for (const successor of current) addUniqueDependency(deps, seen, predecessor, successor);
+  }
+
+  if (profile.sequencePolicy === "structure_complete_first") {
+    const finalStructureFloor = floorNumbers.at(-1);
+    const structureGate = leaves.filter((node) => node.floorIndex === finalStructureFloor && node.executionStage === "structure");
+    const masonry = leaves.filter((node) => node.executionStage === "masonry");
+    for (const predecessor of structureGate) for (const successor of masonry) addUniqueDependency(deps, seen, predecessor, successor);
+  }
+
+  const topFloor = floorNumbers.at(-1);
+  const topStructure = leaves.filter((node) => node.floorIndex === topFloor && ["structure", "masonry"].includes(node.executionStage));
+  const roof = leaves.filter((node) => node.executionStage === "roof");
+  for (const predecessor of topStructure) for (const successor of roof) addUniqueDependency(deps, seen, predecessor, successor);
+  return deps.length ? deps : buildFallbackDependencies(roots);
 }
 
 function addUniqueDependency(
@@ -1215,7 +1384,7 @@ function buildStandardDependencies(
 }
 
 function tradeForActivity(activity: PlannedNode): PlanningTrade {
-  const explicit = planningTradeForCode(activity.sourceCode);
+  const explicit = planningTradeForSource({ code: activity.sourceCode, name: activity.name });
   if (explicit) return explicit;
   if (activity.executionStage === "structure" || activity.executionStage === "milestone") return "structure";
   return activity.executionStage === "external" ? "external" : "finishes";
@@ -1447,9 +1616,9 @@ export function buildExecutionPlan(args: {
     const sectionHasMeasuredWork = section.roots.some(hasMeasuredDescendant);
     if (sectionHasMeasuredWork && !sigo) {
       allMeasuredSectionsSigo = false;
-      if (floors > 1) warnings.push({
+      if (floors > 1 && structuredPlanning) warnings.push({
         code: "IMPORTED_SCOPE_PRESERVED",
-        message: `${section.name}: mapa sem metadados SIGO de localização. A EAP preserva os grupos/ordem do BOQ e não reparte automaticamente por ${floors} pisos.`,
+        message: `${section.name}: mapa importado classificado pelo conteúdo. A hierarquia contratual foi preservada e os trabalhos reconhecidos foram repartidos pelos ${floors} pisos.`,
       });
     }
     if (sectionHasMeasuredWork && sigo) {
@@ -1465,7 +1634,7 @@ export function buildExecutionPlan(args: {
       }
     }
     for (const root of [...section.roots].sort((a, b) => a.sortOrder - b.sortOrder)) {
-      const planned = structuredPlanning && sigo && root.kind === "capitulo"
+      const planned = structuredPlanning && root.kind === "capitulo"
         ? buildStandardChapter(root, floors, roofKind, warnings, args.profile, args.physicalContext ?? null)
         : buildFallbackNode(root, root.code ?? "root");
       if (planned) roots.push(planned);
@@ -1485,9 +1654,11 @@ export function buildExecutionPlan(args: {
   assignWbsCodes(roots);
   let dependencies = allMeasuredSectionsSigo && standardGraphSafe && structuredPlanning
     ? buildStandardDependencies(roots, floors, roofKind, args.profile)
-    : buildFallbackDependencies(roots);
+    : structuredPlanning
+      ? buildSemanticDependencies(roots, args.profile)
+      : buildFallbackDependencies(roots);
   if (structuredPlanning) dependencies = wireLifecycleControls(roots, dependencies);
-  if (allMeasuredSectionsSigo && standardGraphSafe && structuredPlanning) {
+  if (structuredPlanning) {
     dependencies = applyFrontCapacityDependencies(roots, dependencies, args.profile, warnings);
   }
   scheduleDates(roots, dependencies, args.startDate);
@@ -1506,7 +1677,7 @@ export function buildExecutionPlan(args: {
     }
   }
 
-  const usedTrades = new Set(measuredLeaves.map((leaf) => planningTradeForCode(leaf.code)).filter((trade): trade is PlanningTrade => Boolean(trade)));
+  const usedTrades = new Set(measuredLeaves.map((leaf) => planningTradeForRule(inferPlanningRule(leaf))).filter((trade): trade is PlanningTrade => Boolean(trade)));
   for (const trade of usedTrades) {
     if (args.profile.crewSizes[trade] === null) {
       warnings.push({

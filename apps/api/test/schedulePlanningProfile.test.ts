@@ -12,6 +12,8 @@ function context(overrides: Partial<PlanningContext> = {}): PlanningContext {
     floors: 3,
     floorLabels: ["Piso 0", "Piso 1", "Piso 2"],
     measuredItemCount: 20,
+    classifiedItemCount: 20,
+    unclassifiedItemCount: 0,
     hasSigoTemplate: true,
     hasImportedScope: false,
     supportsFloorPlanning: true,

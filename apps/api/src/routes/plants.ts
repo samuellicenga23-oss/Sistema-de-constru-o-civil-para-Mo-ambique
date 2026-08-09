@@ -12,13 +12,14 @@ import { env } from "../env.js";
 import { extractedSlabSchema, plantParseResultSchema, PLANT_DISCIPLINES, fixedSigo } from "@sigo/shared";
 import { loadWorkChapterLibrary } from "../services/boqTemplate.js";
 import { syncProjectPlantMeasurements } from "../services/plantMeasurementSync.js";
+import { recordAuditEvent } from "../services/auditTrail.js";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista"] as const;
 const clientPlantIdSchema = z.string().uuid();
 // Manter alinhado com a geração estrutural do plant-service. O valor participa da
 // chave de cache da BD; ao mudar a leitura de lajes por nível, análises antigas não
 // podem ser reutilizadas silenciosamente em novos uploads do mesmo PDF.
-const PLANT_PARSER_VERSION = "2026.08-cascade-1";
+const PLANT_PARSER_VERSION = "2026.08-identity-1";
 type PlantDetectionContext = { tags: string[]; parserVersion: string };
 
 async function getPlantDetectionContext(companyId: string): Promise<PlantDetectionContext> {
@@ -437,6 +438,33 @@ export async function plantRoutes(app: FastifyInstance) {
       db.select().from(extractedRebarSchedules).where(eq(extractedRebarSchedules.plantId, id)),
     ]);
     return { plant, rooms, openings, rebarSchedules };
+  });
+
+  app.post("/api/plants/:id/confirm-identity", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const companyId = request.currentUser!.companyId!;
+    const plant = await assertPlantOwned(id, companyId);
+    if (!plant) return reply.code(404).send({ error: "Planta não encontrada" });
+    const parsed = z.object({ confirmed: z.literal(true) }).safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: "Confirme explicitamente que as disciplinas pertencem à mesma obra" });
+    const analysis = plant.documentAnalysis;
+    if (!analysis?.requiresIdentityConfirmation) return reply.code(409).send({ error: "Esta planta não tem conflito de identidade por confirmar" });
+    if (analysis.identityConfirmed) return plant;
+    const [updated] = await db.update(plants).set({
+      documentAnalysis: { ...analysis, identityConfirmed: true },
+    }).where(eq(plants.id, id)).returning();
+    await recordAuditEvent({
+      companyId,
+      projectId: plant.projectId,
+      actorUserId: request.currentUser!.id,
+      entityType: "plant",
+      entityId: id,
+      action: "identity_conflict.confirmed",
+      before: { identityConfirmed: false, conflicts: analysis.identityConflicts },
+      after: { identityConfirmed: true, conflicts: analysis.identityConflicts },
+    });
+    await syncProjectPlantMeasurements(plant.projectId);
+    return updated;
   });
 
   app.get("/api/plants/:id/status", { preHandler: requireCompanyUser }, async (request, reply) => {

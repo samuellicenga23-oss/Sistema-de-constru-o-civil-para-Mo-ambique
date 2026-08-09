@@ -41,6 +41,46 @@ function normalizeText(value: string): string {
     .replace(/\p{Diacritic}/gu, "");
 }
 
+/**
+ * PDFs completos repetem frequentemente a mesma planta em folhas de arquitectura,
+ * pormenores e mapas. A leitura conserva a primeira ocorrência exacta e evita que
+ * uma repetição de OCR multiplique áreas, compartimentos e vãos na medição.
+ * Compartimentos genuinamente repetidos continuam separados quando têm número,
+ * área ou piso diferentes.
+ */
+export function deduplicatePlantRooms(rooms: PlantRoom[]): PlantRoom[] {
+  const seen = new Set<string>();
+  return rooms.filter((room) => {
+    const key = [
+      normalizeText(room.floor ?? "piso-nao-identificado"),
+      normalizeText(room.name),
+      normalizeText(room.number ?? ""),
+      room.areaM2.toFixed(2),
+      room.perimeterM == null ? "" : room.perimeterM.toFixed(2),
+    ].join("|");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+export function deduplicatePlantOpenings(openings: PlantOpening[]): PlantOpening[] {
+  const seen = new Set<string>();
+  return openings.filter((opening) => {
+    const key = [
+      opening.kind,
+      normalizeText(opening.floor ?? "piso-nao-identificado"),
+      opening.location,
+      opening.widthM?.toFixed(3) ?? "",
+      opening.heightM?.toFixed(3) ?? "",
+      opening.quantity,
+    ].join("|");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function isGroundFloor(floor: string | null): boolean {
   if (!floor?.trim()) return true;
   const n = normalizeText(floor);
@@ -273,17 +313,34 @@ export async function loadProjectPlantRooms(projectId: string): Promise<PlantRoo
   return (await loadProjectPlantContext(projectId)).rooms;
 }
 
-export async function loadProjectPlantContext(projectId: string): Promise<{ rooms: PlantRoom[]; openings: PlantOpening[] }> {
+export async function loadProjectPlantContext(projectId: string): Promise<{
+  rooms: PlantRoom[];
+  openings: PlantOpening[];
+  identityConflict: boolean;
+}> {
   const plantRows = await db
     .select()
     .from(plants)
     .where(eq(plants.projectId, projectId))
     .orderBy(desc(plants.uploadedAt));
 
+  // Um conflito de identidade por confirmar congela a sincronização automática de todo o
+  // projecto. Continuar para uma planta mais antiga esconderia precisamente o problema que o
+  // utilizador precisa de resolver e poderia manter quantidades obsoletas como se fossem actuais.
+  const identityConflict = plantRows.some((plant) =>
+    plant.processingStatus === "concluido"
+    && plant.documentAnalysis?.requiresIdentityConfirmation
+    && !plant.documentAnalysis.identityConfirmed
+  );
+  if (identityConflict) {
+    return { rooms: [], openings: [], identityConflict: true };
+  }
+
   let selectedRooms: PlantRoom[] = [];
   let selectedOpenings: PlantOpening[] = [];
   for (const plant of plantRows) {
     if (plant.processingStatus !== "concluido") continue;
+    if (plant.documentAnalysis?.requiresIdentityConfirmation && !plant.documentAnalysis.identityConfirmed) continue;
     const [rooms, openings] = await Promise.all([
       db.select().from(extractedRooms).where(eq(extractedRooms.plantId, plant.id)),
       db.select().from(extractedOpenings).where(eq(extractedOpenings.plantId, plant.id)),
@@ -312,5 +369,9 @@ export async function loadProjectPlantContext(projectId: string): Promise<{ room
     }
     if (selectedRooms.length > 0 && selectedOpenings.length > 0) break;
   }
-  return { rooms: selectedRooms, openings: selectedOpenings };
+  return {
+    rooms: deduplicatePlantRooms(selectedRooms),
+    openings: deduplicatePlantOpenings(selectedOpenings),
+    identityConflict: false,
+  };
 }

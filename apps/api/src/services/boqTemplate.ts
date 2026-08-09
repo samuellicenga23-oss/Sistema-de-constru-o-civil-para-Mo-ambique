@@ -291,7 +291,7 @@ export async function getAdaptiveBoqSelection(
 ): Promise<BoqTemplateSelection> {
   const library = await loadWorkChapterLibrary(companyId);
   if (!context || (!context.disciplines.length && !context.hasRooms && !context.hasStructuralElements)) {
-    return { mode: "padrao", chapters: library, detectedDisciplines: [] };
+    return { mode: "adaptativo", chapters: [], detectedDisciplines: [] };
   }
   const disciplines = new Set(context.disciplines);
   if (context.hasRooms) disciplines.add("arquitectura");
@@ -300,6 +300,7 @@ export async function getAdaptiveBoqSelection(
   return {
     mode: "adaptativo",
     chapters: library.filter((chapter) => {
+      if (chapter.code === "1" && !context.hasRooms && !context.hasStructuralElements && !disciplines.has("arquitectura") && !disciplines.has("estrutura")) return false;
       if (chapter.discipline !== "all" && !disciplines.has(chapter.discipline ?? "outro")) return false;
       if (!chapter.requiresTagMatch) return true;
       return (chapter.detectionTags ?? []).some((tag) => detectedTerms.has(tag.toLocaleLowerCase("pt")));
@@ -311,7 +312,7 @@ export async function getAdaptiveBoqSelection(
 /** Selecciona apenas os capítulos sustentados pelas disciplinas efectivamente reconhecidas. */
 export function selectAdaptiveBoqChapters(context?: AdaptivePlantContext | null): BoqTemplateSelection {
   if (!context || (!context.disciplines.length && !context.hasRooms && !context.hasStructuralElements)) {
-    return { mode: "padrao", chapters: STANDARD_CHAPTERS, detectedDisciplines: [] };
+    return { mode: "adaptativo", chapters: [], detectedDisciplines: [] };
   }
 
   const disciplines = new Set(context.disciplines);

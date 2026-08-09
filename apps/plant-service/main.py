@@ -6,7 +6,7 @@ from collections import OrderedDict
 from threading import Lock
 
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from fastapi.responses import StreamingResponse
 
 from parser import parse_pdf
@@ -20,7 +20,7 @@ app = FastAPI(title="SIGO Plant Service")
 # em produção, permissivo em dev sem configuração" (achado da auditoria).
 PLANT_SERVICE_TOKEN = os.environ.get("PLANT_SERVICE_TOKEN")
 IS_PRODUCTION = os.environ.get("ENVIRONMENT") == "production"
-PARSER_VERSION = "2026.08-cascade-1"
+PARSER_VERSION = "2026.08-identity-1"
 PARSER_CONCURRENCY = max(1, min(2, int(os.environ.get("PLANT_PARSER_CONCURRENCY", "1"))))
 PARSER_CACHE_SIZE = max(1, min(20, int(os.environ.get("PLANT_PARSER_CACHE_SIZE", "6"))))
 parser_slots = asyncio.Semaphore(PARSER_CONCURRENCY)
@@ -132,6 +132,13 @@ class DocumentSectionOut(BaseModel):
     pageCount: int
     confidence: float
     evidence: list[str]
+    identity: dict | None = None
+
+
+class DocumentIdentityConflictOut(BaseModel):
+    field: str
+    severity: str
+    values: list[dict]
 
 
 class DocumentAnalysisOut(BaseModel):
@@ -139,6 +146,9 @@ class DocumentAnalysisOut(BaseModel):
     isMultiDiscipline: bool
     sections: list[DocumentSectionOut]
     matchedTags: list[str]
+    identityConflicts: list[DocumentIdentityConflictOut] = Field(default_factory=list)
+    requiresIdentityConfirmation: bool = False
+    identityConfirmed: bool = False
 
 
 class ParseResponse(BaseModel):
@@ -214,6 +224,16 @@ def build_parse_response(result) -> ParseResponse:
             pageCount=document_analysis.page_count,
             isMultiDiscipline=document_analysis.is_multi_discipline,
             matchedTags=document_analysis.matched_tags,
+            identityConflicts=[
+                DocumentIdentityConflictOut(
+                    field=conflict.field,
+                    severity=conflict.severity,
+                    values=conflict.values,
+                )
+                for conflict in document_analysis.identity_conflicts
+            ],
+            requiresIdentityConfirmation=document_analysis.requires_identity_confirmation,
+            identityConfirmed=document_analysis.identity_confirmed,
             sections=[
                 DocumentSectionOut(
                     discipline=section.discipline,
@@ -223,6 +243,12 @@ def build_parse_response(result) -> ParseResponse:
                     pageCount=section.page_count,
                     confidence=section.confidence,
                     evidence=section.evidence,
+                    identity={
+                        "owner": section.identity.owner,
+                        "location": section.identity.location,
+                        "projectTitle": section.identity.project_title,
+                        "pages": section.identity.pages,
+                    } if section.identity else None,
                 )
                 for section in document_analysis.sections
             ],

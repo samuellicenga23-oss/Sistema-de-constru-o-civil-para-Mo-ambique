@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { boqApi, type BudgetDocument, type Project } from "../api/boq";
 import { scheduleApi, type ProjectSchedule, type SchedulePaper, type SchedulePrintScale, type ScheduleTask, type ScheduleTaskStatus } from "../api/schedule";
-import { workingDaysInclusive, nextWorkingDay } from "@sigo/shared";
+import { isWorkingDay, workingDaysInclusive, nextWorkingDay } from "@sigo/shared";
 import Layout from "../components/Layout";
 import LoadingState from "../components/LoadingState";
 import AlertBanner from "../components/AlertBanner";
@@ -22,8 +22,10 @@ const STATUS_LABELS: Record<ScheduleTaskStatus, string> = {
   concluido: "Concluído",
 };
 
-function today() {
-  return new Date().toISOString().slice(0, 10);
+function defaultScheduleStart() {
+  const now = new Date();
+  const localDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  return isWorkingDay(localDate) ? localDate : nextWorkingDay(localDate);
 }
 function fmtMoney(value: number, currency: string) {
   return new Intl.NumberFormat("pt-MZ", { style: "currency", currency, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
@@ -46,7 +48,7 @@ export default function ProjectSchedulePage() {
   const [setupOpen, setSetupOpen] = useState(false);
   const [sheetModalOpen, setSheetModalOpen] = useState(false);
   const [documentId, setDocumentId] = useState("");
-  const [startDate, setStartDate] = useState(today());
+  const [startDate, setStartDate] = useState(defaultScheduleStart());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [printPaper, setPrintPaper] = useState<SchedulePaper>("auto");
@@ -101,7 +103,7 @@ export default function ProjectSchedulePage() {
     if (!projectId) return;
     const roots = schedule?.tasks.filter((task) => !task.parentId) ?? [];
     const previous = roots.at(-1);
-    const start = previous ? nextWorkingDay(previous.endDate) : schedule?.startDate ?? today();
+    const start = previous ? nextWorkingDay(previous.endDate) : schedule?.startDate ?? defaultScheduleStart();
     setSaving(true);
     setError(null);
     try {

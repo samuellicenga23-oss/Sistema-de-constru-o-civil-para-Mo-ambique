@@ -19,10 +19,10 @@ function money(value: string | number) {
 type Tab = "composicoes" | "capitulos" | "mao-de-obra" | "materiais";
 
 const TABS: Array<{ id: Tab; label: string }> = [
-  { id: "composicoes", label: "Composições de custo" },
-  { id: "capitulos", label: "Capítulos de trabalho" },
-  { id: "mao-de-obra", label: "Mão-de-obra" },
+  { id: "composicoes", label: "Composições" },
   { id: "materiais", label: "Materiais" },
+  { id: "mao-de-obra", label: "Mão-de-obra" },
+  { id: "capitulos", label: "Capítulos" },
 ];
 
 function normalize(text: string) {
@@ -115,16 +115,8 @@ export default function CatalogPage() {
   const [collapsedMaterialGroups, setCollapsedMaterialGroups] = useState<Record<string, boolean>>({});
 
   function toggleMaterialGroup(category: string) {
-    setCollapsedMaterialGroups((prev) => ({ ...prev, [category]: !prev[category] }));
+    setCollapsedMaterialGroups((prev) => ({ ...prev, [category]: prev[category] === false }));
   }
-
-  const catalogueHealth = useMemo(() => {
-    const incompleteMaterials = materials.filter((m) => !m.code || !m.specification || !m.priceSourceName || !m.priceDate).length;
-    const staleMaterials = materials.filter((m) => m.priceDate && (Date.now() - new Date(m.priceDate).getTime()) / 86_400_000 > 120).length;
-    const incompleteLabour = labourCategories.filter((l) => !l.code || !l.sourceName || !l.effectiveDate).length;
-    const incompleteCompositions = compositions.filter((c) => !c.isReady || c.qualityScore < 80).length;
-    return { incompleteMaterials, staleMaterials, incompleteLabour, incompleteCompositions };
-  }, [materials, labourCategories, compositions]);
 
   async function handleDeleteLabour(id: string, name: string) {
     const ok = await confirm({ title: "Remover categoria?", message: `Remover “${name}”?`, confirmLabel: "Remover", danger: true });
@@ -176,7 +168,7 @@ export default function CatalogPage() {
   }
 
   return (
-    <Layout title="Catálogo de Preços" subtitle="Composições, mão-de-obra e materiais — preços internos da empresa. Cotações de fornecedores (incluindo SIGO) em Preços e fornecedores.">
+    <Layout title="Catálogo de Preços" subtitle="Recursos e preços usados nos orçamentos.">
       <div className="mx-auto w-full max-w-7xl space-y-5">
         {error && <AlertBanner tone="error" onDismiss={() => setError(null)}>{error}</AlertBanner>}
         {message && <AlertBanner tone="success" onDismiss={() => setMessage(null)}>{message}</AlertBanner>}
@@ -185,17 +177,6 @@ export default function CatalogPage() {
           <LoadingState skeleton />
         ) : (
           <>
-        <section className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-          <div className="grid grid-cols-2 md:grid-cols-4">
-              {[
-                [catalogueHealth.incompleteCompositions, "composições por validar", "composicoes" as Tab],
-                [catalogueHealth.incompleteMaterials, "materiais incompletos", "materiais" as Tab],
-                [catalogueHealth.staleMaterials, "preços com +120 dias", "materiais" as Tab],
-                [catalogueHealth.incompleteLabour, "custos laborais incompletos", "mao-de-obra" as Tab],
-              ].map(([value, label, target], index) => <button key={label as string} onClick={() => setTab(target as Tab)} className={`p-4 text-left hover:bg-slate-50 ${index < 3 ? "border-r border-slate-200" : ""}`}><strong className={`block text-xl tabular-nums ${Number(value) ? "text-amber-700" : "text-emerald-700"}`}>{value}</strong><span className="text-xs text-slate-500">{label}</span></button>)}
-          </div>
-        </section>
-
         {/* Separadores */}
         <div className="workspace-tabs">
           {TABS.map((t) => (
@@ -206,7 +187,6 @@ export default function CatalogPage() {
             >
               {t.label}
               <span className="ml-1.5 rounded-full bg-slate-200/70 px-1.5 py-0.5 text-[10px] text-slate-600">
-                (
                 {t.id === "composicoes"
                   ? compositions.length
                   : t.id === "capitulos"
@@ -214,7 +194,6 @@ export default function CatalogPage() {
                   : t.id === "mao-de-obra"
                     ? labourCategories.length
                     : materials.length}
-                )
               </span>
             </button>
           ))}
@@ -223,8 +202,7 @@ export default function CatalogPage() {
         {tab === "composicoes" && (
           <section className="card overflow-hidden">
             <div className="px-5 py-4 border-b border-slate-200 space-y-3 bg-slate-50/60">
-              <p className="text-xs leading-5 text-gray-500 max-w-lg">Abra uma composição para rever recursos, rendimentos e preço unitário.</p>
-              <div className="flex flex-wrap items-end gap-3 justify-between border-t border-slate-200 pt-3">
+              <div className="flex flex-wrap items-center gap-3 justify-between">
                 <input
                   type="search"
                   placeholder="Pesquisar composição por nome ou categoria..."
@@ -306,9 +284,6 @@ export default function CatalogPage() {
         {tab === "materiais" && (
           <section className="card overflow-hidden">
             <div className="space-y-3 border-b border-gray-100 px-5 pb-3 pt-4">
-              <p className="max-w-3xl text-xs leading-5 text-gray-500">
-                Preço, especificação, perda e unidade de compra — agrupados por tipo (ex. Cimento → Limak, Nacional, Dugongo).
-              </p>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <input
                   type="search"
@@ -330,7 +305,7 @@ export default function CatalogPage() {
             )}
 
             {materialGroups.map((group) => {
-              const collapsed = collapsedMaterialGroups[group.category];
+              const collapsed = materialQuery ? false : (collapsedMaterialGroups[group.category] ?? true);
               return (
                 <div key={group.category} className="border-b border-slate-100 last:border-b-0">
                   <button
@@ -357,17 +332,17 @@ export default function CatalogPage() {
                             </div>
                             <span className="text-right">
                               <strong className="block text-sm tabular-nums">
-                                {money(m.baseUnitCost)} {m.currency}
+                                {money(m.effectiveUnitCost)} {m.currency}
                               </strong>
-                              <small className="text-[10px] text-slate-500">preço base</small>
+                              <small className="text-[10px] text-slate-500">preço aplicado/{m.unit}</small>
                             </span>
                           </div>
                           <div className="mt-3 grid grid-cols-2 gap-2 border-t border-slate-100 pt-3">
                             <button type="button" onClick={() => setMaterialEditor({ item: m })} className="btn btn-secondary btn-sm">
-                              Editar ficha
+                              Editar
                             </button>
                             <button type="button" onClick={() => setPricingModalMaterial(m)} className="btn btn-secondary btn-sm">
-                              Preços e fornecedores
+                              Cotações
                             </button>
                           </div>
                         </article>

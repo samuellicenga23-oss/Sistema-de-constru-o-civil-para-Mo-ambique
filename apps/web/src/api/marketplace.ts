@@ -29,11 +29,23 @@ export type MarketplaceSupplierCatalog = {
   }>;
 };
 
+export type ListMarketplaceSuppliersOptions = {
+  zoneId?: string;
+  q?: string;
+  /** Só fornecedores com conta activa no Portal (convidáveis em RFQ formal). */
+  inviteable?: boolean;
+};
+
 export const marketplaceApi = {
-  listSuppliers: (zoneId?: string, q?: string) => {
+  listSuppliers: (zoneIdOrOptions?: string | ListMarketplaceSuppliersOptions, q?: string) => {
+    const options: ListMarketplaceSuppliersOptions =
+      typeof zoneIdOrOptions === "object" && zoneIdOrOptions !== null
+        ? zoneIdOrOptions
+        : { zoneId: zoneIdOrOptions, q };
     const params = new URLSearchParams();
-    if (zoneId) params.set("zoneId", zoneId);
-    if (q) params.set("q", q);
+    if (options.zoneId) params.set("zoneId", options.zoneId);
+    if (options.q) params.set("q", options.q);
+    if (options.inviteable) params.set("inviteable", "1");
     const qs = params.toString();
     return request<MarketplaceResponse>(`/marketplace/suppliers${qs ? `?${qs}` : ""}`);
   },

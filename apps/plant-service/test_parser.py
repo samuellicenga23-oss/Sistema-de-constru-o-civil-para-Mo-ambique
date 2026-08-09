@@ -4,6 +4,7 @@ import fitz
 
 from parser import (
     Room,
+    PageClassification,
     build_document_analysis,
     classify_document_pages,
     dedupe_rooms,
@@ -191,6 +192,38 @@ S = 12,35 m2
             [(section.discipline, section.start_page, section.end_page) for section in analysis.sections],
             [("arquitectura", 1, 2), ("hidrossanitario", 3, 4), ("estrutura", 5, 5)],
         )
+
+    def test_blocks_combination_when_discipline_identity_conflicts(self):
+        texts = [
+            "Projecto Arquitectónico\nProprietário: Fernando Gore Chaera\nDistrito: Chimoio\nPlanta cotada",
+            "Projecto Estrutural\nProprietário: Edson Nhapulo\nDistrito: Marracuene\nPlanta de fundação",
+        ]
+        classifications = [
+            PageClassification(page=1, discipline="arquitectura", confidence=0.95, evidence=["planta cotada"]),
+            PageClassification(page=2, discipline="estrutura", confidence=0.95, evidence=["planta de fundação"]),
+        ]
+
+        analysis = build_document_analysis(classifications, texts)
+
+        self.assertTrue(analysis.requires_identity_confirmation)
+        self.assertEqual({conflict.field for conflict in analysis.identity_conflicts}, {"owner", "location"})
+        self.assertEqual(analysis.sections[0].identity.owner, "Fernando Gore Chaera")
+        self.assertEqual(analysis.sections[1].identity.location, "Marracuene")
+
+    def test_combines_disciplines_when_identity_is_consistent(self):
+        texts = [
+            "Projecto Arquitectónico\nCliente: Empresa ABC, Lda\nLocal: Matola\nPlanta cotada",
+            "Projecto Estrutural\nCliente: Empresa ABC Lda\nLocal: Matola\nPlanta de fundação",
+        ]
+        classifications = [
+            PageClassification(page=1, discipline="arquitectura", confidence=0.95),
+            PageClassification(page=2, discipline="estrutura", confidence=0.95),
+        ]
+
+        analysis = build_document_analysis(classifications, texts)
+
+        self.assertFalse(analysis.requires_identity_confirmation)
+        self.assertEqual(analysis.identity_conflicts, [])
 
     def test_uses_extracted_content_when_sheet_has_no_standard_title(self):
         classifications = classify_document_pages(

@@ -30,6 +30,23 @@ describe("Regras de aprovação de documentos", () => {
     ]).ready).toBe(true);
   });
 
+  it("bloqueia um elemento que a planta detectou mas ficou com quantidade zero", () => {
+    const result = evaluateDocumentReadiness("medicao", [
+      { code: "3.5", kind: "item", description: "Betão em lajes", unit: "m3", quantity: 0, unitPrice: null },
+      { code: "3.6", kind: "item", description: "Aço", unit: "kg", quantity: 100, unitPrice: null },
+    ], ["3.5", "3.6"]);
+    expect(result.ready).toBe(false);
+    expect(result.missingDetectedQuantities).toEqual(["3.5"]);
+  });
+
+  it("bloqueia códigos detectados pela planta que ainda não existem no mapa", () => {
+    const result = evaluateDocumentReadiness("medicao", [
+      { code: "3.6", kind: "item", description: "Aço", unit: "kg", quantity: 100, unitPrice: null },
+    ], ["3.5", "3.6"]);
+    expect(result.ready).toBe(false);
+    expect(result.missingDetectedQuantities).toEqual(["3.5"]);
+  });
+
   it("explica por que documentos fora do rascunho estão protegidos", () => {
     expect(documentLockedMessage("aprovado")).toMatch(/nova revisão/i);
     expect(documentLockedMessage("submetido")).toMatch(/rascunho/i);

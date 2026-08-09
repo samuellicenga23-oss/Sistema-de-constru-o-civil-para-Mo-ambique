@@ -112,6 +112,23 @@ export const documentDisciplineSchema = z.enum([
 ]);
 export type DocumentDiscipline = z.infer<typeof documentDisciplineSchema>;
 
+export const documentIdentitySchema = z.object({
+  owner: z.string().nullable().default(null),
+  location: z.string().nullable().default(null),
+  projectTitle: z.string().nullable().default(null),
+  pages: z.array(z.number().int().positive()).default([]),
+});
+
+export const documentIdentityConflictSchema = z.object({
+  field: z.enum(["owner", "location", "project_title"]),
+  severity: z.enum(["warning", "critical"]),
+  values: z.array(z.object({
+    value: z.string().min(1),
+    disciplines: z.array(documentDisciplineSchema),
+    pages: z.array(z.number().int().positive()),
+  })).min(2),
+});
+
 export const documentSectionSchema = z.object({
   discipline: documentDisciplineSchema,
   label: z.string().min(1),
@@ -120,6 +137,7 @@ export const documentSectionSchema = z.object({
   pageCount: z.number().int().positive(),
   confidence: z.number().min(0).max(1),
   evidence: z.array(z.string()),
+  identity: documentIdentitySchema.nullable().optional().default(null),
 });
 export type DocumentSection = z.infer<typeof documentSectionSchema>;
 
@@ -128,6 +146,9 @@ export const documentAnalysisSchema = z.object({
   isMultiDiscipline: z.boolean(),
   sections: z.array(documentSectionSchema),
   matchedTags: z.array(z.string()).default([]),
+  identityConflicts: z.array(documentIdentityConflictSchema).default([]),
+  requiresIdentityConfirmation: z.boolean().default(false),
+  identityConfirmed: z.boolean().default(false),
 });
 export type DocumentAnalysis = z.infer<typeof documentAnalysisSchema>;
 

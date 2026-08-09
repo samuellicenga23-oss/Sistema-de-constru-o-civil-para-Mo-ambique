@@ -24,7 +24,7 @@ import {
   buildPlanningContext,
   computeSuccessorDates,
   isWorkingDay,
-  planningTradeForCode,
+  planningTradeForSource,
   shiftWorkingDays,
   validatePlanCoverage,
   validateValueShares,
@@ -139,14 +139,13 @@ function toPlanningSourceNode(
   productivityCache: Map<string, number>,
   fallbackCrewSize: number,
   profile: SchedulePlanningProfile | null,
-  standardCodes: boolean,
 ): PlanningSourceNode | null {
   if (node.kind === "nota") return null;
   if (node.kind === "item") {
     // O cronograma contém todas as linhas aprovadas realmente medidas; linhas de catálogo com 0
     // ficam no BOQ, mas não são trabalhos a executar.
     if ((node.quantity ?? 0) <= 0) return null;
-    const trade = standardCodes ? planningTradeForCode(node.code) : null;
+    const trade = planningTradeForSource({ code: node.code, name: node.description });
     const crewSize = trade && profile?.crewSizes[trade] ? profile.crewSizes[trade]! : fallbackCrewSize;
     const { days, basis } = computeItemDurationDays(node, hoursCache, crewSize, productivityCache);
     return {
@@ -163,7 +162,7 @@ function toPlanningSourceNode(
   }
 
   const children = node.children
-    .map((child) => toPlanningSourceNode(child, hoursCache, productivityCache, fallbackCrewSize, profile, standardCodes))
+    .map((child) => toPlanningSourceNode(child, hoursCache, productivityCache, fallbackCrewSize, profile))
     .filter((child): child is PlanningSourceNode => child !== null);
   if (!children.length) return null;
   return {
@@ -187,14 +186,13 @@ function planningSections(
   profile: SchedulePlanningProfile | null = null,
 ): PlanningSourceSection[] {
   return summary.sections.map((section) => {
-    const standardCodes = Boolean(section.templateKey?.startsWith("sigo_"));
     return {
       id: section.id,
       name: section.name,
       sortOrder: section.sortOrder,
       templateKey: section.templateKey,
       roots: section.items
-        .map((root) => toPlanningSourceNode(root, hoursCache, productivityCache, fallbackCrewSize, profile, standardCodes))
+        .map((root) => toPlanningSourceNode(root, hoursCache, productivityCache, fallbackCrewSize, profile))
         .filter((root): root is PlanningSourceNode => root !== null),
     };
   });

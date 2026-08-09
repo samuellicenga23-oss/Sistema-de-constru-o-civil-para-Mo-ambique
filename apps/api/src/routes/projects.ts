@@ -139,6 +139,10 @@ async function adaptEmptyMeasurementDocument(
     .from(lineItems).where(eq(lineItems.sectionId, generated.id));
   if (items.some((item) => Number(item.quantity ?? 0) !== 0)) return;
 
+  // Sem capítulos adaptativos (planta sem contexto/cálculo), não reconstruir — um mapa
+  // sigo_padrao completo seria apagado e substituído por secção vazia.
+  if (!selection.chapters.length) return;
+
   // Se o utilizador já personalizou a estrutura, ela deixa de ser reconstruída automaticamente.
   const expectedChapters = [...STANDARD_CHAPTERS, ...selection.chapters];
   const expected = new Map(expectedChapters.flatMap((chapter) => [
@@ -415,6 +419,20 @@ export async function projectRoutes(app: FastifyInstance) {
     const companyId = request.currentUser!.companyId!;
     const project = await assertProjectOwned(id, companyId);
     if (!project) return reply.code(404).send({ error: "Projecto não encontrado" });
+
+    const projectPlants = await db.select({ id: plants.id, documentAnalysis: plants.documentAnalysis })
+      .from(plants)
+      .where(eq(plants.projectId, id));
+    const unresolvedIdentity = projectPlants.filter((plant) =>
+      plant.documentAnalysis?.requiresIdentityConfirmation && !plant.documentAnalysis.identityConfirmed,
+    );
+    if (unresolvedIdentity.length > 0) {
+      return reply.code(409).send({
+        code: "PLANT_IDENTITY_CONFLICT",
+        error: "Confirme primeiro se as disciplinas com donos, locais ou títulos diferentes pertencem à mesma obra.",
+        plants: unresolvedIdentity.map((plant) => ({ id: plant.id, conflicts: plant.documentAnalysis?.identityConflicts ?? [] })),
+      });
+    }
 
     const drafts = await db
       .select()

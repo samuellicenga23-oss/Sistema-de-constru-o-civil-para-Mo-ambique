@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { catalogApi, type Material } from "../api/catalog";
-import { quickEstimateApi, type FoundationType, type RoofType, type QuickEstimateResult, type SoilType } from "../api/quickEstimate";
+import { quickEstimateApi, type FoundationType, type MeasurementScope, type RoofType, type QuickEstimateResult, type SoilType } from "../api/quickEstimate";
 import type { ExtractedOpening, ExtractedRoom, StructuralSummary } from "../api/plants";
 import { IconBack, IconPlus, IconRuler, IconTrash } from "./icons";
 import CalculationReportView from "./CalculationReportView";
@@ -91,7 +91,7 @@ function newFloor(): FloorForm {
     key: nextKey(),
     ceilingHeight: "2.8",
     perimeter: "",
-    rooms: [newRoom("Sala"), newRoom("Quarto 1"), newRoom("Cozinha", "humido"), newRoom("WC 1", "humido")],
+    rooms: [newRoom()],
   };
 }
 
@@ -148,17 +148,23 @@ function initialSlabs(floors: FloorForm[], summary?: StructuralSummary | null): 
       };
     });
   }
-  const fallbackThickness = summary?.slabsAvgThicknessCm ? (summary.slabsAvgThicknessCm / 100).toFixed(2) : "";
-  return floors.map((floor, index) => ({
-    key: nextKey(),
-    label: floor.label ? `Laje — ${floor.label}` : `Laje ${index + 1}`,
-    areaM2: floorFormArea(floor).toFixed(2),
-    thicknessM: fallbackThickness,
-    source: summary?.slabsAvgThicknessCm ? "planta" : "manual",
-  }));
+  // Sem lajes efectivamente detectadas, não se inventa uma laje por piso.
+  return [];
 }
 
-const STEPS = ["Espaços", "Estrutura", "Confirmar"];
+const STEPS = ["Âmbito e espaços", "Dados técnicos", "Confirmar"];
+
+const SCOPE_OPTIONS: Array<{ value: MeasurementScope; label: string; hint: string }> = [
+  { value: "preliminares", label: "Preliminares", hint: "Implantação e preparação" },
+  { value: "terraplenagem", label: "Terras e fundações", hint: "Escavações e aterros" },
+  { value: "estrutura", label: "Estrutura", hint: "Betão, aço, lajes e cofragem" },
+  { value: "arquitectura", label: "Arquitectura", hint: "Paredes e acabamentos" },
+  { value: "vaos", label: "Portas e janelas", hint: "Vãos e caixilharia" },
+  { value: "cobertura", label: "Cobertura", hint: "Laje ou cobertura leve" },
+  { value: "hidraulica", label: "Água e saneamento", hint: "Aparelhos e abastecimento" },
+  { value: "drenagem", label: "Drenagem", hint: "Esgotos e águas pluviais" },
+  { value: "electricidade", label: "Electricidade", hint: "Quadro, iluminação e tomadas" },
+];
 
 const FOUNDATION_LABELS: Record<FoundationType, string> = {
   sapata_isolada: "Sapata isolada",
@@ -198,7 +204,22 @@ export default function QuickEstimateWizard({
   const hasStructuralFootings = !!structuralSummary && structuralSummary.footingsCount > 0;
   const hasArchitectureRooms = !!architectureRooms && architectureRooms.length > 0;
   const hasPlantData = hasArchitectureRooms || hasStructuralFootings;
+  const detectedScopes = (): MeasurementScope[] => {
+    const scopes = new Set<MeasurementScope>();
+    if (hasArchitectureRooms) {
+      scopes.add("preliminares"); scopes.add("arquitectura"); scopes.add("vaos");
+      scopes.add("electricidade");
+      if (architectureRooms!.some((room) => classifyRoomType(room.name) === "humido")) {
+        scopes.add("hidraulica"); scopes.add("drenagem");
+      }
+    }
+    if (structuralSummary && (hasStructuralFootings || structuralSummary.beamsCount > 0 || structuralSummary.slabsCount > 0 || structuralSummary.totalSteelWeightKg > 0)) {
+      scopes.add("terraplenagem"); scopes.add("estrutura");
+    }
+    return scopes.size ? [...scopes] : ["arquitectura"];
+  };
   const [step, setStep] = useState(0);
+  const [scopes, setScopes] = useState<MeasurementScope[]>(detectedScopes);
   const [floors, setFloors] = useState<FloorForm[]>(
     hasArchitectureRooms ? floorsFromExtractedRooms(architectureRooms!) : [newFloor()]
   );
@@ -250,13 +271,13 @@ export default function QuickEstimateWizard({
   const [sewerPipe40M, setSewerPipe40M] = useState("");
   const [downpipeLengthM, setDownpipeLengthM] = useState("");
   const [waterSupplyPipeM, setWaterSupplyPipeM] = useState("");
-  const [toilets, setToilets] = useState("1");
-  const [sinks, setSinks] = useState("1");
-  const [showers, setShowers] = useState("1");
-  const [kitchenSinks, setKitchenSinks] = useState("1");
-  const [laundryTanks, setLaundryTanks] = useState("1");
-  const [manholeCount, setManholeCount] = useState("1");
-  const [hasWaterTank, setHasWaterTank] = useState(true);
+  const [toilets, setToilets] = useState("0");
+  const [sinks, setSinks] = useState("0");
+  const [showers, setShowers] = useState("0");
+  const [kitchenSinks, setKitchenSinks] = useState("0");
+  const [laundryTanks, setLaundryTanks] = useState("0");
+  const [manholeCount, setManholeCount] = useState("0");
+  const [hasWaterTank, setHasWaterTank] = useState(false);
   const [useSepticTank, setUseSepticTank] = useState(false);
   const [septicPeople, setSepticPeople] = useState("4");
   const [septicFlow, setSepticFlow] = useState("100");
@@ -306,11 +327,11 @@ export default function QuickEstimateWizard({
     if (hydraulicInitialized) return;
     const wetCount = floors.reduce((s, f) => s + f.rooms.filter((r) => r.type === "humido").length, 0);
     const totalRooms = floors.reduce((s, f) => s + f.rooms.length, 0);
-    const suggested = Math.max(1, wetCount);
+    const suggested = wetCount;
     setToilets(String(suggested));
     setSinks(String(suggested));
     setShowers(String(suggested));
-    setKitchenSinks(String(Math.max(1, floors.some((f) => f.rooms.some((r) => /cozinha/i.test(r.name))) ? 1 : 0)));
+    setKitchenSinks(String(floors.some((f) => f.rooms.some((r) => /cozinha/i.test(r.name))) ? 1 : 0));
     setSepticPeople(String(Math.max(4, totalRooms * 2)));
     setHydraulicInitialized(true);
   }, [floors, hydraulicInitialized]);
@@ -398,7 +419,11 @@ export default function QuickEstimateWizard({
     );
   }
 
-  const step1Valid = floors.every(
+  const requiresGeometry = scopes.some((scope) => ["preliminares", "arquitectura", "electricidade"].includes(scope));
+  const requiresStructure = scopes.some((scope) => scope === "estrutura" || scope === "terraplenagem");
+  const requiresRoof = scopes.includes("cobertura");
+  const usesHydraulics = scopes.includes("hidraulica") || scopes.includes("drenagem");
+  const geometryValid = floors.length > 0 && floors.every(
     (f) =>
       Number(f.ceilingHeight) > 0 &&
       Number(f.perimeter) > 0 &&
@@ -410,31 +435,34 @@ export default function QuickEstimateWizard({
       })
   );
 
-  const slabsValid = floorSlabs.length > 0 && floorSlabs.every((slab) => slab.label.trim() && Number(slab.areaM2) > 0 && Number(slab.thicknessM) > 0);
+  const step1Valid = scopes.length > 0 && (!requiresGeometry || geometryValid);
+  const slabsValid = floorSlabs.length === 0 || floorSlabs.every((slab) => slab.label.trim() && Number(slab.areaM2) > 0 && Number(slab.thicknessM) > 0);
+  const foundationValid = foundationType === "laje"
+    ? Number(slabThickness) > 0
+    : Number(footingCount) > 0 && Number(footingAvgArea) > 0 && Number(footingAvgDepth) > 0;
   const step2Valid =
-    Number(roofArea) > 0 &&
-    slabsValid &&
-    (foundationType === "laje"
-      ? Number(slabThickness) > 0
-      : Number(footingCount) > 0 && Number(footingAvgArea) > 0 && Number(footingAvgDepth) > 0);
+    (!requiresRoof || Number(roofArea) > 0) &&
+    (!requiresStructure || (foundationConfirmed && foundationValid && slabsValid));
 
   const readinessChecks = [
-    { label: "Compartimentos e áreas por piso", ready: step1Valid, impact: "Indique manualmente todos os compartimentos e dimensões.", targetStep: 0 },
-    { label: "Perímetro exterior e pé-direito", ready: floors.every((f) => Number(f.perimeter) > 0 && Number(f.ceilingHeight) > 0), impact: "Necessário para paredes, rebocos, pintura e revestimentos.", targetStep: 0 },
-    { label: "Sapatas e fundações", ready: foundationConfirmed && (foundationType === "laje" ? Number(slabThickness) > 0 : Number(footingCount) > 0 && Number(footingAvgArea) > 0 && Number(footingAvgDepth) > 0), impact: "Confirme quantidade, área e profundidade médias.", targetStep: 1 },
-    { label: "Vigas estruturais", ready: Number(beamConcreteVolumeM3) > 0, impact: "Indique o volume de betão das vigas para evitar um rácio genérico.", targetStep: 1 },
-    { label: "Lajes por nível", ready: slabsValid, impact: "Confirme a área e a espessura de cada laje.", targetStep: 1 },
-    { label: "Mapa de aço", ready: Number(steelWeightKg) > 0, impact: "Indique o peso do mapa de aço para evitar estimativas por kg/m³.", targetStep: 1 },
-    { label: "Redes hidráulicas", ready: true, impact: "Estimadas a partir dos compartimentos húmidos e perímetro — ajuste na confirmação se necessário.", targetStep: 2 },
-    {
+    ...(requiresGeometry ? [
+      { label: "Compartimentos e áreas por piso", ready: geometryValid, impact: "Complete apenas os espaços que pretende medir.", targetStep: 0 },
+      { label: "Perímetro exterior e pé-direito", ready: floors.every((f) => Number(f.perimeter) > 0 && Number(f.ceilingHeight) > 0), impact: "Usado em paredes e acabamentos.", targetStep: 0 },
+    ] : []),
+    ...(requiresStructure ? [
+      { label: "Fundações", ready: foundationConfirmed && foundationValid, impact: "Confirme os dados da fundação.", targetStep: 1 },
+      { label: "Lajes por nível", ready: slabsValid, impact: "Cada laje pode ter área e espessura próprias.", targetStep: 1 },
+    ] : []),
+    ...(usesHydraulics ? [{ label: "Redes hidráulicas", ready: true, impact: "Confirme aparelhos e comprimentos disponíveis.", targetStep: 2 }] : []),
+    ...(!catalogLoading ? [{
       label: "Custos críticos do catálogo",
       ready: criticalCostsReady,
       impact: "Cimento, aço e bloco — aviso na confirmação; não bloqueia a medição.",
       targetStep: 2,
-    },
+    }] : []),
   ];
   const readyCount = readinessChecks.filter((item) => item.ready).length;
-  const readinessPercent = Math.round((readyCount / readinessChecks.length) * 100);
+  const readinessPercent = readinessChecks.length ? Math.round((readyCount / readinessChecks.length) * 100) : 100;
 
   function canProceed() {
     if (step === 0) return step1Valid;
@@ -442,12 +470,23 @@ export default function QuickEstimateWizard({
     return true;
   }
 
+  function goNext() {
+    if (!canProceed()) return;
+    setStep((current) => current === 0 && !requiresStructure && !requiresRoof ? 2 : current + 1);
+  }
+
+  function goBack() {
+    if (step === 0) return onClose();
+    setStep((current) => current === 2 && !requiresStructure && !requiresRoof ? 0 : current - 1);
+  }
+
   async function handleApply() {
     setSubmitting(true);
     setError(null);
     try {
       const payload = {
-        floors: floors.map((f) => ({
+        scopes,
+        ...(requiresGeometry ? { floors: floors.map((f) => ({
           label: f.label,
           ceilingHeight: Number(f.ceilingHeight),
           perimeter: Number(f.perimeter),
@@ -455,22 +494,21 @@ export default function QuickEstimateWizard({
             const { length, width } = roomDimensions(r);
             return { name: r.name.trim(), type: r.type, length, width, perimeterM: Number(r.perimeterM) > 0 ? Number(r.perimeterM) : undefined };
           }),
-        })),
-        foundationType,
-        ...(foundationType === "laje"
+        })) } : {}),
+        ...(requiresStructure ? { foundationType } : {}),
+        ...(requiresStructure && foundationType === "laje"
           ? { slabThickness: Number(slabThickness) }
-          : { footing: { count: Number(footingCount), avgArea: Number(footingAvgArea), avgDepth: Number(footingAvgDepth) } }),
-        concreteClass,
-        roofType,
-        roofArea: Number(roofArea),
-        steelWeightKg: Number(steelWeightKg) > 0 ? Number(steelWeightKg) : undefined,
-        beamConcreteVolumeM3: Number(beamConcreteVolumeM3) > 0 ? Number(beamConcreteVolumeM3) : undefined,
-        floorSlabs: floorSlabs.map((slab) => ({
+          : requiresStructure ? { footing: { count: Number(footingCount), avgArea: Number(footingAvgArea), avgDepth: Number(footingAvgDepth) } } : {}),
+        ...(requiresStructure ? { concreteClass } : {}),
+        ...(requiresRoof ? { roofType, roofArea: Number(roofArea) } : {}),
+        steelWeightKg: requiresStructure && Number(steelWeightKg) > 0 ? Number(steelWeightKg) : undefined,
+        beamConcreteVolumeM3: requiresStructure && Number(beamConcreteVolumeM3) > 0 ? Number(beamConcreteVolumeM3) : undefined,
+        floorSlabs: requiresStructure ? floorSlabs.map((slab) => ({
           label: slab.label.trim(),
           areaM2: Number(slab.areaM2),
           thicknessM: Number(slab.thicknessM),
-        })),
-        openings: openings
+        })) : undefined,
+        openings: scopes.includes("vaos") ? openings
           .filter((opening) => Number(opening.widthM) > 0 && Number(opening.heightM) > 0 && Number(opening.quantity) > 0)
           .map((opening) => ({
             kind: opening.kind,
@@ -479,7 +517,7 @@ export default function QuickEstimateWizard({
             quantity: Number(opening.quantity),
             location: opening.location,
             confirmed: opening.confirmed,
-          })),
+          })) : undefined,
         columnConcreteVolumeM3: columnConcreteVolumeM3 ? Number(columnConcreteVolumeM3) : undefined,
         formworkAreaM2: formworkAreaM2 ? Number(formworkAreaM2) : undefined,
         backfillEarthVolumeM3: backfillEarthVolumeM3 ? Number(backfillEarthVolumeM3) : undefined,
@@ -487,7 +525,7 @@ export default function QuickEstimateWizard({
         sewerPipe40M: sewerPipe40M ? Number(sewerPipe40M) : undefined,
         downpipeLengthM: downpipeLengthM ? Number(downpipeLengthM) : undefined,
         waterSupplyPipeM: waterSupplyPipeM ? Number(waterSupplyPipeM) : undefined,
-        hydraulic: {
+        hydraulic: usesHydraulics ? {
           toilets: Number(toilets) || 0,
           sinks: Number(sinks) || 0,
           showers: Number(showers) || 0,
@@ -495,8 +533,8 @@ export default function QuickEstimateWizard({
           laundryTanks: Number(laundryTanks) || 0,
           hasWaterTank,
           manholeCount: Number(manholeCount) || 0,
-        },
-        ...(useSepticTank
+        } : undefined,
+        ...(usesHydraulics && useSepticTank
           ? {
               septicTank: {
                 numberOfPeople: Number(septicPeople) || 1,
@@ -562,10 +600,37 @@ export default function QuickEstimateWizard({
               )}
               {step === 0 && (
                 <div className="space-y-4">
+                  <section>
+                    <div className="mb-2 flex items-end justify-between gap-3">
+                      <div>
+                        <h3 className="text-sm font-semibold text-slate-900">O que pretende medir?</h3>
+                        <p className="text-xs text-slate-500">O mapa cresce apenas com os trabalhos seleccionados.</p>
+                      </div>
+                      {hasPlantData && <span className="badge badge-blue">Sugerido pelas plantas</span>}
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                      {SCOPE_OPTIONS.map((option) => {
+                        const checked = scopes.includes(option.value);
+                        return (
+                          <label key={option.value} className={`cursor-pointer rounded-lg border p-3 ${checked ? "border-brand-300 bg-brand-50" : "border-slate-200 bg-white hover:border-slate-300"}`}>
+                            <span className="flex items-start gap-2">
+                              <input
+                                type="checkbox"
+                                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-700"
+                                checked={checked}
+                                onChange={() => setScopes((current) => checked ? current.filter((scope) => scope !== option.value) : [...current, option.value])}
+                              />
+                              <span><strong className="block text-xs text-slate-900">{option.label}</strong><span className="text-[11px] text-slate-500">{option.hint}</span></span>
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    {scopes.length === 0 && <p className="mt-2 text-xs font-medium text-red-600">Seleccione pelo menos um grupo de trabalhos.</p>}
+                  </section>
+                  {requiresGeometry ? <>
                   <p className="text-sm text-gray-500">
-                    Indique, por piso, o pé-direito, o perímetro exterior e a lista de compartimentos (nome, tipo e
-                    dimensões). Compartimentos "húmidos" (WC, cozinha, lavandaria) levam impermeabilização e revestimentos
-                    diferentes.
+                    Confirme apenas os pisos e espaços que pertencem a esta medição.
                   </p>
                   {hasArchitectureRooms && (
                     <div className="rounded-lg bg-brand-50 border border-brand-200 p-3 text-sm text-brand-900">
@@ -712,6 +777,11 @@ export default function QuickEstimateWizard({
                     <IconPlus className="w-3.5 h-3.5" />
                     Adicionar piso
                   </button>
+                  </> : (
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                      Esta medição não depende de compartimentos. Pode avançar directamente para os dados técnicos.
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -722,6 +792,7 @@ export default function QuickEstimateWizard({
                     têm prioridade no cálculo e ficam registados no relatório da medição.
                   </p>
 
+                  {requiresStructure && <>
                   {structuralSummary && (
                     <div className="rounded-lg bg-brand-50 border border-brand-200 p-3 text-sm text-brand-900">
                       <p className="font-medium">
@@ -908,6 +979,8 @@ export default function QuickEstimateWizard({
                       <option value="B30">B30</option>
                     </select>
                   </div>
+                  </>}
+                  {requiresRoof && <>
                   <div>
                     <label className="label">Tipo de cobertura</label>
                     <select value={roofType} onChange={(e) => setRoofType(e.target.value as RoofType)} className="input">
@@ -932,8 +1005,9 @@ export default function QuickEstimateWizard({
                       className="input"
                     />
                   </div>
+                  </>}
 
-                  <details className="rounded-lg border border-gray-200 p-3">
+                  {requiresStructure && <details className="rounded-lg border border-gray-200 p-3">
                     <summary className="text-sm font-medium text-gray-700 cursor-pointer">
                       Ajustes avançados (opcional) — insira um valor real em vez da estimativa genérica
                     </summary>
@@ -977,14 +1051,15 @@ export default function QuickEstimateWizard({
                         />
                       </div>
                     </div>
-                  </details>
+                  </details>}
                 </div>
               )}
 
               {step === 2 && (
                 <div className="space-y-4 text-sm">
-                  <p className="text-gray-500">Confirme os dados e ajuste instalações sanitárias se necessário. Tubagens são estimadas automaticamente pelo motor de cálculo.</p>
-                  {floors.map((f, i) => (
+                  <p className="text-gray-500">Confirme os grupos seleccionados. O assistente só altera esses trabalhos; capítulos manuais permanecem intactos.</p>
+                  <div className="flex flex-wrap gap-1.5">{scopes.map((scope) => <span key={scope} className="badge badge-blue">{SCOPE_OPTIONS.find((option) => option.value === scope)?.label}</span>)}</div>
+                  {requiresGeometry && floors.map((f, i) => (
                     <div key={f.key} className="rounded-lg border border-gray-200 p-3">
                       <p className="font-medium text-gray-900 mb-1">
                         {f.label || `Piso ${i + 1}`} — pé-direito {f.ceilingHeight} m, perímetro {f.perimeter} m
@@ -1000,7 +1075,8 @@ export default function QuickEstimateWizard({
                       </p>
                     </div>
                   ))}
-                  <div className="rounded-lg border border-gray-200 p-3 text-gray-500">
+                  {(requiresStructure || requiresRoof) && <div className="rounded-lg border border-gray-200 p-3 text-gray-500">
+                    {requiresStructure && <>
                     Fundação: <span className="text-gray-900">{FOUNDATION_LABELS[foundationType]}</span>
                     {foundationType === "laje" ? (
                       <span className="text-gray-900"> (espessura {slabThickness} m)</span>
@@ -1008,10 +1084,11 @@ export default function QuickEstimateWizard({
                       <span className="text-gray-900"> ({footingCount} sapatas × {footingAvgArea} m² × {footingAvgDepth} m)</span>
                     )}
                     {" · Betão: "}<span className="text-gray-900">{concreteClass}</span>
-                    {" · Cobertura: "}<span className="text-gray-900">{ROOF_LABELS[roofType]} ({roofArea} m²)</span>
-                  </div>
+                    </>}
+                    {requiresRoof && <>{requiresStructure ? " · " : ""}Cobertura: <span className="text-gray-900">{ROOF_LABELS[roofType]} ({roofArea} m²)</span></>}
+                  </div>}
 
-                  <div className="rounded-xl border border-slate-200 p-4">
+                  {scopes.includes("vaos") && <div className="rounded-xl border border-slate-200 p-4">
                     <div className="mb-3 flex items-center justify-between gap-3">
                       <div><p className="font-semibold text-slate-900">Portas e janelas</p><p className="text-xs text-slate-500">Só os vãos confirmados e localizados são descontados das paredes.</p></div>
                       <button type="button" className="btn btn-secondary btn-sm" onClick={() => setOpenings((items) => [...items, { key: nextKey(), kind: "janela", code: "", widthM: "", heightM: "", quantity: "1", location: "exterior", confirmed: true }])}><IconPlus className="h-3.5 w-3.5" />Adicionar</button>
@@ -1031,8 +1108,9 @@ export default function QuickEstimateWizard({
                         ))}
                       </div>
                     )}
-                  </div>
+                  </div>}
 
+                  {usesHydraulics && <>
                   <div className="rounded-xl border border-slate-200 p-4">
                     <p className="text-sm font-semibold text-slate-900 mb-3">Instalações sanitárias</p>
                     <div className="grid grid-cols-2 gap-3 max-w-md">
@@ -1115,6 +1193,7 @@ export default function QuickEstimateWizard({
                       <div><label className="label">Esgoto Ø40 (ml)</label><input type="number" step="0.01" min="0" value={sewerPipe40M} onChange={(e) => setSewerPipe40M(e.target.value)} className="input" placeholder="Auto" /></div>
                     </div>
                   </details>
+                  </>}
 
                   {!catalogLoading && !criticalCostsReady && (
                     <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
@@ -1149,12 +1228,12 @@ export default function QuickEstimateWizard({
             </>
           ) : (
             <>
-              <button onClick={() => (step === 0 ? onClose() : setStep((s) => s - 1))} className="btn btn-ghost">
+              <button onClick={goBack} className="btn btn-ghost">
                 <IconBack className="w-3.5 h-3.5" />
                 {step === 0 ? "Cancelar" : "Voltar"}
               </button>
               {step < STEPS.length - 1 ? (
-                <button onClick={() => canProceed() && setStep((s) => s + 1)} disabled={!canProceed()} className="btn btn-primary">Seguinte</button>
+                <button onClick={goNext} disabled={!canProceed()} className="btn btn-primary">Seguinte</button>
               ) : (
                 <button onClick={handleApply} disabled={submitting} className="btn btn-primary">
                   <IconRuler className="w-4 h-4" />

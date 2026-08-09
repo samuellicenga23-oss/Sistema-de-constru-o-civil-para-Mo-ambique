@@ -1,6 +1,6 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { budgetDocuments, financialEntries, materials, purchaseOrders, stockMovements, supplierInvoiceCreditNotes, supplierInvoicePayments, supplierInvoices } from "../db/schema.js";
+import { budgetDocuments, financialEntries, invoiceCreditNotes, invoiceReceipts, materials, projectInvoices, purchaseOrders, stockMovements, supplierInvoiceCreditNotes, supplierInvoicePayments, supplierInvoices } from "../db/schema.js";
 import { getBudgetDocumentSummary } from "./boqEngine.js";
 import { getProjectSchedule } from "./scheduleEngine.js";
 
@@ -24,7 +24,7 @@ function plannedPercent(start: string, end: string, referenceDate: string) {
 // diário não traz custo próprio, valoriza-a pelo custo médio das entradas efectivamente registadas
 // para aquele material na mesma obra e identifica-a como estimativa no consumidor da API.
 export async function getProjectControl(projectId: string, currency: string) {
-  const [documents, entries, movements, orders, supplierBills, schedule] = await Promise.all([
+  const [documents, entries, movements, orders, supplierBills, clientInvoices, schedule] = await Promise.all([
     db.select().from(budgetDocuments).where(eq(budgetDocuments.projectId, projectId)),
     db.select().from(financialEntries).where(eq(financialEntries.projectId, projectId)),
     db.select({ movement: stockMovements, materialName: materials.name, unit: materials.unit })
@@ -33,13 +33,17 @@ export async function getProjectControl(projectId: string, currency: string) {
       .where(eq(stockMovements.projectId, projectId)),
     db.select().from(purchaseOrders).where(eq(purchaseOrders.projectId, projectId)),
     db.select().from(supplierInvoices).where(eq(supplierInvoices.projectId, projectId)),
+    db.select().from(projectInvoices).where(eq(projectInvoices.projectId, projectId)),
     getProjectSchedule(projectId),
   ]);
 
   const supplierBillIds = supplierBills.map((invoice) => invoice.id);
-  const [supplierPayments, supplierCredits] = await Promise.all([
+  const clientInvoiceIds = clientInvoices.map((invoice) => invoice.id);
+  const [supplierPayments, supplierCredits, clientReceipts, clientCredits] = await Promise.all([
     supplierBillIds.length ? db.select().from(supplierInvoicePayments).where(inArray(supplierInvoicePayments.supplierInvoiceId, supplierBillIds)) : Promise.resolve([]),
     supplierBillIds.length ? db.select().from(supplierInvoiceCreditNotes).where(inArray(supplierInvoiceCreditNotes.supplierInvoiceId, supplierBillIds)) : Promise.resolve([]),
+    clientInvoiceIds.length ? db.select().from(invoiceReceipts).where(inArray(invoiceReceipts.invoiceId, clientInvoiceIds)) : Promise.resolve([]),
+    clientInvoiceIds.length ? db.select().from(invoiceCreditNotes).where(inArray(invoiceCreditNotes.invoiceId, clientInvoiceIds)) : Promise.resolve([]),
   ]);
 
   const approvedDocument = documents.filter((document) => document.status === "aprovado" && document.documentType === "orcamento")
@@ -50,6 +54,7 @@ export async function getProjectControl(projectId: string, currency: string) {
   const financial = entries.filter((entry) => entry.currency === currency).reduce((acc, entry) => {
     const amount = Number(entry.amount);
     if (entry.type === "receita") {
+      if (entry.sourceType === "invoice") return acc;
       // Lançamentos de factura (obra / Comercial) reflectem o estado agregado; pagamentos
       // parciais detalham-se no resumo financeiro via recibos.
       if (entry.status === "pago") acc.received += amount;
@@ -62,6 +67,27 @@ export async function getProjectControl(projectId: string, currency: string) {
     }
     return acc;
   }, { received: 0, receivable: 0, certified: 0, paidCost: 0, committedCost: 0 });
+
+  // Um Auto aprovado cria imediatamente uma factura em rascunho. O valor certificado vem
+  // dessa factura mesmo antes da emissão; recebimentos e saldo vêm dos movimentos próprios,
+  // permitindo pagamentos parciais sem depender do lançamento financeiro agregado.
+  if (clientInvoices.length > 0) {
+    financial.certified = clientInvoices
+      .filter((invoice) => invoice.currency === currency && invoice.status !== "cancelada")
+      .reduce((sum, invoice) => sum + Number(invoice.grossAmount), 0);
+    const receivedByInvoice = new Map<string, number>();
+    const creditedByInvoice = new Map<string, number>();
+    for (const receipt of clientReceipts) receivedByInvoice.set(receipt.invoiceId, (receivedByInvoice.get(receipt.invoiceId) ?? 0) + Number(receipt.amount));
+    for (const credit of clientCredits) if (credit.status === "emitida") creditedByInvoice.set(credit.invoiceId, (creditedByInvoice.get(credit.invoiceId) ?? 0) + Number(credit.amount));
+    for (const invoice of clientInvoices) {
+      if (invoice.currency !== currency || invoice.status === "cancelada") continue;
+      const received = receivedByInvoice.get(invoice.id) ?? 0;
+      financial.received += received;
+      if (invoice.status !== "rascunho") {
+        financial.receivable += Math.max(0, Number(invoice.netAmount) - (creditedByInvoice.get(invoice.id) ?? 0) - received);
+      }
+    }
+  }
 
   const paidByInvoice = new Map<string, number>();
   const creditByInvoice = new Map<string, number>();
