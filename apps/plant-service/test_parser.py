@@ -118,8 +118,8 @@ class RoomExtractionTests(unittest.TestCase):
             source="geometria", needs_confirmation=True,
         )
         openings = merge_openings([
-            Opening(**base, location="Próximo de Sala"),
-            Opening(**base, location="Próximo de Cozinha"),
+            Opening(**base, location="desconhecida", designation="Próximo de Sala"),
+            Opening(**base, location="desconhecida", designation="Próximo de Cozinha"),
         ], "")
 
         self.assertEqual(len(openings), 2)
@@ -153,7 +153,8 @@ class RoomExtractionTests(unittest.TestCase):
         self.assertEqual(len(windows), 1)
         self.assertAlmostEqual(windows[0].width_m, 1.41, places=2)
         self.assertIsNone(windows[0].height_m)
-        self.assertEqual(windows[0].location, "Próximo de SALA DE ESTAR")
+        self.assertEqual(windows[0].location, "desconhecida")
+        self.assertEqual(windows[0].designation, "Próximo de SALA DE ESTAR")
         self.assertTrue(windows[0].needs_confirmation)
         document.close()
 

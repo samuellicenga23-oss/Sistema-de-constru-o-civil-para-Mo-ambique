@@ -20,7 +20,7 @@ app = FastAPI(title="SIGO Plant Service")
 # em produção, permissivo em dev sem configuração" (achado da auditoria).
 PLANT_SERVICE_TOKEN = os.environ.get("PLANT_SERVICE_TOKEN")
 IS_PRODUCTION = os.environ.get("ENVIRONMENT") == "production"
-PARSER_VERSION = "2026.08-openings-hydro-1"
+PARSER_VERSION = "2026.08-openings-fix-1"
 PARSER_CONCURRENCY = max(1, min(2, int(os.environ.get("PLANT_PARSER_CONCURRENCY", "1"))))
 PARSER_CACHE_SIZE = max(1, min(20, int(os.environ.get("PLANT_PARSER_CACHE_SIZE", "6"))))
 parser_slots = asyncio.Semaphore(PARSER_CONCURRENCY)
@@ -247,28 +247,34 @@ class ParseResponse(BaseModel):
 def build_parse_response(result) -> ParseResponse:
     summary = result.structural_summary
     document_analysis = result.document_analysis
+    allowed_locations = {"interior", "exterior", "desconhecida"}
+
+    def opening_out(o) -> OpeningOut:
+        location = o.location if o.location in allowed_locations else "desconhecida"
+        designation = o.designation
+        if o.location not in allowed_locations and designation is None:
+            designation = o.location
+        return OpeningOut(
+            kind=o.kind,
+            code=o.code,
+            widthM=o.width_m,
+            heightM=o.height_m,
+            sillHeightM=o.sill_height_m,
+            quantity=o.quantity,
+            floor=o.floor,
+            location=location,
+            material=o.material,
+            page=o.page,
+            confidence=o.confidence,
+            source=o.source,
+            needsConfirmation=o.needs_confirmation,
+            designation=designation,
+        )
+
     return ParseResponse(
         metadata=MetadataOut(**result.metadata.__dict__),
         rooms=[RoomOut(name=r.name, number=r.number, areaM2=r.area_m2, page=r.page, floor=r.floor, perimeterM=r.perimeter_m) for r in result.rooms],
-        openings=[
-            OpeningOut(
-                kind=o.kind,
-                code=o.code,
-                widthM=o.width_m,
-                heightM=o.height_m,
-                sillHeightM=o.sill_height_m,
-                quantity=o.quantity,
-                floor=o.floor,
-                location=o.location,
-                material=o.material,
-                page=o.page,
-                confidence=o.confidence,
-                source=o.source,
-                needsConfirmation=o.needs_confirmation,
-                designation=o.designation,
-            )
-            for o in result.openings
-        ],
+        openings=[opening_out(o) for o in result.openings],
         rebarSchedules=[
             RebarLineOut(element=r.element, diameterMm=r.diameter_mm, weightKg=r.weight_kg, page=r.page)
             for r in result.rebar_schedules

@@ -48,7 +48,7 @@ export const extractedSlabSchema = z.object({
   name: z.string().trim().max(160).optional(),
   floor: z.string().nullable(),
   areaM2: z.number().positive().optional(),
-  thicknessCm: z.number().positive(),
+  thicknessCm: z.number().nonnegative(),
   layers: z.array(z.enum(["inferior", "superior", "geral"])).min(1),
   pages: z.array(z.number().int().positive()).min(1),
   concreteClass: z.string().trim().max(80).nullable().optional(),

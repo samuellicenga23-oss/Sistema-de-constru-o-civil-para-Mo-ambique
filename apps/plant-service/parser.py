@@ -1186,16 +1186,19 @@ def extract_openings_spatial(page, page_number: int, text: str) -> list[Opening]
         ]
         return min(candidates)[1] if candidates else None
 
-    def nearby_room(cx: float, cy: float) -> str:
+    def nearby_room_context(cx: float, cy: float) -> tuple[str, str | None]:
+        """`location` é só o enum; a sala próxima fica em `designation`."""
         candidates = [
             (((x - cx) ** 2 + (y - cy) ** 2) ** 0.5, label)
             for x, y, label in room_labels
             if abs(x - cx) <= 150 and abs(y - cy) <= 150
         ]
         if not candidates:
-            return "desconhecida"
+            return "desconhecida", None
         distance, label = min(candidates)
-        return f"Próximo de {label}" if distance <= 160 else "desconhecida"
+        if distance <= 160:
+            return "desconhecida", f"Próximo de {label}"
+        return "desconhecida", None
 
     drawings = page.get_drawings()
     candidates: list[tuple[Opening, tuple[float, float]]] = []
@@ -1253,6 +1256,7 @@ def extract_openings_spatial(page, page_number: int, text: str) -> list[Opening]
             else:
                 continue
             door_centres.append((cx, cy))
+            location, designation = nearby_room_context(cx, cy)
             candidates.append((Opening(
                 kind="porta",
                 code=nearby_code(cx, cy, "porta"),
@@ -1261,12 +1265,13 @@ def extract_openings_spatial(page, page_number: int, text: str) -> list[Opening]
                 sill_height_m=0,
                 quantity=1,
                 floor=floor,
-                location=nearby_room(cx, cy),
+                location=location,
                 material=None,
                 page=page_number,
                 confidence=confidence,
                 source="geometria",
                 needs_confirmation=True,
+                designation=designation,
             ), (cx, cy)))
 
     # Janelas (e portas sem arco) só entram automaticamente quando existe um código inequívoco.
@@ -1335,6 +1340,7 @@ def extract_openings_spatial(page, page_number: int, text: str) -> list[Opening]
                 continue
             if any((cx - x) ** 2 + (cy - y) ** 2 <= 45 ** 2 for x, y in door_centres):
                 continue
+            location, designation = nearby_room_context(cx, cy)
             candidates.append((Opening(
                 kind="janela",
                 code=nearby_code(cx, cy, "janela"),
@@ -1343,12 +1349,13 @@ def extract_openings_spatial(page, page_number: int, text: str) -> list[Opening]
                 sill_height_m=None,
                 quantity=1,
                 floor=floor,
-                location=nearby_room(cx, cy),
+                location=location,
                 material=None,
                 page=page_number,
                 confidence=0.58,
                 source="geometria",
                 needs_confirmation=True,
+                designation=designation,
             ), (cx, cy)))
 
     for (cx, cy), code in codes:
@@ -1365,6 +1372,7 @@ def extract_openings_spatial(page, page_number: int, text: str) -> list[Opening]
         if not pairs:
             continue
         _distance, opening_width, opening_height = min(pairs)
+        location, designation = nearby_room_context(cx, cy)
         candidates.append((Opening(
             kind=kind,
             code=code,
@@ -1373,12 +1381,13 @@ def extract_openings_spatial(page, page_number: int, text: str) -> list[Opening]
             sill_height_m=None if kind == "janela" else 0,
             quantity=1,
             floor=floor,
-            location=nearby_room(cx, cy),
+            location=location,
             material=None,
             page=page_number,
             confidence=0.76,
             source="geometria",
             needs_confirmation=True,
+            designation=designation,
         ), (cx, cy)))
 
     # Alguns gabinetes não usam códigos J01/P01: deixam apenas dois valores juntos do símbolo.
@@ -1404,6 +1413,7 @@ def extract_openings_spatial(page, page_number: int, text: str) -> list[Opening]
                 kind, opening_width, opening_height = "janela", smaller, None
             else:
                 kind, opening_width, opening_height = "janela", larger, smaller
+            location, designation = nearby_room_context(cx, cy)
             candidates.append((Opening(
                 kind=kind,
                 code=None,
@@ -1412,18 +1422,28 @@ def extract_openings_spatial(page, page_number: int, text: str) -> list[Opening]
                 sill_height_m=None,
                 quantity=1,
                 floor=floor,
-                location=nearby_room(cx, cy),
+                location=location,
                 material=None,
                 page=page_number,
                 confidence=0.48,
                 source="geometria",
                 needs_confirmation=True,
+                designation=designation,
             ), (cx, cy)))
 
     # Agrupa ocorrências iguais na mesma prancha sem apagar portas realmente repetidas.
     grouped: dict[tuple, Opening] = {}
     for opening, _centre in candidates:
-        key = (opening.kind, opening.code, opening.width_m, opening.height_m, opening.floor, opening.location, opening.page)
+        key = (
+            opening.kind,
+            opening.code,
+            opening.width_m,
+            opening.height_m,
+            opening.floor,
+            opening.location,
+            opening.designation,
+            opening.page,
+        )
         if key in grouped:
             grouped[key].quantity += 1
         else:
