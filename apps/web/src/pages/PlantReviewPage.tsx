@@ -7,6 +7,7 @@ import Layout from "../components/Layout";
 import Modal from "../components/Modal";
 import MoneyInput from "../components/MoneyInput";
 import { IconBack, IconRefresh, IconRuler, IconTrash } from "../components/icons";
+import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import {
   buildRebarPurchasePlan,
   classifyStructuralSteelWeights,
@@ -66,6 +67,7 @@ function floorSortKey(floor: string): number {
 export default function PlantReviewPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { confirm, dialog } = useConfirmDialog();
   const [plant, setPlant] = useState<Plant | null>(null);
   const [rooms, setRooms] = useState<ExtractedRoom[]>([]);
   const [openings, setOpenings] = useState<ExtractedOpening[]>([]);
@@ -178,18 +180,33 @@ export default function PlantReviewPage() {
     }
   }
 
-  async function handleContinueToMeasurements() {
+  async function handleConfirmReadyForMeasurement() {
     if (!plant) return;
+    const ok = await confirm({
+      title: "Dados prontos para medição?",
+      message:
+        "Confirma que sapatas, pilares, vigas, lajes, escadas, compartimentos e aço estão correctos? Depois desta confirmação o Assistente de Medições usa estes valores bloqueados — para alterar, volte a esta análise.",
+      confirmLabel: "Confirmar e abrir assistente",
+    });
+    if (!ok) return;
     setPreparingMeasurements(true);
     setError(null);
     try {
       const { document } = await boqApi.prepareMeasurementWorkspace(plant.projectId);
-      navigate(`/documentos/${document.id}?assistente=1`);
+      navigate(`/documentos/${document.id}?assistente=1&fromPlant=${plant.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Não foi possível preparar as medições");
     } finally {
       setPreparingMeasurements(false);
     }
+  }
+
+  function goBackToProject() {
+    if (!plant) {
+      navigate(-1);
+      return;
+    }
+    navigate(`/projectos/${plant.projectId}#plantas-do-projecto`);
   }
 
   async function handleConfirmIdentity() {
@@ -591,6 +608,10 @@ export default function PlantReviewPage() {
       title={plant.originalFileName ?? "Planta"}
       actions={
         <div className="flex gap-2">
+          <button type="button" onClick={goBackToProject} className="btn btn-ghost btn-sm">
+            <IconBack className="w-3.5 h-3.5" />
+            Voltar ao projecto
+          </button>
           <a href={`/api/files/plants/${plant.id}`} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm">
             Ver PDF original
           </a>
@@ -598,10 +619,6 @@ export default function PlantReviewPage() {
             <IconRefresh className="w-3.5 h-3.5" />
             {reprocessing ? `A reprocessar ${plant.processingProgress}%` : "Reprocessar"}
           </button>
-          <Link to={`/projectos/${plant.projectId}`} className="btn btn-ghost btn-sm">
-            <IconBack className="w-3.5 h-3.5" />
-            Voltar ao projecto
-          </Link>
         </div>
       }
     >
@@ -624,19 +641,22 @@ export default function PlantReviewPage() {
               </p>
             </div>
             <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
+            <button type="button" onClick={goBackToProject} className="btn btn-ghost sm:order-last">
+              <IconBack className="h-4 w-4" />
+              Voltar
+            </button>
             <Link to={`/plantas/${plant.id}/completar`} className="btn btn-secondary">
               Editar dados
             </Link>
             <button
               type="button"
-              onClick={handleContinueToMeasurements}
+              onClick={() => void handleConfirmReadyForMeasurement()}
               disabled={plant.processingStatus !== "concluido" || preparingMeasurements || identityBlocked}
               className="btn btn-primary"
             >
               <IconRuler className="h-4 w-4" />
-              {preparingMeasurements ? "A abrir..." : "Medir agora"}
+              {preparingMeasurements ? "A preparar…" : "Confirmar dados e medir"}
             </button>
-            <Link to={`/projectos/${plant.projectId}#plantas-do-projecto`} className="btn btn-ghost">Voltar ao projecto</Link>
             </div>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-5 py-3 text-xs text-slate-600">
@@ -1006,17 +1026,17 @@ export default function PlantReviewPage() {
               ))
             )}
             <div className="flex flex-wrap gap-2 pt-1">
-              <Link to={`/plantas/${plant.id}/completar`} className="btn btn-primary btn-sm">
+              <Link to={`/plantas/${plant.id}/completar`} className="btn btn-secondary btn-sm">
                 Editar em Completar dados
               </Link>
               <button
                 type="button"
-                onClick={handleContinueToMeasurements}
+                onClick={() => void handleConfirmReadyForMeasurement()}
                 disabled={preparingMeasurements || identityBlocked || plant.processingStatus !== "concluido"}
-                className="btn btn-secondary btn-sm"
+                className="btn btn-primary btn-sm"
               >
                 <IconRuler className="h-3.5 w-3.5" />
-                {preparingMeasurements ? "A preparar..." : "Continuar para medições"}
+                {preparingMeasurements ? "A preparar…" : "Confirmar dados e medir"}
               </button>
             </div>
           </div>
@@ -1209,6 +1229,7 @@ export default function PlantReviewPage() {
           </div>
         </Modal>
       )}
+      {dialog}
     </Layout>
   );
 }

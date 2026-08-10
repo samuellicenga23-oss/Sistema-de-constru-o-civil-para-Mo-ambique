@@ -176,6 +176,7 @@ export default function BudgetDocumentPage() {
   const [error, setError] = useState<string | null>(null);
   const [errorBlockers, setErrorBlockers] = useState<string[]>([]);
   const [showWizard, setShowWizard] = useState(false);
+  const [wizardReturnPlantId, setWizardReturnPlantId] = useState<string | null>(null);
   const [showReport, setShowReport] = useState(false);
   const [showMaterialsByPhase, setShowMaterialsByPhase] = useState(false);
   const [structuralPlant, setStructuralPlant] = useState<Plant | null>(null);
@@ -311,11 +312,24 @@ export default function BudgetDocumentPage() {
 
   useEffect(() => {
     if (searchParams.get("assistente") !== "1" || !summary || plantContextLoading) return;
+    const fromPlant = searchParams.get("fromPlant");
+    if (fromPlant) setWizardReturnPlantId(fromPlant);
     setShowWizard(true);
     const next = new URLSearchParams(searchParams);
     next.delete("assistente");
+    next.delete("fromPlant");
     setSearchParams(next, { replace: true });
   }, [searchParams, setSearchParams, summary, plantContextLoading]);
+
+  function closeWizard() {
+    setShowWizard(false);
+    reload();
+    if (wizardReturnPlantId) {
+      const plantId = wizardReturnPlantId;
+      setWizardReturnPlantId(null);
+      navigate(`/plantas/${plantId}`);
+    }
+  }
 
   async function handleAddSection(e: FormEvent) {
     e.preventDefault();
@@ -1409,15 +1423,14 @@ export default function BudgetDocumentPage() {
           documentId={documentId}
           structuralSummary={structuralPlant?.structuralSummary}
           structuralPlantName={structuralPlant?.originalFileName}
+          structuralPlantId={structuralPlant?.id}
           architectureRooms={architectureRooms}
           architectureOpenings={architectureOpenings}
           architecturePlantName={architecturePlant?.originalFileName}
+          architecturePlantId={architecturePlant?.id}
           zoneId={project?.zoneId}
           documentCurrency={document.currency}
-          onClose={() => {
-            setShowWizard(false);
-            reload();
-          }}
+          onClose={closeWizard}
           onApplied={reload}
         />
       )}

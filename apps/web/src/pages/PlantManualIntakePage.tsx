@@ -427,9 +427,11 @@ export default function PlantManualIntakePage() {
       subtitle="Um bloco por família estrutural — medidas e aço juntos, como no mapa de quantidades"
       actions={
         <div className="flex gap-2">
-          <Link to={`/plantas/${plant.id}`} className="btn btn-ghost btn-sm">Ver resumo</Link>
-          <Link to={`/projectos/${plant.projectId}`} className="btn btn-ghost btn-sm">
+          <Link to={`/plantas/${plant.id}`} className="btn btn-ghost btn-sm">
             <IconBack className="h-3.5 w-3.5" />
+            Voltar à análise
+          </Link>
+          <Link to={`/projectos/${plant.projectId}`} className="btn btn-ghost btn-sm">
             Projecto
           </Link>
         </div>
@@ -772,9 +774,10 @@ export default function PlantManualIntakePage() {
 
       <div className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 backdrop-blur">
         <div className="mx-auto flex w-full max-w-3xl flex-wrap items-center justify-between gap-2 px-4 py-3">
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => navigate(`/plantas/${plant.id}`)}>
-            Voltar ao resumo
-          </button>
+          <Link to={`/plantas/${plant.id}`} className="btn btn-ghost btn-sm">
+            <IconBack className="h-3.5 w-3.5" />
+            Voltar à análise
+          </Link>
           <div className="flex flex-wrap gap-2">
             <button type="button" className="btn btn-secondary" disabled={saving} onClick={() => void persist(false)}>
               {saving ? "A guardar…" : "Guardar dados"}

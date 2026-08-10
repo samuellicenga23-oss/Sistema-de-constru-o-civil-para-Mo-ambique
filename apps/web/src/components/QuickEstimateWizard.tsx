@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { catalogApi, type Material } from "../api/catalog";
 import { quickEstimateApi, type FoundationType, type MeasurementScope, type RoofType, type QuickEstimateResult, type SoilType } from "../api/quickEstimate";
 import type { ExtractedOpening, ExtractedRoom, StructuralSummary } from "../api/plants";
@@ -211,9 +212,11 @@ type Props = {
   onApplied: () => void;
   structuralSummary?: StructuralSummary | null;
   structuralPlantName?: string | null;
+  structuralPlantId?: string | null;
   architectureRooms?: ExtractedRoom[] | null;
   architectureOpenings?: ExtractedOpening[] | null;
   architecturePlantName?: string | null;
+  architecturePlantId?: string | null;
   zoneId?: string | null;
   documentCurrency?: string;
 };
@@ -224,15 +227,33 @@ export default function QuickEstimateWizard({
   onApplied,
   structuralSummary,
   structuralPlantName,
+  structuralPlantId,
   architectureRooms,
   architectureOpenings,
   architecturePlantName,
+  architecturePlantId,
   zoneId,
   documentCurrency = "MZN",
 }: Props) {
   const hasStructuralFootings = !!structuralSummary && structuralSummary.footingsCount > 0;
   const hasArchitectureRooms = !!architectureRooms && architectureRooms.length > 0;
   const hasPlantData = hasArchitectureRooms || hasStructuralFootings;
+  const lockStructureFromPlant = !!structuralSummary && (
+    hasStructuralFootings
+    || structuralSummary.beamsCount > 0
+    || structuralSummary.slabsCount > 0
+    || structuralSummary.totalSteelWeightKg > 0
+  );
+  const plantReviewPath = structuralPlantId
+    ? `/plantas/${structuralPlantId}`
+    : architecturePlantId
+      ? `/plantas/${architecturePlantId}`
+      : null;
+  const plantEditPath = structuralPlantId
+    ? `/plantas/${structuralPlantId}/completar`
+    : architecturePlantId
+      ? `/plantas/${architecturePlantId}/completar`
+      : null;
   const detectedScopes = (): MeasurementScope[] => {
     const scopes = new Set<MeasurementScope>();
     if (hasArchitectureRooms) {
@@ -643,11 +664,17 @@ export default function QuickEstimateWizard({
       <div className="fixed inset-0 z-50 bg-gray-900/50 flex items-center justify-center p-4">
       <div className="card w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 bg-slate-900 text-white">
-          <div className="flex items-center gap-2">
-            <IconRuler className="w-5 h-5" />
-            <h2 className="font-semibold">Assistente de Medições</h2>
+          <div className="flex items-center gap-3">
+            <button type="button" onClick={() => (step === 0 || result ? onClose() : setStep((s) => Math.max(0, s - 1)))} className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-brand-100 hover:bg-white/10 hover:text-white">
+              <IconBack className="h-4 w-4" />
+              {step === 0 || result ? "Voltar" : "Anterior"}
+            </button>
+            <div className="flex items-center gap-2">
+              <IconRuler className="w-5 h-5" />
+              <h2 className="font-semibold">Assistente de Medições</h2>
+            </div>
           </div>
-          <button onClick={onClose} className="text-brand-200 hover:text-white text-sm">
+          <button type="button" onClick={onClose} className="text-brand-200 hover:text-white text-sm">
             Fechar ✕
           </button>
         </div>
@@ -871,37 +898,54 @@ export default function QuickEstimateWizard({
 
               {step === 1 && (
                 <div className="max-w-2xl space-y-4">
-                  <p className="text-sm text-gray-500">
-                    Confirme os valores detectados ou substitua-os pelas quantidades do projectista. Os valores manuais
-                    têm prioridade no cálculo e ficam registados no relatório da medição.
-                  </p>
+                  {lockStructureFromPlant ? (
+                    <div className="rounded-lg border border-brand-200 bg-brand-50 p-3 text-sm text-brand-950">
+                      <p className="font-medium">Dados estruturais bloqueados (confirmados na análise da planta)</p>
+                      <p className="mt-1 text-brand-800">
+                        Para alterar sapatas, pilares, vigas, lajes, escadas ou aço, use a análise da planta — evita confirmações duplicadas neste assistente.
+                      </p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {plantReviewPath && (
+                          <Link to={plantReviewPath} className="btn btn-secondary btn-sm" onClick={onClose}>
+                            Abrir análise da planta
+                          </Link>
+                        )}
+                        {plantEditPath && (
+                          <Link to={plantEditPath} className="btn btn-ghost btn-sm" onClick={onClose}>
+                            Completar / editar dados
+                          </Link>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-500">
+                      Confirme os valores ou indique as quantidades do projectista. Sem planta estrutural, pode editar tudo aqui.
+                    </p>
+                  )}
 
                   {requiresStructure && <>
                   {structuralSummary && (
-                    <div className="rounded-lg bg-brand-50 border border-brand-200 p-3 text-sm text-brand-900">
+                    <div className="rounded-lg bg-slate-50 border border-slate-200 p-3 text-sm text-slate-800">
                       <p className="font-medium">
-                        Planta estrutural importada{structuralPlantName ? ` (${structuralPlantName})` : ""}: {structuralSummary.footingsCount}{" "}
+                        Planta estrutural{structuralPlantName ? ` (${structuralPlantName})` : ""}: {structuralSummary.footingsCount}{" "}
                         sapatas, {structuralSummary.columnsCount} pilares, {structuralSummary.beamsCount} vigas
-                        {structuralSummary.slabsCount > 0 ? `, ${structuralSummary.slabsCount} folha(s) de laje` : ""}
-                        {structuralSummary.staircasesCount > 0 ? ` e ${structuralSummary.staircasesCount} escada(s)` : ""} detectados.
+                        {structuralSummary.slabsCount > 0 ? `, ${structuralSummary.slabsCount} laje(s)` : ""}
+                        {structuralSummary.staircasesCount > 0 ? ` e ${structuralSummary.staircasesCount} escada(s)` : ""}.
                       </p>
-                      {hasStructuralFootings && (
-                        <p className="mt-1 text-brand-700">
-                          Os dados de fundação abaixo já vêm preenchidos a partir da planta — não precisa de os medir à mão. Os
-                          volumes de betão em vigas e em lajes também já usam dados reais (comprimento/secção das vigas,
-                          espessura real da laje), em vez de estimativas genéricas.
-                        </p>
-                      )}
                     </div>
                   )}
 
                   <section className="rounded-xl border border-slate-200 bg-white p-4">
                     <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
                       <div>
-                        <h3 className="text-sm font-semibold text-slate-900">Quantidades estruturais confirmadas</h3>
-                        <p className="mt-0.5 text-xs text-slate-500">Altere qualquer valor que não corresponda ao projecto executivo.</p>
+                        <h3 className="text-sm font-semibold text-slate-900">Quantidades estruturais</h3>
+                        <p className="mt-0.5 text-xs text-slate-500">
+                          {lockStructureFromPlant ? "Somente leitura — altere na análise da planta." : "Editáveis neste passo."}
+                        </p>
                       </div>
-                      <span className="badge badge-gray">Valor manual prevalece</span>
+                      <span className={`badge ${lockStructureFromPlant ? "badge-blue" : "badge-gray"}`}>
+                        {lockStructureFromPlant ? "Da planta" : "Manual"}
+                      </span>
                     </div>
                     <div className="grid gap-3 sm:grid-cols-2">
                       <div>
@@ -915,8 +959,16 @@ export default function QuickEstimateWizard({
                           onChange={(event) => setBeamConcreteVolumeM3(event.target.value)}
                           className="input"
                           placeholder="Ex.: 12,450"
+                          disabled={lockStructureFromPlant}
+                          readOnly={lockStructureFromPlant}
                         />
-                        <p className="mt-1 text-[11px] text-slate-500">{structuralSummary?.beamsConcreteVolumeM3 ? "Preenchido pela planta; editável." : "Indique o volume do mapa estrutural."}</p>
+                        <p className="mt-1 text-[11px] text-slate-500">
+                          {lockStructureFromPlant
+                            ? "Bloqueado — vem da análise da planta."
+                            : structuralSummary?.beamsConcreteVolumeM3
+                              ? "Preenchido pela planta; editável."
+                              : "Indique o volume do mapa estrutural."}
+                        </p>
                       </div>
                       <div>
                         <label className="label" htmlFor="measurement-steel-weight">Peso total de aço (kg)</label>
@@ -929,11 +981,14 @@ export default function QuickEstimateWizard({
                           onChange={(event) => setSteelWeightKg(event.target.value)}
                           className="input"
                           placeholder="Ex.: 8450,00"
+                          disabled={lockStructureFromPlant}
+                          readOnly={lockStructureFromPlant}
                         />
                         <p className="mt-1 text-[11px] text-slate-500">
                           {structuralSummary?.totalSteelWeightKg
-                            ? `Mapa: sapatas ${Number(structuralSummary.footingsSteelWeightKg ?? 0).toFixed(2)} · pilares ${Number(structuralSummary.columnsSteelWeightKg ?? 0).toFixed(2)} · vigas ${Number(structuralSummary.beamsSteelWeightKg ?? 0).toFixed(2)} · lajes ${Number(structuralSummary.slabsSteelWeightKg ?? 0).toFixed(2)} · escadas ${Number(structuralSummary.stairsSteelWeightKg ?? 0).toFixed(2)} kg. Editável.`
+                            ? `Mapa: sapatas ${Number(structuralSummary.footingsSteelWeightKg ?? 0).toFixed(2)} · pilares ${Number(structuralSummary.columnsSteelWeightKg ?? 0).toFixed(2)} · vigas ${Number(structuralSummary.beamsSteelWeightKg ?? 0).toFixed(2)} · lajes ${Number(structuralSummary.slabsSteelWeightKg ?? 0).toFixed(2)} · escadas ${Number(structuralSummary.stairsSteelWeightKg ?? 0).toFixed(2)} kg.`
                             : "Indique o total do mapa de aço."}
+                          {lockStructureFromPlant ? " Bloqueado neste assistente." : ""}
                         </p>
                       </div>
                     </div>
@@ -941,9 +996,11 @@ export default function QuickEstimateWizard({
                       <div className="mb-3 flex items-center justify-between gap-3">
                         <div>
                           <h4 className="text-sm font-semibold text-slate-900">Lajes por nível</h4>
-                          <p className="text-xs text-slate-500">Área × espessura de cada laje, sem médias entre pisos.</p>
+                          <p className="text-xs text-slate-500">Área × espessura de cada laje.</p>
                         </div>
-                        <button type="button" onClick={addSlab} className="btn btn-secondary btn-sm"><IconPlus className="h-3.5 w-3.5" />Adicionar laje</button>
+                        {!lockStructureFromPlant && (
+                          <button type="button" onClick={addSlab} className="btn btn-secondary btn-sm"><IconPlus className="h-3.5 w-3.5" />Adicionar laje</button>
+                        )}
                       </div>
                       <div className="space-y-2">
                         {floorSlabs.map((slab, index) => (
@@ -951,18 +1008,27 @@ export default function QuickEstimateWizard({
                             <div className="grid gap-2 sm:grid-cols-[minmax(150px,1fr)_120px_120px_40px] sm:items-end">
                               <div>
                                 <label className="label" htmlFor={`slab-label-${slab.key}`}>Nível</label>
-                                <input id={`slab-label-${slab.key}`} className="input" value={slab.label} onChange={(event) => updateSlab(slab.key, { label: event.target.value })} />
+                                <input id={`slab-label-${slab.key}`} className="input" value={slab.label} disabled={lockStructureFromPlant} readOnly={lockStructureFromPlant} onChange={(event) => updateSlab(slab.key, { label: event.target.value })} />
                               </div>
                               <div>
                                 <label className="label" htmlFor={`slab-area-${slab.key}`}>Área (m²)</label>
-                                <input id={`slab-area-${slab.key}`} aria-label={`Área da ${slab.label || `laje ${index + 1}`} (m²)`} className="input" type="number" min="0" step="0.01" value={slab.areaM2} onChange={(event) => updateSlab(slab.key, { areaM2: event.target.value })} />
+                                <input id={`slab-area-${slab.key}`} aria-label={`Área da ${slab.label || `laje ${index + 1}`} (m²)`} className="input" type="number" min="0" step="0.01" value={slab.areaM2} disabled={lockStructureFromPlant} readOnly={lockStructureFromPlant} onChange={(event) => updateSlab(slab.key, { areaM2: event.target.value })} />
                               </div>
                               <div>
                                 <label className="label" htmlFor={`slab-thickness-${slab.key}`}>Espessura (m)</label>
-                                <input id={`slab-thickness-${slab.key}`} aria-label={`Espessura da ${slab.label || `laje ${index + 1}`} (m)`} className="input" type="number" min="0" step="0.01" value={slab.thicknessM} onChange={(event) => updateSlab(slab.key, { thicknessM: event.target.value })} />
+                                <input id={`slab-thickness-${slab.key}`} aria-label={`Espessura da ${slab.label || `laje ${index + 1}`} (m)`} className="input" type="number" min="0" step="0.01" value={slab.thicknessM} disabled={lockStructureFromPlant} readOnly={lockStructureFromPlant} onChange={(event) => updateSlab(slab.key, { thicknessM: event.target.value })} />
                               </div>
-                              <button type="button" onClick={() => removeSlab(slab.key)} className="btn-icon h-10 w-10" aria-label={`Remover ${slab.label || `laje ${index + 1}`}`}><IconTrash className="h-4 w-4" /></button>
+                              {!lockStructureFromPlant && (
+                                <button type="button" onClick={() => removeSlab(slab.key)} className="btn-icon h-10 w-10" aria-label={`Remover ${slab.label || `laje ${index + 1}`}`}><IconTrash className="h-4 w-4" /></button>
+                              )}
                             </div>
+                            {(slab.bottomRebar || slab.topRebar || slab.topSteelWeightKg || slab.bottomSteelWeightKg) && (
+                              <p className="mt-2 text-xs text-slate-600">
+                                Armadura {(slab.topSteelWeightKg + slab.bottomSteelWeightKg) > 0 ? `· ${(slab.topSteelWeightKg + slab.bottomSteelWeightKg).toFixed(2)} kg` : "detetada"}
+                                {lockStructureFromPlant ? " (bloqueada — editar na análise)" : ""}
+                              </p>
+                            )}
+                            {!lockStructureFromPlant && (
                             <details className="mt-2 border-t border-slate-200 pt-2">
                               <summary className="cursor-pointer text-xs font-medium text-brand-700">
                                 Armadura {slab.bottomRebar || slab.topRebar || slab.topSteelWeightKg || slab.bottomSteelWeightKg ? "detectada/confirmada" : "por indicar"}
@@ -993,6 +1059,7 @@ export default function QuickEstimateWizard({
                                 })}
                               </div>
                             </details>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -1032,6 +1099,7 @@ export default function QuickEstimateWizard({
                       value={foundationType}
                       onChange={(e) => { setFoundationType(e.target.value as FoundationType); setFoundationConfirmed(true); }}
                       className="input"
+                      disabled={lockStructureFromPlant && hasStructuralFootings}
                     >
                       {(Object.keys(FOUNDATION_LABELS) as FoundationType[]).map((k) => (
                         <option key={k} value={k}>
@@ -1051,6 +1119,8 @@ export default function QuickEstimateWizard({
                         value={slabThickness}
                         onChange={(e) => { setSlabThickness(e.target.value); setFoundationConfirmed(true); }}
                         className="input"
+                        disabled={lockStructureFromPlant}
+                        readOnly={lockStructureFromPlant}
                       />
                     </div>
                   ) : hasStructuralFootings && useStructuralFooting ? (
@@ -1069,9 +1139,23 @@ export default function QuickEstimateWizard({
                           <p className="muted">profundidade média</p>
                         </div>
                       </div>
-                      <button onClick={() => { setUseStructuralFooting(false); setFoundationConfirmed(false); }} className="btn btn-ghost btn-sm mt-2">
-                        Prefiro inserir manualmente
-                      </button>
+                      {lockStructureFromPlant ? (
+                        <p className="mt-2 text-xs text-slate-500">
+                          Bloqueado —{" "}
+                          {plantEditPath ? (
+                            <Link to={plantEditPath} className="font-semibold text-brand-700 underline" onClick={onClose}>
+                              alterar em Completar dados
+                            </Link>
+                          ) : (
+                            "altere na análise da planta"
+                          )}
+                          .
+                        </p>
+                      ) : (
+                        <button type="button" onClick={() => { setUseStructuralFooting(false); setFoundationConfirmed(false); }} className="btn btn-ghost btn-sm mt-2">
+                          Prefiro inserir manualmente
+                        </button>
+                      )}
                     </div>
                   ) : (
                     <div className="grid grid-cols-3 gap-3">
