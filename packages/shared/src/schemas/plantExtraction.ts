@@ -159,8 +159,11 @@ export function classifyStructuralSteelWeights(
     const weight = Number(line.weightKg) || 0;
     if (weight <= 0) continue;
     const element = line.element.toLocaleLowerCase("pt");
-    if (/sapata|footing|fundac|maci[cç]o|radier/.test(element)) footings += weight;
-    else if (/pilar|coluna|column|pilarete/.test(element)) columns += weight;
+    if (/sapata|footing|funda[cç]|maci[cç]o|radier/.test(element)) footings += weight;
+    else if (
+      /pilar|coluna|column|pilarete/.test(element)
+      || /(?:^|[\s,;])p\d+(?:\s*=\s*p\d+)*(?=$|[\s,;/])/.test(element)
+    ) columns += weight;
     else if (/escada|staircase|\bstair\b/.test(element)) stairs += weight;
     else if (/viga|p[oó]rtico|beam|lintel/.test(element)) beams += weight;
     else if (/laje|cobertura|armadura longitudinal|slab|malha/.test(element)) slabs += weight;
@@ -176,6 +179,65 @@ export function classifyStructuralSteelWeights(
     otherSteelWeightKg: roundStructuralQty(other),
     totalSteelWeightKg: roundStructuralQty(total),
   };
+}
+
+export type StructuralSteelFamilyKey = "footings" | "columns" | "beams" | "slabs" | "stairs" | "other";
+
+/** Classifica um rótulo de mapa de aço na família estrutural correspondente. */
+export function structuralSteelFamilyOf(element: string): StructuralSteelFamilyKey {
+  const value = element.toLocaleLowerCase("pt");
+  if (/sapata|footing|funda[cç]|maci[cç]o|radier/.test(value)) return "footings";
+  if (
+    /pilar|coluna|column|pilarete/.test(value)
+    || /(?:^|[\s,;])p\d+(?:\s*=\s*p\d+)*(?=$|[\s,;/])/.test(value)
+  ) return "columns";
+  if (/escada|staircase|\bstair\b/.test(value)) return "stairs";
+  if (/viga|p[oó]rtico|beam|lintel/.test(value)) return "beams";
+  if (/laje|cobertura|armadura longitudinal|slab|malha/.test(value)) return "slabs";
+  return "other";
+}
+
+/** Aço por família e diâmetro (Ø6/8/10/12/16…) a partir do mapa extraído. */
+export function steelWeightsByFamilyAndDiameter(
+  lines: Array<{ element: string; diameterMm: number; weightKg: number }>,
+): Record<StructuralSteelFamilyKey, Array<{ diameterMm: number; weightKg: number }>> {
+  const buckets: Record<StructuralSteelFamilyKey, Map<number, number>> = {
+    footings: new Map(),
+    columns: new Map(),
+    beams: new Map(),
+    slabs: new Map(),
+    stairs: new Map(),
+    other: new Map(),
+  };
+  for (const line of lines) {
+    const weight = Number(line.weightKg) || 0;
+    const diameter = Math.round(Number(line.diameterMm) || 0);
+    if (weight <= 0 || diameter <= 0) continue;
+    const family = structuralSteelFamilyOf(line.element);
+    buckets[family].set(diameter, (buckets[family].get(diameter) ?? 0) + weight);
+  }
+  const toRows = (map: Map<number, number>) =>
+    [...map.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([diameterMm, weightKg]) => ({ diameterMm, weightKg: roundStructuralQty(weightKg) }));
+  return {
+    footings: toRows(buckets.footings),
+    columns: toRows(buckets.columns),
+    beams: toRows(buckets.beams),
+    slabs: toRows(buckets.slabs),
+    stairs: toRows(buckets.stairs),
+    other: toRows(buckets.other),
+  };
+}
+
+export function formatSteelDiameterBreakdown(
+  rows: Array<{ diameterMm: number; weightKg: number }>,
+  emptyLabel = "Sem mapa por diâmetro neste elemento",
+): string {
+  if (!rows.length) return emptyLabel;
+  return rows
+    .map((row) => `Ø${row.diameterMm}: ${roundStructuralQty(row.weightKg).toFixed(2)} kg`)
+    .join(" · ");
 }
 
 /** Cria / sincroniza grupos «Vigas da Laje N» a partir das lajes conhecidas. */

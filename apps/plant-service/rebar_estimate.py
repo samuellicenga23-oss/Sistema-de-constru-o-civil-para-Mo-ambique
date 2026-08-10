@@ -40,6 +40,61 @@ BARS_ONLY_PATTERN = re.compile(r"(?P<count>\d{1,2})\s*[Øø]\s*(?P<diameter>\d{1
 PESO_TABLE_MARKER = re.compile(r"Peso\s*\+?\s*10%\s*(?:\n|\s)*\(kg\)", re.IGNORECASE)
 PESO_DIAMETER_LINE = re.compile(r"^[Øø]\s*(\d{1,2})$")
 PESO_NUMBER_LINE = re.compile(r"^(\d+(?:[.,]\d+)?)$")
+RESUMO_ACO_LINE = re.compile(r"^resumo\s+a[cç]o$", re.IGNORECASE)
+
+
+def _fold_ascii(value: str) -> str:
+    plain = unicodedata.normalize("NFKD", value or "")
+    return "".join(ch for ch in plain if not unicodedata.combining(ch)).lower()
+
+
+def steel_family_of(element: str) -> str:
+    """Família estrutural a partir do rótulo da linha de aço."""
+    e = _fold_ascii(element)
+    if re.search(r"sapata|funda[cç]|maci[cç]o|radier", e):
+        return "footings"
+    if re.search(r"pilar|coluna|column|pilarete", e) or re.search(
+        r"(?:^|[\s,;])p\d+(?:\s*=\s*p\d+)*(?=$|[\s,;/])", e
+    ):
+        return "columns"
+    if re.search(r"escada|staircase|\bstair\b", e):
+        return "stairs"
+    if re.search(r"viga|p[oó]rtico|beam|lintel", e):
+        return "beams"
+    if re.search(r"laje|cobertura|armadura longitudinal|slab|malha", e):
+        return "slabs"
+    return "other"
+
+
+def label_from_resumo_title(title_lines: list[str], page_text: str = "") -> str:
+    """Classifica o Resumo Aço pelo título imediatamente abaixo de «Resumo Aço»."""
+    title = " ".join(title_lines).strip()
+    n = _fold_ascii(title)
+    page_n = _fold_ascii(page_text[:1200])
+    if re.search(r"quadro\s+de\s+pilares|\bpilares?\b", n):
+        return "Pilares"
+    if re.search(r"funda[cç]", n):
+        return "Fundação"
+    if re.search(r"viga|pormenoriza", n):
+        return "Vigas"
+    if re.search(r"escada", n):
+        return "Escada"
+    if re.search(r"longitudinal\s+inferior", n):
+        return "Armadura longitudinal inferior"
+    if re.search(r"longitudinal\s+superior", n):
+        return "Armadura longitudinal superior"
+    if re.search(r"laje|armadur", n):
+        return title or "Laje"
+    # Contingência: cabeçalho Conteúdo da folha (nunca «Fundação» como piso do quadro de pilares).
+    if re.search(r"conteudo:\s*quadro\s+de\s+pilares", page_n):
+        return "Pilares"
+    if re.search(r"conteudo:\s*pormenor\s+de\s+funda", page_n):
+        return "Fundação"
+    if re.search(r"conteudo:\s*pormenor\s+de\s+vigas", page_n):
+        return "Vigas"
+    if re.search(r"conteudo:\s*escada", page_n):
+        return "Escada"
+    return title or "Peso+10%"
 
 
 def rebar_weight_per_meter(diameter_mm: float) -> float:
@@ -57,24 +112,107 @@ def _to_float(value: str) -> float:
     return float(value.replace(",", "."))
 
 
-def _rebar_line(element: str, diameter_mm: float, weight_kg: float, page: int):
+def _rebar_line(element: str, diameter_mm: float, weight_kg: float, page: int, group_id: int | None = None):
     from parser import RebarLine
 
-    return RebarLine(element=element, diameter_mm=diameter_mm, weight_kg=weight_kg, page=page)
+    return RebarLine(
+        element=element,
+        diameter_mm=diameter_mm,
+        weight_kg=weight_kg,
+        page=page,
+        group_id=group_id,
+    )
 
 
 def extract_rebar_peso_plus10_table(text: str, page_number: int) -> list:
-    """Quadro CYPE «Peso+10% (kg)» com linhas Ød → comprimento → kg."""
-    if not PESO_TABLE_MARKER.search(text):
-        return []
-    lines = [line.strip() for line in text.splitlines()]
-    start = next((i for i, line in enumerate(lines) if "peso" in line.lower() and "10%" in line.lower()), -1)
-    if start < 0:
-        start = next((i for i, line in enumerate(lines) if line.lower().startswith("peso")), -1)
-    if start < 0:
+    """Extrai quadros «Resumo Aço → Peso+10% (kg)» com a família do título do resumo.
+
+    O mesmo resumo pode repetir-se em várias folhas (ex. Fundação 906 kg) — usa-se um
+    fingerprint da tabela como «page» para a fusão não multiplicar. Resumos distintos
+    da mesma família (ex. três resumos de vigas) mantêm fingerprints diferentes e somam.
+    """
+    if not PESO_TABLE_MARKER.search(text) and not re.search(r"resumo\s+a[cç]o", text, re.I):
         return []
 
+    lines = [line.strip() for line in text.splitlines()]
     result = []
+
+    for i, line in enumerate(lines):
+        if not re.match(r"^resumo\s+a[cç]o$", _fold_ascii(line)):
+            continue
+
+        title_lines: list[str] = []
+        j = i + 1
+        while j < len(lines) and j < i + 8:
+            folded = _fold_ascii(lines[j])
+            if re.search(r"comp\.?\s*total|peso\s*\+?\s*10%|^\(m\)$|^\(kg\)$|^s-?400$", folded):
+                break
+            if lines[j]:
+                title_lines.append(lines[j])
+            j += 1
+
+        start = next(
+            (
+                k
+                for k in range(i, min(i + 24, len(lines)))
+                if re.search(r"peso\s*\+?\s*10%", _fold_ascii(lines[k]))
+            ),
+            -1,
+        )
+        if start < 0:
+            continue
+
+        family = label_from_resumo_title(title_lines, text)
+        rows: list[tuple[float, float]] = []
+        k = start + 1
+        while k < len(lines):
+            diam_match = PESO_DIAMETER_LINE.match(lines[k])
+            if diam_match:
+                diameter = float(diam_match.group(1))
+                numbers: list[float] = []
+                m = k + 1
+                while m < len(lines) and len(numbers) < 2:
+                    number_match = PESO_NUMBER_LINE.match(lines[m])
+                    if not number_match:
+                        if PESO_DIAMETER_LINE.match(lines[m]) or _fold_ascii(lines[m]) in {"total", "s-400", "s400"}:
+                            break
+                        m += 1
+                        continue
+                    numbers.append(_to_float(number_match.group(1)))
+                    m += 1
+                weight = None
+                if len(numbers) >= 2:
+                    weight = numbers[1]
+                elif len(numbers) == 1 and numbers[0] >= 5:
+                    weight = numbers[0]
+                if weight and weight > 0:
+                    rows.append((diameter, round(weight, 2)))
+                k = m if m > k + 1 else k + 1
+                continue
+
+            folded = _fold_ascii(lines[k])
+            if folded == "total" or (PESO_NUMBER_LINE.match(lines[k]) and k + 1 < len(lines) and _fold_ascii(lines[k + 1]) == "total"):
+                break
+            if re.match(r"^resumo\s+a[cç]o$", folded):
+                break
+            k += 1
+
+        if not rows:
+            continue
+        fingerprint = hash((family, tuple(rows))) & 0x7FFFFFFF
+        for diameter, weight in rows:
+            result.append(_rebar_line(family, diameter, weight, page_number, group_id=fingerprint))
+
+    # Fallback: páginas com Peso+10% sem cabeçalho «Resumo Aço» (quadro solto).
+    if result:
+        return result
+    if not PESO_TABLE_MARKER.search(text):
+        return []
+    start = next((i for i, line in enumerate(lines) if "peso" in line.lower() and "10%" in line.lower()), -1)
+    if start < 0:
+        return []
+    family = label_from_resumo_title([], text)
+    rows = []
     i = start
     while i < len(lines):
         diam_match = PESO_DIAMETER_LINE.match(lines[i])
@@ -82,7 +220,7 @@ def extract_rebar_peso_plus10_table(text: str, page_number: int) -> list:
             i += 1
             continue
         diameter = float(diam_match.group(1))
-        numbers: list[float] = []
+        numbers = []
         j = i + 1
         while j < len(lines) and len(numbers) < 2:
             number_match = PESO_NUMBER_LINE.match(lines[j])
@@ -93,15 +231,14 @@ def extract_rebar_peso_plus10_table(text: str, page_number: int) -> list:
                 continue
             numbers.append(_to_float(number_match.group(1)))
             j += 1
-        weight = None
-        if len(numbers) >= 2:
-            weight = numbers[1]
-        elif len(numbers) == 1 and numbers[0] >= 5:
-            weight = numbers[0]
+        weight = numbers[1] if len(numbers) >= 2 else (numbers[0] if len(numbers) == 1 and numbers[0] >= 5 else None)
         if weight and weight > 0:
-            result.append(_rebar_line(f"Peso+10% Ø{int(diameter)}", diameter, round(weight, 2), page_number))
+            rows.append((diameter, round(weight, 2)))
         i = j if j > i + 1 else i + 1
-    return result
+    if not rows:
+        return []
+    fingerprint = hash((family, tuple(rows))) & 0x7FFFFFFF
+    return [_rebar_line(family, d, w, page_number, group_id=fingerprint) for d, w in rows]
 
 
 def extract_rebar_from_length_callouts(text: str, page_number: int) -> list:
@@ -158,26 +295,59 @@ def extract_mesh_specs(text: str) -> list[tuple[float, float]]:
 
 
 def estimate_footing_rebar(footings: list, page_texts: dict[int, str]) -> list:
-    """Malha de sapata: NØDa/S em X e Y sobre o lado respectivo."""
+    """Estimativa a partir do quadro de fundação: malha por sapata (X/Y inf/sup) × nº de refs."""
     by_diameter: dict[float, float] = defaultdict(float)
+
+    def weight_for_face(spec, span_cm: float) -> float:
+        if not spec or span_cm <= 0:
+            return 0.0
+        # Preferir a quantidade declarada no quadro («9Ø12a/15») em relação a span/espaçamento.
+        bars = max(1, int(spec.bar_count or 0))
+        if bars < 1:
+            bars = max(1, int(round(span_cm / max(spec.spacing_cm, 1))))
+        return bars * (span_cm / 100.0) * rebar_weight_per_meter(spec.diameter_mm)
+
     for footing in footings:
-        text = page_texts.get(footing.page, "")
-        specs = extract_mesh_specs(text)
-        mesh = _dominant_mesh(specs)
-        if not mesh:
+        faces = []
+        if getattr(footing, "bottom_x", None) or getattr(footing, "bottom_y", None) or getattr(footing, "top_x", None):
+            faces = [
+                (footing.bottom_x, footing.length_cm),
+                (footing.bottom_y, footing.width_cm),
+                (footing.top_x, footing.length_cm),
+                (footing.top_y, footing.width_cm),
+            ]
+        else:
+            # Contingência: malha dominante na página do quadro, X+Y (e topsuperior se referida).
+            text = page_texts.get(footing.page, "")
+            specs = extract_mesh_specs(text)
+            mesh = _dominant_mesh(specs)
+            if not mesh:
+                continue
+            diameter, spacing_cm = mesh
+            from parser import FootingRebarSpec
+
+            fake = FootingRebarSpec(
+                bar_count=max(1, int(round(footing.width_cm / spacing_cm))),
+                diameter_mm=diameter,
+                spacing_cm=spacing_cm,
+            )
+            faces = [
+                (fake, footing.length_cm),
+                (fake, footing.width_cm),
+            ]
+            if re.search(r"armadura\s+sup", text, re.IGNORECASE):
+                faces.extend([(fake, footing.length_cm), (fake, footing.width_cm)])
+
+        group_weight = 0.0
+        for spec, span_cm in faces:
+            if not spec:
+                continue
+            w = weight_for_face(spec, span_cm)
+            group_weight += w
+            by_diameter[float(spec.diameter_mm)] += w * max(1, len(footing.refs)) * DEFAULT_LAP_FACTOR
+
+        if group_weight <= 0:
             continue
-        diameter, spacing_cm = mesh
-        width_m = footing.width_cm / 100.0
-        length_m = footing.length_cm / 100.0
-        bars_x = max(1, int(round((footing.width_cm / spacing_cm)))) if spacing_cm else 1
-        bars_y = max(1, int(round((footing.length_cm / spacing_cm)))) if spacing_cm else 1
-        layers = 2 if re.search(r"armadura\s+sup", text, re.IGNORECASE) else 1
-        weight = layers * (
-            bars_x * length_m * rebar_weight_per_meter(diameter)
-            + bars_y * width_m * rebar_weight_per_meter(diameter)
-        )
-        weight *= max(1, len(footing.refs))
-        by_diameter[diameter] += weight * DEFAULT_LAP_FACTOR
 
     return [
         _rebar_line(f"Cálculo sapata Ø{int(d)}", d, round(w, 2), 0)
@@ -329,16 +499,66 @@ def estimate_beam_rebar(beam_spans: list, page_texts: dict[int, str]) -> list:
 
 
 def merge_rebar_lines(lines: Iterable) -> list:
-    """Fundir pesos do mesmo diâmetro/elemento/página para o resumo."""
-    bucket: dict[tuple[str, float, int], float] = defaultdict(float)
+    """Fundir pesos do mesmo diâmetro/elemento/(group_id ou página).
+
+    Extracções idênticas do mesmo Resumo (mesmo group_id) não somam; resumos
+    distintos (ex. três folhas de vigas) mantêm group_ids diferentes e somam.
+    """
+    clean: dict[tuple[str, float, int], float] = {}
+    meta: dict[tuple[str, float, int], tuple[int, int | None]] = {}
     for line in lines:
-        key = (line.element, round(line.diameter_mm, 1), line.page)
-        bucket[key] += line.weight_kg
-    return [
-        _rebar_line(element, diameter, round(weight, 2), page)
-        for (element, diameter, page), weight in sorted(bucket.items(), key=lambda item: (item[0][2], item[0][1]))
-        if weight > 0
+        weight = float(line.weight_kg or 0)
+        if weight <= 0:
+            continue
+        group = getattr(line, "group_id", None)
+        merge_page = int(group) if group is not None else int(line.page)
+        key = (line.element, round(line.diameter_mm, 1), merge_page)
+        prev = clean.get(key)
+        if prev is None or abs(prev - weight) < 0.05:
+            clean[key] = weight
+        else:
+            clean[key] = prev + weight
+        meta[key] = (int(line.page), group)
+    merged = []
+    for key, weight in sorted(clean.items(), key=lambda item: (item[0][2], item[0][1])):
+        if weight <= 0:
+            continue
+        element, diameter, _merge = key
+        page, group_id = meta[key]
+        merged.append(_rebar_line(element, diameter, round(weight, 2), page, group_id=group_id))
+    return merged
+
+
+def combine_resumo_with_total(peso_plus10_lines: list, total_plus10_lines: list) -> list:
+    """Prefere a família do Resumo Aço e conserva a maior precisão disponível.
+
+    Alguns programas imprimem o resumo arredondado ao quilograma, enquanto a tabela
+    ``Total+10%`` da mesma página mantém casas decimais. Nesse caso, usa-se o valor detalhado
+    da mesma família/página/diâmetro sem duplicar a família.
+    """
+    resumos = merge_rebar_lines(peso_plus10_lines)
+    detailed = merge_rebar_lines(total_plus10_lines)
+
+    def precision_key(line):
+        element = re.sub(r"[^a-z0-9]+", " ", _fold_ascii(line.element or "")).strip()
+        return (element, int(line.page), round(float(line.diameter_mm), 2))
+
+    detailed_by_key = {
+        precision_key(line): line
+        for line in detailed
+    }
+    refined_resumos = []
+    for line in resumos:
+        key = precision_key(line)
+        refined_resumos.append(detailed_by_key.get(key, line))
+    covered = {steel_family_of(line.element) for line in resumos}
+    covered.discard("other")
+    extras = [
+        line
+        for line in detailed
+        if steel_family_of(line.element) not in covered
     ]
+    return merge_rebar_lines([*refined_resumos, *extras])
 
 
 def complete_rebar_schedules(

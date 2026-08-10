@@ -14,7 +14,9 @@ import {
   computeSlabRebarWeightLines,
   DEFAULT_REBAR_LENGTH_M,
   DEFAULT_SLAB_LAP_FACTOR,
+  formatSteelDiameterBreakdown,
   roundStructuralQty,
+  steelWeightsByFamilyAndDiameter,
 } from "@sigo/shared";
 
 const UNASSIGNED_FLOOR = "Piso não identificado";
@@ -568,6 +570,18 @@ export default function PlantReviewPage() {
   const steelByFamily = classifyStructuralSteelWeights(
     rebarSchedules.map((line) => ({ element: line.element, weightKg: Number(line.weightKg) })),
   );
+  const steelByFamilyDiameter = steelWeightsByFamilyAndDiameter(
+    rebarSchedules.map((line) => ({
+      element: line.element,
+      diameterMm: Number(line.diameterMm),
+      weightKg: Number(line.weightKg),
+    })),
+  );
+  const footingDiameterLabel = formatSteelDiameterBreakdown(steelByFamilyDiameter.footings);
+  const columnDiameterLabel = formatSteelDiameterBreakdown(steelByFamilyDiameter.columns);
+  const beamDiameterLabel = formatSteelDiameterBreakdown(steelByFamilyDiameter.beams);
+  const slabDiameterLabel = formatSteelDiameterBreakdown(steelByFamilyDiameter.slabs);
+  const stairDiameterLabel = formatSteelDiameterBreakdown(steelByFamilyDiameter.stairs);
   if (plant.processingStatus === "erro") {
     gaps.push(
       plant.errorMessage
@@ -751,11 +765,13 @@ export default function PlantReviewPage() {
                     `${structuralSummary.footingsCount} sapata(s)`,
                     `Medidas médias ${(Number(structuralSummary.footingsAvgWidthCm) / 100).toFixed(2)} × ${(Number(structuralSummary.footingsAvgLengthCm) / 100).toFixed(2)} m · h ${Number(structuralSummary.footingsAvgDepthCm).toFixed(2)} cm`,
                     `Aço ${roundStructuralQty(Number(structuralSummary.footingsSteelWeightKg ?? steelByFamily.footingsSteelWeightKg)).toFixed(2)} kg`,
+                    `Armaduras: ${footingDiameterLabel}`,
                   ],
                 })}
               >
                 <p className="text-xl font-semibold text-gray-900">{structuralSummary.footingsCount}</p>
                 <p className="muted">sapatas · {roundStructuralQty(Number(structuralSummary.footingsSteelWeightKg ?? steelByFamily.footingsSteelWeightKg)).toFixed(2)} kg aço</p>
+                <p className="mt-1 text-[11px] leading-snug text-slate-500">{footingDiameterLabel}</p>
                 <span className="mt-1 block text-xs font-semibold text-brand-700">Ver / editar</span>
               </button>
               <button
@@ -768,11 +784,13 @@ export default function PlantReviewPage() {
                   lines: [
                     `${structuralSummary.columnsCount} pilar(es)`,
                     `Aço ${roundStructuralQty(Number(structuralSummary.columnsSteelWeightKg ?? steelByFamily.columnsSteelWeightKg)).toFixed(2)} kg`,
+                    `Armaduras: ${columnDiameterLabel}`,
                   ],
                 })}
               >
                 <p className="text-xl font-semibold text-gray-900">{structuralSummary.columnsCount}</p>
                 <p className="muted">pilares · {roundStructuralQty(Number(structuralSummary.columnsSteelWeightKg ?? steelByFamily.columnsSteelWeightKg)).toFixed(2)} kg aço</p>
+                <p className="mt-1 text-[11px] leading-snug text-slate-500">{columnDiameterLabel}</p>
                 <span className="mt-1 block text-xs font-semibold text-brand-700">Ver / editar</span>
               </button>
               <button
@@ -785,6 +803,7 @@ export default function PlantReviewPage() {
                   lines: [
                     `${structuralSummary.beamsCount} viga(s) · ${Number(structuralSummary.beamsTotalLengthM).toFixed(2)} ml · ${Number(structuralSummary.beamsConcreteVolumeM3).toFixed(2)} m³`,
                     `Aço ${roundStructuralQty(Number(structuralSummary.beamsSteelWeightKg ?? steelByFamily.beamsSteelWeightKg)).toFixed(2)} kg`,
+                    `Armaduras: ${beamDiameterLabel}`,
                     ...((structuralSummary.beamGroups?.length ?? 0) > 0
                       ? structuralSummary.beamGroups!.map((g) => `${g.label}: ${g.beamsCount} un · ${Number(g.totalLengthM).toFixed(2)} m · ${Number(g.steelWeightKg ?? 0).toFixed(2)} kg`)
                       : ["Ainda sem grupos por laje — edite em Completar dados"]),
@@ -793,11 +812,13 @@ export default function PlantReviewPage() {
               >
                 <p className="text-xl font-semibold text-gray-900">{structuralSummary.beamsCount}</p>
                 <p className="muted">vigas · {Number(structuralSummary.beamsTotalLengthM).toFixed(2)} ml · {roundStructuralQty(Number(structuralSummary.beamsSteelWeightKg ?? steelByFamily.beamsSteelWeightKg)).toFixed(2)} kg</p>
+                <p className="mt-1 text-[11px] leading-snug text-slate-500">{beamDiameterLabel}</p>
                 <span className="mt-1 block text-xs font-semibold text-brand-700">Por laje · editar</span>
               </button>
-              <button type="button" className="rounded-lg border border-gray-200 p-3 transition-colors hover:border-brand-300 hover:bg-brand-50" onClick={openSlabManager}>
+              <button type="button" className="rounded-lg border border-gray-200 p-3 text-left transition-colors hover:border-brand-300 hover:bg-brand-50" onClick={openSlabManager}>
                 <p className="text-xl font-semibold text-gray-900">{structuralSummary.slabsCount}</p>
                 <p className="muted">laje(s) · {roundStructuralQty(Number(structuralSummary.slabsSteelWeightKg ?? steelByFamily.slabsSteelWeightKg)).toFixed(2)} kg</p>
+                <p className="mt-1 text-[11px] leading-snug text-slate-500">{slabDiameterLabel}</p>
                 <span className="mt-1 block text-xs font-semibold text-brand-700">Indicar ou corrigir</span>
               </button>
               <button
@@ -810,12 +831,14 @@ export default function PlantReviewPage() {
                   lines: [
                     `${structuralSummary.staircasesCount} escada(s)`,
                     `Aço ${roundStructuralQty(Number(structuralSummary.stairsSteelWeightKg ?? steelByFamily.stairsSteelWeightKg)).toFixed(2)} kg`,
+                    `Armaduras: ${stairDiameterLabel}`,
                     `Total de aço do projecto ${Number(structuralSummary.totalSteelWeightKg).toFixed(2)} kg`,
                   ],
                 })}
               >
                 <p className="text-xl font-semibold text-gray-900">{structuralSummary.staircasesCount}</p>
                 <p className="muted">escada(s) · {roundStructuralQty(Number(structuralSummary.stairsSteelWeightKg ?? steelByFamily.stairsSteelWeightKg)).toFixed(2)} kg</p>
+                <p className="mt-1 text-[11px] leading-snug text-slate-500">{stairDiameterLabel}</p>
                 <span className="mt-1 block text-xs font-semibold text-brand-700">Ver / editar</span>
               </button>
             </div>
@@ -955,6 +978,41 @@ export default function PlantReviewPage() {
               {steelByFamily.otherSteelWeightKg > 0 ? ` · Outros ${steelByFamily.otherSteelWeightKg.toFixed(2)}` : ""} kg.
               Lista de compra por diâmetro (varões de 5,75 m).
             </p>
+            <div className="mb-4 overflow-x-auto rounded-lg border border-slate-200">
+              <table className="w-full min-w-[720px] text-sm">
+                <thead>
+                  <tr className="table-head-row">
+                    <th className="px-3 py-2 text-left">Elemento</th>
+                    {[6, 8, 10, 12, 16].map((diameter) => (
+                      <th key={diameter} className="px-2 py-2 text-right">Ø{diameter}</th>
+                    ))}
+                    <th className="pr-3 py-2 text-right">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {([
+                    ["Sapatas", steelByFamilyDiameter.footings, steelByFamily.footingsSteelWeightKg],
+                    ["Pilares", steelByFamilyDiameter.columns, steelByFamily.columnsSteelWeightKg],
+                    ["Vigas", steelByFamilyDiameter.beams, steelByFamily.beamsSteelWeightKg],
+                    ["Lajes", steelByFamilyDiameter.slabs, steelByFamily.slabsSteelWeightKg],
+                    ["Escadas", steelByFamilyDiameter.stairs, steelByFamily.stairsSteelWeightKg],
+                  ] as const).map(([label, rows, totalKg]) => {
+                    const byDiameter = Object.fromEntries(rows.map((row) => [row.diameterMm, row.weightKg]));
+                    return (
+                      <tr key={label} className="table-row">
+                        <td className="px-3 py-2 font-semibold text-slate-900">{label}</td>
+                        {[6, 8, 10, 12, 16].map((diameter) => (
+                          <td key={diameter} className="px-2 py-2 text-right tabular-nums text-slate-700">
+                            {byDiameter[diameter] ? `${Number(byDiameter[diameter]).toFixed(1)}` : "—"}
+                          </td>
+                        ))}
+                        <td className="pr-3 py-2 text-right font-semibold tabular-nums">{totalKg.toFixed(1)} kg</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
             <div className="mb-4 overflow-x-auto rounded-lg border border-slate-200">
               <table className="w-full min-w-[660px] text-sm">
                 <thead><tr className="table-head-row"><th className="px-3 py-2 text-left">Diâmetro</th><th className="text-right">Peso do mapa</th><th className="text-right">Comprimento</th><th className="text-right">Varões de 5,75 m</th><th className="pr-3 text-right">Peso de compra</th></tr></thead>

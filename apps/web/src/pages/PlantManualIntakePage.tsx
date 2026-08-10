@@ -196,7 +196,12 @@ export default function PlantManualIntakePage() {
   useEffect(() => {
     if (!id) return;
     setLoading(true);
-    Promise.all([plantsApi.detail(id), plantsApi.getReviewRequest(id)])
+    // A revisão do motor é opcional — se a BD ainda não tiver a tabela / falhar o endpoint,
+    // o formulário de Completar dados deve continuar a carregar.
+    Promise.all([
+      plantsApi.detail(id),
+      plantsApi.getReviewRequest(id).catch(() => ({ review: null as PlantReviewRequest | null, slaHours: 5 })),
+    ])
       .then(async ([detail, reviewState]) => {
         setPlant(detail.plant);
         setRebarSchedules(detail.rebarSchedules);

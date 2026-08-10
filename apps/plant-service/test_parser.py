@@ -20,10 +20,36 @@ from parser import (
     RebarLine,
     build_structural_summary,
     summarise_slabs,
+    BeamSpan,
+    extract_openings_spatial,
+    extract_structural_material_specs,
 )
 
 
 class RoomExtractionTests(unittest.TestCase):
+    def test_extracts_door_arc_without_inventing_height(self):
+        document = fitz.open()
+        page = document.new_page(width=1191, height=842)
+        page.draw_bezier(
+            fitz.Point(100, 100),
+            fitz.Point(100, 76),
+            fitz.Point(124, 76),
+            fitz.Point(124, 100),
+        )
+
+        openings = extract_openings_spatial(
+            page,
+            1,
+            "PLANTA COTADA PISO TÃ‰RREO\nEscala 1:100",
+        )
+
+        self.assertEqual(len(openings), 1)
+        self.assertEqual(openings[0].kind, "porta")
+        self.assertAlmostEqual(openings[0].width_m, 0.85, places=2)
+        self.assertIsNone(openings[0].height_m)
+        self.assertTrue(openings[0].needs_confirmation)
+        document.close()
+
     def test_extracts_door_and_window_schedule_with_dimensions_and_quantity(self):
         text = """PLANTA COTADA PISO T\u00c9RREO
 J01 Janela de alum\u00ednio 1,50 x 1,20 m 4
@@ -77,6 +103,47 @@ J02 Janela da sala 150 x 120 cm 2
         self.assertEqual(slabs[0].bottom_rebar.y_spacing_cm, 20)
         self.assertEqual(slabs[0].top_rebar.x_spacing_cm, 20)
         self.assertEqual((slabs[0].concrete_class, slabs[0].steel_grade, slabs[0].cover_cm), ("B25", "S-400", 2.5))
+
+    def test_does_not_confuse_beam_codes_with_concrete_class(self):
+        concrete, steel, cover = extract_structural_material_specs(
+            "B15 B20 B33\nBetÃ£o: C20/25\nAÃ§o em varÃµes: S-400\nRecobrimentos adoptados:\nLajes: 2 cm"
+        )
+
+        self.assertEqual((concrete, steel, cover), ("C20/25", "S-400", 2.0))
+
+    def test_does_not_reduce_multiple_slab_diameters_to_one_uniform_mesh(self):
+        slabs = extract_slabs(
+            "PLANTA DE ARMADURA SUPERIOR - 2Âº PISO\nP1Ã˜12a/15\nP2Ã˜10a/15\nP3Ã˜8a/15",
+            66,
+        )
+
+        self.assertEqual(len(slabs), 1)
+        self.assertIsNone(slabs[0].rebar)
+
+    def test_groups_beams_by_declared_floor_and_assigns_floor_steel(self):
+        slabs = [
+            Slab("1Âº Piso", "geral", 15, 41),
+            Slab("2Âº Piso", "geral", 25, 42),
+            Slab("Cobertura", "geral", 20, 43),
+        ]
+        spans = [
+            BeamSpan("PÃ³rtico 1", 20, 30, 5, 46, "1Âº Piso"),
+            BeamSpan("PÃ³rtico 1", 40, 25, 6, 49, "2Âº Piso"),
+            BeamSpan("PÃ³rtico 1", 30, 20, 4, 56, "Cobertura"),
+        ]
+        summary = build_structural_summary(
+            [], [], spans,
+            [
+                RebarLine("Vigas", 10, 100, 48),
+                RebarLine("Vigas", 10, 200, 55),
+                RebarLine("Vigas", 10, 300, 61),
+            ],
+            [], slabs,
+        )
+
+        self.assertEqual([group.beams_count for group in summary.beam_groups], [1, 1, 1])
+        self.assertEqual([group.total_length_m for group in summary.beam_groups], [5, 6, 4])
+        self.assertEqual([group.steel_weight_kg for group in summary.beam_groups], [100, 200, 300])
 
     def test_links_separate_rebar_pages_to_the_slab_geometry_by_floor(self):
         slabs = [
@@ -275,6 +342,21 @@ S = 12,35 m2
 
         self.assertFalse(analysis.requires_identity_confirmation)
         self.assertEqual(analysis.identity_conflicts, [])
+
+    def test_blocks_internal_location_conflict_hidden_in_technical_memory(self):
+        texts = [
+            "Projecto Estrutural\nProprietario: Fernando Gore Chaera\nLocalizacao: Cidade de Chimoio",
+            "A estrutura a analisar esta localizada na provincia de Maputo, tem dois pisos.",
+        ]
+        classifications = [
+            PageClassification(page=1, discipline="estrutura", confidence=0.95),
+            PageClassification(page=2, discipline="estrutura", confidence=0.9),
+        ]
+
+        analysis = build_document_analysis(classifications, texts)
+
+        self.assertTrue(analysis.requires_identity_confirmation)
+        self.assertEqual([conflict.field for conflict in analysis.identity_conflicts], ["location"])
 
     def test_uses_extracted_content_when_sheet_has_no_standard_title(self):
         classifications = classify_document_pages(

@@ -52,6 +52,17 @@ class RebarLine:
     diameter_mm: float
     weight_kg: float
     page: int
+    # Agrupa linhas do mesmo quadro «Resumo Aço» (fingerprint) sem alterar a página real —
+    # necessário para _on_struct filtrar por page ∈ structure_pages.
+    group_id: int | None = None
+
+
+@dataclass
+class FootingRebarSpec:
+    """Uma face da malha de sapata no quadro (ex: «4Ø10a/15»)."""
+    bar_count: int
+    diameter_mm: float
+    spacing_cm: float
 
 
 @dataclass
@@ -61,6 +72,10 @@ class Footing:
     length_cm: float
     height_cm: float
     page: int
+    bottom_x: FootingRebarSpec | None = None
+    bottom_y: FootingRebarSpec | None = None
+    top_x: FootingRebarSpec | None = None
+    top_y: FootingRebarSpec | None = None
 
 
 @dataclass
@@ -76,6 +91,7 @@ class BeamSpan:
     height_cm: float
     length_m: float
     page: int
+    floor: str | None = None
 
 
 @dataclass
@@ -173,9 +189,11 @@ def _classify_steel_weights(
         if weight <= 0:
             continue
         element = (line.element or "").lower()
-        if re.search(r"sapata|footing|fundac|maci[cç]o|radier", element):
+        if re.search(r"sapata|footing|funda[cç]|maci[cç]o|radier", element):
             footings += weight
-        elif re.search(r"pilar|coluna|column|pilarete", element):
+        elif re.search(r"pilar|coluna|column|pilarete", element) or re.search(
+            r"(?:^|[\s,;])p\d+(?:\s*=\s*p\d+)*(?=$|[\s,;/])", element
+        ):
             columns += weight
         elif re.search(r"escada|staircase|\bstair\b", element):
             stairs += weight
@@ -201,6 +219,7 @@ def _build_beam_groups(
     beam_spans: list[BeamSpan],
     slab_summaries: list[SlabSummary],
     beams_steel: float,
+    rebar_schedules: list[RebarLine] | None = None,
 ) -> list[BeamGroupSummary]:
     """Agrupa vãos de vigas pela laje/piso mais próxima em página (medições por nível)."""
     if not beam_spans and not slab_summaries:
@@ -226,15 +245,56 @@ def _build_beam_groups(
 
     buckets: list[list[BeamSpan]] = [[] for _ in slab_summaries]
     for span in beam_spans:
-        best_idx = 0
-        best_dist = abs(span.page - (slab_summaries[0].pages[0] if slab_summaries[0].pages else span.page))
-        for idx, slab in enumerate(slab_summaries):
-            pages = slab.pages or [span.page]
-            dist = min(abs(span.page - page) for page in pages)
-            if dist < best_dist:
-                best_dist = dist
-                best_idx = idx
+        best_idx = next(
+            (
+                idx
+                for idx, slab in enumerate(slab_summaries)
+                if span.floor and slab.floor and _normalise_key(span.floor) == _normalise_key(slab.floor)
+            ),
+            None,
+        )
+        if best_idx is None:
+            best_idx = 0
+            # A planta geral e a primeira pÃ¡gina do grupo sÃ£o Ã¢ncoras melhores do que as
+            # folhas de armadura, que podem surgir dezenas de pÃ¡ginas mais tarde.
+            best_dist = abs(span.page - (slab_summaries[0].pages[0] if slab_summaries[0].pages else span.page))
+            for idx, slab in enumerate(slab_summaries):
+                anchor = slab.pages[0] if slab.pages else span.page
+                dist = abs(span.page - anchor)
+                if dist < best_dist:
+                    best_dist = dist
+                    best_idx = idx
         buckets[best_idx].append(span)
+
+    beam_rebar = [
+        line
+        for line in (rebar_schedules or [])
+        if re.search(r"viga|p[oÃ³]rtico|beam|lintel", (line.element or ""), re.IGNORECASE)
+    ]
+    floor_starts = sorted(
+        (
+            (min(span.page for span in beam_spans if span.floor == floor), floor)
+            for floor in {span.floor for span in beam_spans if span.floor}
+        ),
+        key=lambda item: item[0],
+    )
+
+    def floor_for_rebar_page(page: int) -> str | None:
+        if not floor_starts:
+            return None
+        eligible = [item for item in floor_starts if item[0] <= page]
+        if eligible:
+            return eligible[-1][1]
+        return floor_starts[0][1]
+
+    def steel_for_floor(floor: str | None) -> float:
+        if not floor or not beam_rebar:
+            return 0.0
+        assigned = 0.0
+        for line in beam_rebar:
+            if floor_for_rebar_page(line.page) == floor:
+                assigned += float(line.weight_kg or 0)
+        return round(assigned, 2)
 
     groups: list[BeamGroupSummary] = []
     steel_remaining = beams_steel
@@ -245,11 +305,13 @@ def _build_beam_groups(
         widths = [b.width_cm for b in spans]
         heights = [b.height_cm for b in spans]
         porticos = {(b.portico, b.page) for b in spans}
-        share = round(beams_steel / nonempty, 2) if spans else 0.0
-        if idx == len(slab_summaries) - 1 and spans:
-            share = round(steel_remaining, 2)
-        elif spans:
-            steel_remaining = round(steel_remaining - share, 2)
+        share = steel_for_floor(slab.floor)
+        if not beam_rebar:
+            share = round(beams_steel / nonempty, 2) if spans else 0.0
+            if idx == len(slab_summaries) - 1 and spans:
+                share = round(steel_remaining, 2)
+            elif spans:
+                steel_remaining = round(steel_remaining - share, 2)
         groups.append(
             BeamGroupSummary(
                 label=f"Vigas da {slab_label}",
@@ -465,6 +527,13 @@ IDENTITY_FALLBACK_PATTERNS = {
     ],
     "location": [
         re.compile(r"(?im)^[ \t]*(?:localiza[çc][ãa]o|local|distrito)[ \t]*[:\-][ \t]*([^\n\r:]{2,120})"),
+        re.compile(
+            r"(?i)\ba\s+ser\s+constru[íi]d[ao]\s+em\s+([^\n\r.,;]{2,100})"
+        ),
+        re.compile(
+            r"(?i)\blocalizad[ao]\s+n[ao]\s+(?:prov[íi]ncia\s+de\s+|cidade\s+de\s+|bairro\s+)?"
+            r"([^\n\r.,;]{2,100})"
+        ),
     ],
     "project_title": [
         re.compile(r"(?im)^[ \t]*(?:projecto|projeto|obra|empreendimento)[ \t]*[:\-][ \t]*(?!arquitect|arquitet|estrutur|hidr|el[ée]ct)([^\n\r:]{3,140})"),
@@ -556,25 +625,53 @@ def _identity_equivalent(left: str, right: str) -> bool:
     return SequenceMatcher(None, a, b).ratio() >= 0.84
 
 
-def _identity_conflicts(sections: list[DocumentSection]) -> list[DocumentIdentityConflict]:
+def _identity_conflicts(
+    sections: list[DocumentSection],
+    page_texts: list[str] | None = None,
+) -> list[DocumentIdentityConflict]:
     conflicts: list[DocumentIdentityConflict] = []
     for field_name in ("owner", "location", "project_title"):
         values: list[dict] = []
+
+        def add_value(value: str, discipline: str, pages: list[int]) -> None:
+            def equivalent(left: str, right: str) -> bool:
+                if _identity_equivalent(left, right):
+                    return True
+                if field_name != "location":
+                    return False
+                ignored = {"BAIRRO", "CIDADE", "PROVINCIA", "DISTRITO", "MOCAMBIQUE", "DE", "DA", "DO"}
+                left_tokens = set(_normalise_key(left).split()) - ignored
+                right_tokens = set(_normalise_key(right).split()) - ignored
+                return bool(left_tokens and right_tokens and left_tokens == right_tokens)
+
+            existing = next((item for item in values if equivalent(item["value"], value)), None)
+            if existing:
+                if discipline not in existing["disciplines"]:
+                    existing["disciplines"].append(discipline)
+                existing["pages"] = sorted(set(existing["pages"] + pages))
+            else:
+                values.append({"value": value, "disciplines": [discipline], "pages": pages[:]})
+
         for section in sections:
             if section.discipline == "outro" or not section.identity:
                 continue
             value = getattr(section.identity, field_name)
             if not value:
                 continue
-            existing = next((item for item in values if _identity_equivalent(item["value"], value)), None)
-            if existing:
-                if section.discipline not in existing["disciplines"]:
-                    existing["disciplines"].append(section.discipline)
-                existing["pages"] = sorted(set(existing["pages"] + section.identity.pages))
-            else:
-                values.append({"value": value, "disciplines": [section.discipline], "pages": section.identity.pages[:]})
+            add_value(value, section.discipline, section.identity.pages)
+
+            # MemÃ³rias copiadas de outro projecto podem contradizer o carimbo dentro da mesma
+            # especialidade. Para localizaÃ§Ã£o, recolhe tambÃ©m declaraÃ§Ãµes inequÃ­vocas do corpo
+            # do documento e nÃ£o apenas o valor maioritÃ¡rio escolhido para a secÃ§Ã£o.
+            if field_name == "location" and page_texts:
+                for page_number in range(section.start_page, section.end_page + 1):
+                    if not 1 <= page_number <= len(page_texts):
+                        continue
+                    candidate = _fallback_identity_value(page_texts[page_number - 1], "location")
+                    if candidate:
+                        add_value(candidate, section.discipline, [page_number])
         represented_disciplines = {discipline for item in values for discipline in item["disciplines"]}
-        if len(values) > 1 and len(represented_disciplines) > 1:
+        if len(values) > 1 and (len(represented_disciplines) > 1 or field_name == "location"):
             conflicts.append(DocumentIdentityConflict(field=field_name, severity="critical", values=values))
     return conflicts
 
@@ -606,7 +703,7 @@ def build_document_analysis(classifications: list[PageClassification], page_text
         )
         start = end + 1
     recognized = {section.discipline for section in sections if section.discipline != "outro"}
-    conflicts = _identity_conflicts(sections)
+    conflicts = _identity_conflicts(sections, page_texts)
     return DocumentAnalysis(
         page_count=len(classifications),
         is_multi_discipline=len(recognized) > 1,
@@ -719,7 +816,12 @@ ELEMENT_LABEL_PATTERN = re.compile(
 # Linha de referências de sapatas/pilares no "QUADRO DE ELEMENTOS DE FUNDAÇÃO"/"QUADRO DE
 # PILARES" do CYPE CAD — ex: "P01", "P05 e P18", "P07, P09, P15 e P16", "(P23-P22)",
 # "P01=P02=P10=P11" (pilares agrupados por "=").
-FOOTING_REF_LINE = re.compile(r"^\(?P\d+(?:\s*(?:,|e|-|=)\s*P\d+)*\)?$")
+FOOTING_REF_LINE = re.compile(r"^\(?P\d+(?:\s*(?:,|e|-|=)\s*P\d+)*\)?$", re.IGNORECASE)
+# Malha do quadro de fundação — ex: "4Ø10a/15", "9Ø12a/12.5", "15Ø12a/15"
+FOOTING_MESH_SPEC_LINE = re.compile(
+    r"^(?P<count>\d{1,2})\s*[ØøΦ]\s*(?P<diameter>\d{1,2})\s*a\s*/\s*(?P<spacing>\d+(?:[.,]\d+)?)$",
+    re.IGNORECASE,
+)
 DIMENSION_LINE = re.compile(r"^(\d+)\s*x\s*(\d+)$")
 NUMBER_LINE = re.compile(r"^\d+(?:[.,]\d+)?$")
 DECIMAL_METER_LINE = re.compile(r"^\d+[.,]\d+$")
@@ -727,6 +829,21 @@ PORTICO_LABEL_LINE = re.compile(r"^Pórtico\s*(\d+)$")
 STAIRCASE_LABEL_LINE = re.compile(r"^Escada\s*(\d+)$")
 METER_VALUE = re.compile(r"^([\d.,]+)\s*m$")
 INTEGER_VALUE = re.compile(r"^(\d+)$")
+
+# Páginas de pormenor/quadro de fundação: os blocos Total+10% usam rótulos P1/P4=…
+# partilhados com pilares, mas o aço é de sapata (ver Fernando pág. 35 — Resumo Aço Fundação).
+FOUNDATION_REBAR_PAGE_PATTERN = re.compile(
+    r"pormenor\s+de\s+funda[cç][aã]o|"
+    r"quadro\s+de\s+elementos\s+de\s+funda[cç][aã]o|"
+    r"resumo\s+a[cç]o\s+funda[cç][aã]o|"
+    r"resumo\s+a[cç]o\s*\n\s*funda[cç][aã]o|"
+    r"a[cç]o\s+funda[cç][aã]o",
+    re.IGNORECASE,
+)
+PILLAR_LIKE_ELEMENT_PATTERN = re.compile(
+    r"^(?:P\d+(?:\s*=\s*P\d+)*|PP\d+(?:\s*=\s*PP\d+)*)$",
+    re.IGNORECASE,
+)
 
 # Folhas de armadura de lajes (piso térreo/intermédio/cobertura): título "ARMADURA
 # INFERIOR"/"ARMADURA SUPERIOR" na legenda, e a espessura da laje repetida várias vezes na
@@ -737,9 +854,17 @@ SLAB_MESH_SPEC_PATTERN = re.compile(
     r"[ØøΦ]\s*(?P<diameter>\d{1,2})\s*(?:a\s*/\s*|@\s*)(?P<spacing>\d+(?:[.,]\d+)?)",
     re.IGNORECASE,
 )
-CONCRETE_CLASS_PATTERN = re.compile(r"\b(?:BET(?:ÃO|AO)\s*)?(B\s*[-/]?\s*(?:15|20|25|30|35|40))\b", re.IGNORECASE)
+CONCRETE_EUROCODE_PATTERN = re.compile(r"\bC\s*(\d{2})\s*/\s*(\d{2})\b", re.IGNORECASE)
+CONCRETE_B_PATTERN = re.compile(
+    r"\bBET(?:ÃO|AO)\s*(?:DE\s+CLASSE\s+DE\s+RESISTÊNCIA\s+)?[:=]?\s*"
+    r"(B\s*[-/]?\s*(?:15|20|25|30|35|40))\b",
+    re.IGNORECASE,
+)
 STEEL_GRADE_PATTERN = re.compile(r"\b([AS]\s*[-/]?\s*(?:235|240|400|500))\b", re.IGNORECASE)
-COVER_PATTERN = re.compile(r"\b(?:recobrimento|rec\.?|cobrimento)\s*[:=]?\s*(\d+(?:[.,]\d+)?)\s*(mm|cm)?", re.IGNORECASE)
+COVER_PATTERN = re.compile(
+    r"\b(?:recobrimento|rec\.?|cobrimento|lajes?)\s*[:=]?\s*(\d+(?:[.,]\d+)?)\s*(mm|cm)?",
+    re.IGNORECASE,
+)
 # Formato alternativo (planta geral de elementos estruturais, sem folha de armadura própria
 # por laje): referência "L1" seguida imediatamente da espessura "h=15".
 SLAB_REF_LINE = re.compile(r"^L\d+$")
@@ -958,6 +1083,12 @@ def extract_openings_spatial(page, page_number: int, text: str) -> list[Opening]
         return []
     floor, _ = detect_floor_label(text)
     words = page.get_text("words")
+    scale_values = [
+        int(value)
+        for value in re.findall(r"\b1\s*:\s*(25|50|75|100|125|150|200)\b", text)
+    ]
+    drawing_scale = Counter(scale_values).most_common(1)[0][0] if scale_values else None
+    metres_per_point = drawing_scale * 25.4 / 72 / 1000 if drawing_scale else None
     dimensions = []
     codes = []
     for word in words:
@@ -991,6 +1122,11 @@ def extract_openings_spatial(page, page_number: int, text: str) -> list[Opening]
             if not (12 <= width_points <= 55 and 12 <= height_points <= 55):
                 continue
             cx, cy = (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
+            if not (
+                page.rect.width * 0.05 < cx < page.rect.width * 0.85
+                and page.rect.height * 0.05 < cy < page.rect.height * 0.93
+            ):
+                continue
             if any((cx - x) ** 2 + (cy - y) ** 2 < 49 for x, y in door_centres):
                 continue
             nearby = [
@@ -1004,9 +1140,29 @@ def extract_openings_spatial(page, page_number: int, text: str) -> list[Opening]
                 for h, x2, y2 in nearby
                 if w != h and 0.55 <= w <= 2.2 and 1.8 <= h <= 2.5
             ]
-            if not pairs:
+            if pairs:
+                _distance, opening_width, opening_height = min(pairs)
+                confidence = 0.84
+                if metres_per_point:
+                    arc_width = max(width_points, height_points) * metres_per_point
+                    if 0.55 <= arc_width <= 1.8 and abs(opening_width - arc_width) > max(0.2, arc_width * 0.35):
+                        # A cota prÃ³xima pertence provavelmente Ã  parede/compartimento. O arco
+                        # mede directamente a folha e Ã© uma evidÃªncia mais local para a largura.
+                        opening_width = round(arc_width, 2)
+                        confidence = 0.72
+            elif metres_per_point:
+                # Em muitas plantas ArchiCAD a porta nÃ£o tem largura/altura escrita junto ao
+                # arco. O raio do arco, convertido pela escala declarada da folha, fornece a
+                # largura aproximada; a altura fica vazia para confirmaÃ§Ã£o em vez de ser
+                # inventada a partir de uma cota de parede prÃ³xima.
+                opening_width = max(width_points, height_points) * metres_per_point
+                if not 0.55 <= opening_width <= 1.8:
+                    continue
+                opening_width = round(opening_width, 2)
+                opening_height = None
+                confidence = 0.66
+            else:
                 continue
-            _distance, opening_width, opening_height = min(pairs)
             door_centres.append((cx, cy))
             candidates.append((Opening(
                 kind="porta",
@@ -1019,7 +1175,7 @@ def extract_openings_spatial(page, page_number: int, text: str) -> list[Opening]
                 location="desconhecida",
                 material=None,
                 page=page_number,
-                confidence=0.84,
+                confidence=confidence,
                 source="geometria",
                 needs_confirmation=True,
             ), (cx, cy)))
@@ -1209,15 +1365,15 @@ def is_room_area_page(text: str) -> bool:
 
 
 METADATA_LABELS = {
-    "proprietario": r"Propriet[áa]rio[ \t]*:[ \t]*([^\n:]+?)(?=[ \t]{2,}|$|Fase[ \t]*:|Bairro[ \t]*:)",
-    "fase": r"Fase\s*:\s*([^\n:]+?)(?=\s{2,}|$|Especialidade\s*:)",
-    "bairro": r"Bairro\s*:\s*([^\n:]+?)(?=\s{2,}|$|Talh[ãa]o\s*:)",
-    "talhao": r"Talh[ãa]o\s*:\s*([^\n:]+?)(?=\s{2,}|$|Distrito\s*:)",
-    "distrito": r"Distrito\s*:\s*([^\n:]+?)(?=\s{2,}|$)",
-    "especialidade": r"Especialidade\s*:\s*([^\n:]+?)(?=\s{2,}|$|Planta)",
-    "conteudo": r"Conte[úu]do\s*:\s*([^\n:]+?)(?=\s{2,}|$|Escala)",
-    "numero": r"N[uú]mero\s*:\s*([^\n:]+?)(?=\s{2,}|$)",
-    "escala": r"Escala\s*:?\s*([\d:.,/\s]+?)(?=\s{2,}|$)",
+    "proprietario": r"(?im)^\s*Propriet[áa]rio\s*:\s*([^\r\n:]{3,100})\s*$",
+    "fase": r"(?im)^\s*Fase\s*:\s*([^\r\n:]{2,80})\s*$",
+    "bairro": r"(?im)^\s*Bairro\s*:\s*([^\r\n:]{2,100})\s*$",
+    "talhao": r"(?im)^\s*Talh[ãa]o\s*:\s*([^\r\n:]{1,80})\s*$",
+    "distrito": r"(?im)^\s*Distrito\s*:\s*([^\r\n:]{2,100})\s*$",
+    "especialidade": r"(?im)^\s*Especialidade\s*:\s*([^\r\n:]{2,80})\s*$",
+    "conteudo": r"(?im)^\s*Conte[úu]do\s*:\s*([^\r\n:]{2,140})\s*$",
+    "numero": r"(?im)^\s*N[uú]mero\s*:\s*([^\r\n:]{1,80})\s*$",
+    "escala": r"(?im)^\s*Escala\s*:?\s*([\d:.,/ ]{2,40})\s*$",
 }
 
 
@@ -1646,9 +1802,25 @@ def merge_page_room_sources(*sources: list[Room]) -> list[Room]:
     return merged
 
 
+def is_foundation_rebar_page(text: str) -> bool:
+    """True nas folhas de pormenor/quadro/resumo de aço de fundação (não planta de implantação)."""
+    return bool(FOUNDATION_REBAR_PAGE_PATTERN.search(text or ""))
+
+
+def _foundation_element_label(label: str | None) -> str | None:
+    """Em páginas de fundação, P1/P4=P9 são sapatas — não pilares."""
+    if not label:
+        return label
+    cleaned = label.strip()
+    if PILLAR_LIKE_ELEMENT_PATTERN.match(cleaned):
+        return f"Sapata {cleaned}"
+    return cleaned
+
+
 def extract_rebar_total_plus10(text: str, page_number: int) -> list[RebarLine]:
     """Nível 1 do aço: blocos clássicos «Total+10%: Ød: kg … Total:»."""
     lines = []
+    foundation_page = is_foundation_rebar_page(text)
     element_positions = [(m.start(), m.group(1)) for m in ELEMENT_LABEL_PATTERN.finditer(text)]
     for block_match in re.finditer(r"Total\+10%:.{0,200}?Total:\s*[\d.,]+", text, re.DOTALL):
         block_start = block_match.start()
@@ -1658,6 +1830,8 @@ def extract_rebar_total_plus10(text: str, page_number: int) -> list[RebarLine]:
                 current_element = label
             else:
                 break
+        if foundation_page:
+            current_element = _foundation_element_label(current_element)
         if not current_element:
             continue
         block_text = block_match.group(0)
@@ -1680,10 +1854,21 @@ def extract_rebar_schedules(text: str, page_number: int) -> list[RebarLine]:
     return lines
 
 
+def _parse_footing_mesh_spec(line: str) -> FootingRebarSpec | None:
+    match = FOOTING_MESH_SPEC_LINE.match(line.strip())
+    if not match:
+        return None
+    return FootingRebarSpec(
+        bar_count=int(match.group("count")),
+        diameter_mm=float(match.group("diameter")),
+        spacing_cm=_to_float(match.group("spacing")),
+    )
+
+
 def extract_footings(text: str, page_number: int) -> list[Footing]:
     # "QUADRO DE ELEMENTOS DE FUNDAÇÃO" do CYPE CAD: cada sapata (ou grupo de sapatas
     # idênticas) aparece como 3 linhas consecutivas — referências, "LxL" (cm), altura (cm) —
-    # seguidas de 2 ou 4 linhas de armadura antes da referência seguinte.
+    # seguidas de 2 ou 4 linhas de armadura (inf. X/Y e, se existir, sup. X/Y).
     if "FUNDAÇÃO" not in text.upper() and "FUNDACAO" not in text.upper():
         return []
     lines = [l.strip() for l in text.split("\n")]
@@ -1695,7 +1880,22 @@ def extract_footings(text: str, page_number: int) -> list[Footing]:
             dim_match = DIMENSION_LINE.match(lines[i + 1])
             height_match = NUMBER_LINE.match(lines[i + 2])
             if dim_match and height_match:
-                refs = re.findall(r"P\d+", ref_line)
+                refs = re.findall(r"P\d+", ref_line, flags=re.IGNORECASE)
+                mesh_specs: list[FootingRebarSpec] = []
+                j = i + 3
+                while j < len(lines) and len(mesh_specs) < 4:
+                    if FOOTING_REF_LINE.match(lines[j]) and DIMENSION_LINE.match(lines[j + 1] if j + 1 < len(lines) else ""):
+                        break
+                    spec = _parse_footing_mesh_spec(lines[j])
+                    if spec:
+                        mesh_specs.append(spec)
+                        j += 1
+                        continue
+                    # Linhas intercalares (cabeçalhos repetidos, vazios) — saltar sem abortar.
+                    if not lines[j] or re.search(r"armadur|refer|dimens|altura", lines[j], re.IGNORECASE):
+                        j += 1
+                        continue
+                    break
                 footings.append(
                     Footing(
                         refs=refs,
@@ -1703,9 +1903,13 @@ def extract_footings(text: str, page_number: int) -> list[Footing]:
                         length_cm=float(dim_match.group(2)),
                         height_cm=_to_float(lines[i + 2]),
                         page=page_number,
+                        bottom_x=mesh_specs[0] if len(mesh_specs) > 0 else None,
+                        bottom_y=mesh_specs[1] if len(mesh_specs) > 1 else None,
+                        top_x=mesh_specs[2] if len(mesh_specs) > 2 else None,
+                        top_y=mesh_specs[3] if len(mesh_specs) > 3 else None,
                     )
                 )
-                i += 3
+                i = j if j > i + 3 else i + 3
                 continue
         i += 1
     return footings
@@ -1746,6 +1950,7 @@ def extract_beam_spans(text: str, page_number: int) -> list[BeamSpan]:
     # comprimentos em metros (decimais) e, logo a seguir, o mesmo número de secções "LxA"
     # (cm) repetidas — um par comprimento/secção por vão do pórtico.
     lines = [l.strip() for l in text.split("\n")]
+    floor, _ = detect_floor_label(text)
     portico_indices = [i for i, l in enumerate(lines) if PORTICO_LABEL_LINE.match(l)]
     spans: list[BeamSpan] = []
     for pos, idx in enumerate(portico_indices):
@@ -1782,7 +1987,16 @@ def extract_beam_spans(text: str, page_number: int) -> list[BeamSpan]:
             continue
 
         for (width, height), length in zip(section_run, lengths):
-            spans.append(BeamSpan(portico=portico_name, width_cm=width, height_cm=height, length_m=length, page=page_number))
+            spans.append(
+                BeamSpan(
+                    portico=portico_name,
+                    width_cm=width,
+                    height_cm=height,
+                    length_m=length,
+                    page=page_number,
+                    floor=floor,
+                )
+            )
     return spans
 
 
@@ -1852,6 +2066,14 @@ def extract_slab_rebar_layer(text: str) -> SlabRebarLayer | None:
     if not all_specs:
         return None
 
+    # Sem indicaÃ§Ã£o explÃ­cita X/Y, vÃ¡rios diÃ¢metros representam zonas/posiÃ§Ãµes diferentes,
+    # nÃ£o uma malha uniforme. Devolver a chamada dominante seria tecnicamente enganador; os
+    # pesos por diÃ¢metro continuam preservados no resumo da laje para compra e orÃ§amento.
+    distinct_diameters = {round(diameter, 2) for diameter, _spacing in all_specs}
+    has_directional_evidence = bool(directional["x"] or directional["y"])
+    if len(distinct_diameters) > 1 and not has_directional_evidence:
+        return None
+
     dominant = Counter((round(d, 2), round(s, 2)) for d, s in all_specs).most_common(1)[0][0]
 
     def dominant_for(direction: str) -> tuple[float, float]:
@@ -1864,10 +2086,16 @@ def extract_slab_rebar_layer(text: str) -> SlabRebarLayer | None:
 
 
 def extract_structural_material_specs(text: str) -> tuple[str | None, str | None, float | None]:
-    concrete_match = CONCRETE_CLASS_PATTERN.search(text)
+    eurocode_match = CONCRETE_EUROCODE_PATTERN.search(text)
+    concrete_match = CONCRETE_B_PATTERN.search(text)
     steel_match = STEEL_GRADE_PATTERN.search(text)
     cover_match = COVER_PATTERN.search(text)
-    concrete_class = re.sub(r"[^A-Z0-9]", "", concrete_match.group(1).upper()) if concrete_match else None
+    if eurocode_match:
+        concrete_class = f"C{eurocode_match.group(1)}/{eurocode_match.group(2)}"
+    elif concrete_match:
+        concrete_class = re.sub(r"[^A-Z0-9]", "", concrete_match.group(1).upper())
+    else:
+        concrete_class = None
     if steel_match:
         compact_grade = re.sub(r"[^A-Z0-9]", "", steel_match.group(1).upper())
         steel_grade = f"{compact_grade[0]}-{compact_grade[1:]}"
@@ -1996,8 +2224,13 @@ def summarise_slabs(slabs: list[Slab]) -> list[SlabSummary]:
             target["top_rebar"] = slab.rebar
         elif slab.layer == "inferior" and slab.rebar:
             target["bottom_rebar"] = slab.rebar
-        target["concrete_class"] = target["concrete_class"] or slab.concrete_class
-        target["steel_grade"] = target["steel_grade"] or slab.steel_grade
+        if slab.layer in ("inferior", "superior"):
+            # A folha de armadura Ã© mais especÃ­fica do que uma nota global da memÃ³ria.
+            target["concrete_class"] = slab.concrete_class or target["concrete_class"]
+            target["steel_grade"] = slab.steel_grade or target["steel_grade"]
+        else:
+            target["concrete_class"] = target["concrete_class"] or slab.concrete_class
+            target["steel_grade"] = target["steel_grade"] or slab.steel_grade
         target["cover_cm"] = target["cover_cm"] if target["cover_cm"] is not None else slab.cover_cm
 
     return [
@@ -2075,7 +2308,7 @@ def build_structural_summary(
     if slab_map_steel > 0:
         slabs_steel = slab_map_steel
 
-    beam_groups = _build_beam_groups(beam_spans, slab_summaries, beams_steel)
+    beam_groups = _build_beam_groups(beam_spans, slab_summaries, beams_steel, rebar_schedules)
 
     return StructuralSummary(
         footings_count=len(footing_refs),
@@ -2134,10 +2367,13 @@ def parse_pdf(file_bytes: bytes, progress_callback=None, detection_tags: list[st
         page_number = page_index + 1
         document_text_parts.append(text)
 
-        if not metadata.especialidade:
-            page_metadata = extract_metadata(text)
-            if any(v for v in page_metadata.__dict__.values()):
-                metadata = page_metadata
+        page_metadata = extract_metadata(text)
+        # Um carimbo pode ter o proprietÃ¡rio na capa e especialidade/conteÃºdo apenas nas
+        # pranchas. Completa campo a campo, em vez de substituir o objecto inteiro ou parar na
+        # primeira pÃ¡gina parcialmente preenchida.
+        for field_name, value in page_metadata.__dict__.items():
+            if value and not getattr(metadata, field_name):
+                setattr(metadata, field_name, value)
 
         if is_room_area_page(text):
             plan_type = detect_plan_type(text)
@@ -2196,6 +2432,30 @@ def parse_pdf(file_bytes: bytes, progress_callback=None, detection_tags: list[st
 
     classifications = classify_document_pages(document_text_parts, page_hints)
     document_analysis = build_document_analysis(classifications, document_text_parts)
+    if document_analysis.sections:
+        first_identity = next(
+            (section.identity for section in document_analysis.sections if section.identity),
+            None,
+        )
+        if first_identity:
+            metadata.proprietario = first_identity.owner or metadata.proprietario
+            location = first_identity.location or ""
+            bairro_match = re.search(r"(?i)\bBairro\s+(.+?)(?=\s*[-,]\s*Cidade|$)", location)
+            city_match = re.search(r"(?i)\bCidade\s+de\s+(.+?)(?=\s*[-,]|$)", location)
+            if bairro_match:
+                metadata.bairro = bairro_match.group(1).strip()
+            if city_match:
+                metadata.distrito = city_match.group(1).strip()
+            elif not metadata.distrito:
+                metadata.distrito = location or None
+    if document_analysis.is_multi_discipline:
+        # ConteÃºdo, nÃºmero e escala pertencem a cada prancha; num PDF composto, expor o
+        # primeiro valor encontrado mistura especialidades e pode atÃ© recuperar texto oculto
+        # de um carimbo-modelo. A informaÃ§Ã£o detalhada permanece nas secÃ§Ãµes/pÃ¡ginas.
+        metadata.especialidade = "MULTIDISCIPLINAR"
+        metadata.conteudo = None
+        metadata.numero = None
+        metadata.escala = None
     normalised_document = _normalise_key("\n".join(document_text_parts))
     document_analysis.matched_tags = sorted({
         tag.strip().lower()
@@ -2224,6 +2484,18 @@ def parse_pdf(file_bytes: bytes, progress_callback=None, detection_tags: list[st
     beam_spans = _on_struct(beam_spans)
     staircases = _on_struct(staircases)
     slabs = _on_struct(slabs)
+
+    # Materiais e recobrimentos aparecem muitas vezes na memÃ³ria estrutural, nÃ£o em todas as
+    # pranchas de laje. Completa apenas campos ausentes; nunca substitui uma especificaÃ§Ã£o
+    # explÃ­cita da folha por uma premissa global.
+    structural_text = "\n".join(
+        text for page, text in enumerate(document_text_parts, start=1) if page in structure_pages
+    )
+    global_concrete, global_steel, global_slab_cover = extract_structural_material_specs(structural_text)
+    for slab in slabs:
+        slab.concrete_class = slab.concrete_class or global_concrete
+        slab.steel_grade = slab.steel_grade or global_steel
+        slab.cover_cm = slab.cover_cm if slab.cover_cm is not None else global_slab_cover
 
     default_floor = detect_document_default_floor("\n".join(document_text_parts))
     page_texts_map = {index + 1: text for index, text in enumerate(document_text_parts)}

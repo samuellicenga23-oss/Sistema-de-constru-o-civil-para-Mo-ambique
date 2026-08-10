@@ -153,29 +153,37 @@ def resolve_rebar_cascade(
     slabs: list,
 ) -> tuple[list, CascadeResult]:
     from rebar_estimate import (
+        combine_resumo_with_total,
         estimate_beam_rebar,
         estimate_footing_rebar,
         estimate_slab_rebar_from_area,
         extract_rebar_from_length_callouts,
         merge_rebar_lines,
+        steel_family_of,
     )
 
     structure_texts = {page: text for page, text in page_texts.items() if page in structure_pages}
 
-    def level_total_plus10():
-        items = merge_rebar_lines(total_plus10_lines)
+    def level_resumo_por_familia():
+        # Resumo Aço (Fundação / Pilares / Vigas / Lajes / Escadas) tem prioridade.
+        # Total+10% por elemento só completa famílias que o resumo não cobriu.
+        items = combine_resumo_with_total(peso_plus10_lines, total_plus10_lines)
+        by_family = {}
+        for line in items:
+            fam = steel_family_of(line.element)
+            by_family[fam] = by_family.get(fam, 0.0) + float(line.weight_kg or 0)
+        detail = ", ".join(f"{k} {v:.0f}" for k, v in sorted(by_family.items()) if v > 0)
         total = sum(line.weight_kg for line in items)
-        return items, f"{len(items)} linha(s), {total:.0f} kg"
+        return items, f"{len(items)} linha(s), {total:.0f} kg ({detail})"
 
     def level_explicit_lengths_and_peso():
-        # Peso+10% (kg) e chamadas C= são ambos dados do projecto — não estimativa.
         callouts = []
         pages_with_peso = {line.page for line in peso_plus10_lines}
         for page, text in structure_texts.items():
             if page in pages_with_peso:
                 continue
             callouts.extend(extract_rebar_from_length_callouts(text, page))
-        items = merge_rebar_lines([*peso_plus10_lines, *callouts])
+        items = merge_rebar_lines([*peso_plus10_lines, *callouts, *total_plus10_lines])
         total = sum(line.weight_kg for line in items)
         return items, f"{len(items)} linha(s), {total:.0f} kg"
 
@@ -191,8 +199,8 @@ def resolve_rebar_cascade(
     return run_cascade(
         "aco",
         [
-            (1, "resumo Total+10% (kg)", level_total_plus10),
-            (2, "Peso+10% e/ou comprimentos C=", level_explicit_lengths_and_peso),
+            (1, "Resumo Aço por família (+ Total+10% residual)", level_resumo_por_familia),
+            (2, "Peso+10% / Total+10% / comprimentos C=", level_explicit_lengths_and_peso),
             (3, "Ø + espaçamento × geometria", level_geometry),
         ],
         min_count=1,
