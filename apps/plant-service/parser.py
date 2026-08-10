@@ -368,6 +368,58 @@ class DocumentSection:
 
 
 @dataclass
+class TechnicalQualityIssue:
+    code: str
+    severity: str
+    scope: str
+    message: str
+    pages: list[int] = field(default_factory=list)
+    requires_confirmation: bool = False
+
+
+@dataclass
+class HydroPipeEvidence:
+    system: str
+    material: str | None
+    diameter_mm: float | None
+    diameter_inch: str | None
+    page: int
+    occurrences: int
+    evidence_kind: str
+    measured_length_m: float | None = None
+    confidence: float = 0.0
+    floor: str | None = None
+    measurement_basis: str | None = None
+    trace_colour: str | None = None
+
+
+@dataclass
+class HydroEquipmentEvidence:
+    kind: str
+    page: int
+    occurrences: int
+    evidence_kind: str
+    capacity_l: float | None = None
+    confidence: float = 0.0
+    quantity: int | None = None
+    code: str | None = None
+    floor: str | None = None
+    source: str = "text_evidence"
+    requires_confirmation: bool = True
+
+
+@dataclass
+class HydrosanitarySummary:
+    systems: list[str] = field(default_factory=list)
+    pipes: list[HydroPipeEvidence] = field(default_factory=list)
+    equipment: list[HydroEquipmentEvidence] = field(default_factory=list)
+    septic_tank_detected: bool = False
+    pool_detected: bool = False
+    quantitative_coverage: str = "evidence_only"
+    requires_confirmation: bool = True
+
+
+@dataclass
 class DocumentAnalysis:
     page_count: int
     is_multi_discipline: bool
@@ -376,6 +428,9 @@ class DocumentAnalysis:
     identity_conflicts: list[DocumentIdentityConflict] = field(default_factory=list)
     requires_identity_confirmation: bool = False
     identity_confirmed: bool = False
+    quality_issues: list[TechnicalQualityIssue] = field(default_factory=list)
+    requires_technical_confirmation: bool = False
+    hydrosanitary_summary: HydrosanitarySummary | None = None
 
 
 @dataclass
@@ -736,6 +791,10 @@ ROOM_PATTERN = re.compile(
 AREA_ONLY_PATTERN = re.compile(
     rf"(?i)^\s*(?:(?:{AREA_LABEL_PATTERN})(?!\w)\s*[:=\.\-]?\s*)?"
     rf"(?P<area>\d{{1,4}}(?:[.,]\d{{1,4}})?)\s*{AREA_UNIT_PATTERN}\s*$"
+)
+PERIMETER_ONLY_PATTERN = re.compile(
+    r"(?i)^\s*(?:P(?:ER[IÍ]METRO)?|PERIMETER)\s*[:=]\s*"
+    r"(?P<perimeter>\d{1,4}(?:[.,]\d{1,3})?)\s*m\s*$"
 )
 
 # Último recurso para PDFs que não colocam etiquetas de área na planta, mas incluem um quadro
@@ -1100,6 +1159,24 @@ def extract_openings_spatial(page, page_number: int, text: str) -> list[Opening]
         if code_match:
             codes.append((centre, _normalise_opening_code(f"{code_match.group('prefix')}-{code_match.group('number')}")))
 
+    positioned_lines = _positioned_text_lines(page)
+    room_labels: list[tuple[float, float, str]] = []
+    for nx0, ny0, nx1, ny1, name_text in positioned_lines:
+        identity = _room_identity(name_text)
+        if not identity:
+            continue
+        name_centre = ((nx0 + nx1) / 2, (ny0 + ny1) / 2)
+        has_nearby_area = any(
+            AREA_ONLY_PATTERN.match(area_text)
+            and -2 <= ay0 - ny1 <= 42
+            and abs(((ax0 + ax1) / 2) - name_centre[0]) <= max(120.0, (ax1 - ax0) * 1.75)
+            for ax0, ay0, ax1, _ay1, area_text in positioned_lines
+        )
+        if not has_nearby_area:
+            continue
+        name, number = identity
+        room_labels.append((name_centre[0], name_centre[1], f"{name} {number}".strip() if number else name))
+
     def nearby_code(cx: float, cy: float, kind: str) -> str | None:
         allowed = ("J", "W", "WD") if kind == "janela" else ("P", "D", "DOO")
         candidates = [
@@ -1109,9 +1186,21 @@ def extract_openings_spatial(page, page_number: int, text: str) -> list[Opening]
         ]
         return min(candidates)[1] if candidates else None
 
+    def nearby_room(cx: float, cy: float) -> str:
+        candidates = [
+            (((x - cx) ** 2 + (y - cy) ** 2) ** 0.5, label)
+            for x, y, label in room_labels
+            if abs(x - cx) <= 150 and abs(y - cy) <= 150
+        ]
+        if not candidates:
+            return "desconhecida"
+        distance, label = min(candidates)
+        return f"Próximo de {label}" if distance <= 160 else "desconhecida"
+
+    drawings = page.get_drawings()
     candidates: list[tuple[Opening, tuple[float, float]]] = []
     door_centres: list[tuple[float, float]] = []
-    for drawing in page.get_drawings():
+    for drawing in drawings:
         for item in drawing["items"]:
             if item[0] != "c":
                 continue
@@ -1172,7 +1261,7 @@ def extract_openings_spatial(page, page_number: int, text: str) -> list[Opening]
                 sill_height_m=0,
                 quantity=1,
                 floor=floor,
-                location="desconhecida",
+                location=nearby_room(cx, cy),
                 material=None,
                 page=page_number,
                 confidence=confidence,
@@ -1181,6 +1270,87 @@ def extract_openings_spatial(page, page_number: int, text: str) -> list[Opening]
             ), (cx, cy)))
 
     # Janelas (e portas sem arco) só entram automaticamente quando existe um código inequívoco.
+    # Janelas sem código: em muitas plantas ArchiCAD, cada folha de janela é desenhada como
+    # 5-9 linhas paralelas, próximas e com os mesmos extremos, inseridas na parede. O detector
+    # converte somente a largura demonstrada pela escala; altura e localização ficam pendentes.
+    if metres_per_point:
+        axis_segments: list[tuple[str, float, float, float]] = []
+        for drawing in drawings:
+            for item in drawing["items"]:
+                if item[0] != "l":
+                    continue
+                p1, p2 = item[1], item[2]
+                dx, dy = abs(p2.x - p1.x), abs(p2.y - p1.y)
+                if dy <= 0.35 and 10 <= dx <= 90:
+                    axis_segments.append(("h", min(p1.x, p2.x), max(p1.x, p2.x), (p1.y + p2.y) / 2))
+                elif dx <= 0.35 and 10 <= dy <= 90:
+                    axis_segments.append(("v", min(p1.y, p2.y), max(p1.y, p2.y), (p1.x + p2.x) / 2))
+
+        frame_parts: list[tuple[str, float, float, float]] = []
+        consumed: set[int] = set()
+        for index, base in enumerate(axis_segments):
+            if index in consumed:
+                continue
+            orientation, start, end, cross = base
+            group = [
+                (candidate_index, candidate)
+                for candidate_index, candidate in enumerate(axis_segments)
+                if candidate[0] == orientation
+                and abs(candidate[1] - start) <= 2.5
+                and abs(candidate[2] - end) <= 2.5
+                and abs(candidate[3] - cross) <= 3.5
+            ]
+            cross_values = [candidate[3] for _, candidate in group]
+            if len(group) < 5 or len({round(value, 1) for value in cross_values}) < 3:
+                continue
+            cross_span = max(cross_values) - min(cross_values)
+            if not 0.6 <= cross_span <= 3.5:
+                continue
+            consumed.update(candidate_index for candidate_index, _candidate in group)
+            frame_parts.append((orientation, start, end, sum(cross_values) / len(cross_values)))
+
+        # Uma caixilharia com duas folhas aparece como partes contíguas. Junta-as antes de
+        # converter para metros para representar uma janela, não cada folha individual.
+        merged_parts: list[tuple[str, float, float, float]] = []
+        for part in sorted(frame_parts, key=lambda value: (value[0], value[3], value[1])):
+            orientation, start, end, cross = part
+            for merged_index, current in enumerate(merged_parts):
+                c_orientation, c_start, c_end, c_cross = current
+                gap = max(start - c_end, c_start - end, 0)
+                if orientation == c_orientation and abs(cross - c_cross) <= 3.5 and gap <= 4:
+                    merged_parts[merged_index] = (orientation, min(start, c_start), max(end, c_end), (cross + c_cross) / 2)
+                    break
+            else:
+                merged_parts.append(part)
+
+        for orientation, start, end, cross in merged_parts:
+            width_m = round((end - start) * metres_per_point, 2)
+            if not 0.45 <= width_m <= 4.5:
+                continue
+            cx, cy = ((start + end) / 2, cross) if orientation == "h" else (cross, (start + end) / 2)
+            if not (
+                page.rect.width * 0.08 < cx < page.rect.width * 0.85
+                and page.rect.height * 0.12 < cy < page.rect.height * 0.85
+            ):
+                continue
+            if any((cx - x) ** 2 + (cy - y) ** 2 <= 45 ** 2 for x, y in door_centres):
+                continue
+            candidates.append((Opening(
+                kind="janela",
+                code=nearby_code(cx, cy, "janela"),
+                width_m=width_m,
+                height_m=None,
+                sill_height_m=None,
+                quantity=1,
+                floor=floor,
+                location=nearby_room(cx, cy),
+                material=None,
+                page=page_number,
+                confidence=0.58,
+                source="geometria",
+                needs_confirmation=True,
+            ), (cx, cy)))
+
     for (cx, cy), code in codes:
         kind = "janela" if code.startswith(("J", "W")) else "porta"
         if kind == "porta" and any((cx - x) ** 2 + (cy - y) ** 2 <= 55 ** 2 for x, y in door_centres):
@@ -1203,7 +1373,7 @@ def extract_openings_spatial(page, page_number: int, text: str) -> list[Opening]
             sill_height_m=None if kind == "janela" else 0,
             quantity=1,
             floor=floor,
-            location="desconhecida",
+            location=nearby_room(cx, cy),
             material=None,
             page=page_number,
             confidence=0.76,
@@ -1242,7 +1412,7 @@ def extract_openings_spatial(page, page_number: int, text: str) -> list[Opening]
                 sill_height_m=None,
                 quantity=1,
                 floor=floor,
-                location="desconhecida",
+                location=nearby_room(cx, cy),
                 material=None,
                 page=page_number,
                 confidence=0.48,
@@ -1253,7 +1423,7 @@ def extract_openings_spatial(page, page_number: int, text: str) -> list[Opening]
     # Agrupa ocorrências iguais na mesma prancha sem apagar portas realmente repetidas.
     grouped: dict[tuple, Opening] = {}
     for opening, _centre in candidates:
-        key = (opening.kind, opening.code, opening.width_m, opening.height_m, opening.floor, opening.page)
+        key = (opening.kind, opening.code, opening.width_m, opening.height_m, opening.floor, opening.location, opening.page)
         if key in grouped:
             grouped[key].quantity += 1
         else:
@@ -1274,7 +1444,17 @@ def merge_openings(openings: list[Opening], document_text: str) -> list[Opening]
             continue
         if opening.material is None:
             opening.material = defaults[opening.kind]
-        key = (opening.source, opening.page, opening.kind, opening.code, opening.width_m, opening.height_m)
+        key = (
+            opening.source,
+            opening.page,
+            opening.kind,
+            opening.code,
+            opening.width_m,
+            opening.height_m,
+            opening.floor,
+            opening.location,
+            opening.designation,
+        )
         if key in seen:
             continue
         seen.add(key)
@@ -1580,7 +1760,28 @@ def extract_rooms_spatial(page, page_number: int, text: str | None = None, page_
             _, (name, number), name_bbox = min(candidates, key=lambda candidate: candidate[0])
             if not _bbox_has_visible_ink(rendered_page, page.rect, name_bbox, render_scale):
                 continue
-            room = Room(name=name, number=number, area_m2=area, page=page_number, floor=floor_label)
+            tag_centre_y = (name_bbox[1] + ay1) / 2
+            perimeter_candidates: list[tuple[float, float]] = []
+            for px0, py0, px1, py1, perimeter_text in lines:
+                perimeter_match = PERIMETER_ONLY_PATTERN.match(perimeter_text)
+                if not perimeter_match:
+                    continue
+                perimeter = _to_float(perimeter_match.group("perimeter"))
+                if not 1 <= perimeter <= 10_000:
+                    continue
+                px, py = (px0 + px1) / 2, (py0 + py1) / 2
+                distance = ((px - area_centre) ** 2 + (py - tag_centre_y) ** 2) ** 0.5
+                if distance <= 100:
+                    perimeter_candidates.append((distance, perimeter))
+            perimeter_m = min(perimeter_candidates)[1] if perimeter_candidates else None
+            room = Room(
+                name=name,
+                number=number,
+                area_m2=area,
+                page=page_number,
+                floor=floor_label,
+                perimeter_m=perimeter_m,
+            )
             positioned_rooms.append((room, area_centre))
 
     positioned_rooms = _prefer_dimensioned_view(positioned_rooms, lines, page.rect)
@@ -2339,6 +2540,633 @@ def build_structural_summary(
     )
 
 
+def _hydro_system_for_text(text: str) -> str:
+    normalised = _normalise_key(text)
+    if "AGUAS PLUVIAIS" in normalised or "DRENAGEM PLUVIAL" in normalised:
+        return "aguas_pluviais"
+    if any(token in normalised for token in ("AGUAS RESIDUAIS", "AGUAS NEGRAS", "AGUAS BRANCAS")):
+        return "aguas_residuais"
+    if "REDE DE INCENDIO" in normalised or "COMBATE A INCENDIO" in normalised:
+        return "incendio"
+    if "VENTILACAO" in normalised:
+        return "ventilacao"
+    if any(token in normalised for token in ("ABASTECIMENTO", "REDE DE AGUA", "AGUA FRIA")):
+        return "agua_fria"
+    if "PISCINA" in normalised:
+        return "piscina"
+    return "hidrossanitario"
+
+
+def _hydro_evidence_kind(text: str) -> str:
+    normalised = _normalise_key(text)
+    if any(token in normalised for token in (
+        "ESPECIFICACOES TECNICAS", "MEMORIA DESCRITIVA", "CALCULO", "DIMENSIONAMENTO",
+    )):
+        return "especificacao"
+    if any(token in normalised for token in ("PORMENOR", "DETALHE", "CORTE", "BOMBA DA PISCINA")):
+        return "detalhe"
+    if any(token in normalised for token in ("ABASTECIMENTO DE AGUA", "DRENAGEM DE AGUAS", "REDE DE", "PISCINA")):
+        return "planta"
+    return "referencia"
+
+
+def _drawing_scale(text: str) -> int | None:
+    values = [int(value) for value in re.findall(r"\b1\s*:\s*(25|50|75|100|125|150|200|250|500)\b", text)]
+    return Counter(values).most_common(1)[0][0] if values else None
+
+
+def _pipe_colour_family(colour: tuple[float, float, float] | None) -> str | None:
+    if not colour:
+        return None
+    red, green, blue = colour
+    if red >= 0.75 and red >= green * 1.8 and red >= blue * 1.8:
+        return "red"
+    if blue >= 0.48 and blue >= red * 2.0 and blue >= green * 1.45:
+        return "blue"
+    return None
+
+
+def _vector_pipe_colour_family(colour: tuple[float, float, float] | None) -> str | None:
+    family = _pipe_colour_family(colour)
+    if family == "blue" and colour and colour[2] < 0.75:
+        return None
+    return family
+
+
+def _colour_from_int(value: int) -> tuple[float, float, float]:
+    return (((value >> 16) & 255) / 255, ((value >> 8) & 255) / 255, (value & 255) / 255)
+
+
+def _diameter_from_coloured_label(raw: str, system: str) -> tuple[float | None, str | None]:
+    fraction = re.search(r"Ø\s*((?:\d+\s+)?\d+\s*/\s*\d+|[½¾¼⅜⅝])", raw, re.IGNORECASE)
+    if fraction:
+        return None, re.sub(r"\s+", "", fraction.group(1))
+    numeric = re.search(r"Ø\s*(\d+(?:[.,]\d+)?)", raw, re.IGNORECASE)
+    if not numeric:
+        return None, None
+    value = float(numeric.group(1).replace(",", "."))
+    # Alguns desenhos CAD escrevem Ø0.75 para a rede de 75 mm. Só normalizamos este caso
+    # quando a própria prancha é de drenagem e não existe símbolo de polegadas.
+    if system == "aguas_residuais" and 0 < value < 2:
+        value *= 100
+    return value, None
+
+
+def _coloured_pipe_labels(page, system: str) -> dict[str, tuple[float | None, str | None, str | None]]:
+    candidates: dict[str, list[tuple[float | None, str | None, str | None]]] = defaultdict(list)
+    for block in page.get_text("dict").get("blocks", []):
+        for line in block.get("lines", []):
+            for span in line.get("spans", []):
+                raw = str(span.get("text") or "")
+                if "Ø" not in raw:
+                    continue
+                family = _pipe_colour_family(_colour_from_int(int(span.get("color") or 0)))
+                if not family:
+                    continue
+                diameter_mm, diameter_inch = _diameter_from_coloured_label(raw, system)
+                if diameter_mm is None and diameter_inch is None:
+                    continue
+                material = next((item for item in ("HDPE", "PEAD", "UPVC", "PVC", "PPR") if item in raw.upper()), None)
+                candidates[family].append((diameter_mm, diameter_inch, material))
+    return {
+        family: Counter(values).most_common(1)[0][0]
+        for family, values in candidates.items()
+        if values
+    }
+
+
+def _line_length(item) -> float:
+    if not item or item[0] != "l":
+        return 0.0
+    p1, p2 = item[1], item[2]
+    return ((p2.x - p1.x) ** 2 + (p2.y - p1.y) ** 2) ** 0.5
+
+
+def _vector_length_by_colour(page) -> dict[str, tuple[float, str]]:
+    stroke_groups: dict[tuple[str, float], float] = defaultdict(float)
+    filled_lengths: dict[str, float] = defaultdict(float)
+    for drawing in page.get_drawings():
+        stroke = drawing.get("color")
+        stroke_family = _vector_pipe_colour_family(tuple(float(value) for value in stroke) if stroke else None)
+        width = round(float(drawing.get("width") or 0), 3)
+        if stroke_family and drawing.get("type") == "s" and 0.35 <= width <= 0.9:
+            for item in drawing.get("items", []):
+                length = _line_length(item)
+                if length >= 5:
+                    stroke_groups[(stroke_family, width)] += length
+
+        fill = drawing.get("fill")
+        fill_family = _vector_pipe_colour_family(tuple(float(value) for value in fill) if fill else None)
+        if not fill_family or drawing.get("type") != "f":
+            continue
+        rect = drawing.get("rect")
+        if not rect:
+            continue
+        long_side = max(float(rect.width), float(rect.height))
+        short_side = min(float(rect.width), float(rect.height))
+        if long_side < 3 or short_side > 3.5 or long_side / max(short_side, 0.01) < 3:
+            continue
+        edge_length = max((_line_length(item) for item in drawing.get("items", [])), default=0.0)
+        filled_lengths[fill_family] += max(edge_length, long_side)
+
+    measured: dict[str, tuple[float, str]] = {}
+    families = {family for family, _width in stroke_groups} | set(filled_lengths)
+    for family in families:
+        stroke_candidates = [
+            (length, "vector_stroke")
+            for (candidate_family, _width), length in stroke_groups.items()
+            if candidate_family == family
+        ]
+        fill_candidate = (filled_lengths.get(family, 0.0), "vector_fill")
+        length, basis = max(stroke_candidates + [fill_candidate], key=lambda item: item[0])
+        if length >= 10:
+            measured[family] = (length, basis)
+    return measured
+
+
+def _eligible_vector_segments(page) -> dict[str, tuple[list[tuple[tuple[float, float], tuple[float, float]]], str]]:
+    stroke_groups: dict[tuple[str, float], list[tuple[tuple[float, float], tuple[float, float]]]] = defaultdict(list)
+    fill_groups: dict[str, list[tuple[tuple[float, float], tuple[float, float]]]] = defaultdict(list)
+    for drawing in page.get_drawings():
+        stroke = drawing.get("color")
+        family = _vector_pipe_colour_family(tuple(float(value) for value in stroke) if stroke else None)
+        width = round(float(drawing.get("width") or 0), 3)
+        if family and drawing.get("type") == "s" and 0.35 <= width <= 0.9:
+            for item in drawing.get("items", []):
+                if _line_length(item) < 5:
+                    continue
+                p1, p2 = item[1], item[2]
+                stroke_groups[(family, width)].append(((p1.x, p1.y), (p2.x, p2.y)))
+
+        fill = drawing.get("fill")
+        family = _vector_pipe_colour_family(tuple(float(value) for value in fill) if fill else None)
+        rect = drawing.get("rect")
+        if not family or drawing.get("type") != "f" or not rect:
+            continue
+        long_side = max(float(rect.width), float(rect.height))
+        short_side = min(float(rect.width), float(rect.height))
+        if long_side < 3 or short_side > 3.5 or long_side / max(short_side, 0.01) < 3:
+            continue
+        edges = [item for item in drawing.get("items", []) if item[0] == "l"]
+        longest = max(edges, key=_line_length, default=None)
+        if not longest:
+            continue
+        p1, p2 = longest[1], longest[2]
+        # O eixo está a meia espessura do polígono; para topologia a pequena translação é
+        # irrelevante porque os extremos são agrupados com tolerância.
+        fill_groups[family].append(((p1.x, p1.y), (p2.x, p2.y)))
+
+    result: dict[str, tuple[list[tuple[tuple[float, float], tuple[float, float]]], str]] = {}
+    families = {family for family, _width in stroke_groups} | set(fill_groups)
+    for family in families:
+        stroke_options = [
+            (segments, "vector_stroke")
+            for (candidate, _width), segments in stroke_groups.items()
+            if candidate == family
+        ]
+        fill_option = (fill_groups.get(family, []), "vector_fill")
+        segments, basis = max(
+            stroke_options + [fill_option],
+            key=lambda option: sum(((b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2) ** 0.5 for a, b in option[0]),
+        )
+        if segments:
+            result[family] = (segments, basis)
+    return result
+
+
+def _network_topology_counts(segments: list[tuple[tuple[float, float], tuple[float, float]]]) -> dict[str, int]:
+    nodes: list[tuple[float, float]] = []
+    adjacency: dict[int, list[int]] = defaultdict(list)
+
+    def node_for(point: tuple[float, float]) -> int:
+        for index, candidate in enumerate(nodes):
+            if ((candidate[0] - point[0]) ** 2 + (candidate[1] - point[1]) ** 2) ** 0.5 <= 3.5:
+                return index
+        nodes.append(point)
+        return len(nodes) - 1
+
+    for start, end in segments:
+        a, b = node_for(start), node_for(end)
+        if a == b:
+            continue
+        adjacency[a].append(b)
+        adjacency[b].append(a)
+
+    result = {"terminal": 0, "curva": 0, "te": 0, "juncao": 0}
+    for node, neighbours in adjacency.items():
+        unique = list(dict.fromkeys(neighbours))
+        degree = len(unique)
+        if degree == 1:
+            result["terminal"] += 1
+        elif degree == 2:
+            origin = nodes[node]
+            vectors = [(nodes[other][0] - origin[0], nodes[other][1] - origin[1]) for other in unique]
+            lengths = [max((x * x + y * y) ** 0.5, 0.001) for x, y in vectors]
+            cosine = (vectors[0][0] * vectors[1][0] + vectors[0][1] * vectors[1][1]) / (lengths[0] * lengths[1])
+            if cosine > -0.985:
+                result["curva"] += 1
+        elif degree == 3:
+            result["te"] += 1
+        elif degree >= 4:
+            result["juncao"] += 1
+    return result
+
+
+def extract_hydro_vector_accessories(page, text: str, page_number: int) -> list[HydroEquipmentEvidence]:
+    evidence_kind = _hydro_evidence_kind(text)
+    system = _hydro_system_for_text(text)
+    if evidence_kind != "planta" or system not in {"agua_fria", "aguas_residuais", "aguas_pluviais"} or not _drawing_scale(text):
+        return []
+    labels = _coloured_pipe_labels(page, system)
+    equipment: list[HydroEquipmentEvidence] = []
+    for family, (segments, basis) in _eligible_vector_segments(page).items():
+        # Os polígonos de drenagem medem bem o comprimento, mas os seus extremos ficam
+        # deslocados pela espessura e ainda não formam uma topologia segura para acessórios.
+        if basis != "vector_stroke":
+            continue
+        diameter_mm, diameter_inch, _material = labels.get(family, (None, None, None))
+        suffix = f"_{int(diameter_mm)}mm" if diameter_mm is not None else f"_{diameter_inch}pol" if diameter_inch else ""
+        for kind, quantity in _network_topology_counts(segments).items():
+            if quantity <= 0:
+                continue
+            equipment.append(HydroEquipmentEvidence(
+                kind=f"{kind}{suffix}",
+                page=page_number,
+                occurrences=quantity,
+                evidence_kind="planta",
+                confidence=0.68,
+                quantity=quantity,
+                code=None,
+                floor=None,
+                source="vector_topology",
+                requires_confirmation=True,
+            ))
+    return equipment
+
+
+def extract_hydro_coded_equipment(page, text: str, page_number: int) -> list[HydroEquipmentEvidence]:
+    normalised = _normalise_key(text)
+    evidence_kind = _hydro_evidence_kind(text)
+    if evidence_kind != "planta" and "PISCINA" not in normalised:
+        return []
+    equipment: list[HydroEquipmentEvidence] = []
+    if "ABASTECIMENTO DE AGUA" in normalised:
+        for code in sorted(set(re.findall(r"\bB\d{2}\b", text, re.IGNORECASE))):
+            equipment.append(HydroEquipmentEvidence(
+                kind="ponto_abastecimento", page=page_number, occurrences=1, evidence_kind="planta",
+                confidence=0.9, quantity=1, code=code.upper(), source="codigo_planta", requires_confirmation=False,
+            ))
+        for code in sorted(set(re.findall(r"\bP\d{2}\b", text, re.IGNORECASE))):
+            equipment.append(HydroEquipmentEvidence(
+                kind="ligacao_principal", page=page_number, occurrences=1, evidence_kind="planta",
+                confidence=0.86, quantity=1, code=code.upper(), source="codigo_planta", requires_confirmation=False,
+            ))
+
+    if "PISCINA" in normalised and "TABELA DE SELECCAO" in normalised:
+        component_names = {
+            "1": "filtro_piscina", "2": "bomba_piscina", "3": "valvula_selectora",
+            "4": "skimmer", "5": "regulador_nivel", "6": "boca_impulsao",
+            "7": "aspirador_piscina", "8": "escada_piscina", "9": "quadro_piscina",
+        }
+        counts: Counter[str] = Counter()
+        for block in page.get_text("dict").get("blocks", []):
+            for line in block.get("lines", []):
+                for span in line.get("spans", []):
+                    value = str(span.get("text") or "").strip()
+                    if value not in component_names or not 5.5 <= float(span.get("size") or 0) <= 9.5:
+                        continue
+                    x0, y0, x1, y1 = span.get("bbox")
+                    if page.rect.width * 0.15 <= (x0 + x1) / 2 <= page.rect.width * 0.75 and page.rect.height * 0.15 <= (y0 + y1) / 2 <= page.rect.height * 0.68:
+                        counts[value] += 1
+        for code, quantity in counts.items():
+            equipment.append(HydroEquipmentEvidence(
+                kind=component_names[code], page=page_number, occurrences=quantity, evidence_kind="planta",
+                confidence=0.9, quantity=quantity, code=code, source="simbolo_numerado", requires_confirmation=False,
+            ))
+
+    if "AGUAS RESIDUAIS" in normalised:
+        boxes = 0
+        for drawing in page.get_drawings():
+            fill = drawing.get("fill")
+            rect = drawing.get("rect")
+            if not fill or not rect or max(float(value) for value in fill) > 0.08:
+                continue
+            if 8.5 <= rect.width <= 11 and 8.5 <= rect.height <= 11:
+                boxes += 1
+        if boxes:
+            equipment.append(HydroEquipmentEvidence(
+                kind="caixa_drenagem", page=page_number, occurrences=boxes, evidence_kind="planta",
+                confidence=0.72, quantity=boxes, source="simbolo_geometrico", requires_confirmation=True,
+            ))
+    return equipment
+
+
+def extract_hydro_vector_measurements(page, text: str, page_number: int) -> list[HydroPipeEvidence]:
+    """Mede apenas redes CAD coloridas, com escala declarada e geometria inequívoca."""
+    evidence_kind = _hydro_evidence_kind(text)
+    system = _hydro_system_for_text(text)
+    scale = _drawing_scale(text)
+    if evidence_kind != "planta" or system not in {"agua_fria", "aguas_residuais", "aguas_pluviais"} or not scale:
+        return []
+    labels = _coloured_pipe_labels(page, system)
+    vectors = _vector_length_by_colour(page)
+    metres_per_point = scale * 25.4 / 72 / 1000
+    results: list[HydroPipeEvidence] = []
+    for family, (length_points, basis) in vectors.items():
+        diameter_mm, diameter_inch, material = labels.get(family, (None, None, None))
+        measured_system = system
+        if system == "agua_fria" and family == "red":
+            measured_system = "agua_quente"
+        results.append(HydroPipeEvidence(
+            system=measured_system,
+            material=material,
+            diameter_mm=diameter_mm,
+            diameter_inch=diameter_inch,
+            page=page_number,
+            occurrences=1,
+            evidence_kind="planta",
+            measured_length_m=round(length_points * metres_per_point, 2),
+            confidence=0.84 if labels.get(family) else 0.74,
+            floor=None,
+            measurement_basis=basis,
+            trace_colour=family,
+        ))
+    return results
+
+
+def _infer_hydro_floor(text: str, rooms: list[Room]) -> str | None:
+    explicit, _priority = detect_floor_label(text)
+    if explicit:
+        room_floors = {room.floor for room in rooms if room.floor}
+        if explicit == "1º Piso" and "Piso Superior" in room_floors and "1º Piso" not in room_floors:
+            return "Piso Superior"
+        return explicit
+    normalised = f" {_normalise_key(text)} "
+    labels_by_floor: dict[str, set[str]] = defaultdict(set)
+    for room in rooms:
+        if not room.floor:
+            continue
+        name = _normalise_key(room.name)
+        if room.number:
+            labels_by_floor[room.floor].add(f"{name} {_normalise_key(room.number)}")
+        elif len(name) >= 6:
+            labels_by_floor[room.floor].add(name)
+    scores = {
+        floor: sum(1 for label in labels if f" {label} " in normalised)
+        for floor, labels in labels_by_floor.items()
+    }
+    ranked = sorted(scores.items(), key=lambda item: item[1], reverse=True)
+    if not ranked or ranked[0][1] < 2:
+        return None
+    if len(ranked) > 1 and ranked[0][1] <= ranked[1][1] + 1:
+        return None
+    return ranked[0][0]
+
+
+def extract_hydrosanitary_summary(
+    document_analysis: DocumentAnalysis,
+    page_texts: list[str],
+    vector_measurements: list[HydroPipeEvidence] | None = None,
+    equipment_measurements: list[HydroEquipmentEvidence] | None = None,
+    rooms: list[Room] | None = None,
+) -> HydrosanitarySummary | None:
+    """Extrai evidência hidrossanitária sem converter rótulos em comprimentos de obra."""
+    hydro_pages = sorted({
+        page
+        for section in document_analysis.sections
+        if section.discipline == "hidrossanitario"
+        for page in range(section.start_page, section.end_page + 1)
+    })
+    if not hydro_pages:
+        return None
+
+    grouped_pipes: dict[tuple[str, str | None, float | None, str | None, int, str], int] = defaultdict(int)
+    equipment: list[HydroEquipmentEvidence] = []
+    systems: set[str] = set()
+    septic_tank_detected = False
+    pool_detected = False
+    materials = ("HDPE", "PEAD", "UPVC", "PVC", "PPR")
+
+    for page_number in hydro_pages:
+        if not 1 <= page_number <= len(page_texts):
+            continue
+        text = page_texts[page_number - 1]
+        if not text.strip():
+            continue
+        system = _hydro_system_for_text(text)
+        evidence_kind = _hydro_evidence_kind(text)
+        if evidence_kind in {"planta", "detalhe"} and system != "hidrossanitario":
+            systems.add(system)
+        confidence = 0.88 if evidence_kind == "planta" else 0.72 if evidence_kind == "detalhe" else 0.58
+
+        for line in (raw.strip() for raw in text.splitlines()):
+            if not line or "@" in line:
+                continue
+            upper = line.upper()
+            material = next((item for item in materials if item in upper), None)
+            for match in re.finditer(r"Ø\s*((?:\d+\s+)?\d+\s*/\s*\d+|[½¾¼⅜⅝])\s*[\"”]?", line, re.IGNORECASE):
+                diameter = re.sub(r"\s+", "", match.group(1))
+                grouped_pipes[(system, material, None, diameter, page_number, evidence_kind)] += 1
+            for match in re.finditer(r"Ø\s*(\d+(?:[.,]\d+)?)\s*[\"”]", line, re.IGNORECASE):
+                diameter = match.group(1).replace(",", ".")
+                grouped_pipes[(system, material, None, diameter, page_number, evidence_kind)] += 1
+            for match in re.finditer(r"Ø\s*(\d{2,3})(?:\s*mm)?", line, re.IGNORECASE):
+                suffix = line[match.end():match.end() + 3]
+                has_mm = bool(re.search(r"mm", match.group(0), re.IGNORECASE))
+                if '"' in suffix or "”" in suffix or not (has_mm or material or "I=" in upper):
+                    continue
+                grouped_pipes[(system, material, float(match.group(1)), None, page_number, evidence_kind)] += 1
+
+        # Menções em memórias e catálogos são especificações, não contagens de equipamentos.
+        if evidence_kind not in {"planta", "detalhe"}:
+            continue
+        normalised = _normalise_key(text)
+        equipment_patterns = (
+            ("deposito", r"\b(?:DEPOSITO|RESERVATORIO)\b"),
+            ("fossa_septica", r"\bFOSSA\s+SEPTICA\b"),
+            ("piscina", r"\bPISCINA\b"),
+            ("bomba", r"\bBOMBA(?:GEM|S)?\b"),
+            ("contador", r"\bCONTADOR\b"),
+            ("caixa_inspeccao", r"\bCAIXA\s+(?:DE\s+INSPECCAO|NORMALIZADA)\b"),
+            ("ralo", r"\bGULLY\b|\bRALO\b"),
+        )
+        for kind, pattern in equipment_patterns:
+            occurrences = len(re.findall(pattern, normalised))
+            if not occurrences:
+                continue
+            capacity_l = None
+            if kind == "deposito":
+                capacity_match = re.search(r"(?:DEPOSITO|RESERVATORIO).{0,50}?(\d{3,5})\s*L\b", normalised, re.DOTALL)
+                if capacity_match:
+                    capacity_l = float(capacity_match.group(1))
+            confirmed_label = evidence_kind == "planta" and occurrences == 1 and kind in {"deposito", "contador", "fossa_septica"}
+            equipment.append(HydroEquipmentEvidence(
+                kind=kind,
+                page=page_number,
+                occurrences=occurrences,
+                evidence_kind=evidence_kind,
+                capacity_l=capacity_l,
+                confidence=confidence,
+                quantity=1 if confirmed_label else None,
+                floor=_infer_hydro_floor(text, rooms or []),
+                source="etiqueta_explicita",
+                requires_confirmation=not confirmed_label,
+            ))
+            septic_tank_detected = septic_tank_detected or kind == "fossa_septica"
+            pool_detected = pool_detected or kind == "piscina"
+
+    pipes = [
+        HydroPipeEvidence(
+            system=key[0],
+            material=key[1],
+            diameter_mm=key[2],
+            diameter_inch=key[3],
+            page=key[4],
+            occurrences=count,
+            evidence_kind=key[5],
+            measured_length_m=None,
+            confidence=0.88 if key[5] == "planta" else 0.72 if key[5] == "detalhe" else 0.58,
+            floor=_infer_hydro_floor(page_texts[key[4] - 1], rooms or []),
+            measurement_basis=None,
+        )
+        for key, count in sorted(grouped_pipes.items(), key=lambda item: (item[0][4], item[0][0], item[0][2] or 0, item[0][3] or ""))
+    ]
+    known_vector_specs: dict[tuple[str, str], list[HydroPipeEvidence]] = defaultdict(list)
+    for measurement in vector_measurements or []:
+        if measurement.trace_colour and (measurement.diameter_mm is not None or measurement.diameter_inch is not None):
+            known_vector_specs[(measurement.system, measurement.trace_colour)].append(measurement)
+    for measurement in vector_measurements or []:
+        if measurement.page in hydro_pages:
+            if measurement.trace_colour and measurement.diameter_mm is None and measurement.diameter_inch is None:
+                neighbours = known_vector_specs.get((measurement.system, measurement.trace_colour), [])
+                nearest = min(neighbours, key=lambda item: abs(item.page - measurement.page), default=None)
+                if nearest and abs(nearest.page - measurement.page) <= 2:
+                    measurement.diameter_mm = nearest.diameter_mm
+                    measurement.diameter_inch = nearest.diameter_inch
+                    measurement.material = nearest.material
+                    measurement.confidence = min(measurement.confidence, 0.78)
+            measurement.floor = measurement.floor or _infer_hydro_floor(
+                page_texts[measurement.page - 1], rooms or []
+            )
+            pipes.append(measurement)
+            systems.add(measurement.system)
+    for item in equipment_measurements or []:
+        if item.page not in hydro_pages:
+            continue
+        item.floor = item.floor or _infer_hydro_floor(page_texts[item.page - 1], rooms or [])
+        equipment.append(item)
+    has_vector_lengths = any(pipe.measured_length_m is not None for pipe in pipes)
+    return HydrosanitarySummary(
+        systems=sorted(systems),
+        pipes=pipes,
+        equipment=equipment,
+        septic_tank_detected=septic_tank_detected,
+        pool_detected=pool_detected,
+        quantitative_coverage="vector_partial" if has_vector_lengths else "partial" if any(pipe.evidence_kind == "planta" for pipe in pipes) else "evidence_only",
+        requires_confirmation=True,
+    )
+
+
+def build_technical_quality_issues(
+    document_analysis: DocumentAnalysis,
+    rooms: list[Room],
+    openings: list[Opening],
+    structural_summary: StructuralSummary | None,
+) -> list[TechnicalQualityIssue]:
+    """Expõe limites reais da leitura sem transformar inferências em medições."""
+    disciplines = {section.discipline for section in document_analysis.sections}
+    pages_by_discipline = {
+        discipline: sorted({page for section in document_analysis.sections if section.discipline == discipline for page in range(section.start_page, section.end_page + 1)})
+        for discipline in disciplines
+    }
+    issues: list[TechnicalQualityIssue] = []
+
+    def add(code: str, severity: str, scope: str, message: str, pages: list[int] | None = None, confirm: bool = False):
+        issues.append(TechnicalQualityIssue(code, severity, scope, message, pages or [], confirm))
+
+    if "arquitectura" in disciplines:
+        architecture_pages = pages_by_discipline.get("arquitectura", [])
+        if not rooms:
+            add("architecture.rooms_missing", "critical", "arquitectura", "Não foram identificados compartimentos e áreas.", architecture_pages, True)
+        else:
+            missing_perimeters = sum(room.perimeter_m is None or room.perimeter_m <= 0 for room in rooms)
+            if missing_perimeters:
+                add(
+                    "architecture.room_perimeters_missing",
+                    "warning",
+                    "arquitectura",
+                    f"{missing_perimeters} compartimento(s) não têm perímetro confirmado; paredes e revestimentos não devem ser fechados automaticamente.",
+                    sorted({room.page for room in rooms if room.perimeter_m is None or room.perimeter_m <= 0}),
+                    True,
+                )
+
+        doors = [opening for opening in openings if opening.kind == "porta"]
+        windows = [opening for opening in openings if opening.kind == "janela"]
+        if not doors:
+            add("architecture.doors_missing", "critical", "aberturas", "Nenhuma porta foi identificada.", architecture_pages, True)
+        if not windows:
+            add("architecture.windows_missing", "critical", "aberturas", "Nenhuma janela foi identificada.", architecture_pages, True)
+
+        incomplete = [
+            opening for opening in openings
+            if opening.needs_confirmation or not opening.width_m or not opening.height_m or opening.location == "desconhecida"
+        ]
+        if incomplete:
+            add(
+                "architecture.openings_incomplete",
+                "critical",
+                "aberturas",
+                f"{sum(max(opening.quantity, 1) for opening in incomplete)} vão(s) não têm dimensão e localização totalmente confirmadas.",
+                sorted({opening.page for opening in incomplete}),
+                True,
+            )
+
+    if "estrutura" in disciplines:
+        structure_pages = pages_by_discipline.get("estrutura", [])
+        if not structural_summary:
+            add("structure.summary_missing", "critical", "estrutura", "Não foi possível formar o resumo estrutural.", structure_pages, True)
+        else:
+            missing_families = [
+                label for label, count in (
+                    ("fundações", structural_summary.footings_count),
+                    ("pilares", structural_summary.columns_count),
+                    ("vigas", structural_summary.beams_count),
+                    ("lajes", structural_summary.slabs_count),
+                ) if count == 0
+            ]
+            if missing_families:
+                add("structure.families_missing", "warning", "estrutura", f"Elementos não confirmados: {', '.join(missing_families)}.", structure_pages, True)
+            if structural_summary.total_steel_weight_kg <= 0:
+                add("structure.steel_missing", "critical", "estrutura", "O peso de aço não foi confirmado.", structure_pages, True)
+
+    if "hidrossanitario" in disciplines:
+        hydro_summary = document_analysis.hydrosanitary_summary
+        has_plan_evidence = bool(
+            hydro_summary
+            and any(pipe.evidence_kind == "planta" for pipe in hydro_summary.pipes)
+        )
+        has_vector_lengths = bool(
+            hydro_summary
+            and any(pipe.measured_length_m is not None for pipe in hydro_summary.pipes)
+        )
+        add(
+            "hydro.vector_lengths_partial"
+            if has_vector_lengths
+            else "hydro.lengths_not_measured" if has_plan_evidence else "hydro.quantities_not_measured",
+            "warning",
+            "hidrossanitario",
+            "Foram medidos troços vetoriais com escala confirmada; ligações sem codificação e quantidades finais de aparelhos ainda exigem revisão."
+            if has_vector_lengths
+            else "Tubagens e diâmetros foram identificados, mas os comprimentos e as quantidades finais de aparelhos exigem confirmação."
+            if has_plan_evidence
+            else "A disciplina hidrossanitária foi separada, mas comprimentos de tubagem e quantidades de aparelhos ainda não foram medidos.",
+            pages_by_discipline.get("hidrossanitario", []),
+            True,
+        )
+
+    return issues
+
+
 def parse_pdf(file_bytes: bytes, progress_callback=None, detection_tags: list[str] | None = None) -> ParseResult:
     doc = fitz.open(stream=file_bytes, filetype="pdf")
     metadata = PlantMetadata()
@@ -2359,6 +3187,8 @@ def parse_pdf(file_bytes: bytes, progress_callback=None, detection_tags: list[st
     beam_spans: list[BeamSpan] = []
     staircases: list[Staircase] = []
     slabs: list[Slab] = []
+    hydro_vector_measurements: list[HydroPipeEvidence] = []
+    hydro_equipment_measurements: list[HydroEquipmentEvidence] = []
 
     for page_index in range(doc.page_count):
         page = doc[page_index]
@@ -2410,6 +3240,9 @@ def parse_pdf(file_bytes: bytes, progress_callback=None, detection_tags: list[st
         beam_spans.extend(extract_beam_spans(text, page_number))
         staircases.extend(extract_staircases(text, page_number))
         slabs.extend(extract_slabs(text, page_number))
+        hydro_vector_measurements.extend(extract_hydro_vector_measurements(page, text, page_number))
+        hydro_equipment_measurements.extend(extract_hydro_coded_equipment(page, text, page_number))
+        hydro_equipment_measurements.extend(extract_hydro_vector_accessories(page, text, page_number))
         if progress_callback:
             progress_callback(page_number, doc.page_count)
 
@@ -2545,6 +3378,19 @@ def parse_pdf(file_bytes: bytes, progress_callback=None, detection_tags: list[st
     doc.close()
     structural_summary = build_structural_summary(
         footings, column_groups, beam_spans, rebar_schedules, staircases, slabs
+    )
+    document_analysis.hydrosanitary_summary = extract_hydrosanitary_summary(
+        document_analysis,
+        document_text_parts,
+        vector_measurements=hydro_vector_measurements,
+        equipment_measurements=hydro_equipment_measurements,
+        rooms=selected_rooms,
+    )
+    document_analysis.quality_issues = build_technical_quality_issues(
+        document_analysis, selected_rooms, selected_openings, structural_summary
+    )
+    document_analysis.requires_technical_confirmation = any(
+        issue.requires_confirmation for issue in document_analysis.quality_issues
     )
     return ParseResult(
         metadata=metadata,

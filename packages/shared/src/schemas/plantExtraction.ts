@@ -367,6 +367,55 @@ export const documentSectionSchema = z.object({
 });
 export type DocumentSection = z.infer<typeof documentSectionSchema>;
 
+export const technicalQualityIssueSchema = z.object({
+  code: z.string().min(1),
+  severity: z.enum(["info", "warning", "critical"]),
+  scope: z.string().min(1),
+  message: z.string().min(1),
+  pages: z.array(z.number().int().positive()).default([]),
+  requiresConfirmation: z.boolean().default(false),
+});
+export type TechnicalQualityIssue = z.infer<typeof technicalQualityIssueSchema>;
+
+export const hydroPipeEvidenceSchema = z.object({
+  system: z.string().min(1),
+  material: z.string().nullable(),
+  diameterMm: z.number().positive().nullable(),
+  diameterInch: z.string().nullable(),
+  page: z.number().int().positive(),
+  occurrences: z.number().int().positive(),
+  evidenceKind: z.enum(["planta", "detalhe", "especificacao", "referencia"]),
+  measuredLengthM: z.number().nonnegative().nullable(),
+  confidence: z.number().min(0).max(1),
+  floor: z.string().nullable().optional().default(null),
+  measurementBasis: z.enum(["vector_stroke", "vector_fill"]).nullable().optional().default(null),
+});
+
+export const hydroEquipmentEvidenceSchema = z.object({
+  kind: z.string().min(1),
+  page: z.number().int().positive(),
+  occurrences: z.number().int().positive(),
+  evidenceKind: z.enum(["planta", "detalhe", "especificacao", "referencia"]),
+  capacityL: z.number().positive().nullable(),
+  confidence: z.number().min(0).max(1),
+  quantity: z.number().int().positive().nullable().optional().default(null),
+  code: z.string().nullable().optional().default(null),
+  floor: z.string().nullable().optional().default(null),
+  source: z.string().optional().default("text_evidence"),
+  requiresConfirmation: z.boolean().optional().default(true),
+});
+
+export const hydrosanitarySummarySchema = z.object({
+  systems: z.array(z.string()),
+  pipes: z.array(hydroPipeEvidenceSchema),
+  equipment: z.array(hydroEquipmentEvidenceSchema),
+  septicTankDetected: z.boolean(),
+  poolDetected: z.boolean(),
+  quantitativeCoverage: z.enum(["evidence_only", "partial", "vector_partial"]),
+  requiresConfirmation: z.boolean(),
+});
+export type HydrosanitarySummary = z.infer<typeof hydrosanitarySummarySchema>;
+
 export const documentAnalysisSchema = z.object({
   pageCount: z.number().int().nonnegative(),
   isMultiDiscipline: z.boolean(),
@@ -375,6 +424,9 @@ export const documentAnalysisSchema = z.object({
   identityConflicts: z.array(documentIdentityConflictSchema).default([]),
   requiresIdentityConfirmation: z.boolean().default(false),
   identityConfirmed: z.boolean().default(false),
+  qualityIssues: z.array(technicalQualityIssueSchema).default([]),
+  requiresTechnicalConfirmation: z.boolean().default(false),
+  hydrosanitarySummary: hydrosanitarySummarySchema.nullable().optional().default(null),
 });
 export type DocumentAnalysis = z.infer<typeof documentAnalysisSchema>;
 

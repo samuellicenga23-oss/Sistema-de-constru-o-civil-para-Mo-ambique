@@ -169,8 +169,8 @@ async function plantPreview(lineItemId: string, companyId: string) {
     .where(eq(budgetSections.id, item.sectionId))
     .limit(1);
   if (!projectRow) return null;
-  const { rooms, openings } = await loadProjectPlantContext(projectRow.projectId);
-  const built = buildMeasurementLinesFromPlant(item.code, rooms, openings);
+  const { rooms, openings, hydroPipes, hydroEquipment } = await loadProjectPlantContext(projectRow.projectId);
+  const built = buildMeasurementLinesFromPlant(item.code, rooms, openings, hydroPipes, item.description, hydroEquipment);
   if (!built.ok) return { ok: false as const, reason: built.reason };
   const compositionDefault = await resolveDefaultFormula(item);
   const lines = built.lines.map((line, index) => {

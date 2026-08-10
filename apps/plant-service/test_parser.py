@@ -23,10 +23,157 @@ from parser import (
     BeamSpan,
     extract_openings_spatial,
     extract_structural_material_specs,
+    build_technical_quality_issues,
+    extract_hydrosanitary_summary,
+    extract_hydro_vector_measurements,
+    extract_hydro_coded_equipment,
+    extract_hydro_vector_accessories,
+    DocumentAnalysis,
+    DocumentSection,
+    Opening,
+    merge_openings,
 )
 
 
 class RoomExtractionTests(unittest.TestCase):
+    def test_extracts_supply_point_codes_without_counting_repeated_labels(self):
+        doc = fitz.open()
+        page = doc.new_page()
+        text = "Conteudo: ABASTECIMENTO DE AGUA\nB01 B02 B02 B06 P01\nEscala: 1:100"
+        page.insert_text((30, 30), text)
+
+        equipment = extract_hydro_coded_equipment(page, page.get_text(), 1)
+        doc.close()
+
+        points = [item for item in equipment if item.kind == "ponto_abastecimento"]
+        self.assertEqual([item.code for item in points], ["B01", "B02", "B06"])
+        self.assertTrue(all(item.quantity == 1 and not item.requires_confirmation for item in points))
+
+    def test_estimates_vector_fittings_but_marks_them_for_confirmation(self):
+        doc = fitz.open()
+        page = doc.new_page(width=500, height=500)
+        page.insert_text((30, 30), "Conteudo: ABASTECIMENTO DE AGUA\nEscala: 1:100")
+        page.draw_line(fitz.Point(50, 100), fitz.Point(150, 100), color=(0, 0, 1), width=0.567)
+        page.draw_line(fitz.Point(150, 100), fitz.Point(150, 180), color=(0, 0, 1), width=0.567)
+
+        accessories = extract_hydro_vector_accessories(page, page.get_text(), 1)
+        doc.close()
+
+        elbow = next(item for item in accessories if item.kind.startswith("curva"))
+        self.assertEqual(elbow.quantity, 1)
+        self.assertEqual(elbow.source, "vector_topology")
+        self.assertTrue(elbow.requires_confirmation)
+
+    def test_measures_scaled_coloured_hydro_vector(self):
+        doc = fitz.open()
+        page = doc.new_page(width=500, height=500)
+        page.insert_text((30, 30), "Conteudo: ABASTECIMENTO DE AGUA\nEscala: 1:100")
+        page.draw_line(fitz.Point(50, 100), fitz.Point(150, 100), color=(1, 0, 0), width=0.567)
+
+        measured = extract_hydro_vector_measurements(page, page.get_text(), 1)
+        doc.close()
+
+        self.assertEqual(len(measured), 1)
+        self.assertEqual(measured[0].system, "agua_quente")
+        self.assertAlmostEqual(measured[0].measured_length_m or 0, 3.53, places=2)
+        self.assertEqual(measured[0].measurement_basis, "vector_stroke")
+
+    def test_extracts_hydrosanitary_plan_evidence_without_inventing_lengths(self):
+        analysis = DocumentAnalysis(
+            page_count=1,
+            is_multi_discipline=False,
+            sections=[DocumentSection("hidrossanitario", "Hidrossanitário", 1, 1, 1, 0.9)],
+        )
+        summary = extract_hydrosanitary_summary(analysis, [
+            'Conteúdo: ABASTECIMENTO DE ÁGUA\nREDE DE ÁGUA FRIA\nØ¾"HDPE\nØ¾"HDPE\nØ½"HDPE\nDepósito de\n1500L'
+        ])
+
+        self.assertIsNotNone(summary)
+        assert summary is not None
+        self.assertIn("agua_fria", summary.systems)
+        three_quarter = next(pipe for pipe in summary.pipes if pipe.diameter_inch == "¾")
+        self.assertEqual(three_quarter.occurrences, 2)
+        self.assertIsNone(three_quarter.measured_length_m)
+        tank = next(item for item in summary.equipment if item.kind == "deposito")
+        self.assertEqual(tank.capacity_l, 1500)
+
+    def test_does_not_treat_rebar_spacing_as_hydrosanitary_pipe(self):
+        analysis = DocumentAnalysis(
+            page_count=1,
+            is_multi_discipline=False,
+            sections=[DocumentSection("hidrossanitario", "Hidrossanitário", 1, 1, 1, 0.9)],
+        )
+        summary = extract_hydrosanitary_summary(analysis, [
+            "PORMENOR DA FOSSA SÉPTICA\nArmadura Ø8@15 cm\nTubagem PVC Ø110 mm"
+        ])
+
+        assert summary is not None
+        self.assertFalse(any(pipe.diameter_mm == 8 for pipe in summary.pipes))
+        self.assertTrue(any(pipe.diameter_mm == 110 for pipe in summary.pipes))
+
+    def test_keeps_equal_openings_in_different_rooms(self):
+        base = dict(
+            kind="porta", code=None, width_m=0.8, height_m=None, sill_height_m=0,
+            quantity=1, floor="Piso Térreo", material=None, page=1, confidence=0.7,
+            source="geometria", needs_confirmation=True,
+        )
+        openings = merge_openings([
+            Opening(**base, location="Próximo de Sala"),
+            Opening(**base, location="Próximo de Cozinha"),
+        ], "")
+
+        self.assertEqual(len(openings), 2)
+
+    def test_extracts_explicit_room_perimeter_near_area_tag(self):
+        document = fitz.open()
+        page = document.new_page(width=500, height=500)
+        page.insert_text((100, 100), "SALA")
+        page.insert_text((100, 125), "A:20.00 m2")
+        page.insert_text((100, 145), "Perímetro: 18.50 m")
+
+        rooms = extract_rooms_spatial(page, 1, page.get_text())
+
+        self.assertEqual(len(rooms), 1)
+        self.assertEqual(rooms[0].name, "SALA")
+        self.assertAlmostEqual(rooms[0].perimeter_m or 0, 18.5, places=2)
+        document.close()
+
+    def test_extracts_uncoded_window_frame_at_declared_scale(self):
+        document = fitz.open()
+        page = document.new_page(width=1191, height=842)
+        page.insert_text((50, 70), "PLANTA COTADA PISO TÉRREO - Escala 1:100")
+        page.insert_text((100, 145), "SALA DE ESTAR")
+        page.insert_text((100, 170), "A:20.00 m2")
+        for offset in (0.0, 0.5, 1.0, 1.5, 2.0, 2.5):
+            page.draw_line(fitz.Point(100, 110 + offset), fitz.Point(140, 110 + offset))
+
+        openings = extract_openings_spatial(page, 1, page.get_text())
+        windows = [opening for opening in openings if opening.kind == "janela"]
+
+        self.assertEqual(len(windows), 1)
+        self.assertAlmostEqual(windows[0].width_m, 1.41, places=2)
+        self.assertIsNone(windows[0].height_m)
+        self.assertEqual(windows[0].location, "Próximo de SALA DE ESTAR")
+        self.assertTrue(windows[0].needs_confirmation)
+        document.close()
+
+    def test_quality_report_separates_missing_windows_and_perimeters(self):
+        analysis = DocumentAnalysis(
+            page_count=2,
+            is_multi_discipline=False,
+            sections=[DocumentSection("arquitectura", "Arquitectura", 1, 2, 2, 0.95)],
+        )
+        rooms = [Room("Sala", None, 20.0, 1, "Piso Térreo")]
+        doors = [Opening("porta", None, 0.9, None, None, 1, "Piso Térreo", "desconhecida", None, 1, 0.7, "geometry", True)]
+
+        issues = build_technical_quality_issues(analysis, rooms, doors, None)
+        codes = {issue.code for issue in issues}
+
+        self.assertIn("architecture.room_perimeters_missing", codes)
+        self.assertIn("architecture.windows_missing", codes)
+        self.assertIn("architecture.openings_incomplete", codes)
+        self.assertNotIn("architecture.doors_missing", codes)
+
     def test_extracts_door_arc_without_inventing_height(self):
         document = fitz.open()
         page = document.new_page(width=1191, height=842)

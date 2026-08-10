@@ -27,6 +27,28 @@ export type PlantOpening = {
   needsConfirmation: boolean;
 };
 
+export type PlantHydroPipe = {
+  system: string;
+  material: string | null;
+  diameterMm: number | null;
+  diameterInch: string | null;
+  page: number;
+  floor: string | null;
+  measuredLengthM: number;
+  confidence: number;
+};
+
+export type PlantHydroEquipment = {
+  kind: string;
+  code: string | null;
+  page: number;
+  floor: string | null;
+  quantity: number;
+  capacityL: number | null;
+  confidence: number;
+  requiresConfirmation: boolean;
+};
+
 export function classifyRoomType(name: string): "seco" | "humido" {
   const n = name
     .toLowerCase()
@@ -91,11 +113,9 @@ function roomLabel(room: PlantRoom): string {
   return parts.join(" — ") || room.name;
 }
 
-function estimateWallAreaM2(floorAreaM2: number, perimeterM: number | null, ceilingHeight = 2.7): number {
-  if (floorAreaM2 <= 0) return 0;
-  if (perimeterM != null && perimeterM > 0) return perimeterM * ceilingHeight;
-  const side = Math.sqrt(floorAreaM2);
-  return 4 * side * ceilingHeight;
+function confirmedWallAreaM2(perimeterM: number | null, ceilingHeight = 2.7): number | null {
+  if (perimeterM == null || perimeterM <= 0) return null;
+  return perimeterM * ceilingHeight;
 }
 
 type RoomFilter = "all" | "wet" | "dry" | "ground";
@@ -149,7 +169,114 @@ export type PlantFillResult =
   | { ok: true; lines: PlantMeasurementLineDraft[]; strategy: string; roomCount: number }
   | { ok: false; reason: string };
 
-export function buildMeasurementLinesFromPlant(itemCode: string, rooms: PlantRoom[], openings: PlantOpening[] = []): PlantFillResult {
+function parseHydroTarget(description: string): {
+  system: string | null;
+  diameterMm: number | null;
+  diameterInch: string | null;
+} | null {
+  const normalized = normalizeText(description);
+  if (!/tubagem|tubo|rede de agua|canalizacao/.test(normalized)) return null;
+  const system = /pluvial/.test(normalized)
+    ? "aguas_pluviais"
+    : /esgoto|residu/.test(normalized)
+      ? "aguas_residuais"
+      : /agua quente/.test(normalized)
+        ? "agua_quente"
+        : /agua fria|abastecimento/.test(normalized)
+          ? "agua_fria"
+          : null;
+  const fraction = description.match(/(?:Ø|DN)?\s*((?:\d+\s+)?\d+\s*\/\s*\d+|[½¾¼⅜⅝])\s*["”]/i);
+  const metric = description.match(/(?:Ø|DN)\s*(\d+(?:[.,]\d+)?)\s*mm\b/i)
+    ?? description.match(/\b(\d{2,3})\s*mm\b/i);
+  return {
+    system,
+    diameterMm: metric ? Number(metric[1].replace(",", ".")) : null,
+    diameterInch: fraction ? fraction[1].replace(/\s+/g, "") : null,
+  };
+}
+
+function buildHydroMeasurementLines(description: string, pipes: PlantHydroPipe[]): PlantFillResult | null {
+  const target = parseHydroTarget(description);
+  if (!target) return null;
+  if (!target.system || (target.diameterMm == null && target.diameterInch == null)) {
+    return { ok: false, reason: "Indique o sistema e o diâmetro no item para ligar a tubagem medida na planta." };
+  }
+  const selected = pipes.filter((pipe) =>
+    pipe.system === target.system
+    && (target.diameterMm == null || Math.abs((pipe.diameterMm ?? -1) - target.diameterMm) < 0.01)
+    && (target.diameterInch == null || pipe.diameterInch === target.diameterInch)
+  );
+  if (!selected.length) {
+    const diameter = target.diameterMm != null ? `Ø${target.diameterMm} mm` : `Ø${target.diameterInch}″`;
+    return { ok: false, reason: `Não há traçado ${diameter} confirmado para este sistema na planta.` };
+  }
+  return {
+    ok: true,
+    strategy: "comprimento vetorial por sistema, diâmetro e piso",
+    roomCount: 0,
+    lines: selected.map((pipe, index) => ({
+      description: [pipe.floor ?? "Piso por confirmar", pipe.material, pipe.diameterMm != null ? `Ø${pipe.diameterMm} mm` : `Ø${pipe.diameterInch}″`, `pág. ${pipe.page}`].filter(Boolean).join(" — "),
+      count: 1,
+      length: pipe.measuredLengthM,
+      width: null,
+      height: null,
+      sortOrder: index,
+    })),
+  };
+}
+
+function buildHydroEquipmentLines(description: string, equipment: PlantHydroEquipment[]): PlantFillResult | null {
+  const normalized = normalizeText(description);
+  let kind: string | null = null;
+  if (/ponto.*(?:agua|abastecimento)/.test(normalized)) kind = "ponto_abastecimento";
+  else if (/reservatorio|deposito.*agua/.test(normalized)) kind = "deposito";
+  else if (/contador.*agua/.test(normalized)) kind = "contador";
+  else if (/filtro.*piscina/.test(normalized)) kind = "filtro_piscina";
+  else if (/bomba.*piscina/.test(normalized)) kind = "bomba_piscina";
+  else if (/skimmer/.test(normalized)) kind = "skimmer";
+  else if (/regulador.*nivel/.test(normalized)) kind = "regulador_nivel";
+  else if (/boca.*impulsao/.test(normalized)) kind = "boca_impulsao";
+  else if (/aspirador.*piscina/.test(normalized)) kind = "aspirador_piscina";
+  else if (/quadro.*piscina/.test(normalized)) kind = "quadro_piscina";
+  if (!kind) return null;
+
+  const capacityMatch = description.match(/\b(\d{3,5})\s*L\b/i);
+  const capacityL = capacityMatch ? Number(capacityMatch[1]) : null;
+  const selected = equipment.filter((item) =>
+    item.kind === kind
+    && !item.requiresConfirmation
+    && (capacityL == null || item.capacityL === capacityL)
+  );
+  if (!selected.length) {
+    return { ok: false, reason: capacityL ? `Não há ${kind.replaceAll("_", " ")} de ${capacityL} L confirmado na planta.` : `Não há ${kind.replaceAll("_", " ")} confirmado na planta.` };
+  }
+  return {
+    ok: true,
+    strategy: "equipamento codificado ou identificado na planta",
+    roomCount: 0,
+    lines: selected.map((item, index) => ({
+      description: [item.floor ?? "Piso por confirmar", item.code, `pág. ${item.page}`].filter(Boolean).join(" — "),
+      count: item.quantity,
+      length: null,
+      width: null,
+      height: null,
+      sortOrder: index,
+    })),
+  };
+}
+
+export function buildMeasurementLinesFromPlant(
+  itemCode: string,
+  rooms: PlantRoom[],
+  openings: PlantOpening[] = [],
+  hydroPipes: PlantHydroPipe[] = [],
+  itemDescription = "",
+  hydroEquipment: PlantHydroEquipment[] = [],
+): PlantFillResult {
+  const hydroEquipmentResult = buildHydroEquipmentLines(itemDescription, hydroEquipment);
+  if (hydroEquipmentResult) return hydroEquipmentResult;
+  const hydroResult = buildHydroMeasurementLines(itemDescription, hydroPipes);
+  if (hydroResult) return hydroResult;
   const confirmedOpenings = openings.filter(
     (opening) => !opening.needsConfirmation && opening.widthM != null && opening.heightM != null && opening.location !== "desconhecida",
   );
@@ -256,6 +383,16 @@ export function buildMeasurementLinesFromPlant(itemCode: string, rooms: PlantRoo
     };
   }
 
+  if (strategy.kind === "per_room_wall") {
+    const roomsWithoutPerimeter = filtered.filter((room) => room.perimeterM == null || room.perimeterM <= 0);
+    if (roomsWithoutPerimeter.length > 0) {
+      return {
+        ok: false,
+        reason: `${roomsWithoutPerimeter.length} compartimento(s) não têm perímetro confirmado. Preencha os perímetros antes de calcular paredes, rebocos, revestimentos ou pintura.`,
+      };
+    }
+  }
+
   const ceilingHeight = strategy.kind === "per_room_wall" ? (strategy.ceilingHeight ?? 2.7) : 2.7;
   const lines: PlantMeasurementLineDraft[] = filtered.map((room, index) => {
     if (strategy.kind === "per_room_area") {
@@ -268,9 +405,9 @@ export function buildMeasurementLinesFromPlant(itemCode: string, rooms: PlantRoo
         sortOrder: index,
       };
     }
-    const wallArea = estimateWallAreaM2(room.areaM2, room.perimeterM, ceilingHeight);
+    const wallArea = confirmedWallAreaM2(room.perimeterM, ceilingHeight)!;
     return {
-      description: `${roomLabel(room)} (≈ parede, h=${ceilingHeight}m)`,
+      description: `${roomLabel(room)} (perímetro confirmado × h=${ceilingHeight}m)`,
       count: 1,
       length: wallArea,
       width: 1,
@@ -298,7 +435,7 @@ export function buildMeasurementLinesFromPlant(itemCode: string, rooms: PlantRoo
 
   return {
     ok: true,
-    strategy: strategy.kind === "per_room_area" ? `área por compartimento (${strategy.filter})` : `parede estimada (${strategy.filter})`,
+    strategy: strategy.kind === "per_room_area" ? `área por compartimento (${strategy.filter})` : `parede por perímetro confirmado (${strategy.filter})`,
     roomCount: filtered.length,
     lines,
   };
@@ -315,6 +452,8 @@ export async function loadProjectPlantRooms(projectId: string): Promise<PlantRoo
 export async function loadProjectPlantContext(projectId: string): Promise<{
   rooms: PlantRoom[];
   openings: PlantOpening[];
+  hydroPipes: PlantHydroPipe[];
+  hydroEquipment: PlantHydroEquipment[];
   identityConflict: boolean;
 }> {
   const plantRows = await db
@@ -332,14 +471,40 @@ export async function loadProjectPlantContext(projectId: string): Promise<{
     && !plant.documentAnalysis.identityConfirmed
   );
   if (identityConflict) {
-    return { rooms: [], openings: [], identityConflict: true };
+    return { rooms: [], openings: [], hydroPipes: [], hydroEquipment: [], identityConflict: true };
   }
 
   const selectedRooms: PlantRoom[] = [];
   const selectedOpenings: PlantOpening[] = [];
+  const selectedHydroPipes: PlantHydroPipe[] = [];
+  const selectedHydroEquipment: PlantHydroEquipment[] = [];
   for (const plant of plantRows) {
     if (plant.processingStatus !== "concluido") continue;
     if (plant.documentAnalysis?.requiresIdentityConfirmation && !plant.documentAnalysis.identityConfirmed) continue;
+    selectedHydroPipes.push(...(plant.documentAnalysis?.hydrosanitarySummary?.pipes ?? [])
+      .filter((pipe) => pipe.measuredLengthM != null)
+      .map((pipe) => ({
+        system: pipe.system,
+        material: pipe.material,
+        diameterMm: pipe.diameterMm,
+        diameterInch: pipe.diameterInch,
+        page: pipe.page,
+        floor: pipe.floor ?? null,
+        measuredLengthM: Number(pipe.measuredLengthM),
+        confidence: pipe.confidence,
+      })));
+    selectedHydroEquipment.push(...(plant.documentAnalysis?.hydrosanitarySummary?.equipment ?? [])
+      .filter((item) => item.quantity != null)
+      .map((item) => ({
+        kind: item.kind,
+        code: item.code ?? null,
+        page: item.page,
+        floor: item.floor ?? null,
+        quantity: Number(item.quantity),
+        capacityL: item.capacityL,
+        confidence: item.confidence,
+        requiresConfirmation: item.requiresConfirmation ?? true,
+      })));
     const [rooms, openings] = await Promise.all([
       db.select().from(extractedRooms).where(eq(extractedRooms.plantId, plant.id)),
       db.select().from(extractedOpenings).where(eq(extractedOpenings.plantId, plant.id)),
@@ -372,6 +537,21 @@ export async function loadProjectPlantContext(projectId: string): Promise<{
   return {
     rooms: deduplicatePlantRooms(selectedRooms),
     openings: deduplicatePlantOpenings(selectedOpenings),
+    hydroPipes: selectedHydroPipes.filter((pipe, index, all) => all.findIndex((candidate) =>
+      candidate.system === pipe.system
+      && candidate.floor === pipe.floor
+      && candidate.page === pipe.page
+      && candidate.diameterMm === pipe.diameterMm
+      && candidate.diameterInch === pipe.diameterInch
+      && candidate.measuredLengthM === pipe.measuredLengthM
+    ) === index),
+    hydroEquipment: selectedHydroEquipment.filter((item, index, all) => all.findIndex((candidate) =>
+      candidate.kind === item.kind
+      && candidate.code === item.code
+      && candidate.floor === item.floor
+      && candidate.page === item.page
+      && candidate.quantity === item.quantity
+    ) === index),
     identityConflict: false,
   };
 }

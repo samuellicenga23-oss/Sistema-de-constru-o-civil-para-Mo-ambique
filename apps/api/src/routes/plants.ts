@@ -24,7 +24,7 @@ const clientPlantIdSchema = z.string().uuid();
 // Manter alinhado com a geração estrutural do plant-service. O valor participa da
 // chave de cache da BD; ao mudar a leitura de lajes por nível, análises antigas não
 // podem ser reutilizadas silenciosamente em novos uploads do mesmo PDF.
-const PLANT_PARSER_VERSION = "2026.08-resumo-fam-1";
+const PLANT_PARSER_VERSION = "2026.08-openings-hydro-1";
 type PlantDetectionContext = { tags: string[]; parserVersion: string };
 
 async function getPlantDetectionContext(companyId: string): Promise<PlantDetectionContext> {

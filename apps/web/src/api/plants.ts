@@ -83,6 +83,47 @@ export type DocumentIdentityConflict = {
   severity: "warning" | "critical";
   values: Array<{ value: string; disciplines: DocumentDiscipline[]; pages: number[] }>;
 };
+export type TechnicalQualityIssue = {
+  code: string;
+  severity: "info" | "warning" | "critical";
+  scope: string;
+  message: string;
+  pages: number[];
+  requiresConfirmation: boolean;
+};
+export type HydrosanitarySummary = {
+  systems: string[];
+  pipes: Array<{
+    system: string;
+    material: string | null;
+    diameterMm: number | null;
+    diameterInch: string | null;
+    page: number;
+    occurrences: number;
+    evidenceKind: "planta" | "detalhe" | "especificacao" | "referencia";
+    measuredLengthM: number | null;
+    confidence: number;
+    floor: string | null;
+    measurementBasis: "vector_stroke" | "vector_fill" | null;
+  }>;
+  equipment: Array<{
+    kind: string;
+    page: number;
+    occurrences: number;
+    evidenceKind: "planta" | "detalhe" | "especificacao" | "referencia";
+    capacityL: number | null;
+    confidence: number;
+    quantity: number | null;
+    code: string | null;
+    floor: string | null;
+    source: string;
+    requiresConfirmation: boolean;
+  }>;
+  septicTankDetected: boolean;
+  poolDetected: boolean;
+  quantitativeCoverage: "evidence_only" | "partial" | "vector_partial";
+  requiresConfirmation: boolean;
+};
 export type DocumentAnalysis = {
   pageCount: number;
   isMultiDiscipline: boolean;
@@ -91,6 +132,9 @@ export type DocumentAnalysis = {
   identityConflicts: DocumentIdentityConflict[];
   requiresIdentityConfirmation: boolean;
   identityConfirmed: boolean;
+  qualityIssues: TechnicalQualityIssue[];
+  requiresTechnicalConfirmation: boolean;
+  hydrosanitarySummary: HydrosanitarySummary | null;
 };
 export type PlantUploadDiscipline = "auto" | "arquitectura" | "estrutura";
 

@@ -703,7 +703,7 @@ export default function PlantManualIntakePage() {
         <FamilyCard
           id="compartimentos"
           title="6. Compartimentos"
-          subtitle="Áreas de arquitectura — salas, WC, cozinha, etc."
+          subtitle="Área para pavimentos; perímetro para paredes e acabamentos."
         >
           <div className="flex items-center justify-between gap-2">
             <p className="text-sm text-slate-500">{rooms.length} compartimento(s)</p>
@@ -731,7 +731,7 @@ export default function PlantManualIntakePage() {
               <input required type="number" min={0.01} step="0.01" className="input" placeholder="Área m²" value={room.areaM2}
                 onChange={(e) => setRooms((items) => items.map((item, i) => i === index ? { ...item, areaM2: e.target.value } : item))} />
               <div className="flex gap-2">
-                <input type="number" min={0} step="0.01" className="input" placeholder="Perímetro m" value={room.perimeterM}
+                <input type="number" min={0} step="0.01" className="input" placeholder="Perímetro (m)" aria-label={`Perímetro de ${room.name || "compartimento"}`} value={room.perimeterM}
                   onChange={(e) => setRooms((items) => items.map((item, i) => i === index ? { ...item, perimeterM: e.target.value } : item))} />
                 <button type="button" className="icon-btn-danger" onClick={() => setRooms((items) => items.filter((_, i) => i !== index))}>
                   <IconTrash className="h-3.5 w-3.5" />

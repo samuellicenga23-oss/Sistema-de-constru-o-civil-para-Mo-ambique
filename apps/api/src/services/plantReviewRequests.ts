@@ -23,6 +23,7 @@ export type PlantExtractionGapsInput = {
   discipline: "arquitectura" | "estrutura";
   documentAnalysis?: {
     sections?: Array<{ discipline: string }>;
+    qualityIssues?: Array<{ message: string; severity: string }>;
   } | null;
   structuralSummary?: {
     footingsCount: number;
@@ -38,6 +39,12 @@ export type PlantExtractionGapsInput = {
 };
 
 export function assessPlantExtractionGaps(input: PlantExtractionGapsInput): string[] {
+  const structuredIssues = input.documentAnalysis?.qualityIssues ?? [];
+  if (structuredIssues.length > 0) {
+    return structuredIssues
+      .filter((issue) => issue.severity !== "info")
+      .map((issue) => issue.message);
+  }
   const gaps: string[] = [];
   const detected = new Set((input.documentAnalysis?.sections ?? []).map((section) => section.discipline));
   const hasArchitecture = detected.size > 0 ? detected.has("arquitectura") : input.discipline === "arquitectura";

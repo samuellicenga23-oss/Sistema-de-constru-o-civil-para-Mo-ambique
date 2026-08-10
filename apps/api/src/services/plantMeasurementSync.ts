@@ -1,7 +1,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { budgetDocuments, budgetSections, lineItems, measurementLines } from "../db/schema.js";
-import { buildMeasurementLinesFromPlant, loadProjectPlantContext, supportedPlantItemCodes } from "./plantMeasurementLink.js";
+import { buildMeasurementLinesFromPlant, loadProjectPlantContext } from "./plantMeasurementLink.js";
 
 /**
  * Mantém rascunhos de medição ligados aos dados confirmados da planta.
@@ -20,7 +20,7 @@ export async function syncProjectPlantMeasurements(projectId: string): Promise<{
   // Conflito de identidade: contextualizou-se a vazio de propósito. Limpar quantidades
   // com origem «planta» evita deixar saldos obsoletos a parecerem actuais enquanto
   // o utilizador não confirma a identidade da planta.
-  if (!context.rooms.length && !context.openings.length) {
+  if (!context.rooms.length && !context.openings.length && !context.hydroPipes.length && !context.hydroEquipment.length) {
     if (!context.identityConflict) return { updatedItems: 0 };
     return clearPlantOriginQuantities(documents.map((document) => document.id));
   }
@@ -28,6 +28,7 @@ export async function syncProjectPlantMeasurements(projectId: string): Promise<{
   const items = await db.select({
     id: lineItems.id,
     code: lineItems.code,
+    description: lineItems.description,
     quantity: lineItems.quantity,
     origin: lineItems.origin,
   }).from(lineItems)
@@ -35,7 +36,6 @@ export async function syncProjectPlantMeasurements(projectId: string): Promise<{
     .where(and(
       inArray(budgetSections.documentId, documents.map((document) => document.id)),
       eq(lineItems.kind, "item"),
-      inArray(lineItems.code, supportedPlantItemCodes()),
     ));
 
   const existingLineCounts = items.length
@@ -52,7 +52,14 @@ export async function syncProjectPlantMeasurements(projectId: string): Promise<{
     const alreadyFromPlant = item.origin === "planta";
     if (!alreadyFromPlant && (itemsWithMeasurementLines.has(item.id) || Number(item.quantity ?? 0) !== 0)) continue;
 
-    const built = buildMeasurementLinesFromPlant(item.code, context.rooms, context.openings);
+    const built = buildMeasurementLinesFromPlant(
+      item.code,
+      context.rooms,
+      context.openings,
+      context.hydroPipes,
+      item.description,
+      context.hydroEquipment,
+    );
     if (!built.ok) continue;
     const total = built.lines.reduce((sum, line) => sum
       + line.count * (line.length ?? 1) * (line.width ?? 1) * (line.height ?? 1), 0);
@@ -86,7 +93,6 @@ async function clearPlantOriginQuantities(documentIds: string[]): Promise<{ upda
       inArray(budgetSections.documentId, documentIds),
       eq(lineItems.kind, "item"),
       eq(lineItems.origin, "planta"),
-      inArray(lineItems.code, supportedPlantItemCodes()),
     ));
   if (!plantItems.length) return { updatedItems: 0 };
 

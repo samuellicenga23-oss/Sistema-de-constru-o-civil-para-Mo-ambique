@@ -20,7 +20,7 @@ app = FastAPI(title="SIGO Plant Service")
 # em produção, permissivo em dev sem configuração" (achado da auditoria).
 PLANT_SERVICE_TOKEN = os.environ.get("PLANT_SERVICE_TOKEN")
 IS_PRODUCTION = os.environ.get("ENVIRONMENT") == "production"
-PARSER_VERSION = "2026.08-resumo-fam-1"
+PARSER_VERSION = "2026.08-openings-hydro-1"
 PARSER_CONCURRENCY = max(1, min(2, int(os.environ.get("PLANT_PARSER_CONCURRENCY", "1"))))
 PARSER_CACHE_SIZE = max(1, min(20, int(os.environ.get("PLANT_PARSER_CACHE_SIZE", "6"))))
 parser_slots = asyncio.Semaphore(PARSER_CONCURRENCY)
@@ -174,6 +174,53 @@ class DocumentIdentityConflictOut(BaseModel):
     values: list[dict]
 
 
+class TechnicalQualityIssueOut(BaseModel):
+    code: str
+    severity: str
+    scope: str
+    message: str
+    pages: list[int] = Field(default_factory=list)
+    requiresConfirmation: bool = False
+
+
+class HydroPipeEvidenceOut(BaseModel):
+    system: str
+    material: str | None
+    diameterMm: float | None
+    diameterInch: str | None
+    page: int
+    occurrences: int
+    evidenceKind: str
+    measuredLengthM: float | None
+    confidence: float
+    floor: str | None
+    measurementBasis: str | None
+
+
+class HydroEquipmentEvidenceOut(BaseModel):
+    kind: str
+    page: int
+    occurrences: int
+    evidenceKind: str
+    capacityL: float | None
+    confidence: float
+    quantity: int | None
+    code: str | None
+    floor: str | None
+    source: str
+    requiresConfirmation: bool
+
+
+class HydrosanitarySummaryOut(BaseModel):
+    systems: list[str] = Field(default_factory=list)
+    pipes: list[HydroPipeEvidenceOut] = Field(default_factory=list)
+    equipment: list[HydroEquipmentEvidenceOut] = Field(default_factory=list)
+    septicTankDetected: bool = False
+    poolDetected: bool = False
+    quantitativeCoverage: str
+    requiresConfirmation: bool = True
+
+
 class DocumentAnalysisOut(BaseModel):
     pageCount: int
     isMultiDiscipline: bool
@@ -182,6 +229,9 @@ class DocumentAnalysisOut(BaseModel):
     identityConflicts: list[DocumentIdentityConflictOut] = Field(default_factory=list)
     requiresIdentityConfirmation: bool = False
     identityConfirmed: bool = False
+    qualityIssues: list[TechnicalQualityIssueOut] = Field(default_factory=list)
+    requiresTechnicalConfirmation: bool = False
+    hydrosanitarySummary: HydrosanitarySummaryOut | None = None
 
 
 class ParseResponse(BaseModel):
@@ -304,6 +354,57 @@ def build_parse_response(result) -> ParseResponse:
             ],
             requiresIdentityConfirmation=document_analysis.requires_identity_confirmation,
             identityConfirmed=document_analysis.identity_confirmed,
+            qualityIssues=[
+                TechnicalQualityIssueOut(
+                    code=issue.code,
+                    severity=issue.severity,
+                    scope=issue.scope,
+                    message=issue.message,
+                    pages=issue.pages,
+                    requiresConfirmation=issue.requires_confirmation,
+                )
+                for issue in document_analysis.quality_issues
+            ],
+            requiresTechnicalConfirmation=document_analysis.requires_technical_confirmation,
+            hydrosanitarySummary=HydrosanitarySummaryOut(
+                systems=document_analysis.hydrosanitary_summary.systems,
+                pipes=[
+                    HydroPipeEvidenceOut(
+                        system=pipe.system,
+                        material=pipe.material,
+                        diameterMm=pipe.diameter_mm,
+                        diameterInch=pipe.diameter_inch,
+                        page=pipe.page,
+                        occurrences=pipe.occurrences,
+                        evidenceKind=pipe.evidence_kind,
+                        measuredLengthM=pipe.measured_length_m,
+                        confidence=pipe.confidence,
+                        floor=pipe.floor,
+                        measurementBasis=pipe.measurement_basis,
+                    )
+                    for pipe in document_analysis.hydrosanitary_summary.pipes
+                ],
+                equipment=[
+                    HydroEquipmentEvidenceOut(
+                        kind=item.kind,
+                        page=item.page,
+                        occurrences=item.occurrences,
+                        evidenceKind=item.evidence_kind,
+                        capacityL=item.capacity_l,
+                        confidence=item.confidence,
+                        quantity=item.quantity,
+                        code=item.code,
+                        floor=item.floor,
+                        source=item.source,
+                        requiresConfirmation=item.requires_confirmation,
+                    )
+                    for item in document_analysis.hydrosanitary_summary.equipment
+                ],
+                septicTankDetected=document_analysis.hydrosanitary_summary.septic_tank_detected,
+                poolDetected=document_analysis.hydrosanitary_summary.pool_detected,
+                quantitativeCoverage=document_analysis.hydrosanitary_summary.quantitative_coverage,
+                requiresConfirmation=document_analysis.hydrosanitary_summary.requires_confirmation,
+            ) if document_analysis.hydrosanitary_summary else None,
             sections=[
                 DocumentSectionOut(
                     discipline=section.discipline,

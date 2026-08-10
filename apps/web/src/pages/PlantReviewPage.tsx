@@ -532,6 +532,7 @@ export default function PlantReviewPage() {
   }
 
   const totalRoomsArea = rooms.reduce((s, r) => s + Number(r.areaM2), 0);
+  const roomsWithPerimeter = rooms.filter((room) => room.perimeterM != null && Number(room.perimeterM) > 0).length;
   const identityBlocked = Boolean(
     plant.documentAnalysis?.requiresIdentityConfirmation
     && !plant.documentAnalysis.identityConfirmed,
@@ -556,10 +557,21 @@ export default function PlantReviewPage() {
   // Lacunas de extracção: o utilizador pediu explicitamente para ser informado do que não foi
   // possível puxar automaticamente da planta, sem lhe perguntar como reformatar o ficheiro — por
   // isso listamos factos concretos (o quê não foi encontrado) e nunca pedimos para reenviar nada.
-  const gaps: string[] = [];
+  const structuredQualityIssues = plant.documentAnalysis?.qualityIssues ?? [];
+  const gaps: string[] = structuredQualityIssues
+    .filter((issue) => issue.severity !== "info")
+    .map((issue) => issue.message);
   const detectedDisciplines = new Set(plant.documentAnalysis?.sections.map((section) => section.discipline));
   const hasArchitecture = detectedDisciplines.size > 0 ? detectedDisciplines.has("arquitectura") : plant.discipline === "arquitectura";
   const hasStructure = detectedDisciplines.size > 0 ? detectedDisciplines.has("estrutura") : plant.discipline === "estrutura";
+  const hydrosanitarySummary = plant.documentAnalysis?.hydrosanitarySummary ?? null;
+  const measuredHydroPipes = hydrosanitarySummary?.pipes.filter((pipe) => pipe.measuredLengthM != null) ?? [];
+  const displayedHydroPipes = measuredHydroPipes.length > 0
+    ? measuredHydroPipes
+    : hydrosanitarySummary?.pipes.filter((pipe) => pipe.evidenceKind === "planta").slice(0, 12) ?? [];
+  const measuredHydroTotalM = measuredHydroPipes.reduce((total, pipe) => total + Number(pipe.measuredLengthM ?? 0), 0);
+  const quantifiedHydroEquipment = hydrosanitarySummary?.equipment.filter((item) => item.quantity != null && item.source !== "vector_topology") ?? [];
+  const estimatedHydroAccessories = hydrosanitarySummary?.equipment.filter((item) => item.quantity != null && item.source === "vector_topology") ?? [];
   const structuralSummary = plant.structuralSummary ?? {
     footingsCount: 0, footingsAvgWidthCm: 0, footingsAvgLengthCm: 0, footingsAvgDepthCm: 0,
     columnsCount: 0, beamsCount: 0, beamsTotalLengthM: 0, beamsAvgWidthCm: 0, beamsAvgHeightCm: 0,
@@ -588,7 +600,7 @@ export default function PlantReviewPage() {
         ? `Não foi possível processar este ficheiro: ${plant.errorMessage}.`
         : "Não foi possível processar este ficheiro."
     );
-  } else {
+  } else if (structuredQualityIssues.length === 0) {
     if (hasStructure) {
       const s = plant.structuralSummary;
       if (!s) {
@@ -737,9 +749,79 @@ export default function PlantReviewPage() {
 
         {gaps.length > 0 && (
           <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
-            {gaps.length} ponto(s) por regularizar — veja o chat de regularização no final desta página, ou{" "}
+            {gaps.length} ponto(s) por regularizar — consulte a lista de validação no final desta página, ou{" "}
             <Link to={`/plantas/${plant.id}/completar`} className="font-semibold underline">edite os dados agora</Link>.
           </div>
+        )}
+
+        {hydrosanitarySummary && (
+          <section className="card card-pad">
+            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="section-title">Redes hidrossanitárias</h2>
+                <p className="muted mt-1">
+                  {measuredHydroPipes.length > 0
+                    ? `${measuredHydroTotalM.toFixed(2)} m medidos em traçados com escala confirmada.`
+                    : "Diâmetros encontrados nas pranchas; comprimentos continuam por confirmar."}
+                </p>
+              </div>
+              <Link to={`/plantas/${plant.id}/completar`} className="btn btn-secondary btn-sm">Confirmar redes</Link>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {hydrosanitarySummary.systems.map((system) => (
+                <span key={system} className="badge badge-neutral">{system.replaceAll("_", " ")}</span>
+              ))}
+              {hydrosanitarySummary.septicTankDetected && <span className="badge badge-neutral">fossa séptica</span>}
+              {hydrosanitarySummary.poolDetected && <span className="badge badge-neutral">piscina</span>}
+            </div>
+            {displayedHydroPipes.length > 0 && (
+              <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200">
+                <table className="w-full min-w-[620px] text-sm">
+                  <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+                    <tr><th className="px-4 py-3">Rede</th><th className="px-4 py-3">Piso</th><th className="px-4 py-3">Material</th><th className="px-4 py-3">Diâmetro</th><th className="px-4 py-3">{measuredHydroPipes.length > 0 ? "Comprimento" : "Ocorrências"}</th><th className="px-4 py-3">Origem</th></tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {displayedHydroPipes.map((pipe, index) => (
+                      <tr key={`${pipe.system}-${pipe.page}-${pipe.diameterMm}-${pipe.diameterInch}-${index}`}>
+                        <td className="px-4 py-3 font-medium text-slate-900">{pipe.system.replaceAll("_", " ")}</td>
+                        <td className="px-4 py-3 text-slate-600">{pipe.floor ?? "por confirmar"}</td>
+                        <td className="px-4 py-3 text-slate-600">{pipe.material ?? "por confirmar"}</td>
+                        <td className="px-4 py-3 tabular-nums">{pipe.diameterMm != null ? `Ø ${pipe.diameterMm.toFixed(0)} mm` : pipe.diameterInch ? `Ø ${pipe.diameterInch}″` : "por confirmar"}</td>
+                        <td className="px-4 py-3 font-semibold tabular-nums text-slate-900">{pipe.measuredLengthM != null ? `${pipe.measuredLengthM.toFixed(2)} m` : pipe.occurrences}</td>
+                        <td className="px-4 py-3 text-slate-500">vetor · pág. {pipe.page}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {quantifiedHydroEquipment.length > 0 && (
+              <div className="mt-4">
+                <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Equipamentos e pontos identificados</p>
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {quantifiedHydroEquipment.map((item, index) => (
+                    <div key={`${item.kind}-${item.page}-${item.code}-${index}`} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-slate-900">{item.kind.replaceAll("_", " ")}{item.code ? ` ${item.code}` : ""}</p>
+                        <p className="text-xs text-slate-500">{item.floor ?? `pág. ${item.page}`}{item.capacityL ? ` · ${item.capacityL.toFixed(0)} L` : ""}{item.requiresConfirmation ? " · confirmar" : ""}</p>
+                      </div>
+                      <span className="text-base font-bold tabular-nums text-brand-700">{item.quantity}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {estimatedHydroAccessories.length > 0 && (
+              <details className="mt-4 rounded-lg border border-amber-200 bg-amber-50">
+                <summary className="cursor-pointer px-3 py-2 text-sm font-semibold text-amber-950">Acessórios estimados pelo traçado ({estimatedHydroAccessories.reduce((total, item) => total + Number(item.quantity ?? 0), 0)})</summary>
+                <div className="flex flex-wrap gap-2 border-t border-amber-200 px-3 py-3">
+                  {estimatedHydroAccessories.map((item, index) => (
+                    <span key={`${item.kind}-${item.page}-${index}`} className="rounded-full bg-white px-2.5 py-1 text-xs text-amber-950">{item.kind.replaceAll("_", " ")}: {item.quantity} · {item.floor ?? `pág. ${item.page}`}</span>
+                  ))}
+                </div>
+              </details>
+            )}
+          </section>
         )}
 
         {hasStructure && (
@@ -897,14 +979,14 @@ export default function PlantReviewPage() {
           <section className="card card-pad">
             <div className="flex items-center gap-2 mb-3">
               <IconRuler className="w-4 h-4 text-brand-700" />
-              <h2 className="section-title">Compartimentos detectados ({rooms.length}) — confirme o piso de cada um</h2>
+              <h2 className="section-title">Compartimentos ({rooms.length})</h2>
             </div>
-            <p className="text-sm text-gray-600 mb-3">
-              Área total: <span className="font-semibold text-gray-900">{totalRoomsArea.toFixed(2)} m²</span>, em{" "}
-              {floorNames.length} piso(s) detectado(s). A detecção automática (pelo texto da folha) pode falhar em
-              casos ambíguos — reveja e corrija o piso de qualquer compartimento antes de continuar. Cada piso vira um
-              piso próprio no Assistente de Medições; nenhum item é criado por compartimento.
-            </p>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm text-gray-600">
+              <span><strong className="text-gray-900">{totalRoomsArea.toFixed(2)} m²</strong> · {floorNames.length} piso(s) · {roomsWithPerimeter}/{rooms.length} perímetros</span>
+              {roomsWithPerimeter < rooms.length && (
+                <Link to={`/plantas/${plant.id}/completar#compartimentos`} className="btn btn-secondary btn-sm">Preencher perímetros</Link>
+              )}
+            </div>
             <div className="space-y-4">
               {floorNames.map((floorName) => {
                 const floorRooms = roomsByFloor.get(floorName) ?? [];
@@ -917,13 +999,15 @@ export default function PlantReviewPage() {
                         {floorRooms.length} compartimento(s) · {floorArea.toFixed(2)} m²
                       </span>
                     </div>
-                    <table className="w-full text-sm">
+                    <div className="overflow-x-auto"><table className="w-full min-w-[680px] text-sm">
+                      <thead><tr className="border-b border-gray-100 text-xs uppercase tracking-wide text-gray-500"><th className="px-3 py-2 text-left">Compartimento</th><th className="py-2 text-left">N.º</th><th className="py-2 text-right">Área</th><th className="py-2 text-right">Perímetro</th><th className="px-3 py-2 text-right">Piso</th></tr></thead>
                       <tbody>
                         {floorRooms.map((r) => (
                           <tr key={r.id} className="table-row">
                             <td className="py-1.5 pl-3">{r.name}</td>
                             <td className="text-gray-400">{r.number}</td>
                             <td className="text-right tabular-nums">{Number(r.areaM2).toFixed(2)} m²</td>
+                            <td className={`text-right tabular-nums ${r.perimeterM ? "text-slate-700" : "font-medium text-amber-700"}`}>{r.perimeterM ? `${Number(r.perimeterM).toFixed(2)} m` : "Por preencher"}</td>
                             <td className="text-right pr-3 w-48">
                               <select
                                 value={r.floor ?? UNASSIGNED_FLOOR}
@@ -942,7 +1026,7 @@ export default function PlantReviewPage() {
                           </tr>
                         ))}
                       </tbody>
-                    </table>
+                    </table></div>
                   </div>
                 );
               })}
@@ -1056,25 +1140,22 @@ export default function PlantReviewPage() {
 
         <section id="regularizacao-leitura" className="card overflow-hidden scroll-mt-24">
           <div className="border-b border-slate-100 bg-slate-50 px-5 py-4">
-            <h2 className="section-title">Regularização da leitura</h2>
+            <h2 className="section-title">Validação técnica</h2>
             <p className="mt-1 text-sm text-slate-600">
-              Último passo — cada ponto abre em pop-up. Pode corrigir já em Completar dados ou aguardar o motor (SLA 5h).
+              Confirme apenas os pontos que o desenho não permitiu medir com segurança.
             </p>
           </div>
-          <div className="space-y-3 bg-slate-100/60 p-4">
-            <div className="max-w-[92%] rounded-2xl rounded-tl-md bg-white px-4 py-3 text-sm text-slate-800 shadow-sm">
-              Olá — estes são os pontos em que o leitor automático precisa de regularização ou confirmação.
-            </div>
+          <div className="space-y-3 p-4">
             {gaps.length === 0 ? (
-              <div className="ml-auto max-w-[92%] rounded-2xl rounded-tr-md bg-brand-700 px-4 py-3 text-sm text-white shadow-sm">
-                Sem lacunas críticas. Pode editar qualquer família estrutural se quiser afinar as medições.
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+                Sem lacunas críticas. Os dados estão prontos para medição.
               </div>
             ) : (
               gaps.map((gap, index) => (
                 <button
                   key={`${gap}-${index}`}
                   type="button"
-                  className="block w-full max-w-[92%] rounded-2xl rounded-tl-md border border-amber-200 bg-amber-50 px-4 py-3 text-left text-sm text-amber-950 shadow-sm transition hover:border-amber-400"
+                  className="block w-full rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-left text-sm text-amber-950 hover:border-amber-400"
                   onClick={() => setGapPopup(gap)}
                 >
                   <span className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">Ponto {index + 1}</span>
