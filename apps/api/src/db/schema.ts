@@ -37,6 +37,8 @@ export const scheduleDependencyTypeEnum = pgEnum("schedule_dependency_type", ["F
 export const subscriptionStatusEnum = pgEnum("subscription_status", ["trial", "activo", "suspenso"]);
 export const plantDisciplineEnum = pgEnum("plant_discipline", ["arquitectura", "estrutura"]);
 export const plantStatusEnum = pgEnum("plant_status", ["pendente", "processando", "concluido", "erro"]);
+export const plantReviewStatusEnum = pgEnum("plant_review_status", ["aberto", "em_analise", "resolvido"]);
+export const plantReviewReasonEnum = pgEnum("plant_review_reason", ["erro_processamento", "extraccao_incompleta", "pedido_utilizador"]);
 
 // ---------- Multi-tenant / Auth ----------
 
@@ -935,6 +937,33 @@ export const extractedRebarSchedules = pgTable("extracted_rebar_schedules", {
   weightKg: numeric("weight_kg", { precision: 12, scale: 3 }).notNull(),
   page: integer("page").notNull(),
 });
+
+// Pedidos para o super admin melhorar o motor de análise quando a planta falha
+// a meio ou termina com muitas lacunas — o utilizador também pode completar os dados à mão.
+export const plantReviewRequests = pgTable(
+  "plant_review_requests",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    plantId: uuid("plant_id").notNull().references(() => plants.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+    companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+    requestedByUserId: uuid("requested_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    reason: plantReviewReasonEnum("reason").notNull(),
+    status: plantReviewStatusEnum("status").notNull().default("aberto"),
+    gaps: jsonb("gaps").$type<string[]>().notNull().default([]),
+    progressAtFailure: integer("progress_at_failure"),
+    errorMessage: text("error_message"),
+    userNotes: text("user_notes"),
+    adminNotes: text("admin_notes"),
+    slaHours: integer("sla_hours").notNull().default(5),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    resolvedAt: timestamp("resolved_at"),
+  },
+  (table) => [
+    index("plant_review_requests_status_idx").on(table.status, table.createdAt),
+    index("plant_review_requests_plant_idx").on(table.plantId, table.status),
+  ],
+);
 
 // ---------- Financeiro por obra ----------
 

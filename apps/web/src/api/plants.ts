@@ -94,6 +94,41 @@ export type Plant = {
   uploadedAt: string;
 };
 
+export type PlantReviewRequest = {
+  id: string;
+  plantId: string;
+  projectId: string;
+  companyId: string;
+  reason: "erro_processamento" | "extraccao_incompleta" | "pedido_utilizador";
+  status: "aberto" | "em_analise" | "resolvido";
+  gaps: string[];
+  progressAtFailure: number | null;
+  errorMessage: string | null;
+  userNotes: string | null;
+  adminNotes: string | null;
+  slaHours: number;
+  createdAt: string;
+  resolvedAt: string | null;
+  plantFileName?: string | null;
+  plantStatus?: Plant["processingStatus"];
+  plantProgress?: number;
+  projectName?: string;
+  companyName?: string;
+  requesterName?: string | null;
+  requesterEmail?: string | null;
+  pdfUrl?: string;
+};
+
+export type ManualRoomInput = {
+  id?: string;
+  name: string;
+  number?: string | null;
+  floor?: string | null;
+  areaM2: number;
+  perimeterM?: number | null;
+  page?: number;
+};
+
 export type PlantProcessingProgress = Pick<
   Plant,
   "id" | "processingStatus" | "processingProgress" | "processingStage" | "processingCurrentPage" | "processingTotalPages" | "processingStartedAt" | "processingUpdatedAt" | "errorMessage"
@@ -282,4 +317,33 @@ export const plantsApi = {
     request<{ ok: true }>(`/plants/${plantId}/openings/${openingId}`, { method: "DELETE" }),
 
   delete: (id: string) => request<{ ok: true }>(`/plants/${id}`, { method: "DELETE" }),
+
+  getReviewRequest: (id: string) =>
+    request<{ review: PlantReviewRequest | null; slaHours: number }>(`/plants/${id}/review-request`),
+
+  requestEngineReview: (id: string, input?: { userNotes?: string; gaps?: string[] }) =>
+    request<{ review: PlantReviewRequest; message: string; slaHours: number }>(`/plants/${id}/request-engine-review`, {
+      method: "POST",
+      body: JSON.stringify(input ?? {}),
+    }),
+
+  saveManualData: (id: string, input: {
+    structuralSummary: StructuralSummary;
+    rooms: ManualRoomInput[];
+    userNotes?: string;
+    requestEngineReview?: boolean;
+  }) =>
+    request<{
+      plant: Plant;
+      rooms: ExtractedRoom[];
+      review: PlantReviewRequest | null;
+      message: string;
+      slaHours: number;
+    }>(`/plants/${id}/manual-data`, { method: "PUT", body: JSON.stringify(input) }),
+
+  listAdminReviews: (status: "aberto" | "em_analise" | "resolvido" | "todos" = "aberto") =>
+    request<PlantReviewRequest[]>(`/admin/plant-reviews?status=${status}`),
+
+  updateAdminReview: (id: string, input: { status: PlantReviewRequest["status"]; adminNotes?: string }) =>
+    request<PlantReviewRequest>(`/admin/plant-reviews/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
 };

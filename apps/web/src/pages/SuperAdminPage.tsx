@@ -13,6 +13,7 @@ import {
 } from "../api/companies";
 import { dashboardApi, type AdminStats } from "../api/dashboard";
 import { adminSuppliersApi, type AdminSupplierAccount, type AdminQuoteRequestStats } from "../api/adminSuppliers";
+import { plantsApi, type PlantReviewRequest } from "../api/plants";
 import Layout from "../components/Layout";
 import Modal from "../components/Modal";
 import PageSearch from "../components/PageSearch";
@@ -235,6 +236,8 @@ export default function SuperAdminPage() {
   const [proofActionId, setProofActionId] = useState<string | null>(null);
   const [leads, setLeads] = useState<CommercialLead[]>([]);
   const [leadActionId, setLeadActionId] = useState<string | null>(null);
+  const [plantReviews, setPlantReviews] = useState<PlantReviewRequest[]>([]);
+  const [plantReviewActionId, setPlantReviewActionId] = useState<string | null>(null);
   const [supplierAccounts, setSupplierAccounts] = useState<AdminSupplierAccount[]>([]);
   const [quoteStats, setQuoteStats] = useState<AdminQuoteRequestStats | null>(null);
   const [resendingInviteId, setResendingInviteId] = useState<string | null>(null);
@@ -330,6 +333,25 @@ export default function SuperAdminPage() {
     setLeads(rows);
   }
 
+  async function reloadPlantReviews() {
+    const rows = await plantsApi.listAdminReviews("aberto");
+    setPlantReviews(rows);
+  }
+
+  async function handlePlantReviewStatus(id: string, status: PlantReviewRequest["status"]) {
+    setPlantReviewActionId(id);
+    setError(null);
+    try {
+      await plantsApi.updateAdminReview(id, { status });
+      await reloadPlantReviews();
+      setSuccess(en ? "Plant review updated." : "Pedido de planta actualizado.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao actualizar pedido de planta");
+    } finally {
+      setPlantReviewActionId(null);
+    }
+  }
+
   async function handleLeadStatus(id: string, status: CommercialLead["status"]) {
     setLeadActionId(id);
     setError(null);
@@ -394,6 +416,7 @@ export default function SuperAdminPage() {
     reload().catch((err) => setError(err.message));
     reloadPendingProofs().catch((err) => setError(err.message));
     reloadLeads().catch((err) => setError(err.message));
+    reloadPlantReviews().catch((err) => setError(err.message));
     reloadSuppliers().catch((err) => setError(err.message));
     companiesApi.getMailStatus().then((r) => setMailEnabled(r.enabled)).catch(() => setMailEnabled(false));
     companiesApi.getMonitoringStatus().then((r) => setMonitoringEnabled(r.enabled)).catch(() => setMonitoringEnabled(false));
@@ -961,6 +984,65 @@ export default function SuperAdminPage() {
                 </div>
               </section>
             </div>
+
+            <section id="plant-reviews" className="card p-5 scroll-mt-24">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <h2 className="section-title">{en ? "Plant engine reviews" : "Revisões do motor de plantas"}</h2>
+                <span className="badge badge-brand">{plantReviews.length}</span>
+              </div>
+              <p className="mb-3 text-sm text-slate-600">
+                {en
+                  ? "Failed or incomplete extractions awaiting engine improvement within 5 hours."
+                  : "Falhas ou extracções incompletas à espera de melhoria do motor em até 5 horas."}
+              </p>
+              {plantReviews.length === 0 ? (
+                <p className="text-sm text-slate-500">{en ? "Nothing open." : "Nada em aberto."}</p>
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  {plantReviews.map((review) => (
+                    <div key={review.id} className="flex flex-wrap items-start justify-between gap-3 py-3">
+                      <div className="min-w-0 flex-1">
+                        <strong className="text-sm text-slate-950">
+                          {review.projectName} · {review.companyName}
+                        </strong>
+                        <p className="text-xs text-slate-500">
+                          {review.plantFileName ?? review.plantId}
+                          {review.progressAtFailure != null ? ` · ${review.progressAtFailure}%` : ""}
+                          {` · ${review.reason}`} · SLA {review.slaHours}h · {fmtDate(review.createdAt)}
+                        </p>
+                        {review.gaps?.length > 0 && (
+                          <ul className="mt-1 list-disc pl-4 text-xs text-slate-600">
+                            {review.gaps.slice(0, 4).map((gap) => <li key={gap}>{gap}</li>)}
+                          </ul>
+                        )}
+                        {review.errorMessage && <p className="mt-1 text-xs text-red-600">{review.errorMessage}</p>}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <a href={review.pdfUrl} target="_blank" rel="noreferrer" className="btn btn-secondary btn-sm">
+                          {en ? "PDF" : "PDF"}
+                        </a>
+                        <button
+                          type="button"
+                          disabled={plantReviewActionId === review.id}
+                          onClick={() => handlePlantReviewStatus(review.id, "em_analise")}
+                          className="btn btn-secondary btn-sm"
+                        >
+                          {en ? "In progress" : "Em análise"}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={plantReviewActionId === review.id}
+                          onClick={() => handlePlantReviewStatus(review.id, "resolvido")}
+                          className="btn btn-primary btn-sm"
+                        >
+                          {plantReviewActionId === review.id ? "..." : en ? "Resolved" : "Resolvido"}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
 
             <section className="card p-5">
               <div className="mb-3 flex items-center justify-between gap-2">

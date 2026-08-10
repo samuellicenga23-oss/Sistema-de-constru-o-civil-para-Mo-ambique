@@ -1,18 +1,23 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { eq, and, isNull, or } from "drizzle-orm";
+import { eq, and, isNull, or, desc, inArray } from "drizzle-orm";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, writeFile, unlink, readFile } from "node:fs/promises";
 import path from "node:path";
 import { db } from "../db/index.js";
-import { plants, projects as projectTable, extractedRooms, extractedOpenings, extractedRebarSchedules, materials } from "../db/schema.js";
+import { plants, projects as projectTable, extractedRooms, extractedOpenings, extractedRebarSchedules, materials, plantReviewRequests, companies, users } from "../db/schema.js";
 import { requireCompanyUser, requireRole } from "../auth/middleware.js";
 import { assertProjectOwned, assertPlantOwned } from "../services/accessControl.js";
 import { env } from "../env.js";
-import { extractedSlabSchema, plantParseResultSchema, PLANT_DISCIPLINES, fixedSigo } from "@sigo/shared";
+import { extractedSlabSchema, plantParseResultSchema, PLANT_DISCIPLINES, fixedSigo, structuralSummarySchema } from "@sigo/shared";
 import { loadWorkChapterLibrary } from "../services/boqTemplate.js";
 import { syncProjectPlantMeasurements } from "../services/plantMeasurementSync.js";
 import { recordAuditEvent } from "../services/auditTrail.js";
+import {
+  createPlantReviewRequest,
+  maybeOpenPlantReviewAfterProcessing,
+  PLANT_REVIEW_SLA_HOURS,
+} from "../services/plantReviewRequests.js";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista"] as const;
 const clientPlantIdSchema = z.string().uuid();
@@ -219,6 +224,7 @@ export async function processPlantFile(plantId: string, buffer: Buffer, filename
     processingStage: "Análise concluída",
     processingUpdatedAt: new Date(),
   }).where(eq(plants.id, plantId));
+  await maybeOpenPlantReviewAfterProcessing(plantId).catch(() => undefined);
 }
 
 // A leitura nunca pertence ao ciclo de vida do pedido HTTP. A BD é a fila persistente:
@@ -238,12 +244,21 @@ export function enqueuePlantProcessing(plantId: string, suppliedContext?: PlantD
         await processPlantFile(plantId, buffer, plant.originalFileName ?? "planta.pdf", suppliedContext);
       } catch (err) {
         const message = err instanceof Error ? err.message : "Erro desconhecido a processar a planta";
-        await db.update(plants).set({
+        const [failed] = await db.update(plants).set({
           processingStatus: "erro",
           processingStage: "Análise interrompida",
           processingUpdatedAt: new Date(),
           errorMessage: message,
-        }).where(eq(plants.id, plantId)).catch(() => undefined);
+        }).where(eq(plants.id, plantId)).returning().catch(() => [undefined]);
+        if (failed) {
+          await createPlantReviewRequest({
+            plantId,
+            reason: "erro_processamento",
+            gaps: [`Processamento interrompido: ${message}`],
+            progressAtFailure: failed.processingProgress,
+            errorMessage: message,
+          }).catch(() => undefined);
+        }
       } finally {
         activePlantJobs.delete(plantId);
       }
@@ -655,5 +670,224 @@ export async function plantRoutes(app: FastifyInstance) {
     if (!deleted) return reply.code(404).send({ error: "Vão não encontrado" });
     await syncProjectPlantMeasurements(ownedPlant.projectId);
     return { ok: true };
+  });
+
+  // Pedido explícito (ou reabertura) para o super admin melhorar o motor de análise.
+  app.post("/api/plants/:id/request-engine-review", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const companyId = request.currentUser!.companyId!;
+    const plant = await assertPlantOwned(id, companyId);
+    if (!plant) return reply.code(404).send({ error: "Planta não encontrada" });
+    const body = z.object({
+      userNotes: z.string().trim().max(2000).optional(),
+      gaps: z.array(z.string().trim().max(400)).max(40).optional(),
+    }).safeParse(request.body ?? {});
+    if (!body.success) return reply.code(400).send({ error: body.error.flatten() });
+
+    const review = await createPlantReviewRequest({
+      plantId: id,
+      reason: plant.processingStatus === "erro" ? "erro_processamento" : "pedido_utilizador",
+      requestedByUserId: request.currentUser!.id,
+      gaps: body.data.gaps,
+      progressAtFailure: plant.processingProgress,
+      errorMessage: plant.errorMessage,
+      userNotes: body.data.userNotes ?? null,
+      forceNotify: true,
+    });
+    if (!review) return reply.code(500).send({ error: "Não foi possível registar o pedido de revisão" });
+    return {
+      review,
+      message: `A equipa SIGO já recebeu este pedido. Respondemos em até ${PLANT_REVIEW_SLA_HOURS} horas e regularizamos a leitura da planta e do projecto.`,
+      slaHours: PLANT_REVIEW_SLA_HOURS,
+    };
+  });
+
+  app.get("/api/plants/:id/review-request", { preHandler: requireCompanyUser }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const companyId = request.currentUser!.companyId!;
+    const plant = await assertPlantOwned(id, companyId);
+    if (!plant) return reply.code(404).send({ error: "Planta não encontrada" });
+    const [open] = await db
+      .select()
+      .from(plantReviewRequests)
+      .where(and(
+        eq(plantReviewRequests.plantId, id),
+        inArray(plantReviewRequests.status, ["aberto", "em_analise"]),
+      ))
+      .orderBy(desc(plantReviewRequests.createdAt))
+      .limit(1);
+    return { review: open ?? null, slaHours: PLANT_REVIEW_SLA_HOURS };
+  });
+
+  // Formulário dedicado (fora do assistente) para preencher sapatas, pilares, lajes, compartimentos, etc.
+  const manualRoomSchema = z.object({
+    id: z.string().uuid().optional(),
+    name: z.string().trim().min(1).max(200),
+    number: z.string().trim().max(20).nullable().optional(),
+    floor: z.string().trim().max(100).nullable().optional(),
+    areaM2: z.number().positive().max(100_000),
+    perimeterM: z.number().positive().max(10_000).nullable().optional(),
+    page: z.number().int().positive().max(500).default(1),
+  });
+
+  app.put("/api/plants/:id/manual-data", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const companyId = request.currentUser!.companyId!;
+    const plant = await assertPlantOwned(id, companyId);
+    if (!plant) return reply.code(404).send({ error: "Planta não encontrada" });
+
+    const parsed = z.object({
+      structuralSummary: structuralSummarySchema,
+      rooms: z.array(manualRoomSchema).max(200),
+      userNotes: z.string().trim().max(2000).optional(),
+      requestEngineReview: z.boolean().optional(),
+    }).safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+
+    const summary = {
+      ...parsed.data.structuralSummary,
+      slabsCount: parsed.data.structuralSummary.slabs?.length ?? parsed.data.structuralSummary.slabsCount,
+      slabsAvgThicknessCm: (parsed.data.structuralSummary.slabs?.length ?? 0)
+        ? parsed.data.structuralSummary.slabs!.reduce((sum, slab) => sum + slab.thicknessCm, 0) / parsed.data.structuralSummary.slabs!.length
+        : parsed.data.structuralSummary.slabsAvgThicknessCm,
+    };
+
+    const [updatedPlant] = await db.update(plants).set({
+      structuralSummary: summary,
+      // Se estava em erro, passa a concluído depois do preenchimento manual para desbloquear o fluxo.
+      processingStatus: plant.processingStatus === "erro" ? "concluido" : plant.processingStatus,
+      processingStage: plant.processingStatus === "erro" ? "Dados preenchidos manualmente" : plant.processingStage,
+      processingProgress: plant.processingStatus === "erro" ? 100 : plant.processingProgress,
+      errorMessage: plant.processingStatus === "erro" ? null : plant.errorMessage,
+      processingUpdatedAt: new Date(),
+    }).where(eq(plants.id, id)).returning();
+
+    const existingRooms = await db.select().from(extractedRooms).where(eq(extractedRooms.plantId, id));
+    const keepIds = new Set(parsed.data.rooms.map((room) => room.id).filter(Boolean) as string[]);
+    for (const room of existingRooms) {
+      if (!keepIds.has(room.id)) {
+        await db.delete(extractedRooms).where(and(eq(extractedRooms.id, room.id), eq(extractedRooms.plantId, id)));
+      }
+    }
+
+    const savedRooms = [];
+    for (const room of parsed.data.rooms) {
+      if (room.id && existingRooms.some((row) => row.id === room.id)) {
+        const [updated] = await db.update(extractedRooms).set({
+          name: room.name,
+          number: room.number ?? null,
+          floor: room.floor ?? null,
+          areaM2: fixedSigo(room.areaM2),
+          perimeterM: room.perimeterM != null ? fixedSigo(room.perimeterM) : null,
+          page: room.page,
+        }).where(and(eq(extractedRooms.id, room.id), eq(extractedRooms.plantId, id))).returning();
+        if (updated) savedRooms.push(updated);
+      } else {
+        const [created] = await db.insert(extractedRooms).values({
+          plantId: id,
+          name: room.name,
+          number: room.number ?? null,
+          floor: room.floor ?? null,
+          areaM2: fixedSigo(room.areaM2),
+          perimeterM: room.perimeterM != null ? fixedSigo(room.perimeterM) : null,
+          page: room.page,
+        }).returning();
+        if (created) savedRooms.push(created);
+      }
+    }
+
+    await syncProjectPlantMeasurements(plant.projectId);
+
+    let review = null;
+    if (parsed.data.requestEngineReview !== false) {
+      review = await createPlantReviewRequest({
+        plantId: id,
+        reason: plant.processingStatus === "erro" ? "erro_processamento" : "extraccao_incompleta",
+        requestedByUserId: request.currentUser!.id,
+        gaps: [
+          "Utilizador preencheu dados manuais enquanto a equipa melhora o motor.",
+          ...(parsed.data.userNotes ? [parsed.data.userNotes] : []),
+        ],
+        progressAtFailure: plant.processingProgress,
+        errorMessage: plant.errorMessage,
+        userNotes: parsed.data.userNotes ?? null,
+      });
+    }
+
+    await recordAuditEvent({
+      companyId,
+      actorUserId: request.currentUser!.id,
+      entityType: "plant",
+      entityId: id,
+      action: "manual_data.save",
+      after: { rooms: savedRooms.length, structuralSummary: summary },
+    });
+
+    return {
+      plant: updatedPlant,
+      rooms: savedRooms,
+      review,
+      message: `Dados guardados. A equipa SIGO continua a melhorar a leitura automática e responde em até ${PLANT_REVIEW_SLA_HOURS} horas.`,
+      slaHours: PLANT_REVIEW_SLA_HOURS,
+    };
+  });
+
+  app.get("/api/admin/plant-reviews", { preHandler: requireRole("super_admin") }, async (request) => {
+    const query = z.object({
+      status: z.enum(["aberto", "em_analise", "resolvido", "todos"]).default("aberto"),
+    }).safeParse(request.query ?? {});
+    const status = query.success ? query.data.status : "aberto";
+    const base = db
+      .select({
+        review: plantReviewRequests,
+        plantFileName: plants.originalFileName,
+        plantStatus: plants.processingStatus,
+        plantProgress: plants.processingProgress,
+        projectName: projectTable.name,
+        companyName: companies.name,
+        requesterName: users.name,
+        requesterEmail: users.email,
+      })
+      .from(plantReviewRequests)
+      .innerJoin(plants, eq(plants.id, plantReviewRequests.plantId))
+      .innerJoin(projectTable, eq(projectTable.id, plantReviewRequests.projectId))
+      .innerJoin(companies, eq(companies.id, plantReviewRequests.companyId))
+      .leftJoin(users, eq(users.id, plantReviewRequests.requestedByUserId));
+    const rows = status === "todos"
+      ? await base.orderBy(desc(plantReviewRequests.createdAt)).limit(100)
+      : await base.where(eq(plantReviewRequests.status, status)).orderBy(desc(plantReviewRequests.createdAt)).limit(100);
+
+    return rows.map((row) => ({
+      ...row.review,
+      plantFileName: row.plantFileName,
+      plantStatus: row.plantStatus,
+      plantProgress: row.plantProgress,
+      projectName: row.projectName,
+      companyName: row.companyName,
+      requesterName: row.requesterName,
+      requesterEmail: row.requesterEmail,
+      pdfUrl: `/api/files/plants/${row.review.plantId}`,
+    }));
+  });
+
+  app.patch("/api/admin/plant-reviews/:id", { preHandler: requireRole("super_admin") }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const parsed = z.object({
+      status: z.enum(["aberto", "em_analise", "resolvido"]),
+      adminNotes: z.string().trim().max(2000).optional(),
+    }).safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+
+    const [updated] = await db
+      .update(plantReviewRequests)
+      .set({
+        status: parsed.data.status,
+        adminNotes: parsed.data.adminNotes ?? undefined,
+        resolvedAt: parsed.data.status === "resolvido" ? new Date() : null,
+      })
+      .where(eq(plantReviewRequests.id, id))
+      .returning();
+    if (!updated) return reply.code(404).send({ error: "Pedido não encontrado" });
+    return updated;
   });
 }

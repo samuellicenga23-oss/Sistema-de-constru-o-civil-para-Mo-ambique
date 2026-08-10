@@ -581,10 +581,16 @@ export default function PlantReviewPage() {
         <section className="card overflow-hidden border-t-4 border-t-brand-600">
           <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-brand-700">Análise concluída</p>
-              <h2 className="mt-1 text-lg font-bold text-slate-900">Resumo da planta — confirme só se necessário</h2>
+              <p className="text-xs font-semibold uppercase tracking-wide text-brand-700">
+                {gaps.length > 0 ? "Análise parcial — acção necessária" : "Análise concluída"}
+              </p>
+              <h2 className="mt-1 text-lg font-bold text-slate-900">
+                {gaps.length > 0 ? "Alguns dados em falta — preencha ou aguarde a revisão" : "Resumo da planta — confirme só se necessário"}
+              </h2>
               <p className="mt-1 max-w-2xl text-sm text-slate-600">
-                {rooms.length} compartimento(s) · {totalRoomsArea.toFixed(2)} m² · pode medir já ou corrigir pisos abaixo.
+                {rooms.length} compartimento(s) · {totalRoomsArea.toFixed(2)} m² · {gaps.length > 0
+                  ? "pode completar no formulário dedicado enquanto a equipa melhora o motor (resposta em até 5h)."
+                  : "pode medir já ou corrigir pisos abaixo."}
               </p>
             </div>
             <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
@@ -681,19 +687,25 @@ export default function PlantReviewPage() {
                 <li key={g}>{g}</li>
               ))}
             </ul>
-            <p className="text-xs text-amber-700 mt-2">
-              Estes pontos podem ser preenchidos à mão no Assistente de Medições ou directamente no Mapa de
-              Quantidades — o resto da planta continua a ser usado normalmente.
+            <p className="mt-3 rounded-lg border border-amber-200 bg-white/70 px-3 py-2 text-sm text-amber-950">
+              A equipa SIGO foi (ou será) notificada para melhorar o motor de análise desta planta.
+              <strong> Respondemos em até 5 horas</strong> e regularizamos a leitura da planta e do projecto.
+              Entretanto, pode preencher já os dados em falta num formulário dedicado — sem usar o assistente de chat.
             </p>
-            <button
-              type="button"
-              onClick={handleContinueToMeasurements}
-              disabled={preparingMeasurements || identityBlocked}
-              className="btn btn-secondary btn-sm mt-3"
-            >
-              <IconRuler className="h-3.5 w-3.5" />
-              {preparingMeasurements ? "A preparar os campos..." : "Indicar dados manualmente"}
-            </button>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Link to={`/plantas/${plant.id}/completar`} className="btn btn-primary btn-sm">
+                Preencher dados em falta
+              </Link>
+              <button
+                type="button"
+                onClick={handleContinueToMeasurements}
+                disabled={preparingMeasurements || identityBlocked || plant.processingStatus !== "concluido"}
+                className="btn btn-secondary btn-sm"
+              >
+                <IconRuler className="h-3.5 w-3.5" />
+                {preparingMeasurements ? "A preparar os campos..." : "Continuar para medições"}
+              </button>
+            </div>
           </section>
         )}
 

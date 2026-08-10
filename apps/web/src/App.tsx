@@ -16,6 +16,7 @@ const ProjectDetailPage = lazy(() => import("./pages/ProjectDetailPage"));
 const BudgetDocumentPage = lazy(() => import("./pages/BudgetDocumentPage"));
 const MeasurementCertificatePage = lazy(() => import("./pages/MeasurementCertificatePage"));
 const PlantReviewPage = lazy(() => import("./pages/PlantReviewPage"));
+const PlantManualIntakePage = lazy(() => import("./pages/PlantManualIntakePage"));
 const SuperAdminPage = lazy(() => import("./pages/SuperAdminPage"));
 const CompositionDetailPage = lazy(() => import("./pages/CompositionDetailPage"));
 const CompanySettingsPage = lazy(() => import("./pages/CompanySettingsPage"));
@@ -195,6 +196,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <PlantReviewPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/plantas/:id/completar"
+        element={
+          <ProtectedRoute>
+            <PlantManualIntakePage />
           </ProtectedRoute>
         }
       />

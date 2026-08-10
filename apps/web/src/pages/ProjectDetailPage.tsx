@@ -198,7 +198,13 @@ export default function ProjectDetailPage() {
     setUploadNotice(null);
     try {
       const uploaded = await plantsApi.upload(projectId, file, "auto", setUploadProgress, { waitForCompletion: true });
-      if (uploaded.processingStatus === "erro") throw new Error(uploaded.errorMessage || "Não foi possível analisar o projecto");
+      if (uploaded.processingStatus === "erro") {
+        setPlants((current) => current.some((plant) => plant.id === uploaded.id) ? current : [...current, uploaded]);
+        fileInput.value = "";
+        setUploadProgress(null);
+        navigate(`/plantas/${uploaded.id}/completar`);
+        return;
+      }
       setPlants((current) => current.some((plant) => plant.id === uploaded.id) ? current : [...current, uploaded]);
       fileInput.value = "";
       setUploadProgress(null);
@@ -746,16 +752,24 @@ export default function ProjectDetailPage() {
                           {p.processingCurrentPage && p.processingTotalPages ? ` · página ${p.processingCurrentPage}/${p.processingTotalPages}` : ""}
                         </span>
                       )}
-                      {p.processingStatus === "erro" && p.errorMessage && (
-                        <span className="mt-0.5 block text-[11px] leading-4 text-red-600">{p.errorMessage}</span>
+                      {p.processingStatus === "erro" && (
+                        <span className="mt-0.5 block text-[11px] leading-4 text-red-700">
+                          Análise interrompida aos {p.processingProgress}%. A equipa SIGO responde em até 5 horas e regulariza a leitura.
+                          {p.errorMessage ? ` (${p.errorMessage})` : ""}
+                        </span>
                       )}
                     </span>
                     <span className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:shrink-0">
                       <span className={`badge ${PLANT_STATUS_BADGE[p.processingStatus].cls}`}>{p.processingStatus === "processando" ? `${p.processingProgress}%` : PLANT_STATUS_BADGE[p.processingStatus].label}</span>
                       {p.processingStatus === "erro" && (
-                        <button onClick={(e) => handleReprocessPlant(e, p.id)} disabled={reprocessingPlantId === p.id} className="btn btn-secondary btn-sm">
-                          {reprocessingPlantId === p.id ? "A tentar..." : "Tentar novamente"}
-                        </button>
+                        <>
+                          <Link to={`/plantas/${p.id}/completar`} className="btn btn-primary btn-sm">
+                            Preencher dados em falta
+                          </Link>
+                          <button onClick={(e) => handleReprocessPlant(e, p.id)} disabled={reprocessingPlantId === p.id} className="btn btn-secondary btn-sm">
+                            {reprocessingPlantId === p.id ? "A tentar..." : "Tentar novamente"}
+                          </button>
+                        </>
                       )}
                       <button
                         onClick={(e) => handleDeletePlant(e, p.id, p.originalFileName)}
