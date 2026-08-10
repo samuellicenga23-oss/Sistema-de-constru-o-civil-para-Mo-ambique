@@ -932,7 +932,7 @@ export default function QuickEstimateWizard({
                         />
                         <p className="mt-1 text-[11px] text-slate-500">
                           {structuralSummary?.totalSteelWeightKg
-                            ? `Mapa: sapatas ${Number(structuralSummary.footingsSteelWeightKg ?? 0).toFixed(2)} · pilares ${Number(structuralSummary.columnsSteelWeightKg ?? 0).toFixed(2)} · vigas ${Number(structuralSummary.beamsSteelWeightKg ?? 0).toFixed(2)} · lajes ${Number(structuralSummary.slabsSteelWeightKg ?? 0).toFixed(2)} kg. Editável.`
+                            ? `Mapa: sapatas ${Number(structuralSummary.footingsSteelWeightKg ?? 0).toFixed(2)} · pilares ${Number(structuralSummary.columnsSteelWeightKg ?? 0).toFixed(2)} · vigas ${Number(structuralSummary.beamsSteelWeightKg ?? 0).toFixed(2)} · lajes ${Number(structuralSummary.slabsSteelWeightKg ?? 0).toFixed(2)} · escadas ${Number(structuralSummary.stairsSteelWeightKg ?? 0).toFixed(2)} kg. Editável.`
                             : "Indique o total do mapa de aço."}
                         </p>
                       </div>

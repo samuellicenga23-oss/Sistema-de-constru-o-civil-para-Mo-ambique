@@ -866,6 +866,17 @@ export const plants = pgTable("plants", {
     beamsAvgWidthCm: number;
     beamsAvgHeightCm: number;
     beamsConcreteVolumeM3: number;
+    beamGroups?: Array<{
+      id?: string;
+      label: string;
+      slabIndex?: number;
+      floor?: string | null;
+      beamsCount: number;
+      totalLengthM: number;
+      avgWidthCm?: number;
+      avgHeightCm?: number;
+      steelWeightKg?: number;
+    }>;
     staircasesCount: number;
     slabsCount: number;
     slabsAvgThicknessCm: number;
@@ -890,6 +901,7 @@ export const plants = pgTable("plants", {
     columnsSteelWeightKg?: number;
     beamsSteelWeightKg?: number;
     slabsSteelWeightKg?: number;
+    stairsSteelWeightKg?: number;
     totalSteelWeightKg: number;
   } | null>(),
   // Organização virtual de PDFs completos: mantém o original intacto e regista os intervalos

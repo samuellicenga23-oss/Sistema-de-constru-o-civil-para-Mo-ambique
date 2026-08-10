@@ -9,9 +9,11 @@ import MoneyInput from "../components/MoneyInput";
 import { IconBack, IconRefresh, IconRuler, IconTrash } from "../components/icons";
 import {
   buildRebarPurchasePlan,
+  classifyStructuralSteelWeights,
   computeSlabRebarWeightLines,
   DEFAULT_REBAR_LENGTH_M,
   DEFAULT_SLAB_LAP_FACTOR,
+  roundStructuralQty,
 } from "@sigo/shared";
 
 const UNASSIGNED_FLOOR = "Piso não identificado";
@@ -26,6 +28,26 @@ const SECTION_STYLES = {
 function pageRange(startPage: number, endPage: number) {
   return startPage === endPage ? `Página ${startPage}` : `Páginas ${startPage}–${endPage}`;
 }
+
+function gapCompletarHash(gap: string): string {
+  const g = gap.toLocaleLowerCase("pt");
+  if (g.includes("sapata") || g.includes("funda")) return "sapatas";
+  if (g.includes("pilar")) return "pilares";
+  if (g.includes("viga")) return "vigas";
+  if (g.includes("laje") || g.includes("cobertura") || g.includes("armadura de laje")) return "lajes";
+  if (g.includes("escada")) return "escadas";
+  if (g.includes("compartiment")) return "compartimentos";
+  if (g.includes("porta") || g.includes("janela") || g.includes("vão")) return "portas-janelas";
+  if (g.includes("aço") || g.includes("peso")) return "sapatas";
+  return "regularizacao";
+}
+
+type FamilyPopup = {
+  id: string;
+  title: string;
+  lines: string[];
+  hash: string;
+};
 
 // Ordena os pisos por senso comum de construção: térreo primeiro, depois pisos numerados a
 // subir, depois zonas especiais (anexo, cobertura), e por fim o que não foi identificado.
@@ -67,6 +89,8 @@ export default function PlantReviewPage() {
   const [slabManagerOpen, setSlabManagerOpen] = useState(false);
   const [slabDrafts, setSlabDrafts] = useState<StructuralSlab[]>([]);
   const [savingSlabs, setSavingSlabs] = useState(false);
+  const [gapPopup, setGapPopup] = useState<string | null>(null);
+  const [familyPopup, setFamilyPopup] = useState<FamilyPopup | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -520,10 +544,13 @@ export default function PlantReviewPage() {
   const structuralSummary = plant.structuralSummary ?? {
     footingsCount: 0, footingsAvgWidthCm: 0, footingsAvgLengthCm: 0, footingsAvgDepthCm: 0,
     columnsCount: 0, beamsCount: 0, beamsTotalLengthM: 0, beamsAvgWidthCm: 0, beamsAvgHeightCm: 0,
-    beamsConcreteVolumeM3: 0, staircasesCount: 0, slabsCount: 0, slabsAvgThicknessCm: 0, slabs: [],
+    beamsConcreteVolumeM3: 0, beamGroups: [], staircasesCount: 0, slabsCount: 0, slabsAvgThicknessCm: 0, slabs: [],
     footingsSteelWeightKg: 0, columnsSteelWeightKg: 0, beamsSteelWeightKg: 0, slabsSteelWeightKg: 0,
-    totalSteelWeightKg: 0,
+    stairsSteelWeightKg: 0, totalSteelWeightKg: 0,
   };
+  const steelByFamily = classifyStructuralSteelWeights(
+    rebarSchedules.map((line) => ({ element: line.element, weightKg: Number(line.weightKg) })),
+  );
   if (plant.processingStatus === "erro") {
     gaps.push(
       plant.errorMessage
@@ -597,6 +624,9 @@ export default function PlantReviewPage() {
               </p>
             </div>
             <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
+            <Link to={`/plantas/${plant.id}/completar`} className="btn btn-secondary">
+              Editar dados
+            </Link>
             <button
               type="button"
               onClick={handleContinueToMeasurements}
@@ -606,7 +636,7 @@ export default function PlantReviewPage() {
               <IconRuler className="h-4 w-4" />
               {preparingMeasurements ? "A abrir..." : "Medir agora"}
             </button>
-            <Link to={`/projectos/${plant.projectId}#plantas-do-projecto`} className="btn btn-secondary">Voltar ao projecto</Link>
+            <Link to={`/projectos/${plant.projectId}#plantas-do-projecto`} className="btn btn-ghost">Voltar ao projecto</Link>
             </div>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-5 py-3 text-xs text-slate-600">
@@ -672,103 +702,132 @@ export default function PlantReviewPage() {
         )}
 
         {gaps.length > 0 && (
-          <section className="card card-pad border-amber-200 bg-amber-50">
-            <div className="flex items-center gap-2 mb-2">
-              <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4 text-amber-600 shrink-0">
-                <path
-                  d="M12 3.5 2 20h20L12 3.5Z M12 9.5v4.5 M12 17h.01"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-              <h2 className="section-title text-amber-900">O que não foi possível extrair automaticamente</h2>
-            </div>
-            <ul className="text-sm text-amber-900 space-y-1 list-disc pl-5">
-              {gaps.map((g) => (
-                <li key={g}>{g}</li>
-              ))}
-            </ul>
-            <p className="mt-3 rounded-lg border border-amber-200 bg-white/70 px-3 py-2 text-sm text-amber-950">
-              A equipa SIGO foi (ou será) notificada para melhorar o motor de análise desta planta.
-              <strong> Respondemos em até 5 horas</strong> e regularizamos a leitura da planta e do projecto.
-              Entretanto, pode preencher já os dados em falta num formulário dedicado — sem usar o assistente de chat.
-            </p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <Link to={`/plantas/${plant.id}/completar`} className="btn btn-primary btn-sm">
-                Preencher dados em falta
-              </Link>
-              <button
-                type="button"
-                onClick={handleContinueToMeasurements}
-                disabled={preparingMeasurements || identityBlocked || plant.processingStatus !== "concluido"}
-                className="btn btn-secondary btn-sm"
-              >
-                <IconRuler className="h-3.5 w-3.5" />
-                {preparingMeasurements ? "A preparar os campos..." : "Continuar para medições"}
-              </button>
-            </div>
-          </section>
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+            {gaps.length} ponto(s) por regularizar — veja o chat de regularização no final desta página, ou{" "}
+            <Link to={`/plantas/${plant.id}/completar`} className="font-semibold underline">edite os dados agora</Link>.
+          </div>
         )}
 
         {hasStructure && (
           <section className="card card-pad">
-            <div className="flex items-center gap-2 mb-3">
-              <IconRuler className="w-4 h-4 text-brand-700" />
-              <h2 className="section-title">Resumo estrutural detectado</h2>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <IconRuler className="w-4 h-4 text-brand-700" />
+                <h2 className="section-title">Resumo estrutural detectado</h2>
+              </div>
+              <Link to={`/plantas/${plant.id}/completar`} className="btn btn-secondary btn-sm">
+                Editar estrutura
+              </Link>
             </div>
             <div className="mb-3 grid grid-cols-2 gap-3 text-center sm:grid-cols-3 xl:grid-cols-5">
-              <div className="rounded-lg border border-gray-200 p-3">
+              <button
+                type="button"
+                className="rounded-lg border border-gray-200 p-3 text-left transition-colors hover:border-brand-300 hover:bg-brand-50"
+                onClick={() => setFamilyPopup({
+                  id: "sapatas",
+                  title: "Sapatas / fundações",
+                  hash: "sapatas",
+                  lines: [
+                    `${structuralSummary.footingsCount} sapata(s)`,
+                    `Medidas médias ${(Number(structuralSummary.footingsAvgWidthCm) / 100).toFixed(2)} × ${(Number(structuralSummary.footingsAvgLengthCm) / 100).toFixed(2)} m · h ${Number(structuralSummary.footingsAvgDepthCm).toFixed(2)} cm`,
+                    `Aço ${roundStructuralQty(Number(structuralSummary.footingsSteelWeightKg ?? steelByFamily.footingsSteelWeightKg)).toFixed(2)} kg`,
+                  ],
+                })}
+              >
                 <p className="text-xl font-semibold text-gray-900">{structuralSummary.footingsCount}</p>
-                <p className="muted">
-                  sapatas ·{" "}
-                  {(
-                    (Number(structuralSummary.footingsAvgWidthCm.toFixed(2)) / 100)
-                    * (Number(structuralSummary.footingsAvgLengthCm.toFixed(2)) / 100)
-                  ).toFixed(2)}{" "}
-                  m² méd.
-                </p>
-              </div>
-              <div className="rounded-lg border border-gray-200 p-3">
+                <p className="muted">sapatas · {roundStructuralQty(Number(structuralSummary.footingsSteelWeightKg ?? steelByFamily.footingsSteelWeightKg)).toFixed(2)} kg aço</p>
+                <span className="mt-1 block text-xs font-semibold text-brand-700">Ver / editar</span>
+              </button>
+              <button
+                type="button"
+                className="rounded-lg border border-gray-200 p-3 text-left transition-colors hover:border-brand-300 hover:bg-brand-50"
+                onClick={() => setFamilyPopup({
+                  id: "pilares",
+                  title: "Pilares",
+                  hash: "pilares",
+                  lines: [
+                    `${structuralSummary.columnsCount} pilar(es)`,
+                    `Aço ${roundStructuralQty(Number(structuralSummary.columnsSteelWeightKg ?? steelByFamily.columnsSteelWeightKg)).toFixed(2)} kg`,
+                  ],
+                })}
+              >
                 <p className="text-xl font-semibold text-gray-900">{structuralSummary.columnsCount}</p>
-                <p className="muted">pilares</p>
-              </div>
-              <div className="rounded-lg border border-gray-200 p-3">
+                <p className="muted">pilares · {roundStructuralQty(Number(structuralSummary.columnsSteelWeightKg ?? steelByFamily.columnsSteelWeightKg)).toFixed(2)} kg aço</p>
+                <span className="mt-1 block text-xs font-semibold text-brand-700">Ver / editar</span>
+              </button>
+              <button
+                type="button"
+                className="rounded-lg border border-gray-200 p-3 text-left transition-colors hover:border-brand-300 hover:bg-brand-50"
+                onClick={() => setFamilyPopup({
+                  id: "vigas",
+                  title: "Vigas por laje",
+                  hash: "vigas",
+                  lines: [
+                    `${structuralSummary.beamsCount} viga(s) · ${Number(structuralSummary.beamsTotalLengthM).toFixed(2)} ml · ${Number(structuralSummary.beamsConcreteVolumeM3).toFixed(2)} m³`,
+                    `Aço ${roundStructuralQty(Number(structuralSummary.beamsSteelWeightKg ?? steelByFamily.beamsSteelWeightKg)).toFixed(2)} kg`,
+                    ...((structuralSummary.beamGroups?.length ?? 0) > 0
+                      ? structuralSummary.beamGroups!.map((g) => `${g.label}: ${g.beamsCount} un · ${Number(g.totalLengthM).toFixed(2)} m · ${Number(g.steelWeightKg ?? 0).toFixed(2)} kg`)
+                      : ["Ainda sem grupos por laje — edite em Completar dados"]),
+                  ],
+                })}
+              >
                 <p className="text-xl font-semibold text-gray-900">{structuralSummary.beamsCount}</p>
-                <p className="muted">
-                  vigas · {Number(structuralSummary.beamsTotalLengthM).toFixed(2)} ml · {Number(structuralSummary.beamsConcreteVolumeM3).toFixed(2)} m³
-                </p>
-              </div>
+                <p className="muted">vigas · {Number(structuralSummary.beamsTotalLengthM).toFixed(2)} ml · {roundStructuralQty(Number(structuralSummary.beamsSteelWeightKg ?? steelByFamily.beamsSteelWeightKg)).toFixed(2)} kg</p>
+                <span className="mt-1 block text-xs font-semibold text-brand-700">Por laje · editar</span>
+              </button>
               <button type="button" className="rounded-lg border border-gray-200 p-3 transition-colors hover:border-brand-300 hover:bg-brand-50" onClick={openSlabManager}>
                 <p className="text-xl font-semibold text-gray-900">{structuralSummary.slabsCount}</p>
-                <p className="muted">laje(s) física(s) por nível</p>
+                <p className="muted">laje(s) · {roundStructuralQty(Number(structuralSummary.slabsSteelWeightKg ?? steelByFamily.slabsSteelWeightKg)).toFixed(2)} kg</p>
                 <span className="mt-1 block text-xs font-semibold text-brand-700">Indicar ou corrigir</span>
               </button>
-              <div className="rounded-lg border border-gray-200 p-3">
-                <p className="text-xl font-semibold text-gray-900">{Number(structuralSummary.totalSteelWeightKg).toFixed(2)}</p>
-                <p className="muted">kg de aço total</p>
+              <button
+                type="button"
+                className="rounded-lg border border-gray-200 p-3 text-left transition-colors hover:border-brand-300 hover:bg-brand-50"
+                onClick={() => setFamilyPopup({
+                  id: "escadas",
+                  title: "Escadas",
+                  hash: "escadas",
+                  lines: [
+                    `${structuralSummary.staircasesCount} escada(s)`,
+                    `Aço ${roundStructuralQty(Number(structuralSummary.stairsSteelWeightKg ?? steelByFamily.stairsSteelWeightKg)).toFixed(2)} kg`,
+                    `Total de aço do projecto ${Number(structuralSummary.totalSteelWeightKg).toFixed(2)} kg`,
+                  ],
+                })}
+              >
+                <p className="text-xl font-semibold text-gray-900">{structuralSummary.staircasesCount}</p>
+                <p className="muted">escada(s) · {roundStructuralQty(Number(structuralSummary.stairsSteelWeightKg ?? steelByFamily.stairsSteelWeightKg)).toFixed(2)} kg</p>
+                <span className="mt-1 block text-xs font-semibold text-brand-700">Ver / editar</span>
+              </button>
+            </div>
+            <div className="mb-3 grid grid-cols-2 gap-2 text-center sm:grid-cols-5">
+              <div className="rounded-lg bg-slate-50 px-2 py-2 text-xs text-slate-600">
+                Sapatas <strong className="block text-sm text-slate-900">{roundStructuralQty(Number(structuralSummary.footingsSteelWeightKg ?? steelByFamily.footingsSteelWeightKg)).toFixed(2)} kg</strong>
+              </div>
+              <div className="rounded-lg bg-slate-50 px-2 py-2 text-xs text-slate-600">
+                Pilares <strong className="block text-sm text-slate-900">{roundStructuralQty(Number(structuralSummary.columnsSteelWeightKg ?? steelByFamily.columnsSteelWeightKg)).toFixed(2)} kg</strong>
+              </div>
+              <div className="rounded-lg bg-slate-50 px-2 py-2 text-xs text-slate-600">
+                Vigas <strong className="block text-sm text-slate-900">{roundStructuralQty(Number(structuralSummary.beamsSteelWeightKg ?? steelByFamily.beamsSteelWeightKg)).toFixed(2)} kg</strong>
+              </div>
+              <div className="rounded-lg bg-slate-50 px-2 py-2 text-xs text-slate-600">
+                Lajes <strong className="block text-sm text-slate-900">{roundStructuralQty(Number(structuralSummary.slabsSteelWeightKg ?? steelByFamily.slabsSteelWeightKg)).toFixed(2)} kg</strong>
+              </div>
+              <div className="rounded-lg bg-slate-50 px-2 py-2 text-xs text-slate-600">
+                Escadas <strong className="block text-sm text-slate-900">{roundStructuralQty(Number(structuralSummary.stairsSteelWeightKg ?? steelByFamily.stairsSteelWeightKg)).toFixed(2)} kg</strong>
               </div>
             </div>
-            <div className="mb-3 grid grid-cols-2 gap-2 text-center sm:grid-cols-4">
-              <div className="rounded-lg bg-slate-50 px-2 py-2 text-xs text-slate-600">
-                Sapatas <strong className="block text-sm text-slate-900">{Number(structuralSummary.footingsSteelWeightKg ?? 0).toFixed(2)} kg</strong>
+            {(structuralSummary.beamGroups?.length ?? 0) > 0 && (
+              <div className="mb-3 grid gap-2 sm:grid-cols-2">
+                {structuralSummary.beamGroups!.map((group, index) => (
+                  <div key={group.id ?? `${group.label}-${index}`} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+                    <strong className="text-slate-900">{group.label}</strong>
+                    <span className="mt-0.5 block text-xs text-slate-500">
+                      {group.beamsCount} viga(s) · {Number(group.totalLengthM).toFixed(2)} m · {Number(group.steelWeightKg ?? 0).toFixed(2)} kg
+                      {group.floor ? ` · ${group.floor}` : ""}
+                    </span>
+                  </div>
+                ))}
               </div>
-              <div className="rounded-lg bg-slate-50 px-2 py-2 text-xs text-slate-600">
-                Pilares <strong className="block text-sm text-slate-900">{Number(structuralSummary.columnsSteelWeightKg ?? 0).toFixed(2)} kg</strong>
-              </div>
-              <div className="rounded-lg bg-slate-50 px-2 py-2 text-xs text-slate-600">
-                Vigas <strong className="block text-sm text-slate-900">{Number(structuralSummary.beamsSteelWeightKg ?? 0).toFixed(2)} kg</strong>
-              </div>
-              <div className="rounded-lg bg-slate-50 px-2 py-2 text-xs text-slate-600">
-                Lajes <strong className="block text-sm text-slate-900">{Number(structuralSummary.slabsSteelWeightKg ?? 0).toFixed(2)} kg</strong>
-              </div>
-            </div>
-            {structuralSummary.staircasesCount > 0 && (
-              <p className="text-sm text-gray-600 mb-3">
-                {structuralSummary.staircasesCount} escada(s) detectada(s) — o aço da(s) escada(s) já está incluído no
-                total acima.
-              </p>
             )}
             {(structuralSummary.slabs?.length ?? 0) > 0 && (
               <div className="mb-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -780,16 +839,13 @@ export default function PlantReviewPage() {
                 ))}
               </div>
             )}
+            <p className="mb-1 text-sm font-semibold text-slate-800">
+              Total aço: {Number(structuralSummary.totalSteelWeightKg || steelByFamily.totalSteelWeightKg).toFixed(2)} kg
+              {steelByFamily.otherSteelWeightKg > 0 ? ` (inclui ${steelByFamily.otherSteelWeightKg.toFixed(2)} kg não classificados)` : ""}
+            </p>
             <p className="text-xs text-gray-500 mb-3">
-              Estes números vêm do quadro de elementos de fundação, do quadro de pilares/vigas, das folhas de armadura
-              de laje/cobertura por piso, do detalhe de escadas e do resumo de aço do projecto estrutural. Ao abrir o
-              Assistente de Medições num Mapa de Quantidades deste projecto, o nº de sapatas, a área/profundidade
-              média, o volume real de betão em vigas (comprimento × secção de cada vão), a espessura real da laje e o
-              peso total de aço já vêm preenchidos automaticamente — não precisa de os medir à mão outra vez, e nenhum
-              item novo é criado (só os itens-padrão de fundação/estrutura ficam mais precisos). O volume de betão em
-              pilares continua a usar uma estimativa genérica — a secção de cada pilar não vem
-              como um dado limpo neste tipo de ficheiro (só o desenho da cofragem, sem um valor de largura×altura
-              isolado), pelo que não é seguro extraí-la automaticamente.
+              Clique em cada família para ver o detalhe ou editar em Completar dados. Os números alimentam medições e orçamento
+              (sapatas, pilares, vigas por laje, lajes e escadas).
             </p>
           </section>
         )}
@@ -874,9 +930,10 @@ export default function PlantReviewPage() {
           <section className="card card-pad">
             <h2 className="section-title mb-3">Aço estrutural detectado ({rebarSchedules.length} linhas)</h2>
             <p className="text-sm text-gray-600 mb-3">
-              Peso total: <span className="font-semibold text-gray-900">{totalRebarWeight.toFixed(2)} kg</span>. Este
-              total já está incluído no resumo estrutural acima. A lista de compra abaixo agrupa o mapa por diâmetro
-              e converte o peso em varões comerciais de 5,75 m.
+              Peso total: <span className="font-semibold text-gray-900">{totalRebarWeight.toFixed(2)} kg</span>
+              {" · "}Sapatas {steelByFamily.footingsSteelWeightKg.toFixed(2)} · Pilares {steelByFamily.columnsSteelWeightKg.toFixed(2)} · Vigas {steelByFamily.beamsSteelWeightKg.toFixed(2)} · Lajes {steelByFamily.slabsSteelWeightKg.toFixed(2)} · Escadas {steelByFamily.stairsSteelWeightKg.toFixed(2)}
+              {steelByFamily.otherSteelWeightKg > 0 ? ` · Outros ${steelByFamily.otherSteelWeightKg.toFixed(2)}` : ""} kg.
+              Lista de compra por diâmetro (varões de 5,75 m).
             </p>
             <div className="mb-4 overflow-x-auto rounded-lg border border-slate-200">
               <table className="w-full min-w-[660px] text-sm">
@@ -918,7 +975,120 @@ export default function PlantReviewPage() {
             </div>
           </section>
         )}
+
+        <section id="regularizacao-leitura" className="card overflow-hidden scroll-mt-24">
+          <div className="border-b border-slate-100 bg-slate-50 px-5 py-4">
+            <h2 className="section-title">Regularização da leitura</h2>
+            <p className="mt-1 text-sm text-slate-600">
+              Último passo — cada ponto abre em pop-up. Pode corrigir já em Completar dados ou aguardar o motor (SLA 5h).
+            </p>
+          </div>
+          <div className="space-y-3 bg-slate-100/60 p-4">
+            <div className="max-w-[92%] rounded-2xl rounded-tl-md bg-white px-4 py-3 text-sm text-slate-800 shadow-sm">
+              Olá — estes são os pontos em que o leitor automático precisa de regularização ou confirmação.
+            </div>
+            {gaps.length === 0 ? (
+              <div className="ml-auto max-w-[92%] rounded-2xl rounded-tr-md bg-brand-700 px-4 py-3 text-sm text-white shadow-sm">
+                Sem lacunas críticas. Pode editar qualquer família estrutural se quiser afinar as medições.
+              </div>
+            ) : (
+              gaps.map((gap, index) => (
+                <button
+                  key={`${gap}-${index}`}
+                  type="button"
+                  className="block w-full max-w-[92%] rounded-2xl rounded-tl-md border border-amber-200 bg-amber-50 px-4 py-3 text-left text-sm text-amber-950 shadow-sm transition hover:border-amber-400"
+                  onClick={() => setGapPopup(gap)}
+                >
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">Ponto {index + 1}</span>
+                  <span className="mt-1 block">{gap}</span>
+                  <span className="mt-2 block text-xs font-semibold text-brand-700">Abrir →</span>
+                </button>
+              ))
+            )}
+            <div className="flex flex-wrap gap-2 pt-1">
+              <Link to={`/plantas/${plant.id}/completar`} className="btn btn-primary btn-sm">
+                Editar em Completar dados
+              </Link>
+              <button
+                type="button"
+                onClick={handleContinueToMeasurements}
+                disabled={preparingMeasurements || identityBlocked || plant.processingStatus !== "concluido"}
+                className="btn btn-secondary btn-sm"
+              >
+                <IconRuler className="h-3.5 w-3.5" />
+                {preparingMeasurements ? "A preparar..." : "Continuar para medições"}
+              </button>
+            </div>
+          </div>
+        </section>
       </div>
+      {gapPopup && (
+        <Modal
+          title="Regularizar este ponto"
+          subtitle="Edite o elemento em Completar dados ou confirme após a revisão do motor"
+          onClose={() => setGapPopup(null)}
+          maxWidth="max-w-lg"
+        >
+          <p className="text-sm leading-relaxed text-slate-800">{gapPopup}</p>
+          <p className="mt-3 text-xs text-slate-500">
+            Em medições profissionais, cada família (sapatas, pilares, vigas da laje N, lajes, escadas) deve ter
+            quantidade, geometria e kg de aço separados — assim o orçamento não mistura armaduras.
+          </p>
+          <div className="mt-5 flex flex-wrap justify-end gap-2">
+            <button type="button" className="btn btn-secondary" onClick={() => setGapPopup(null)}>Fechar</button>
+            {gapCompletarHash(gapPopup) === "portas-janelas" ? (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  setGapPopup(null);
+                  document.getElementById("portas-janelas")?.scrollIntoView({ behavior: "smooth" });
+                }}
+              >
+                Ir às portas/janelas
+              </button>
+            ) : (
+              <Link
+                to={`/plantas/${plant.id}/completar#${gapCompletarHash(gapPopup)}`}
+                className="btn btn-primary"
+                onClick={() => setGapPopup(null)}
+              >
+                Editar este elemento
+              </Link>
+            )}
+          </div>
+        </Modal>
+      )}
+      {familyPopup && (
+        <Modal
+          title={familyPopup.title}
+          subtitle="Dados detectados — edite no formulário dedicado se precisar corrigir"
+          onClose={() => setFamilyPopup(null)}
+          maxWidth="max-w-lg"
+        >
+          <ul className="space-y-2 text-sm text-slate-800">
+            {familyPopup.lines.map((line) => (
+              <li key={line} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">{line}</li>
+            ))}
+          </ul>
+          <div className="mt-5 flex flex-wrap justify-end gap-2">
+            <button type="button" className="btn btn-secondary" onClick={() => setFamilyPopup(null)}>Fechar</button>
+            {familyPopup.hash === "lajes" ? (
+              <button type="button" className="btn btn-primary" onClick={() => { setFamilyPopup(null); openSlabManager(); }}>
+                Gerir lajes
+              </button>
+            ) : (
+              <Link
+                to={`/plantas/${plant.id}/completar#${familyPopup.hash}`}
+                className="btn btn-primary"
+                onClick={() => setFamilyPopup(null)}
+              >
+                Editar em Completar dados
+              </Link>
+            )}
+          </div>
+        </Modal>
+      )}
       {slabManagerOpen && (
         <Modal title="Lajes do projecto" subtitle="Área, espessura e armaduras por nível" onClose={() => setSlabManagerOpen(false)} maxWidth="max-w-6xl">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-slate-50 px-4 py-3">

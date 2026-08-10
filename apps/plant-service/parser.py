@@ -145,11 +145,29 @@ class StructuralSummary:
     columns_steel_weight_kg: float = 0.0
     beams_steel_weight_kg: float = 0.0
     slabs_steel_weight_kg: float = 0.0
+    stairs_steel_weight_kg: float = 0.0
+    beam_groups: list["BeamGroupSummary"] = field(default_factory=list)
 
 
-def _classify_steel_weights(rebar_schedules: list[RebarLine]) -> tuple[float, float, float, float, float]:
-    """Devolve (sapatas, pilares, vigas, lajes, total) com 2 casas decimais."""
-    footings = columns = beams = slabs = 0.0
+@dataclass
+class BeamGroupSummary:
+    """Vigas agregadas por laje/piso — orçamento liga cada grupo ao respectivo nível."""
+
+    label: str
+    slab_index: int | None
+    floor: str | None
+    beams_count: int
+    total_length_m: float
+    avg_width_cm: float
+    avg_height_cm: float
+    steel_weight_kg: float
+
+
+def _classify_steel_weights(
+    rebar_schedules: list[RebarLine],
+) -> tuple[float, float, float, float, float, float]:
+    """Devolve (sapatas, pilares, vigas, lajes, escadas, total) com 2 casas decimais."""
+    footings = columns = beams = slabs = stairs = 0.0
     for line in rebar_schedules:
         weight = float(line.weight_kg or 0)
         if weight <= 0:
@@ -159,6 +177,8 @@ def _classify_steel_weights(rebar_schedules: list[RebarLine]) -> tuple[float, fl
             footings += weight
         elif re.search(r"pilar|coluna|column|pilarete", element):
             columns += weight
+        elif re.search(r"escada|staircase|\bstair\b", element):
+            stairs += weight
         elif re.search(r"viga|p[oó]rtico|beam|lintel", element):
             beams += weight
         elif re.search(r"laje|cobertura|armadura longitudinal|slab|malha", element):
@@ -172,8 +192,77 @@ def _classify_steel_weights(rebar_schedules: list[RebarLine]) -> tuple[float, fl
         round(columns, 2),
         round(beams, 2),
         round(slabs, 2),
+        round(stairs, 2),
         round(total, 2),
     )
+
+
+def _build_beam_groups(
+    beam_spans: list[BeamSpan],
+    slab_summaries: list[SlabSummary],
+    beams_steel: float,
+) -> list[BeamGroupSummary]:
+    """Agrupa vãos de vigas pela laje/piso mais próxima em página (medições por nível)."""
+    if not beam_spans and not slab_summaries:
+        return []
+
+    if not slab_summaries:
+        lengths = [b.length_m for b in beam_spans]
+        widths = [b.width_cm for b in beam_spans]
+        heights = [b.height_cm for b in beam_spans]
+        porticos = {(b.portico, b.page) for b in beam_spans}
+        return [
+            BeamGroupSummary(
+                label="Vigas gerais",
+                slab_index=None,
+                floor=None,
+                beams_count=len(porticos),
+                total_length_m=round(sum(lengths), 2),
+                avg_width_cm=round(_avg(widths), 2),
+                avg_height_cm=round(_avg(heights), 2),
+                steel_weight_kg=round(beams_steel, 2),
+            )
+        ]
+
+    buckets: list[list[BeamSpan]] = [[] for _ in slab_summaries]
+    for span in beam_spans:
+        best_idx = 0
+        best_dist = abs(span.page - (slab_summaries[0].pages[0] if slab_summaries[0].pages else span.page))
+        for idx, slab in enumerate(slab_summaries):
+            pages = slab.pages or [span.page]
+            dist = min(abs(span.page - page) for page in pages)
+            if dist < best_dist:
+                best_dist = dist
+                best_idx = idx
+        buckets[best_idx].append(span)
+
+    groups: list[BeamGroupSummary] = []
+    steel_remaining = beams_steel
+    nonempty = sum(1 for bucket in buckets if bucket) or 1
+    for idx, (slab, spans) in enumerate(zip(slab_summaries, buckets)):
+        slab_label = (slab.floor or f"Laje {idx + 1}").strip()
+        lengths = [b.length_m for b in spans]
+        widths = [b.width_cm for b in spans]
+        heights = [b.height_cm for b in spans]
+        porticos = {(b.portico, b.page) for b in spans}
+        share = round(beams_steel / nonempty, 2) if spans else 0.0
+        if idx == len(slab_summaries) - 1 and spans:
+            share = round(steel_remaining, 2)
+        elif spans:
+            steel_remaining = round(steel_remaining - share, 2)
+        groups.append(
+            BeamGroupSummary(
+                label=f"Vigas da {slab_label}",
+                slab_index=idx,
+                floor=slab.floor,
+                beams_count=len(porticos),
+                total_length_m=round(sum(lengths), 2),
+                avg_width_cm=round(_avg(widths), 2) if widths else 0.0,
+                avg_height_cm=round(_avg(heights), 2) if heights else 0.0,
+                steel_weight_kg=share,
+            )
+        )
+    return groups
 
 
 @dataclass
@@ -1978,11 +2067,15 @@ def build_structural_summary(
             by_diameter[f"{line.diameter_mm:g}"] += line.weight_kg
         summary.steel_by_diameter = {diameter: round(weight, 2) for diameter, weight in sorted(by_diameter.items(), key=lambda item: float(item[0]))}
 
-    footings_steel, columns_steel, beams_steel, slabs_steel, total_steel = _classify_steel_weights(rebar_schedules)
+    footings_steel, columns_steel, beams_steel, slabs_steel, stairs_steel, total_steel = _classify_steel_weights(
+        rebar_schedules
+    )
     # Se o mapa de lajes já acumulou aço por folha, usa-o como preferência para a família lajes.
     slab_map_steel = round(sum(s.top_steel_weight_kg + s.bottom_steel_weight_kg for s in slab_summaries), 2)
     if slab_map_steel > 0:
         slabs_steel = slab_map_steel
+
+    beam_groups = _build_beam_groups(beam_spans, slab_summaries, beams_steel)
 
     return StructuralSummary(
         footings_count=len(footing_refs),
@@ -2008,6 +2101,8 @@ def build_structural_summary(
         columns_steel_weight_kg=columns_steel,
         beams_steel_weight_kg=beams_steel,
         slabs_steel_weight_kg=slabs_steel,
+        stairs_steel_weight_kg=stairs_steel,
+        beam_groups=beam_groups,
     )
 
 

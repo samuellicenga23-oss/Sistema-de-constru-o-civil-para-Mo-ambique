@@ -1,6 +1,18 @@
 import { request, ApiError } from "./http";
 import { beginPlantProcessingTask, failPlantProcessingTask, updatePlantProcessingTask } from "../services/plantProcessingTracker";
 
+export type StructuralBeamGroup = {
+  id?: string;
+  label: string;
+  slabIndex?: number;
+  floor?: string | null;
+  beamsCount: number;
+  totalLengthM: number;
+  avgWidthCm: number;
+  avgHeightCm: number;
+  steelWeightKg: number;
+};
+
 export type StructuralSummary = {
   footingsCount: number;
   footingsAvgWidthCm: number;
@@ -12,6 +24,7 @@ export type StructuralSummary = {
   beamsAvgWidthCm: number;
   beamsAvgHeightCm: number;
   beamsConcreteVolumeM3: number;
+  beamGroups?: StructuralBeamGroup[];
   staircasesCount: number;
   slabsCount: number;
   slabsAvgThicknessCm: number;
@@ -20,6 +33,7 @@ export type StructuralSummary = {
   columnsSteelWeightKg?: number;
   beamsSteelWeightKg?: number;
   slabsSteelWeightKg?: number;
+  stairsSteelWeightKg?: number;
   totalSteelWeightKg: number;
 };
 

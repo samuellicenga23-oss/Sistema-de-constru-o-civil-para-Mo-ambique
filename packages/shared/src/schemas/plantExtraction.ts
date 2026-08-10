@@ -76,6 +76,20 @@ export const plantMetadataSchema = z.object({
 });
 export type PlantMetadata = z.infer<typeof plantMetadataSchema>;
 
+/** Vigas agrupadas por laje/piso — medições e orçamento ligam vigas ao respectivo nível. */
+export const structuralBeamGroupSchema = z.object({
+  id: z.string().optional(),
+  label: z.string().min(1),
+  slabIndex: z.number().int().nonnegative().optional(),
+  floor: z.string().nullable().optional(),
+  beamsCount: z.number().int().nonnegative(),
+  totalLengthM: z.number().nonnegative(),
+  avgWidthCm: z.number().nonnegative().default(0),
+  avgHeightCm: z.number().nonnegative().default(0),
+  steelWeightKg: z.number().nonnegative().default(0),
+});
+export type StructuralBeamGroup = z.infer<typeof structuralBeamGroupSchema>;
+
 // Resumo estrutural agregado (sapatas/pilares/vigas) extraído de um projecto estrutural
 // (CYPE CAD) — usado para pré-preencher o Assistente de Medições sem repetir perguntas.
 export const structuralSummarySchema = z.object({
@@ -89,6 +103,7 @@ export const structuralSummarySchema = z.object({
   beamsAvgWidthCm: z.number().nonnegative(),
   beamsAvgHeightCm: z.number().nonnegative(),
   beamsConcreteVolumeM3: z.number().nonnegative(),
+  beamGroups: z.array(structuralBeamGroupSchema).default([]),
   staircasesCount: z.number().int().nonnegative(),
   slabsCount: z.number().int().nonnegative(),
   slabsAvgThicknessCm: z.number().nonnegative(),
@@ -98,6 +113,7 @@ export const structuralSummarySchema = z.object({
   columnsSteelWeightKg: z.number().nonnegative().default(0),
   beamsSteelWeightKg: z.number().nonnegative().default(0),
   slabsSteelWeightKg: z.number().nonnegative().default(0),
+  stairsSteelWeightKg: z.number().nonnegative().default(0),
   totalSteelWeightKg: z.number().nonnegative(),
 });
 
@@ -119,21 +135,25 @@ export function roundStructuralQty(value: number, decimals = 2): number {
   return Math.round(value * factor) / factor;
 }
 
-/** Classifica o mapa de aço por família estrutural a partir do rótulo do elemento. */
-export function classifyStructuralSteelWeights(
-  lines: Array<{ element: string; weightKg: number }>,
-): {
+export type ClassifiedStructuralSteel = {
   footingsSteelWeightKg: number;
   columnsSteelWeightKg: number;
   beamsSteelWeightKg: number;
   slabsSteelWeightKg: number;
+  stairsSteelWeightKg: number;
   otherSteelWeightKg: number;
   totalSteelWeightKg: number;
-} {
+};
+
+/** Classifica o mapa de aço por família estrutural a partir do rótulo do elemento. */
+export function classifyStructuralSteelWeights(
+  lines: Array<{ element: string; weightKg: number }>,
+): ClassifiedStructuralSteel {
   let footings = 0;
   let columns = 0;
   let beams = 0;
   let slabs = 0;
+  let stairs = 0;
   let other = 0;
   for (const line of lines) {
     const weight = Number(line.weightKg) || 0;
@@ -141,18 +161,109 @@ export function classifyStructuralSteelWeights(
     const element = line.element.toLocaleLowerCase("pt");
     if (/sapata|footing|fundac|maci[cç]o|radier/.test(element)) footings += weight;
     else if (/pilar|coluna|column|pilarete/.test(element)) columns += weight;
+    else if (/escada|staircase|\bstair\b/.test(element)) stairs += weight;
     else if (/viga|p[oó]rtico|beam|lintel/.test(element)) beams += weight;
     else if (/laje|cobertura|armadura longitudinal|slab|malha/.test(element)) slabs += weight;
     else other += weight;
   }
-  const total = footings + columns + beams + slabs + other;
+  const total = footings + columns + beams + slabs + stairs + other;
   return {
     footingsSteelWeightKg: roundStructuralQty(footings),
     columnsSteelWeightKg: roundStructuralQty(columns),
     beamsSteelWeightKg: roundStructuralQty(beams),
     slabsSteelWeightKg: roundStructuralQty(slabs),
+    stairsSteelWeightKg: roundStructuralQty(stairs),
     otherSteelWeightKg: roundStructuralQty(other),
     totalSteelWeightKg: roundStructuralQty(total),
+  };
+}
+
+/** Cria / sincroniza grupos «Vigas da Laje N» a partir das lajes conhecidas. */
+export function ensureBeamGroupsForSlabs(
+  summary: {
+    beamGroups?: StructuralBeamGroup[] | null;
+    beamsCount: number;
+    beamsTotalLengthM: number;
+    beamsAvgWidthCm: number;
+    beamsAvgHeightCm: number;
+    beamsSteelWeightKg?: number;
+  },
+  slabs: Array<{ name?: string | null; floor?: string | null }>,
+): StructuralBeamGroup[] {
+  const existing = summary.beamGroups ?? [];
+  if (existing.length > 0) {
+    return existing.map((group, index) => ({
+      ...group,
+      id: group.id ?? `beam-group-${index}`,
+      label: group.label || `Vigas da Laje ${index + 1}`,
+      avgWidthCm: roundStructuralQty(group.avgWidthCm ?? summary.beamsAvgWidthCm ?? 0),
+      avgHeightCm: roundStructuralQty(group.avgHeightCm ?? summary.beamsAvgHeightCm ?? 0),
+      totalLengthM: roundStructuralQty(group.totalLengthM),
+      steelWeightKg: roundStructuralQty(group.steelWeightKg ?? 0),
+    }));
+  }
+  if (slabs.length > 0) {
+    return slabs.map((slab, index) => {
+      const slabLabel = (slab.name || slab.floor || `Laje ${index + 1}`).trim();
+      return {
+        id: `beam-group-${index}`,
+        label: `Vigas da ${slabLabel}`,
+        slabIndex: index,
+        floor: slab.floor ?? null,
+        beamsCount: index === 0 ? summary.beamsCount : 0,
+        totalLengthM: index === 0 ? roundStructuralQty(summary.beamsTotalLengthM) : 0,
+        avgWidthCm: roundStructuralQty(summary.beamsAvgWidthCm),
+        avgHeightCm: roundStructuralQty(summary.beamsAvgHeightCm),
+        steelWeightKg: index === 0 ? roundStructuralQty(summary.beamsSteelWeightKg ?? 0) : 0,
+      };
+    });
+  }
+  if (summary.beamsCount > 0 || summary.beamsTotalLengthM > 0 || (summary.beamsSteelWeightKg ?? 0) > 0) {
+    return [{
+      id: "beam-group-0",
+      label: "Vigas gerais",
+      beamsCount: summary.beamsCount,
+      totalLengthM: roundStructuralQty(summary.beamsTotalLengthM),
+      avgWidthCm: roundStructuralQty(summary.beamsAvgWidthCm),
+      avgHeightCm: roundStructuralQty(summary.beamsAvgHeightCm),
+      steelWeightKg: roundStructuralQty(summary.beamsSteelWeightKg ?? 0),
+    }];
+  }
+  return [];
+}
+
+export function syncBeamAggregatesFromGroups(groups: StructuralBeamGroup[]): {
+  beamsCount: number;
+  beamsTotalLengthM: number;
+  beamsAvgWidthCm: number;
+  beamsAvgHeightCm: number;
+  beamsConcreteVolumeM3: number;
+  beamsSteelWeightKg: number;
+} {
+  const beamsCount = groups.reduce((sum, group) => sum + group.beamsCount, 0);
+  const beamsTotalLengthM = roundStructuralQty(groups.reduce((sum, group) => sum + group.totalLengthM, 0));
+  const beamsSteelWeightKg = roundStructuralQty(groups.reduce((sum, group) => sum + Number(group.steelWeightKg ?? 0), 0));
+  const lengthWeightedWidth = groups.reduce((sum, group) => sum + group.totalLengthM * Number(group.avgWidthCm ?? 0), 0);
+  const lengthWeightedHeight = groups.reduce((sum, group) => sum + group.totalLengthM * Number(group.avgHeightCm ?? 0), 0);
+  const beamsAvgWidthCm = beamsTotalLengthM > 0
+    ? roundStructuralQty(lengthWeightedWidth / beamsTotalLengthM)
+    : roundStructuralQty(groups[0]?.avgWidthCm ?? 0);
+  const beamsAvgHeightCm = beamsTotalLengthM > 0
+    ? roundStructuralQty(lengthWeightedHeight / beamsTotalLengthM)
+    : roundStructuralQty(groups[0]?.avgHeightCm ?? 0);
+  const beamsConcreteVolumeM3 = roundStructuralQty(
+    groups.reduce(
+      (sum, group) => sum + group.totalLengthM * (Number(group.avgWidthCm ?? 0) / 100) * (Number(group.avgHeightCm ?? 0) / 100),
+      0,
+    ),
+  );
+  return {
+    beamsCount,
+    beamsTotalLengthM,
+    beamsAvgWidthCm,
+    beamsAvgHeightCm,
+    beamsConcreteVolumeM3,
+    beamsSteelWeightKg,
   };
 }
 

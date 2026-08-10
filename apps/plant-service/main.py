@@ -20,7 +20,7 @@ app = FastAPI(title="SIGO Plant Service")
 # em produção, permissivo em dev sem configuração" (achado da auditoria).
 PLANT_SERVICE_TOKEN = os.environ.get("PLANT_SERVICE_TOKEN")
 IS_PRODUCTION = os.environ.get("ENVIRONMENT") == "production"
-PARSER_VERSION = "2026.08-openings-2"
+PARSER_VERSION = "2026.08-steel-stairs-1"
 PARSER_CONCURRENCY = max(1, min(2, int(os.environ.get("PLANT_PARSER_CONCURRENCY", "1"))))
 PARSER_CACHE_SIZE = max(1, min(20, int(os.environ.get("PLANT_PARSER_CACHE_SIZE", "6"))))
 parser_slots = asyncio.Semaphore(PARSER_CONCURRENCY)
@@ -122,6 +122,17 @@ class OpeningOut(BaseModel):
     designation: str | None = None
 
 
+class BeamGroupOut(BaseModel):
+    label: str
+    slabIndex: int | None = None
+    floor: str | None = None
+    beamsCount: int
+    totalLengthM: float
+    avgWidthCm: float = 0
+    avgHeightCm: float = 0
+    steelWeightKg: float = 0
+
+
 class StructuralSummaryOut(BaseModel):
     footingsCount: int
     footingsAvgWidthCm: float
@@ -133,6 +144,7 @@ class StructuralSummaryOut(BaseModel):
     beamsAvgWidthCm: float
     beamsAvgHeightCm: float
     beamsConcreteVolumeM3: float
+    beamGroups: list[BeamGroupOut] = Field(default_factory=list)
     staircasesCount: int
     slabsCount: int
     slabsAvgThicknessCm: float
@@ -142,6 +154,7 @@ class StructuralSummaryOut(BaseModel):
     columnsSteelWeightKg: float = 0
     beamsSteelWeightKg: float = 0
     slabsSteelWeightKg: float = 0
+    stairsSteelWeightKg: float = 0
 
 
 class DocumentSectionOut(BaseModel):
@@ -260,6 +273,20 @@ def build_parse_response(result) -> ParseResponse:
             columnsSteelWeightKg=summary.columns_steel_weight_kg,
             beamsSteelWeightKg=summary.beams_steel_weight_kg,
             slabsSteelWeightKg=summary.slabs_steel_weight_kg,
+            stairsSteelWeightKg=summary.stairs_steel_weight_kg,
+            beamGroups=[
+                BeamGroupOut(
+                    label=group.label,
+                    slabIndex=group.slab_index,
+                    floor=group.floor,
+                    beamsCount=group.beams_count,
+                    totalLengthM=group.total_length_m,
+                    avgWidthCm=group.avg_width_cm,
+                    avgHeightCm=group.avg_height_cm,
+                    steelWeightKg=group.steel_weight_kg,
+                )
+                for group in summary.beam_groups
+            ],
         )
         if summary
         else None,
