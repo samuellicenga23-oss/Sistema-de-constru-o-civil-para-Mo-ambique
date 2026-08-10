@@ -1,6 +1,7 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 import type { LabourCategory, LabourCategoryInput, Material, MaterialInput, PriceZone, PriceZoneInput } from "../api/catalog";
 import Modal from "./Modal";
+import MoneyInput from "./MoneyInput";
 
 const nullable = (value: string) => value.trim() || null;
 const numeric = (value: string, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
@@ -73,7 +74,7 @@ export function LabourEditor({
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Código"><input className="input" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} placeholder="MO-PED-01" /></Field>
           <Field label="Categoria"><input required className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Pedreiro oficial" /></Field>
-          <Field label="Salário mensal"><input required min="0.01" type="number" step="0.01" className="input" value={form.monthlySalary} onChange={(e) => setForm({ ...form, monthlySalary: e.target.value })} /></Field>
+          <Field label="Salário mensal"><MoneyInput required className="input" value={form.monthlySalary} onValueChange={(monthlySalary) => setForm({ ...form, monthlySalary })} /></Field>
           <Field label="Horas produtivas/mês" hint="Se ficar vazio, usa os dias e horas de trabalho definidos na empresa."><input min="0.01" type="number" step="0.01" className="input" value={form.productiveHoursPerMonth} onChange={(e) => setForm({ ...form, productiveHoursPerMonth: e.target.value })} placeholder="176" /></Field>
           <Field label="Encargos sociais (%)"><input min="0" max="200" type="number" step="0.01" className="input" value={form.socialChargesPct} onChange={(e) => setForm({ ...form, socialChargesPct: e.target.value })} /></Field>
           <Field label="Custos complementares (%)" hint="EPI, ferramentas, transporte, alimentação ou outros custos não salariais."><input min="0" max="200" type="number" step="0.01" className="input" value={form.complementaryCostsPct} onChange={(e) => setForm({ ...form, complementaryCostsPct: e.target.value })} /></Field>
@@ -128,7 +129,7 @@ export function MaterialEditor({
           <Field label="Material"><input required className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Cimento Portland 32,5" /></Field>
           <Field label="Categoria / grupo"><input required className="input" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} list="material-category-suggestions" placeholder="Cimento, Agregados, Aços, Alvenaria…" /></Field>
           <Field label="Unidade de medição"><select className="input" value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })}>{["m", "m2", "m3", "ml", "kg", "un", "vg", "h"].map((u) => <option key={u}>{u}</option>)}</select></Field>
-          <Field label="Preço base (MZN)"><input required min="0" type="number" step="0.01" className="input" value={form.baseUnitCost} onChange={(e) => setForm({ ...form, baseUnitCost: e.target.value })} /></Field>
+          <Field label="Preço base (MZN)"><MoneyInput required className="input" value={form.baseUnitCost} onValueChange={(baseUnitCost) => setForm({ ...form, baseUnitCost })} /></Field>
         </div>
         <datalist id="material-category-suggestions">
           <option value="Cimento" />

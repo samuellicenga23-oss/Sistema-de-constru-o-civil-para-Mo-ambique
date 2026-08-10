@@ -886,6 +886,10 @@ export const plants = pgTable("plants", {
       steelByDiameter?: Record<string, number>;
       notes?: string | null;
     }>;
+    footingsSteelWeightKg?: number;
+    columnsSteelWeightKg?: number;
+    beamsSteelWeightKg?: number;
+    slabsSteelWeightKg?: number;
     totalSteelWeightKg: number;
   } | null>(),
   // Organização virtual de PDFs completos: mantém o original intacto e regista os intervalos

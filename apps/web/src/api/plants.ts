@@ -16,6 +16,10 @@ export type StructuralSummary = {
   slabsCount: number;
   slabsAvgThicknessCm: number;
   slabs?: StructuralSlab[];
+  footingsSteelWeightKg?: number;
+  columnsSteelWeightKg?: number;
+  beamsSteelWeightKg?: number;
+  slabsSteelWeightKg?: number;
   totalSteelWeightKg: number;
 };
 

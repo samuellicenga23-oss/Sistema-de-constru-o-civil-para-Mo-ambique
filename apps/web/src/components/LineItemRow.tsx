@@ -8,6 +8,7 @@ import MeasurementGrid from "./MeasurementGrid";
 import LineItemCostSnapshotPanel from "./LineItemCostSnapshotPanel";
 import ChapterSpecBulkEditor from "./ChapterSpecBulkEditor";
 import { IconPlus, IconPencil, IconRuler, IconTrash } from "./icons";
+import MoneyInput from "./MoneyInput";
 
 const KIND_LABELS: Record<LineItemKind, string> = {
   capitulo: "Capítulo",
@@ -134,7 +135,7 @@ function AddChildForm({
             ))}
           </select>}
           {!measurementOnly && !compositionId && (
-            <input type="number" step="0.01" placeholder="custo directo" title="Custo directo interno, antes de estaleiro, indirectos e margem" value={unitPrice} onChange={(e) => setUnitPrice(e.target.value)} className="input input-sm w-28" />
+            <MoneyInput className="input input-sm w-36" placeholder="custo directo" title="Custo directo interno, antes de estaleiro, indirectos e margem" value={unitPrice} onValueChange={setUnitPrice} />
           )}
         </>
       )}

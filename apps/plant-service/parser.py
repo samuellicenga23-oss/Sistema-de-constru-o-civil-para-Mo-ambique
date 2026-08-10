@@ -141,6 +141,39 @@ class StructuralSummary:
     slabs_avg_thickness_cm: float
     slabs: list[SlabSummary]
     total_steel_weight_kg: float
+    footings_steel_weight_kg: float = 0.0
+    columns_steel_weight_kg: float = 0.0
+    beams_steel_weight_kg: float = 0.0
+    slabs_steel_weight_kg: float = 0.0
+
+
+def _classify_steel_weights(rebar_schedules: list[RebarLine]) -> tuple[float, float, float, float, float]:
+    """Devolve (sapatas, pilares, vigas, lajes, total) com 2 casas decimais."""
+    footings = columns = beams = slabs = 0.0
+    for line in rebar_schedules:
+        weight = float(line.weight_kg or 0)
+        if weight <= 0:
+            continue
+        element = (line.element or "").lower()
+        if re.search(r"sapata|footing|fundac|maci[cç]o|radier", element):
+            footings += weight
+        elif re.search(r"pilar|coluna|column|pilarete", element):
+            columns += weight
+        elif re.search(r"viga|p[oó]rtico|beam|lintel", element):
+            beams += weight
+        elif re.search(r"laje|cobertura|armadura longitudinal|slab|malha", element):
+            slabs += weight
+        else:
+            # Elementos não classificados entram no total mas não nas famílias editáveis.
+            pass
+    total = sum(float(line.weight_kg or 0) for line in rebar_schedules)
+    return (
+        round(footings, 2),
+        round(columns, 2),
+        round(beams, 2),
+        round(slabs, 2),
+        round(total, 2),
+    )
 
 
 @dataclass
@@ -1945,26 +1978,36 @@ def build_structural_summary(
             by_diameter[f"{line.diameter_mm:g}"] += line.weight_kg
         summary.steel_by_diameter = {diameter: round(weight, 2) for diameter, weight in sorted(by_diameter.items(), key=lambda item: float(item[0]))}
 
+    footings_steel, columns_steel, beams_steel, slabs_steel, total_steel = _classify_steel_weights(rebar_schedules)
+    # Se o mapa de lajes já acumulou aço por folha, usa-o como preferência para a família lajes.
+    slab_map_steel = round(sum(s.top_steel_weight_kg + s.bottom_steel_weight_kg for s in slab_summaries), 2)
+    if slab_map_steel > 0:
+        slabs_steel = slab_map_steel
+
     return StructuralSummary(
         footings_count=len(footing_refs),
-        footings_avg_width_cm=_avg(footing_widths),
-        footings_avg_length_cm=_avg(footing_lengths),
-        footings_avg_depth_cm=_avg(footing_depths),
+        footings_avg_width_cm=round(_avg(footing_widths), 2),
+        footings_avg_length_cm=round(_avg(footing_lengths), 2),
+        footings_avg_depth_cm=round(_avg(footing_depths), 2),
         columns_count=len(column_refs),
         beams_count=len(beam_porticos),
-        beams_total_length_m=sum(beam_lengths),
-        beams_avg_width_cm=_avg(beam_widths),
-        beams_avg_height_cm=_avg(beam_heights),
-        beams_concrete_volume_m3=beams_concrete_volume_m3,
+        beams_total_length_m=round(sum(beam_lengths), 2),
+        beams_avg_width_cm=round(_avg(beam_widths), 2),
+        beams_avg_height_cm=round(_avg(beam_heights), 2),
+        beams_concrete_volume_m3=round(beams_concrete_volume_m3, 2),
         staircases_count=len(staircase_elements),
         slabs_count=len(slab_summaries),
-        slabs_avg_thickness_cm=_avg(slab_thicknesses),
+        slabs_avg_thickness_cm=round(_avg(slab_thicknesses), 2),
         slabs=slab_summaries,
         # Peso total de aço já com +10% de desperdício, tal como vem calculado nos "Resumo
         # Aço" do projecto — soma de todos os elementos (sapatas, pilares, vigas, escadas,
         # armadura de lajes/cobertura — este último grupo só passou a ser contabilizado
         # depois de "Armadura longitudinal inferior/superior" entrar no ELEMENT_LABEL_PATTERN).
-        total_steel_weight_kg=sum(r.weight_kg for r in rebar_schedules),
+        total_steel_weight_kg=total_steel,
+        footings_steel_weight_kg=footings_steel,
+        columns_steel_weight_kg=columns_steel,
+        beams_steel_weight_kg=beams_steel,
+        slabs_steel_weight_kg=slabs_steel,
     )
 
 

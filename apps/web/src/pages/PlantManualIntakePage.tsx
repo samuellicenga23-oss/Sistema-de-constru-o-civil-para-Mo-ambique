@@ -1,7 +1,12 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
+  classifyStructuralSteelWeights,
+  roundStructuralQty,
+} from "@sigo/shared";
+import {
   plantsApi,
+  type ExtractedRebarLine,
   type ExtractedRoom,
   type Plant,
   type PlantReviewRequest,
@@ -9,6 +14,7 @@ import {
   type StructuralSummary,
 } from "../api/plants";
 import Layout from "../components/Layout";
+import PlantSlabManagerModal from "../components/PlantSlabManagerModal";
 import { IconBack, IconPlus, IconTrash } from "../components/icons";
 
 type RoomDraft = {
@@ -36,7 +42,52 @@ function emptySummary(): StructuralSummary {
     slabsCount: 0,
     slabsAvgThicknessCm: 0,
     slabs: [],
+    footingsSteelWeightKg: 0,
+    columnsSteelWeightKg: 0,
+    beamsSteelWeightKg: 0,
+    slabsSteelWeightKg: 0,
     totalSteelWeightKg: 0,
+  };
+}
+
+function normalizeSummary(base: StructuralSummary, rebar: ExtractedRebarLine[]): StructuralSummary {
+  const classified = classifyStructuralSteelWeights(
+    rebar.map((line) => ({ element: line.element, weightKg: Number(line.weightKg) })),
+  );
+  const slabSteelFromSlabs = roundStructuralQty(
+    (base.slabs ?? []).reduce(
+      (sum, slab) => sum + Number(slab.topSteelWeightKg ?? 0) + Number(slab.bottomSteelWeightKg ?? 0),
+      0,
+    ),
+  );
+  const footingsSteel = roundStructuralQty(base.footingsSteelWeightKg ?? classified.footingsSteelWeightKg);
+  const columnsSteel = roundStructuralQty(base.columnsSteelWeightKg ?? classified.columnsSteelWeightKg);
+  const beamsSteel = roundStructuralQty(base.beamsSteelWeightKg ?? classified.beamsSteelWeightKg);
+  const slabsSteel = roundStructuralQty(
+    base.slabsSteelWeightKg
+      || slabSteelFromSlabs
+      || classified.slabsSteelWeightKg,
+  );
+  const total = roundStructuralQty(
+    base.totalSteelWeightKg
+      || footingsSteel + columnsSteel + beamsSteel + slabsSteel + classified.otherSteelWeightKg
+      || classified.totalSteelWeightKg,
+  );
+  return {
+    ...base,
+    footingsAvgWidthCm: roundStructuralQty(base.footingsAvgWidthCm),
+    footingsAvgLengthCm: roundStructuralQty(base.footingsAvgLengthCm),
+    footingsAvgDepthCm: roundStructuralQty(base.footingsAvgDepthCm),
+    beamsTotalLengthM: roundStructuralQty(base.beamsTotalLengthM),
+    beamsAvgWidthCm: roundStructuralQty(base.beamsAvgWidthCm),
+    beamsAvgHeightCm: roundStructuralQty(base.beamsAvgHeightCm),
+    beamsConcreteVolumeM3: roundStructuralQty(base.beamsConcreteVolumeM3),
+    slabsAvgThicknessCm: roundStructuralQty(base.slabsAvgThicknessCm),
+    footingsSteelWeightKg: footingsSteel,
+    columnsSteelWeightKg: columnsSteel,
+    beamsSteelWeightKg: beamsSteel,
+    slabsSteelWeightKg: slabsSteel,
+    totalSteelWeightKg: total,
   };
 }
 
@@ -46,9 +97,37 @@ function roomToDraft(room: ExtractedRoom): RoomDraft {
     id: room.id,
     name: room.name,
     floor: room.floor ?? "",
-    areaM2: String(room.areaM2),
-    perimeterM: room.perimeterM != null ? String(room.perimeterM) : "",
+    areaM2: roundStructuralQty(Number(room.areaM2)).toFixed(2),
+    perimeterM: room.perimeterM != null ? roundStructuralQty(Number(room.perimeterM)).toFixed(2) : "",
   };
+}
+
+function DecimalField({
+  label,
+  value,
+  onChange,
+  min = 0,
+  step = "0.01",
+}: {
+  label: string;
+  value: number;
+  onChange: (value: number) => void;
+  min?: number;
+  step?: string;
+}) {
+  return (
+    <label className="text-sm">
+      {label}
+      <input
+        type="number"
+        min={min}
+        step={step}
+        className="input mt-1"
+        value={Number.isFinite(value) ? roundStructuralQty(value).toFixed(2) : "0.00"}
+        onChange={(e) => onChange(roundStructuralQty(Number(e.target.value) || 0))}
+      />
+    </label>
+  );
 }
 
 export default function PlantManualIntakePage() {
@@ -58,6 +137,7 @@ export default function PlantManualIntakePage() {
   const [summary, setSummary] = useState<StructuralSummary>(emptySummary());
   const [rooms, setRooms] = useState<RoomDraft[]>([]);
   const [slabs, setSlabs] = useState<StructuralSlab[]>([]);
+  const [rebarSchedules, setRebarSchedules] = useState<ExtractedRebarLine[]>([]);
   const [notes, setNotes] = useState("");
   const [gaps, setGaps] = useState<string[]>([]);
   const [review, setReview] = useState<PlantReviewRequest | null>(null);
@@ -65,6 +145,7 @@ export default function PlantManualIntakePage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [requesting, setRequesting] = useState(false);
+  const [slabManagerOpen, setSlabManagerOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -74,13 +155,13 @@ export default function PlantManualIntakePage() {
     Promise.all([plantsApi.detail(id), plantsApi.getReviewRequest(id)])
       .then(async ([detail, reviewState]) => {
         setPlant(detail.plant);
-        const base = detail.plant.structuralSummary ?? emptySummary();
+        setRebarSchedules(detail.rebarSchedules);
+        const base = normalizeSummary(detail.plant.structuralSummary ?? emptySummary(), detail.rebarSchedules);
         setSummary(base);
         setSlabs(base.slabs ?? []);
         setRooms(detail.rooms.map(roomToDraft));
         setReview(reviewState.review);
         setSlaHours(reviewState.slaHours);
-        // Abre pedido automaticamente se ainda não existir (erro ou lacunas).
         if (!reviewState.review && (detail.plant.processingStatus === "erro" || detail.rooms.length === 0 || !base.footingsCount || !base.columnsCount)) {
           try {
             const requested = await plantsApi.requestEngineReview(id, {
@@ -112,10 +193,54 @@ export default function PlantManualIntakePage() {
       .finally(() => setLoading(false));
   }, [id]);
 
+  const floorOptions = useMemo(() => {
+    const names = new Set<string>();
+    for (const room of rooms) if (room.floor.trim()) names.add(room.floor.trim());
+    for (const slab of slabs) if (slab.floor) names.add(slab.floor);
+    if (!names.size) names.add("Piso Térreo");
+    return Array.from(names);
+  }, [rooms, slabs]);
+
+  const rebarPreview = useMemo(
+    () => classifyStructuralSteelWeights(rebarSchedules.map((line) => ({ element: line.element, weightKg: Number(line.weightKg) }))),
+    [rebarSchedules],
+  );
+
   const slaCopy = useMemo(
     () => `A equipa SIGO já foi notificada para melhorar a análise desta planta. Respondemos em até ${slaHours} horas e regularizamos a leitura da planta e do projecto.`,
     [slaHours],
   );
+
+  function patchSummary(patch: Partial<StructuralSummary>, recalculateTotal = false) {
+    setSummary((current) => {
+      const next = { ...current, ...patch };
+      if (recalculateTotal) {
+        next.totalSteelWeightKg = roundStructuralQty(
+          Number(next.footingsSteelWeightKg ?? 0)
+          + Number(next.columnsSteelWeightKg ?? 0)
+          + Number(next.beamsSteelWeightKg ?? 0)
+          + Number(next.slabsSteelWeightKg ?? 0)
+          + rebarPreview.otherSteelWeightKg,
+        );
+      }
+      return next;
+    });
+  }
+
+  function applySlabs(nextSlabs: StructuralSlab[]) {
+    const slabsSteel = roundStructuralQty(
+      nextSlabs.reduce((sum, slab) => sum + Number(slab.topSteelWeightKg ?? 0) + Number(slab.bottomSteelWeightKg ?? 0), 0),
+    );
+    setSlabs(nextSlabs);
+    patchSummary({
+      slabs: nextSlabs,
+      slabsCount: nextSlabs.length,
+      slabsAvgThicknessCm: nextSlabs.length
+        ? roundStructuralQty(nextSlabs.reduce((sum, slab) => sum + slab.thicknessCm, 0) / nextSlabs.length)
+        : 0,
+      slabsSteelWeightKg: slabsSteel || summary.slabsSteelWeightKg,
+    }, true);
+  }
 
   async function handleRequestReview() {
     if (!id) return;
@@ -148,8 +273,17 @@ export default function PlantManualIntakePage() {
         slabs,
         slabsCount: slabs.length || summary.slabsCount,
         slabsAvgThicknessCm: slabs.length
-          ? slabs.reduce((sum, slab) => sum + slab.thicknessCm, 0) / slabs.length
+          ? roundStructuralQty(slabs.reduce((sum, slab) => sum + slab.thicknessCm, 0) / slabs.length)
           : summary.slabsAvgThicknessCm,
+        footingsAvgWidthCm: roundStructuralQty(summary.footingsAvgWidthCm),
+        footingsAvgLengthCm: roundStructuralQty(summary.footingsAvgLengthCm),
+        footingsAvgDepthCm: roundStructuralQty(summary.footingsAvgDepthCm),
+        beamsTotalLengthM: roundStructuralQty(summary.beamsTotalLengthM),
+        footingsSteelWeightKg: roundStructuralQty(summary.footingsSteelWeightKg ?? 0),
+        columnsSteelWeightKg: roundStructuralQty(summary.columnsSteelWeightKg ?? 0),
+        beamsSteelWeightKg: roundStructuralQty(summary.beamsSteelWeightKg ?? 0),
+        slabsSteelWeightKg: roundStructuralQty(summary.slabsSteelWeightKg ?? 0),
+        totalSteelWeightKg: roundStructuralQty(summary.totalSteelWeightKg),
       };
       const result = await plantsApi.saveManualData(id, {
         structuralSummary: payloadSummary,
@@ -165,7 +299,8 @@ export default function PlantManualIntakePage() {
         requestEngineReview: true,
       });
       setPlant(result.plant);
-      setSummary(result.plant.structuralSummary ?? payloadSummary);
+      setSummary(normalizeSummary(result.plant.structuralSummary ?? payloadSummary, rebarSchedules));
+      setSlabs(result.plant.structuralSummary?.slabs ?? slabs);
       setRooms(result.rooms.map(roomToDraft));
       setReview(result.review);
       setSlaHours(result.slaHours);
@@ -231,76 +366,100 @@ export default function PlantManualIntakePage() {
           <h2 className="section-title">Estrutura</h2>
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="text-sm">Sapatas (quantidade)
-              <input type="number" min={0} className="input mt-1" value={summary.footingsCount}
-                onChange={(e) => setSummary((s) => ({ ...s, footingsCount: Number(e.target.value) || 0 }))} />
+              <input type="number" min={0} step="1" className="input mt-1" value={summary.footingsCount}
+                onChange={(e) => patchSummary({ footingsCount: Math.max(0, Math.round(Number(e.target.value) || 0)) })} />
             </label>
-            <label className="text-sm">Largura média sapata (cm)
-              <input type="number" min={0} className="input mt-1" value={summary.footingsAvgWidthCm}
-                onChange={(e) => setSummary((s) => ({ ...s, footingsAvgWidthCm: Number(e.target.value) || 0 }))} />
-            </label>
-            <label className="text-sm">Comprimento médio sapata (cm)
-              <input type="number" min={0} className="input mt-1" value={summary.footingsAvgLengthCm}
-                onChange={(e) => setSummary((s) => ({ ...s, footingsAvgLengthCm: Number(e.target.value) || 0 }))} />
-            </label>
-            <label className="text-sm">Altura média sapata (cm)
-              <input type="number" min={0} className="input mt-1" value={summary.footingsAvgDepthCm}
-                onChange={(e) => setSummary((s) => ({ ...s, footingsAvgDepthCm: Number(e.target.value) || 0 }))} />
-            </label>
+            <DecimalField label="Largura média sapata (cm)" value={summary.footingsAvgWidthCm}
+              onChange={(value) => patchSummary({ footingsAvgWidthCm: value })} />
+            <DecimalField label="Comprimento médio sapata (cm)" value={summary.footingsAvgLengthCm}
+              onChange={(value) => patchSummary({ footingsAvgLengthCm: value })} />
+            <DecimalField label="Altura média sapata (cm)" value={summary.footingsAvgDepthCm}
+              onChange={(value) => patchSummary({ footingsAvgDepthCm: value })} />
             <label className="text-sm">Pilares (quantidade)
-              <input type="number" min={0} className="input mt-1" value={summary.columnsCount}
-                onChange={(e) => setSummary((s) => ({ ...s, columnsCount: Number(e.target.value) || 0 }))} />
+              <input type="number" min={0} step="1" className="input mt-1" value={summary.columnsCount}
+                onChange={(e) => patchSummary({ columnsCount: Math.max(0, Math.round(Number(e.target.value) || 0)) })} />
             </label>
             <label className="text-sm">Vigas (quantidade)
-              <input type="number" min={0} className="input mt-1" value={summary.beamsCount}
-                onChange={(e) => setSummary((s) => ({ ...s, beamsCount: Number(e.target.value) || 0 }))} />
+              <input type="number" min={0} step="1" className="input mt-1" value={summary.beamsCount}
+                onChange={(e) => patchSummary({ beamsCount: Math.max(0, Math.round(Number(e.target.value) || 0)) })} />
             </label>
-            <label className="text-sm">Comprimento total de vigas (m)
-              <input type="number" min={0} step="0.01" className="input mt-1" value={summary.beamsTotalLengthM}
-                onChange={(e) => setSummary((s) => ({ ...s, beamsTotalLengthM: Number(e.target.value) || 0 }))} />
-            </label>
-            <label className="text-sm">Aço total (kg)
-              <input type="number" min={0} step="0.01" className="input mt-1" value={summary.totalSteelWeightKg}
-                onChange={(e) => setSummary((s) => ({ ...s, totalSteelWeightKg: Number(e.target.value) || 0 }))} />
-            </label>
+            <DecimalField label="Comprimento total de vigas (m)" value={summary.beamsTotalLengthM}
+              onChange={(value) => patchSummary({ beamsTotalLengthM: value })} />
+          </div>
+        </section>
+
+        <section className="card card-pad space-y-4">
+          <div>
+            <h2 className="section-title">Aço estrutural encontrado</h2>
+            <p className="mt-1 text-sm text-slate-600">
+              Valores lidos do mapa de aço — corriga se necessário. O total alimenta as medições e o assistente.
+            </p>
+          </div>
+          {(rebarPreview.totalSteelWeightKg > 0 || summary.totalSteelWeightKg > 0) && (
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+              Mapa detectado: sapatas {rebarPreview.footingsSteelWeightKg.toFixed(2)} kg · pilares {rebarPreview.columnsSteelWeightKg.toFixed(2)} kg · vigas {rebarPreview.beamsSteelWeightKg.toFixed(2)} kg · lajes {rebarPreview.slabsSteelWeightKg.toFixed(2)} kg
+              {rebarPreview.otherSteelWeightKg > 0 ? ` · outros ${rebarPreview.otherSteelWeightKg.toFixed(2)} kg` : ""}
+              {" · "}total {rebarPreview.totalSteelWeightKg.toFixed(2)} kg
+            </div>
+          )}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <DecimalField
+              label="Aço nas sapatas (kg)"
+              value={summary.footingsSteelWeightKg ?? 0}
+              onChange={(value) => patchSummary({ footingsSteelWeightKg: value }, true)}
+            />
+            <DecimalField
+              label="Aço nos pilares (kg)"
+              value={summary.columnsSteelWeightKg ?? 0}
+              onChange={(value) => patchSummary({ columnsSteelWeightKg: value }, true)}
+            />
+            <DecimalField
+              label="Aço nas vigas (kg)"
+              value={summary.beamsSteelWeightKg ?? 0}
+              onChange={(value) => patchSummary({ beamsSteelWeightKg: value }, true)}
+            />
+            <DecimalField
+              label="Aço nas lajes (kg)"
+              value={summary.slabsSteelWeightKg ?? 0}
+              onChange={(value) => patchSummary({ slabsSteelWeightKg: value }, true)}
+            />
+            <DecimalField
+              label="Aço total (kg)"
+              value={summary.totalSteelWeightKg}
+              onChange={(value) => patchSummary({ totalSteelWeightKg: value })}
+            />
           </div>
         </section>
 
         <section className="card card-pad space-y-3">
           <div className="flex items-center justify-between gap-2">
-            <h2 className="section-title">Lajes</h2>
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm"
-              onClick={() => setSlabs((items) => [...items, {
-                name: `Laje ${items.length + 1}`,
-                floor: "Piso Térreo",
-                areaM2: 0,
-                thicknessCm: 15,
-                layers: ["geral"],
-                pages: [1],
-              }])}
-            >
-              <IconPlus className="h-3.5 w-3.5" /> Adicionar laje
+            <div>
+              <h2 className="section-title">Lajes</h2>
+              <p className="mt-1 text-sm text-slate-600">
+                {slabs.length} laje(s) ·{" "}
+                {slabs.reduce((sum, slab) => sum + Number(slab.areaM2 ?? 0), 0).toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} m²
+              </p>
+            </div>
+            <button type="button" className="btn btn-primary btn-sm" onClick={() => setSlabManagerOpen(true)}>
+              Gerir lajes
             </button>
           </div>
-          {slabs.length === 0 && <p className="text-sm text-slate-500">Sem lajes registadas.</p>}
-          {slabs.map((slab, index) => (
-            <div key={`${slab.name}-${index}`} className="grid gap-2 rounded-lg border border-slate-200 p-3 sm:grid-cols-4">
-              <input className="input" placeholder="Nome" value={slab.name ?? ""}
-                onChange={(e) => setSlabs((items) => items.map((item, i) => i === index ? { ...item, name: e.target.value } : item))} />
-              <input className="input" placeholder="Piso" value={slab.floor ?? ""}
-                onChange={(e) => setSlabs((items) => items.map((item, i) => i === index ? { ...item, floor: e.target.value } : item))} />
-              <input type="number" min={0} step="0.01" className="input" placeholder="Área m²" value={slab.areaM2 ?? 0}
-                onChange={(e) => setSlabs((items) => items.map((item, i) => i === index ? { ...item, areaM2: Number(e.target.value) || 0 } : item))} />
-              <div className="flex gap-2">
-                <input type="number" min={0} className="input" placeholder="Espessura cm" value={slab.thicknessCm}
-                  onChange={(e) => setSlabs((items) => items.map((item, i) => i === index ? { ...item, thicknessCm: Number(e.target.value) || 0 } : item))} />
-                <button type="button" className="icon-btn-danger" onClick={() => setSlabs((items) => items.filter((_, i) => i !== index))}>
-                  <IconTrash className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            </div>
-          ))}
+          {slabs.length === 0 ? (
+            <p className="text-sm text-slate-500">Sem lajes registadas — use o mesmo pop-up de área, espessura e armaduras.</p>
+          ) : (
+            <ul className="space-y-2 text-sm text-slate-700">
+              {slabs.map((slab, index) => (
+                <li key={`${slab.name}-${index}`} className="rounded-lg border border-slate-200 px-3 py-2">
+                  <strong>{slab.name || `Laje ${index + 1}`}</strong>
+                  <span className="text-slate-500">
+                    {" · "}{slab.floor || "Sem piso"}
+                    {" · "}{roundStructuralQty(Number(slab.areaM2 ?? 0)).toFixed(2)} m²
+                    {" · "}{roundStructuralQty(slab.thicknessCm).toFixed(2)} cm
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
 
         <section className="card card-pad space-y-3">
@@ -359,6 +518,18 @@ export default function PlantManualIntakePage() {
           </button>
         </div>
       </form>
+
+      <PlantSlabManagerModal
+        open={slabManagerOpen}
+        slabs={slabs}
+        floorOptions={floorOptions}
+        onClose={() => setSlabManagerOpen(false)}
+        onChange={applySlabs}
+        saveLabel="Aplicar lajes"
+        onSave={() => {
+          setSlabManagerOpen(false);
+        }}
+      />
     </Layout>
   );
 }

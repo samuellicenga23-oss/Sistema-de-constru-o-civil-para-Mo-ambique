@@ -138,6 +138,10 @@ class StructuralSummaryOut(BaseModel):
     slabsAvgThicknessCm: float
     slabs: list[SlabOut]
     totalSteelWeightKg: float
+    footingsSteelWeightKg: float = 0
+    columnsSteelWeightKg: float = 0
+    beamsSteelWeightKg: float = 0
+    slabsSteelWeightKg: float = 0
 
 
 class DocumentSectionOut(BaseModel):
@@ -252,6 +256,10 @@ def build_parse_response(result) -> ParseResponse:
                 for slab in summary.slabs
             ],
             totalSteelWeightKg=summary.total_steel_weight_kg,
+            footingsSteelWeightKg=summary.footings_steel_weight_kg,
+            columnsSteelWeightKg=summary.columns_steel_weight_kg,
+            beamsSteelWeightKg=summary.beams_steel_weight_kg,
+            slabsSteelWeightKg=summary.slabs_steel_weight_kg,
         )
         if summary
         else None,

@@ -5,6 +5,7 @@ import { boqApi } from "../api/boq";
 import { catalogApi, type Material } from "../api/catalog";
 import Layout from "../components/Layout";
 import Modal from "../components/Modal";
+import MoneyInput from "../components/MoneyInput";
 import { IconBack, IconRefresh, IconRuler, IconTrash } from "../components/icons";
 import {
   buildRebarPurchasePlan,
@@ -519,7 +520,9 @@ export default function PlantReviewPage() {
   const structuralSummary = plant.structuralSummary ?? {
     footingsCount: 0, footingsAvgWidthCm: 0, footingsAvgLengthCm: 0, footingsAvgDepthCm: 0,
     columnsCount: 0, beamsCount: 0, beamsTotalLengthM: 0, beamsAvgWidthCm: 0, beamsAvgHeightCm: 0,
-    beamsConcreteVolumeM3: 0, staircasesCount: 0, slabsCount: 0, slabsAvgThicknessCm: 0, slabs: [], totalSteelWeightKg: 0,
+    beamsConcreteVolumeM3: 0, staircasesCount: 0, slabsCount: 0, slabsAvgThicknessCm: 0, slabs: [],
+    footingsSteelWeightKg: 0, columnsSteelWeightKg: 0, beamsSteelWeightKg: 0, slabsSteelWeightKg: 0,
+    totalSteelWeightKg: 0,
   };
   if (plant.processingStatus === "erro") {
     gaps.push(
@@ -720,7 +723,10 @@ export default function PlantReviewPage() {
                 <p className="text-xl font-semibold text-gray-900">{structuralSummary.footingsCount}</p>
                 <p className="muted">
                   sapatas ·{" "}
-                  {((structuralSummary.footingsAvgWidthCm / 100) * (structuralSummary.footingsAvgLengthCm / 100)).toFixed(2)}{" "}
+                  {(
+                    (Number(structuralSummary.footingsAvgWidthCm.toFixed(2)) / 100)
+                    * (Number(structuralSummary.footingsAvgLengthCm.toFixed(2)) / 100)
+                  ).toFixed(2)}{" "}
                   m² méd.
                 </p>
               </div>
@@ -731,7 +737,7 @@ export default function PlantReviewPage() {
               <div className="rounded-lg border border-gray-200 p-3">
                 <p className="text-xl font-semibold text-gray-900">{structuralSummary.beamsCount}</p>
                 <p className="muted">
-                  vigas · {structuralSummary.beamsTotalLengthM.toFixed(2)} ml · {structuralSummary.beamsConcreteVolumeM3.toFixed(2)} m³
+                  vigas · {Number(structuralSummary.beamsTotalLengthM).toFixed(2)} ml · {Number(structuralSummary.beamsConcreteVolumeM3).toFixed(2)} m³
                 </p>
               </div>
               <button type="button" className="rounded-lg border border-gray-200 p-3 transition-colors hover:border-brand-300 hover:bg-brand-50" onClick={openSlabManager}>
@@ -740,8 +746,22 @@ export default function PlantReviewPage() {
                 <span className="mt-1 block text-xs font-semibold text-brand-700">Indicar ou corrigir</span>
               </button>
               <div className="rounded-lg border border-gray-200 p-3">
-                <p className="text-xl font-semibold text-gray-900">{structuralSummary.totalSteelWeightKg.toFixed(2)}</p>
+                <p className="text-xl font-semibold text-gray-900">{Number(structuralSummary.totalSteelWeightKg).toFixed(2)}</p>
                 <p className="muted">kg de aço total</p>
+              </div>
+            </div>
+            <div className="mb-3 grid grid-cols-2 gap-2 text-center sm:grid-cols-4">
+              <div className="rounded-lg bg-slate-50 px-2 py-2 text-xs text-slate-600">
+                Sapatas <strong className="block text-sm text-slate-900">{Number(structuralSummary.footingsSteelWeightKg ?? 0).toFixed(2)} kg</strong>
+              </div>
+              <div className="rounded-lg bg-slate-50 px-2 py-2 text-xs text-slate-600">
+                Pilares <strong className="block text-sm text-slate-900">{Number(structuralSummary.columnsSteelWeightKg ?? 0).toFixed(2)} kg</strong>
+              </div>
+              <div className="rounded-lg bg-slate-50 px-2 py-2 text-xs text-slate-600">
+                Vigas <strong className="block text-sm text-slate-900">{Number(structuralSummary.beamsSteelWeightKg ?? 0).toFixed(2)} kg</strong>
+              </div>
+              <div className="rounded-lg bg-slate-50 px-2 py-2 text-xs text-slate-600">
+                Lajes <strong className="block text-sm text-slate-900">{Number(structuralSummary.slabsSteelWeightKg ?? 0).toFixed(2)} kg</strong>
               </div>
             </div>
             {structuralSummary.staircasesCount > 0 && (
@@ -1003,12 +1023,12 @@ export default function PlantReviewPage() {
                   </button>
                 ))}
               </div>
-              <div><label className="label">Preço aplicado (MZN)</label><input className="input" type="number" min="0" step="0.01" value={materialEditorPrice} onChange={(event) => setMaterialEditorPrice(event.target.value)} /></div>
+              <div><label className="label">Preço aplicado (MZN)</label><MoneyInput className="input" value={materialEditorPrice} onValueChange={setMaterialEditorPrice} /></div>
             </div>
           ) : (
             <div className="space-y-4">
               <div><label className="label">Nome do novo material</label><input className="input" value={newMaterialName} placeholder={materialEditorOpening.kind === "porta" ? "Ex.: Porta de madeira maciça 0,90 × 2,10 m" : "Ex.: Janela de alumínio e vidro 1,20 × 1,20 m"} onChange={(event) => setNewMaterialName(event.target.value)} /></div>
-              <div><label className="label">Preço (MZN/{materialEditorOpening.kind === "porta" ? "un" : "m²"})</label><input className="input" type="number" min="0" step="0.01" value={materialEditorPrice} onChange={(event) => setMaterialEditorPrice(event.target.value)} /></div>
+              <div><label className="label">Preço (MZN/{materialEditorOpening.kind === "porta" ? "un" : "m²"})</label><MoneyInput className="input" value={materialEditorPrice} onValueChange={setMaterialEditorPrice} /></div>
               <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">Antes de criar, pesquise no Catálogo. Materiais com o mesmo nome serão reutilizados, não duplicados.</p>
             </div>
           )}

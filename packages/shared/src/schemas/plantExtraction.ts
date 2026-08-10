@@ -93,6 +93,11 @@ export const structuralSummarySchema = z.object({
   slabsCount: z.number().int().nonnegative(),
   slabsAvgThicknessCm: z.number().nonnegative(),
   slabs: z.array(extractedSlabSchema).default([]),
+  // Aço estrutural por família (mapa de aço) — editável no formulário de dados em falta.
+  footingsSteelWeightKg: z.number().nonnegative().default(0),
+  columnsSteelWeightKg: z.number().nonnegative().default(0),
+  beamsSteelWeightKg: z.number().nonnegative().default(0),
+  slabsSteelWeightKg: z.number().nonnegative().default(0),
   totalSteelWeightKg: z.number().nonnegative(),
 });
 
@@ -106,6 +111,50 @@ export const extractedStaircaseSchema = z.object({
 });
 export type ExtractedStaircase = z.infer<typeof extractedStaircaseSchema>;
 export type StructuralSummary = z.infer<typeof structuralSummarySchema>;
+
+/** Arredonda quantidades estruturais para 2 casas decimais (UI e persistência). */
+export function roundStructuralQty(value: number, decimals = 2): number {
+  if (!Number.isFinite(value)) return 0;
+  const factor = 10 ** decimals;
+  return Math.round(value * factor) / factor;
+}
+
+/** Classifica o mapa de aço por família estrutural a partir do rótulo do elemento. */
+export function classifyStructuralSteelWeights(
+  lines: Array<{ element: string; weightKg: number }>,
+): {
+  footingsSteelWeightKg: number;
+  columnsSteelWeightKg: number;
+  beamsSteelWeightKg: number;
+  slabsSteelWeightKg: number;
+  otherSteelWeightKg: number;
+  totalSteelWeightKg: number;
+} {
+  let footings = 0;
+  let columns = 0;
+  let beams = 0;
+  let slabs = 0;
+  let other = 0;
+  for (const line of lines) {
+    const weight = Number(line.weightKg) || 0;
+    if (weight <= 0) continue;
+    const element = line.element.toLocaleLowerCase("pt");
+    if (/sapata|footing|fundac|maci[cç]o|radier/.test(element)) footings += weight;
+    else if (/pilar|coluna|column|pilarete/.test(element)) columns += weight;
+    else if (/viga|p[oó]rtico|beam|lintel/.test(element)) beams += weight;
+    else if (/laje|cobertura|armadura longitudinal|slab|malha/.test(element)) slabs += weight;
+    else other += weight;
+  }
+  const total = footings + columns + beams + slabs + other;
+  return {
+    footingsSteelWeightKg: roundStructuralQty(footings),
+    columnsSteelWeightKg: roundStructuralQty(columns),
+    beamsSteelWeightKg: roundStructuralQty(beams),
+    slabsSteelWeightKg: roundStructuralQty(slabs),
+    otherSteelWeightKg: roundStructuralQty(other),
+    totalSteelWeightKg: roundStructuralQty(total),
+  };
+}
 
 export const documentDisciplineSchema = z.enum([
   "arquitectura",

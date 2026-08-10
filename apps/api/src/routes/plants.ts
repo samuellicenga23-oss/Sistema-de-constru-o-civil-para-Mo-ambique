@@ -24,7 +24,7 @@ const clientPlantIdSchema = z.string().uuid();
 // Manter alinhado com a geração estrutural do plant-service. O valor participa da
 // chave de cache da BD; ao mudar a leitura de lajes por nível, análises antigas não
 // podem ser reutilizadas silenciosamente em novos uploads do mesmo PDF.
-const PLANT_PARSER_VERSION = "2026.08-openings-2";
+const PLANT_PARSER_VERSION = "2026.08-steel-families-1";
 type PlantDetectionContext = { tags: string[]; parserVersion: string };
 
 async function getPlantDetectionContext(companyId: string): Promise<PlantDetectionContext> {
@@ -562,12 +562,20 @@ export async function plantRoutes(app: FastifyInstance) {
       slabsCount: 0,
       slabsAvgThicknessCm: 0,
       totalSteelWeightKg: 0,
+      footingsSteelWeightKg: 0,
+      columnsSteelWeightKg: 0,
+      beamsSteelWeightKg: 0,
+      slabsSteelWeightKg: 0,
     };
     const structuralSummary = {
       ...current,
       slabs,
       slabsCount: slabs.length,
       slabsAvgThicknessCm: slabs.length ? slabs.reduce((sum, slab) => sum + slab.thicknessCm, 0) / slabs.length : 0,
+      slabsSteelWeightKg: slabs.reduce(
+        (sum, slab) => sum + Number(slab.topSteelWeightKg ?? 0) + Number(slab.bottomSteelWeightKg ?? 0),
+        0,
+      ) || current.slabsSteelWeightKg || 0,
     };
     const [updated] = await db.update(plants).set({ structuralSummary }).where(eq(plants.id, id)).returning();
     return updated;

@@ -14,6 +14,7 @@ import {
 import { dashboardApi, type AdminStats } from "../api/dashboard";
 import { adminSuppliersApi, type AdminSupplierAccount, type AdminQuoteRequestStats } from "../api/adminSuppliers";
 import { plantsApi, type PlantReviewRequest } from "../api/plants";
+import MoneyInput from "../components/MoneyInput";
 import Layout from "../components/Layout";
 import Modal from "../components/Modal";
 import PageSearch from "../components/PageSearch";
@@ -2062,7 +2063,7 @@ export default function SuperAdminPage() {
                   <div className="grid gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2">
                     <div>
                       <label className="label">{en ? "Amount (MZN)" : "Valor (MZN)"}</label>
-                      <input type="number" min={0} step="1" value={subForm.amount} onChange={(event) => setSubForm({ ...subForm, amount: event.target.value })} className="input" required={subForm.recordPayment} />
+                      <MoneyInput className="input" value={subForm.amount} onValueChange={(amount) => setSubForm({ ...subForm, amount })} required={subForm.recordPayment} />
                     </div>
                     <div>
                       <label className="label">{en ? "Method" : "Método"}</label>
@@ -2215,12 +2216,10 @@ export default function SuperAdminPage() {
                     )}
                     <div>
                       <label className="label">{en ? "Amount (MZN net)" : "Valor (MZN líquido)"}</label>
-                      <input
-                        type="number"
-                        min={0}
-                        value={creditForm.amount}
-                        onChange={(event) => setCreditForm({ ...creditForm, amount: event.target.value })}
+                      <MoneyInput
                         className="input"
+                        value={creditForm.amount}
+                        onValueChange={(amount) => setCreditForm({ ...creditForm, amount })}
                       />
                     </div>
                     <div>
@@ -2304,7 +2303,7 @@ export default function SuperAdminPage() {
                 <form onSubmit={recordPayment} className="grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2 lg:grid-cols-3">
                   <div>
                     <label className="label">{en ? "Amount" : "Valor"}</label>
-                    <input required type="number" min={1} value={payForm.amount} onChange={(event) => setPayForm({ ...payForm, amount: event.target.value })} className="input" />
+                    <MoneyInput required className="input" value={payForm.amount} onValueChange={(amount) => setPayForm({ ...payForm, amount })} />
                   </div>
                   <div>
                     <label className="label">{en ? "Method" : "Método"}</label>
