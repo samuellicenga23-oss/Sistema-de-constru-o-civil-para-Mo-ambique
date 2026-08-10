@@ -3,14 +3,12 @@ import { Link } from "react-router-dom";
 import { suppliersApi, type Supplier } from "../api/suppliers";
 import { marketplaceApi, type MarketplaceSupplier } from "../api/marketplace";
 import { catalogApi, type PriceZone } from "../api/catalog";
-import { quoteRequestsApi, type QuoteRequest } from "../api/quoteRequests";
 import SupplierMaterialsModal from "../components/SupplierMaterialsModal";
 import MarketplaceSupplierModal from "../components/MarketplaceSupplierModal";
-import QuoteRequestModal from "../components/QuoteRequestModal";
 import Layout from "../components/Layout";
 import GestaoTabs from "../components/GestaoTabs";
 import PageSearch from "../components/PageSearch";
-import { IconUpload, IconBuilding, IconClipboard, IconSearch } from "../components/icons";
+import { IconUpload, IconBuilding, IconSearch } from "../components/icons";
 
 type ListedSupplier =
   | { kind: "sigo"; supplier: Supplier }
@@ -42,9 +40,7 @@ export default function SuppliersPage() {
   const [searchNeedle, setSearchNeedle] = useState("");
   const [offerFilter, setOfferFilter] = useState<OfferFilter>("all");
   const [sortBy, setSortBy] = useState<"name" | "materials" | "coverage">("name");
-  const [quotes, setQuotes] = useState<QuoteRequest[]>([]);
   const [viewSupplier, setViewSupplier] = useState<MarketplaceSupplier | null>(null);
-  const [quoteSupplier, setQuoteSupplier] = useState<MarketplaceSupplier | null>(null);
 
   async function reload() {
     setSuppliers(await suppliersApi.list());
@@ -58,7 +54,6 @@ export default function SuppliersPage() {
   useEffect(() => {
     reload().catch((err) => setError(err.message));
     catalogApi.listPriceZones().then(setZones).catch(() => {});
-    quoteRequestsApi.list().then(setQuotes).catch(() => setQuotes([]));
   }, []);
 
   useEffect(() => {
@@ -71,7 +66,6 @@ export default function SuppliersPage() {
   }, [zoneId, searchNeedle]);
 
   const sigoPrecos = suppliers.find((s) => s.isReference);
-  const openQuotes = quotes.filter((q) => q.status === "enviado" || q.status === "respondido").length;
   const marketplaceCount = marketplace && !marketplace.locked ? marketplace.suppliers.length : marketplace?.count ?? 0;
 
   const listed: ListedSupplier[] = useMemo(() => {
@@ -102,18 +96,9 @@ export default function SuppliersPage() {
   return (
     <Layout
       title="Fornecedores e preços"
-      subtitle="Encontre quem fornece o material e compare preços por zona"
+      subtitle="Contactos e materiais vendidos por cada fornecedor"
       actions={
-        <div className="flex flex-wrap items-center gap-2">
-          <Link to="/gestao/cotacoes" className="btn btn-secondary btn-sm">
-            <IconClipboard className="h-3.5 w-3.5" />
-            Cotações avulsas
-            {openQuotes > 0 && <span className="ml-1 rounded-full bg-amber-100 px-1.5 text-[10px] font-bold text-amber-800">{openQuotes}</span>}
-          </Link>
-          <a href="/fornecedor/registar" target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm">
-            Convidar fornecedor
-          </a>
-        </div>
+        <a href="/fornecedor/registar" target="_blank" rel="noreferrer" className="btn btn-secondary btn-sm">Adicionar fornecedor</a>
       }
     >
       <div className="mx-auto w-full max-w-7xl space-y-5">
@@ -124,9 +109,8 @@ export default function SuppliersPage() {
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
             <span><strong className="text-slate-950">{marketplaceCount}</strong> fornecedores</span>
             <span><strong className="text-slate-950">{sigoPrecos?.referenceMaterialCount ?? 0}</strong> preços de referência</span>
-            {openQuotes > 0 && <span className="text-amber-700"><strong>{openQuotes}</strong> cotações em curso</span>}
           </div>
-          <span className="text-xs text-slate-500">Nas compras da obra, estes fornecedores aparecem automaticamente.</span>
+          <span className="text-xs text-slate-500">Os contactos ficam disponíveis para consulta directa.</span>
         </section>
 
         <section className="card overflow-hidden">
@@ -216,7 +200,7 @@ export default function SuppliersPage() {
                         <div className="min-w-0">
                           <h3 className="break-words font-semibold text-slate-950">{supplier.name}</h3>
                           <p className="mt-1 text-xs text-slate-500">{supplier.zoneName ?? "Zona não indicada"}</p>
-                          {supplier.contact && <p className="mt-0.5 text-xs text-slate-500">{supplier.contact}</p>}
+                      {supplier.contact && <a href={`tel:${supplier.contact.replace(/\s+/g, "")}`} className="mt-1 block text-sm font-semibold text-brand-700 hover:underline">{supplier.contact}</a>}
                         </div>
                       </div>
                       {chips.length > 0 && (
@@ -238,13 +222,8 @@ export default function SuppliersPage() {
                           {matched.length > 3 ? ` +${matched.length - 3}` : ""}
                         </p>
                       )}
-                      <div className="mt-auto flex items-center gap-2 pt-5">
-                        <button type="button" onClick={() => setViewSupplier(supplier)} className="btn btn-secondary btn-sm flex-1">
-                          Preços
-                        </button>
-                        <button type="button" onClick={() => setQuoteSupplier(supplier)} className="btn btn-primary btn-sm flex-1">
-                          Pedir preço
-                        </button>
+                      <div className="mt-auto pt-5">
+                        <button type="button" onClick={() => setViewSupplier(supplier)} className="btn btn-primary btn-sm w-full">Ver materiais e preços</button>
                       </div>
                     </article>
                   );
@@ -266,20 +245,6 @@ export default function SuppliersPage() {
           <MarketplaceSupplierModal
             supplier={viewSupplier}
             onClose={() => setViewSupplier(null)}
-            onRequestQuote={() => {
-              setQuoteSupplier(viewSupplier);
-              setViewSupplier(null);
-            }}
-          />
-        )}
-        {quoteSupplier && (
-          <QuoteRequestModal
-            supplier={quoteSupplier}
-            onClose={() => setQuoteSupplier(null)}
-            onCreated={() => {
-              setQuoteSupplier(null);
-              quoteRequestsApi.list().then(setQuotes).catch(() => {});
-            }}
           />
         )}
       </div>

@@ -5,6 +5,7 @@ import Layout from "../components/Layout";
 import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import LabourByPhaseModal from "../components/LabourByPhaseModal";
 import CertificateFieldMeasurementPanel from "../components/CertificateFieldMeasurementPanel";
+import MeasurementCertificateSimple from "../components/MeasurementCertificateSimple";
 import { IconBack, IconClipboard, IconDownload } from "../components/icons";
 
 function number(value: number) { return value.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
@@ -145,6 +146,35 @@ export default function MeasurementCertificatePage() {
   const progress = contractValue > 0 ? cumulativeValue / contractValue * 100 : 0;
   const measuredItems = lines.filter((line) => line.periodQty > 0).length;
   const overruns = lines.filter((line) => line.hasOverrun).length;
+
+  const simplifiedCertificateUi = true;
+  if (simplifiedCertificateUi) return <MeasurementCertificateSimple
+    data={data}
+    drafts={drafts}
+    setDrafts={setDrafts}
+    grouped={grouped}
+    locked={locked}
+    busy={busy}
+    savingLine={savingLine}
+    dirtyCount={dirtyLineIds.length}
+    error={error}
+    showLabour={showLabour}
+    setShowLabour={setShowLabour}
+    saveLine={saveLine}
+    saveAllDirty={saveAllDirty}
+    changeStatus={changeStatus}
+    reload={reload}
+    periodValue={periodValue}
+    periodIva={periodIva}
+    periodTotal={periodTotal}
+    cumulativeTotal={cumulativeTotal}
+    contractTotal={contractTotal}
+    progress={progress}
+    measuredItems={measuredItems}
+    overruns={overruns}
+    ivaRate={ivaRate}
+    dialog={dialog}
+  />;
 
   return (<><Layout title={`Auto de Medição n.º ${certificate.number}`} subtitle={`${certificate.periodStartDate ? `${certificate.periodStartDate} — ` : "Até "}${certificate.periodDate} · ${STATUS_LABEL[certificate.status]}`} actions={<><a href={measurementApi.fieldMeasurementsPdfUrl(certificate.id)} className="btn btn-secondary btn-sm"><IconDownload className="h-4 w-4" /> Folha de campo PDF</a><button type="button" onClick={() => setShowLabour(true)} className="btn btn-secondary btn-sm"><IconClipboard className="h-4 w-4" /> Mão de obra por fase</button>{!locked && dirtyLineIds.length > 0 && <button type="button" disabled={busy} onClick={saveAllDirty} className="btn btn-primary btn-sm">Guardar {dirtyLineIds.length} alteração(ões)</button>}<Link to={`/projectos/${certificate.projectId}`} className="btn btn-ghost btn-sm"><IconBack className="h-4 w-4" /> Projecto</Link></>}>
     <div className="mx-auto w-full max-w-[1500px] space-y-5">

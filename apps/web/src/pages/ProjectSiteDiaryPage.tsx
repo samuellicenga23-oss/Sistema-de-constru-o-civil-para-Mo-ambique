@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { boqApi, type Project } from "../api/boq";
-import { siteDiaryApi, type SiteDiaryEntry } from "../api/siteDiary";
+import { siteDiaryApi, type SiteDiaryEntry, type SiteDiaryEntryInput } from "../api/siteDiary";
 import { scheduleApi, type ScheduleTask } from "../api/schedule";
 import { purchasingApi, type StockSummaryLine } from "../api/purchasing";
 import Layout from "../components/Layout";
@@ -11,6 +11,7 @@ import Modal from "../components/Modal";
 import PageSearch from "../components/PageSearch";
 import { SectionHeader } from "../components/WorkspaceUI";
 import { IconBack, IconPlus, IconTrash, IconDownload, IconUpload } from "../components/icons";
+import SiteDiaryCompleteForm from "../components/SiteDiaryCompleteForm";
 
 function todayStr() {
   const d = new Date();
@@ -18,6 +19,11 @@ function todayStr() {
 }
 
 const WEATHER_OPTIONS = ["Sol", "Nublado", "Chuva", "Chuva forte (obra parada)"];
+
+function diaryRecordName(date: string) {
+  const label = new Intl.DateTimeFormat("pt-MZ", { day: "2-digit", month: "long", year: "numeric" }).format(new Date(`${date}T12:00:00`));
+  return `Relatório diário · ${label}`;
+}
 
 export default function ProjectSiteDiaryPage() {
   const { confirm, dialog } = useConfirmDialog();
@@ -107,6 +113,21 @@ export default function ProjectSiteDiaryPage() {
     }
   }
 
+  async function handleCompleteCreate(input: SiteDiaryEntryInput) {
+    if (!projectId) return;
+    setError(null);
+    setSaving(true);
+    try {
+      await siteDiaryApi.create(projectId, input);
+      setShowForm(false);
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível submeter o relatório diário");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function handleDelete(entry: SiteDiaryEntry) {
     const ok = await confirm({
       title: "Eliminar registo?",
@@ -183,9 +204,10 @@ export default function ProjectSiteDiaryPage() {
         <ProjectWorkspaceNav projectId={projectId!} />
         {error && <p className="text-sm text-red-600">{error}</p>}
 
-        <section className="card"><SectionHeader title="Registos" description={`${entries.length} dia(s) registado(s)`} actions={<button type="button" onClick={() => setShowForm(true)} className="btn btn-primary btn-sm"><IconPlus className="h-3.5 w-3.5" /> Registar dia</button>} /></section>
+        <section className="card"><SectionHeader title="Relatórios diários" description={`${entries.length} dia(s) registado(s)`} actions={<button type="button" onClick={() => setShowForm(true)} className="btn btn-primary btn-sm"><IconPlus className="h-3.5 w-3.5" /> Novo relatório</button>} /></section>
         <PageSearch value={query} onChange={setQuery} placeholder="Pesquisar por data, trabalho, material ou ocorrência…" resultLabel={`${filteredEntries.length} registo(s)`} />
-        {showForm && <Modal title="Novo registo do Diário" subtitle={`${date} · ${project.name}`} onClose={() => !saving && setShowForm(false)} maxWidth={formMode === "full" ? "max-w-6xl" : "max-w-lg"}>
+        {showForm && <SiteDiaryCompleteForm projectName={project.name} tasks={tasks} stock={stock} saving={saving} initialDate={todayStr()} onClose={() => setShowForm(false)} onSubmit={handleCompleteCreate} />}
+        {showForm && false && <Modal title="Novo registo do Diário" subtitle={`${date} · ${project!.name}`} onClose={() => !saving && setShowForm(false)} maxWidth={formMode === "full" ? "max-w-6xl" : "max-w-lg"}>
           <form onSubmit={handleCreate} className="space-y-3">
             <div className="flex gap-2 text-xs">
               <button type="button" className={`rounded-full px-3 py-1 font-semibold ${formMode === "quick" ? "bg-brand-700 text-white" : "bg-slate-100 text-slate-600"}`} onClick={() => setFormMode("quick")}>Registo rápido</button>
@@ -279,10 +301,12 @@ export default function ProjectSiteDiaryPage() {
                   onClick={() => setExpandedId(expanded ? null : entry.id)}
                   className="group flex w-full flex-col gap-2 px-4 py-4 text-left hover:bg-blue-50/50 sm:flex-row sm:items-center sm:justify-between sm:px-5"
                 >
-                  <span className="font-medium text-gray-900">
-                    {entry.date} <span className="font-normal text-gray-500">— {entry.weather ?? "sem condições registadas"}</span>
+                  <span className="min-w-0">
+                    <strong className="block truncate text-sm text-gray-900">{diaryRecordName(entry.date)}</strong>
+                    <span className="mt-0.5 block text-xs font-normal text-gray-500">{entry.weather ?? "Tempo não indicado"}{entry.entryTime && entry.exitTime ? ` · ${entry.entryTime}–${entry.exitTime}` : ""}</span>
                   </span>
                   <span className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                    <span className="badge badge-green">Submetido</span>
                     {entry.workersPresent != null && <span className="badge badge-gray">{entry.workersPresent} trabalhadores</span>}
                     {entry.photoUrls.length > 0 && <span className="badge badge-gray">{entry.photoUrls.length} fotos</span>}
                     <span className="font-bold text-brand-700">{expanded ? "Fechar ↑" : "Ver registo ↓"}</span>

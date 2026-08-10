@@ -10,6 +10,7 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import LoadingState from "../components/LoadingState";
 import EmptyState from "../components/EmptyState";
 import AlertBanner from "../components/AlertBanner";
+import BlockingProcessingOverlay from "../components/BlockingProcessingOverlay";
 import { PlanLimitCallout } from "../components/PlanLimitCallout";
 import { ApiError } from "../api/http";
 import { IconFolder, IconPlus, IconTrash } from "../components/icons";
@@ -155,12 +156,33 @@ export default function ProjectsPage() {
       createdProjectId = created.id;
 
       if (technicalFiles.length) {
-        // O projecto abre imediatamente. Os ficheiros continuam a carregar mesmo depois da
-        // navegação e o centro global informa o progresso e a conclusão da leitura.
-        for (const entry of technicalFiles) {
-          void plantsApi.upload(created.id, entry.file, entry.discipline).catch(() => undefined);
+        let firstPlantId: string | null = null;
+        for (let index = 0; index < technicalFiles.length; index += 1) {
+          const entry = technicalFiles[index];
+          const uploaded = await plantsApi.upload(
+            created.id,
+            entry.file,
+            entry.discipline,
+            (progress) => {
+              const aggregate = Math.round(((index + progress.processingProgress / 100) / technicalFiles.length) * 100);
+              setAnalysisProgress({
+                percent: aggregate,
+                filePercent: progress.processingProgress,
+                stage: progress.processingStage ?? "A analisar o PDF",
+                fileName: entry.file.name,
+                currentFile: index + 1,
+                totalFiles: technicalFiles.length,
+                currentPage: progress.processingCurrentPage,
+                totalPages: progress.processingTotalPages,
+              });
+            },
+            { waitForCompletion: true },
+          );
+          firstPlantId ??= uploaded.id;
+          if (uploaded.processingStatus === "erro") throw new Error(uploaded.errorMessage || `Não foi possível analisar ${entry.label}`);
         }
-        navigate(`/projectos/${created.id}#plantas-do-projecto`);
+        setShowForm(false);
+        navigate(firstPlantId ? `/plantas/${firstPlantId}` : `/projectos/${created.id}#plantas-do-projecto`);
         return;
       }
 
@@ -357,13 +379,6 @@ export default function ProjectsPage() {
                 </div>
               </details>
               <div className="sm:col-span-2 flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-4">
-              {creating && analysisProgress && (
-                <div className="w-full rounded-xl border border-brand-100 bg-brand-50/70 p-4 mb-1" aria-live="polite">
-                  <div className="flex items-start justify-between gap-4"><div><p className="text-sm font-semibold text-ink">{analysisProgress.stage}</p><p className="mt-0.5 text-xs text-brand-800/70 truncate">Ficheiro {analysisProgress.currentFile} de {analysisProgress.totalFiles} · {analysisProgress.fileName}{analysisProgress.currentPage && analysisProgress.totalPages ? ` · página ${analysisProgress.currentPage} de ${analysisProgress.totalPages}` : ""}</p></div><strong className="text-2xl tabular-nums text-ink">{analysisProgress.percent}%</strong></div>
-                  <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-brand-100" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={analysisProgress.percent}><div className="h-full rounded-full bg-brand-600" style={{ width: `${analysisProgress.percent}%` }} /></div>
-                  {analysisProgress.totalFiles > 1 && <p className="mt-2 text-[11px] text-brand-800/65">Este ficheiro: {analysisProgress.filePercent}% · progresso total considera os {analysisProgress.totalFiles} ficheiros.</p>}
-                </div>
-              )}
               <button type="button" onClick={() => setShowForm(false)} disabled={creating} className="btn btn-secondary">Cancelar</button>
               <button type="submit" disabled={creating} className="btn btn-primary min-w-44">
                 {creating ? analysisProgress ? `${analysisProgress.percent}% concluído` : createProgress : workspace === "medicoes" ? "Criar medição" : "Criar orçamento"}
@@ -371,6 +386,15 @@ export default function ProjectsPage() {
               </div>
             </form>
           </Modal>
+        )}
+
+        {creating && analysisProgress && (
+          <BlockingProcessingOverlay
+            title="A analisar o projecto"
+            stage={analysisProgress.stage}
+            detail={`${analysisProgress.fileName}${analysisProgress.currentPage && analysisProgress.totalPages ? ` · página ${analysisProgress.currentPage} de ${analysisProgress.totalPages}` : ""}`}
+            percent={analysisProgress.percent}
+          />
         )}
 
         {!loading && workspaceProjects.length > 0 && (

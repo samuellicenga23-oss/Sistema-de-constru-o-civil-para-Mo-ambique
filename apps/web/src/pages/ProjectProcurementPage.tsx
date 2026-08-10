@@ -410,7 +410,7 @@ export default function ProjectProcurementPage() {
         requiredByDate: rfqReq.requiredByDate,
         allowPartialQuotes: rfqPartialQuotes,
         allowPartialAward: rfqPartialAward,
-        singleSourceJustification: rfqSupplierIds.length === 1 ? singleSourceReason : undefined,
+        singleSourceJustification: rfqSupplierIds.length === 1 ? (singleSourceReason.trim() || "Fornecedor seleccionado directamente para esta compra") : undefined,
       });
       setRfqOpen(false); setView("cotacoes"); await reload();
     } catch (cause) {
@@ -704,15 +704,11 @@ export default function ProjectProcurementPage() {
       )}
 
       {rfqOpen && (
-        <Modal onClose={() => setRfqOpen(false)} title="Abrir pedido de cotação" maxWidth="max-w-4xl">
+        <Modal onClose={() => setRfqOpen(false)} title="Escolher fornecedores" maxWidth="max-w-3xl">
           <div className="space-y-4">
-            <div className="rounded-lg bg-slate-50 p-3 text-sm">Origem: <strong>{rfqReq?.reference}</strong> · {rfqReq?.lines.length ?? 0} item(ns)</div>
+            <div className="rounded-lg bg-slate-50 p-3 text-sm"><strong>{rfqReq?.lines.length ?? 0} material(is)</strong> · necessários em {dateLabel(rfqReq?.requiredByDate ?? null)}</div>
             {rfqError && <AlertBanner tone="error" onDismiss={() => setRfqError(null)}>{rfqError}</AlertBanner>}
-            <label><span className="label">Título</span><input className="input" value={rfqTitle} onChange={(e) => setRfqTitle(e.target.value)} /></label>
-            <div className="grid gap-3 md:grid-cols-2">
-              <label><span className="label">Responder até</span><input className="input" type="date" value={rfqDeadline} onChange={(e) => setRfqDeadline(e.target.value)} /></label>
-              <label><span className="label">Necessário em obra</span><input className="input" type="date" value={rfqReq?.requiredByDate ?? ""} disabled /></label>
-            </div>
+            <label className="block max-w-xs"><span className="label">Responder até</span><input className="input" type="date" value={rfqDeadline} onChange={(e) => setRfqDeadline(e.target.value)} /></label>
             <div>
               <div className="mb-2 flex flex-wrap items-end justify-between gap-2">
                 <span className="label mb-0">Fornecedores convidados</span>
@@ -773,22 +769,11 @@ export default function ProjectProcurementPage() {
                 </p>
               )}
             </div>
-            {rfqSupplierIds.length === 1 && (
-              <label>
-                <span className="label">Justificação de fonte única</span>
-                <textarea className="input min-h-20" value={singleSourceReason} onChange={(e) => setSingleSourceReason(e.target.value)} />
-              </label>
-            )}
-            <div className="grid gap-2 md:grid-cols-2">
-              <label className="flex items-center gap-2 rounded-lg border p-3 text-sm"><input type="checkbox" checked={rfqPartialQuotes} onChange={(e) => setRfqPartialQuotes(e.target.checked)} />Permitir proposta parcial</label>
-              <label className="flex items-center gap-2 rounded-lg border p-3 text-sm"><input type="checkbox" checked={rfqPartialAward} onChange={(e) => setRfqPartialAward(e.target.checked)} />Permitir repartir adjudicação</label>
-            </div>
-            <label><span className="label">Mensagem / condições</span><textarea className="input min-h-24" value={rfqMessage} onChange={(e) => setRfqMessage(e.target.value)} /></label>
             <div className="flex justify-end gap-2">
               <button className="btn btn-secondary" onClick={() => setRfqOpen(false)}>Cancelar</button>
               <button
                 className="btn btn-primary"
-                disabled={saving || Boolean(marketLocked) || !rfqTitle || !rfqDeadline || !rfqSupplierIds.length || (rfqSupplierIds.length === 1 && !singleSourceReason.trim())}
+                disabled={saving || Boolean(marketLocked) || !rfqTitle || !rfqDeadline || !rfqSupplierIds.length}
                 onClick={createRfq}
               >
                 Pedir preço a {rfqSupplierIds.length} fornecedor(es)

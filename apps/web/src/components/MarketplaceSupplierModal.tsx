@@ -21,7 +21,7 @@ export default function MarketplaceSupplierModal({
 }: {
   supplier: MarketplaceSupplier;
   onClose: () => void;
-  onRequestQuote: () => void;
+  onRequestQuote?: () => void;
 }) {
   const [tab, setTab] = useState<Tab>("materiais");
   const [materialPrices, setMaterialPrices] = useState<SupplierMaterialPrice[]>([]);
@@ -108,9 +108,9 @@ export default function MarketplaceSupplierModal({
         </div>
       )}
 
-      <div className="mt-5 flex justify-end border-t border-slate-200 pt-4">
-        <button onClick={onRequestQuote} className="btn btn-primary">Pedir cotação formal</button>
-      </div>
+      {onRequestQuote && <div className="mt-5 flex justify-end border-t border-slate-200 pt-4">
+        <button onClick={onRequestQuote} className="btn btn-primary">Usar este fornecedor</button>
+      </div>}
     </Modal>
   );
 }

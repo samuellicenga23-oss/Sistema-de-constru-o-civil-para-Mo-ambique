@@ -3,7 +3,6 @@ import { Link, useLocation } from "react-router-dom";
 const TABS = [
   { to: "/gestao", label: "Obras", end: true },
   { to: "/gestao/fornecedores", label: "Fornecedores", end: false },
-  { to: "/gestao/cotacoes", label: "Cotações", end: false },
 ] as const;
 
 /** Separadores partilhados da área «Gestão da obra». */

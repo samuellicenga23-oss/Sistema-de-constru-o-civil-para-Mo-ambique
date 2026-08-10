@@ -7,6 +7,7 @@ import { catalogApi, type PriceZone } from "../api/catalog";
 import { suppliersApi } from "../api/suppliers";
 import Layout from "../components/Layout";
 import PlantUploadProgress from "../components/PlantUploadProgress";
+import BlockingProcessingOverlay from "../components/BlockingProcessingOverlay";
 import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { usePlantPolling } from "../hooks/usePlantPolling";
 import { SectionHeader } from "../components/WorkspaceUI";
@@ -65,6 +66,7 @@ export default function ProjectDetailPage() {
   const [uploadNotice, setUploadNotice] = useState<string | null>(null);
   const [preparingMeasurements, setPreparingMeasurements] = useState(false);
   const [reprocessingPlantId, setReprocessingPlantId] = useState<string | null>(null);
+  const [reprocessProgress, setReprocessProgress] = useState<PlantProcessingProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [costReadiness, setCostReadiness] = useState({ materials: 0, quoted: 0, zonePriced: 0, suppliers: 0, compositions: 0 });
   const [materialSpecifications, setMaterialSpecifications] = useState<ProjectMaterialSpecification[]>([]);
@@ -195,11 +197,12 @@ export default function ProjectDetailPage() {
     setUploading(true);
     setUploadNotice(null);
     try {
-      const uploaded = await plantsApi.upload(projectId, file, "auto", setUploadProgress);
+      const uploaded = await plantsApi.upload(projectId, file, "auto", setUploadProgress, { waitForCompletion: true });
+      if (uploaded.processingStatus === "erro") throw new Error(uploaded.errorMessage || "Não foi possível analisar o projecto");
       setPlants((current) => current.some((plant) => plant.id === uploaded.id) ? current : [...current, uploaded]);
       fileInput.value = "";
       setUploadProgress(null);
-      setUploadNotice(`“${file.name}” carregado. Pode continuar a trabalhar; avisaremos quando a leitura terminar.`);
+      navigate(`/plantas/${uploaded.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao carregar a planta");
       await reload().catch(() => {});
@@ -270,13 +273,16 @@ export default function ProjectDetailPage() {
     setReprocessingPlantId(id);
     try {
       await plantsApi.reprocess(id, (progress) => {
+        setReprocessProgress(progress);
         setPlants((current) => current.map((plant) => plant.id === id ? { ...plant, ...progress } : plant));
       });
       await reload();
+      navigate(`/plantas/${id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Não foi possível reprocessar a planta");
     } finally {
       setReprocessingPlantId(null);
+      setReprocessProgress(null);
     }
   }
 
@@ -770,7 +776,6 @@ export default function ProjectDetailPage() {
             )}
           </ul>
           <form onSubmit={handleUploadPlant} className="grid items-end gap-3 border-t border-gray-100 px-4 py-4 sm:px-5 sm:grid-cols-[minmax(0,1fr)_auto]">
-            {uploadProgress && <div className="sm:col-span-2"><PlantUploadProgress progress={uploadProgress} compact /></div>}
             {plants.some((p) => p.processingStatus === "processando" || p.processingStatus === "pendente") && (
               <div className="sm:col-span-2">
                 {plants.filter((p) => p.processingStatus === "processando" || p.processingStatus === "pendente").map((p) => (
@@ -795,8 +800,8 @@ export default function ProjectDetailPage() {
         {showCertificados && (
         <section id="certificados-obra" className="card order-8 xl:col-span-2 scroll-mt-24">
           <SectionHeader
-            title="Certificados de obra"
-            description="Execução por período ligada ao orçamento aprovado"
+            title="Medições da obra"
+            description="Registe o trabalho executado em cada período"
             actions={<IconClipboard className="w-4 h-4 text-blue-700" />}
           />
           {approvedBudgetDocuments.length === 0 ? (
@@ -812,7 +817,7 @@ export default function ProjectDetailPage() {
                 <li key={c.id} className="table-row group">
                   <Link to={`/autos/${c.id}`} className="flex items-center justify-between px-5 py-3">
                     <span className="font-medium text-gray-900">
-                      Certificado Nº {c.number} <span className="text-gray-400 font-normal">— {c.periodDate}</span>
+                      Medição n.º {c.number} <span className="text-gray-400 font-normal">— {c.periodDate}</span>
                     </span>
                     <span className="flex items-center gap-2">
                       <span className={`badge ${DOC_STATUS_BADGE[c.status] ?? "badge-gray"}`}>{c.status}</span>
@@ -827,7 +832,7 @@ export default function ProjectDetailPage() {
                   </Link>
                 </li>
               ))}
-              {certificates.length === 0 && <li className="px-5 py-4 text-sm text-gray-400">Sem certificados — registe o avanço do 1.º período quando a obra estiver a decorrer.</li>}
+              {certificates.length === 0 && <li className="px-5 py-4 text-sm text-gray-400">Ainda não há medições de execução.</li>}
             </ul>
             <form onSubmit={handleCreateCertificate} className="flex gap-2 items-end px-5 py-4 flex-wrap">
               <div className="flex-1 min-w-[160px]">
@@ -846,7 +851,7 @@ export default function ProjectDetailPage() {
               </div>
               <button type="submit" className="btn btn-primary" disabled={!selectedDocId}>
                 <IconPlus className="w-4 h-4" />
-                Novo certificado
+                Nova medição
               </button>
             </form>
           </div>
@@ -854,6 +859,16 @@ export default function ProjectDetailPage() {
         </section>
         )}
       </div>
+      {(uploading || reprocessingPlantId) && (
+        <BlockingProcessingOverlay
+          title={reprocessingPlantId ? "A repetir a análise" : "A analisar o projecto"}
+          stage={(reprocessProgress ?? uploadProgress)?.processingStage}
+          detail={(reprocessProgress ?? uploadProgress)?.processingCurrentPage && (reprocessProgress ?? uploadProgress)?.processingTotalPages
+            ? `Página ${(reprocessProgress ?? uploadProgress)!.processingCurrentPage} de ${(reprocessProgress ?? uploadProgress)!.processingTotalPages}`
+            : project?.name}
+          percent={(reprocessProgress ?? uploadProgress)?.processingProgress ?? 1}
+        />
+      )}
       {dialog}
       {showPublicShare && <PublicShareModal projectId={projectId!} onClose={() => setShowPublicShare(false)} />}
     </Layout>
