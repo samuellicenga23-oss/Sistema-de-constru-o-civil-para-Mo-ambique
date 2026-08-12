@@ -43,7 +43,7 @@ describe("Portal do Fornecedor — pedidos de cotação", () => {
     const registerRes = await app.inject({
       method: "POST",
       url: "/api/supplier/auth/register",
-      payload: { name: "Cimentos do Sul", email: "fornecedor-rfq@test.local", password: "fornecedorSenha123", zoneId: zone.id },
+      payload: { name: "Cimentos do Sul", email: "fornecedor-rfq@test.local", password: "fornecedorSenha123", zoneId: zone.id, offersMaterials: true, materialIds: [material.id] },
     });
     expect(registerRes.statusCode).toBe(201);
     const supplierCookie = await extractCookie(registerRes, "sid_sup");
@@ -110,8 +110,8 @@ describe("Portal do Fornecedor — pedidos de cotação", () => {
     const [material] = await db.insert(materials).values({ companyId: null, name: "Areia (teste isolamento)", unit: "m3", baseUnitCost: "300" }).returning();
     const [zone] = await db.insert(priceZones).values({ companyId: null, name: "Boane (teste isolamento)" }).returning();
 
-    const registerA = await app.inject({ method: "POST", url: "/api/supplier/auth/register", payload: { name: "Fornecedor A", email: "fornecedor-a@test.local", password: "senhaFornecedorA1", zoneId: zone.id } });
-    const registerB = await app.inject({ method: "POST", url: "/api/supplier/auth/register", payload: { name: "Fornecedor B", email: "fornecedor-b@test.local", password: "senhaFornecedorB1", zoneId: zone.id } });
+    const registerA = await app.inject({ method: "POST", url: "/api/supplier/auth/register", payload: { name: "Fornecedor A", email: "fornecedor-a@test.local", password: "senhaFornecedorA1", zoneId: zone.id, offersMaterials: true, materialIds: [material.id] } });
+    const registerB = await app.inject({ method: "POST", url: "/api/supplier/auth/register", payload: { name: "Fornecedor B", email: "fornecedor-b@test.local", password: "senhaFornecedorB1", zoneId: zone.id, offersMaterials: true, materialIds: [material.id] } });
     const supplierCookieB = await extractCookie(registerB, "sid_sup");
 
     const [supplierA] = await db.select().from(suppliers).where(eq(suppliers.name, "Fornecedor A")).limit(1);
@@ -121,7 +121,7 @@ describe("Portal do Fornecedor — pedidos de cotação", () => {
       method: "POST",
       url: "/api/quote-requests",
       headers: { cookie: cookieA },
-      payload: { supplierId: supplierA.id, title: "Pedido isolado", lines: [{ kind: "material", resourceId: material.id }] },
+      payload: { supplierId: supplierA.id, title: "Pedido isolado", lines: [{ kind: "material", resourceId: material.id, quantity: 1 }] },
     });
     const quoteRequest = createRes.json() as { id: string };
 

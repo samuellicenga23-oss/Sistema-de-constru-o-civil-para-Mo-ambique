@@ -300,6 +300,7 @@ export type ExtractedRebarLine = {
 
 export const plantsApi = {
   list: (projectId: string) => request<Plant[]>(`/projects/${projectId}/plants`),
+  listDetails: (projectId: string) => request<Array<{ plant: Plant; rooms: ExtractedRoom[]; openings: ExtractedOpening[]; rebarSchedules: ExtractedRebarLine[] }>>(`/projects/${projectId}/plants/details`),
 
   upload: async (
     projectId: string,

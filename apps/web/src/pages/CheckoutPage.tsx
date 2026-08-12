@@ -102,7 +102,7 @@ export default function CheckoutPage() {
           <div className="border-b border-slate-200 px-5 py-5 sm:px-7">
             <p className="eyebrow text-accent">Pedido de subscrição</p>
             <h1 className="mt-2 font-display text-2xl font-black tracking-tight sm:text-3xl">Dados para activar o SIGO</h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">Confirme os dados da empresa. Não será feita nenhuma cobrança nesta página; a equipa SIGO valida a implementação e envia a proposta final.</p>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">Confirme os dados da empresa. Pode apenas pedir contacto ou, se preferir, efectuar o pagamento e anexar o comprovativo.</p>
           </div>
           {submitted ? (
             <div className="p-5 sm:p-7">
@@ -145,12 +145,15 @@ export default function CheckoutPage() {
               </div>
             </fieldset>
             <fieldset className="border-t border-slate-200 pt-5">
-              <legend className="mb-1 text-sm font-bold text-slate-900">Já pode pagar agora</legend>
+              <legend className="mb-1 text-sm font-bold text-slate-900">Pagamento opcional</legend>
               <p className="mb-3 text-xs leading-5 text-slate-500">
                 Opcional — pague por transferência ou carteira móvel e anexe o comprovativo. Sem conta ainda: a equipa
                 SIGO cria a empresa e confirma o pagamento a seguir.
               </p>
-              <PaymentDetailsCard />
+              <details className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <summary className="cursor-pointer text-sm font-bold text-slate-900">Ver dados para pagamento</summary>
+                <div className="mt-4"><PaymentDetailsCard /></div>
+              </details>
               <div className="mt-4">
                 <label className="label">Comprovativo de pagamento (opcional)</label>
                 <input

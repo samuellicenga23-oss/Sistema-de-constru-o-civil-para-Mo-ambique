@@ -20,7 +20,7 @@ import ProcurementAccountsPayablePanel from "../components/ProcurementAccountsPa
 import ProcurementIntelligencePanel from "../components/ProcurementIntelligencePanel";
 
 type View = "necessidades" | "requisicoes" | "cotacoes" | "ordens" | "recepcoes" | "facturas" | "stock" | "inteligencia";
-type Stage = "comprar" | "cotacoes" | "pedidos" | "stock" | "controlo";
+type Stage = "comprar" | "pedidos" | "stock" | "controlo";
 type DraftRequisitionLine = { materialId: string; materialName: string; unit: string; quantity: number; specification?: string };
 type AwardDraft = Record<string, Array<{ quoteId: string; quantity: string }>>;
 type NextStep = { title: string; detail: string; view: View; actionLabel?: string; onAction?: () => void };
@@ -59,15 +59,13 @@ function defaultDeadline() {
 
 const STAGE_DEFAULT_VIEW: Record<Stage, View> = {
   comprar: "necessidades",
-  cotacoes: "cotacoes",
   pedidos: "ordens",
   stock: "stock",
   controlo: "inteligencia",
 };
 
 function stageForView(view: View): Stage {
-  if (view === "necessidades" || view === "requisicoes") return "comprar";
-  if (view === "cotacoes") return "cotacoes";
+  if (view === "necessidades" || view === "requisicoes" || view === "cotacoes") return "comprar";
   if (view === "ordens" || view === "recepcoes") return "pedidos";
   if (view === "stock") return "stock";
   return "controlo";
@@ -492,22 +490,22 @@ export default function ProjectProcurementPage() {
         )}
 
         <section className="card p-2">
-          <div className="grid gap-1 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="grid gap-1 sm:grid-cols-2 lg:grid-cols-4">
             {([
-              ["comprar", "Comprar", requirements.length + requisitions.length],
-              ["cotacoes", "Cotações", rfqs.length],
-              ["pedidos", "Pedidos e entregas", orders.length],
+              ["comprar", "Preparar compra", requirements.length + requisitions.length],
+              ["pedidos", "Pedir e receber", orders.length],
               ["stock", "Stock", stock.length],
-              ["controlo", "Pagamentos e análise", null],
+              ["controlo", "Custos", null],
             ] as Array<[Stage, string, number | null]>).map(([id, label, count]) => (
               <button key={id} type="button" onClick={() => { setView(STAGE_DEFAULT_VIEW[id]); setQuery(""); }} className={`flex items-center justify-between rounded-lg px-3 py-3 text-sm font-semibold ${stage === id ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-100"}`}>
                 <span>{label}</span>{count !== null && <span className={`rounded-full px-2 py-0.5 text-xs ${stage === id ? "bg-white/15" : "bg-slate-100 text-slate-500"}`}>{count}</span>}
               </button>
             ))}
           </div>
-          {stage === "comprar" && <div className="mt-2 flex gap-1 border-t border-slate-100 pt-2">
+          {stage === "comprar" && <div className="mt-2 flex flex-wrap gap-1 border-t border-slate-100 pt-2">
             <button type="button" className={`rounded-md px-3 py-2 text-xs font-semibold ${view === "necessidades" ? "bg-brand-50 text-brand-800" : "text-slate-500 hover:bg-slate-50"}`} onClick={() => setView("necessidades")}>A comprar ({requirements.length})</button>
             <button type="button" className={`rounded-md px-3 py-2 text-xs font-semibold ${view === "requisicoes" ? "bg-brand-50 text-brand-800" : "text-slate-500 hover:bg-slate-50"}`} onClick={() => setView("requisicoes")}>Aprovações ({requisitions.length})</button>
+            <button type="button" className={`rounded-md px-3 py-2 text-xs font-semibold ${view === "cotacoes" ? "bg-brand-50 text-brand-800" : "text-slate-500 hover:bg-slate-50"}`} onClick={() => setView("cotacoes")}>Preços recebidos ({rfqs.length})</button>
           </div>}
           {stage === "pedidos" && <div className="mt-2 flex flex-wrap gap-1 border-t border-slate-100 pt-2">
             <button type="button" className={`rounded-md px-3 py-2 text-xs font-semibold ${view === "ordens" ? "bg-brand-50 text-brand-800" : "text-slate-500 hover:bg-slate-50"}`} onClick={() => setView("ordens")}>Pedidos ({orders.length})</button>

@@ -1,10 +1,17 @@
 name: CI
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 # Corre em cada push/PR — nunca faz deploy sozinho (isso continua manual, via SSH, só depois
 # disto passar e alguém aprovar). O deploy pega o código já validado aqui.
 on:
   push:
-    branches: ["main", "feature/**"]
+    branches: ["main", "feature/**", "codex/**"]
   pull_request:
 
 jobs:
@@ -47,6 +54,12 @@ jobs:
 
       - name: Build (shared → api → web)
         run: npm run build
+
+      - name: Validar scripts operacionais de produção
+        run: bash -n deploy/lib.sh deploy/preflight.sh deploy/backup.sh deploy/deploy.sh deploy/rollback.sh deploy/status.sh
+
+      - name: Bloqueios estruturais da release
+        run: npm run quality:release
 
       - name: Typecheck do pacote partilhado
         run: npm run typecheck --workspace=packages/shared

@@ -355,7 +355,8 @@ export default function ProjectDetailPage() {
   // Plantas e preparação de preços são o ponto de partida da obra — não esconder
   // só porque se entrou por Orçamentos; em gestão mantêm-se acessíveis.
   const showPlantas = fase !== "gestao" || usesPlants || plants.length > 0;
-  const showPrepararObra = fase !== "gestao";
+  // Preços e composições pertencem ao orçamento; nunca devem bloquear o levantamento.
+  const showPrepararObra = fase === "orcamento";
   const showCertificados = fase === "gestao" || (fase === "orcamento" && approvedBudgetDocuments.length > 0);
 
   const workflowSteps = fase === "orcamento"
@@ -370,14 +371,14 @@ export default function ProjectDetailPage() {
           { label: "1. Identificar a obra", detail: "Projecto criado", done: true },
           { label: "2. Carregar projectos", detail: plants.length ? `${plants.length} ficheiro(s)` : "Arquitectura, estrutura ou ambos", done: plants.length > 0 },
           { label: "3. Confirmar dados", detail: failedPlants.length ? `${failedPlants.length} ficheiro(s) requerem atenção` : completedPlants.length ? "Dados prontos para revisão" : "A aguardar análise", done: completedPlants.length > 0 && failedPlants.length === 0 },
-          { label: "4. Medir", detail: hasMeasuredBudget ? "Quantidades prontas" : "Diagnóstico antes do cálculo", done: hasMeasuredBudget },
+          { label: "4. Quantificar", detail: hasMeasuredBudget ? "Quantidades prontas" : "Diagnóstico antes do cálculo", done: hasMeasuredBudget },
           ...(fase === "medicao"
-            ? [{ label: "5. Enviar a orçamentos", detail: budgetDocuments.length ? "Já enviado" : "Aprovar medição e criar orçamento", done: budgetDocuments.length > 0 }]
-            : [{ label: "5. Orçamentar", detail: budgetDocuments.length ? "Medição ligada ao orçamento" : "Enviar quando a medição estiver pronta", done: budgetDocuments.length > 0 }]),
+            ? [{ label: "5. Enviar a orçamentos", detail: budgetDocuments.length ? "Já enviado" : "Aprovar levantamento e criar orçamento", done: budgetDocuments.length > 0 }]
+            : [{ label: "5. Orçamentar", detail: budgetDocuments.length ? "Levantamento ligado ao orçamento" : "Enviar quando o levantamento estiver pronto", done: budgetDocuments.length > 0 }]),
         ]
       : [
           { label: "1. Projecto", detail: "Dados da obra registados", done: true },
-          { label: "2. Medições", detail: project.measurementMode === "importar" ? "Quantidades importadas do Excel" : "Introdução manual no assistente", done: project.measurementMode === "importar" || hasMeasuredBudget },
+          { label: "2. Levantamento", detail: project.measurementMode === "importar" ? "Quantidades importadas do Excel" : "Introdução manual no assistente", done: project.measurementMode === "importar" || hasMeasuredBudget },
           ...(fase === "medicao"
             ? [{ label: "3. Enviar a orçamentos", detail: budgetDocuments.length ? "Já enviado" : "Aprovar e criar orçamento", done: budgetDocuments.length > 0 }]
             : [{ label: "3. Orçamento", detail: "Rever quantidades, preços e percentagens", done: hasMeasuredBudget }]),
@@ -387,7 +388,7 @@ export default function ProjectDetailPage() {
 
   const backTo =
     fase === "gestao" ? "/gestao" : fase === "medicao" ? "/medicoes" : fase === "orcamento" ? "/orcamentos" : project.projectType === "medicao" ? "/medicoes" : "/orcamentos";
-  const backLabel = fase === "gestao" ? "Gestão" : fase === "medicao" ? "Medições" : "Orçamentos";
+  const backLabel = fase === "gestao" ? "Gestão" : fase === "medicao" ? "Levantamentos" : "Orçamentos";
   const navMode = fase === "gestao" ? "site" : fase === "medicao" ? "measurement" : "budget";
   const faseQuery = fase === "gestao" ? "?fase=gestao" : `?fase=${fase === "hibrido" ? "orcamento" : fase}`;
 
@@ -433,7 +434,7 @@ export default function ProjectDetailPage() {
           <div className="flex flex-col gap-4 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0 flex-1">
               <div className="flex items-center justify-between gap-3">
-                <h2 className="text-sm font-bold text-slate-950">{usesPlants ? "Preparação da obra" : project.measurementMode === "importar" ? "Medições importadas" : "Medição manual"}</h2>
+                <h2 className="text-sm font-bold text-slate-950">{usesPlants ? "Preparação do levantamento" : project.measurementMode === "importar" ? "Levantamento importado" : "Levantamento manual"}</h2>
                 <span className="text-xs font-semibold text-slate-500">{completedWorkflowSteps}/{workflowSteps.length}</span>
               </div>
               <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
@@ -445,12 +446,12 @@ export default function ProjectDetailPage() {
               !usesPlants ? (
                 <button onClick={handlePrepareMeasurements} disabled={preparingMeasurements} className="btn btn-primary btn-sm">
                   <IconRuler className="h-3.5 w-3.5" />
-                  {preparingMeasurements ? "A abrir..." : "Abrir medições"}
+                  {preparingMeasurements ? "A abrir..." : "Abrir levantamento"}
                 </button>
               ) : completedPlants.length > 0 ? (
                 <button onClick={handlePrepareMeasurements} disabled={preparingMeasurements} className="btn btn-primary btn-sm">
                   <IconRuler className="h-3.5 w-3.5" />
-                  {preparingMeasurements ? "A preparar..." : hasMeasuredBudget ? "Rever medições" : "Preparar medições"}
+                  {preparingMeasurements ? "A preparar..." : hasMeasuredBudget ? "Rever levantamento" : "Preparar levantamento"}
                 </button>
               ) : (
                 <a href="#plantas-do-projecto" className="btn btn-primary btn-sm">
@@ -539,10 +540,10 @@ export default function ProjectDetailPage() {
               ? [
                   ["Orçamentos", budgetDocuments.length],
                   ["Aprovados", approvedBudgetDocuments.length],
-                  ["Medições origem", measurementDocuments.length],
+                  ["Levantamentos origem", measurementDocuments.length],
                 ]
               : [
-                  ["Medições", measurementDocuments.length],
+                  ["Levantamentos", measurementDocuments.length],
                   ...(showOrcamento ? [["Orçamentos", budgetDocuments.length] as const] : [["A enviar", budgetDocuments.length ? "Sim" : "Não"] as const]),
                   ["Plantas", plants.length],
                 ]
@@ -588,22 +589,22 @@ export default function ProjectDetailPage() {
         {showPrepararObra && (
         <details
           id="preparar-obra"
-          open={!project.zoneId || costReadiness.compositions === 0 || (costReadiness.suppliers > 0 && costReadiness.quoted === 0)}
+          open={!project.zoneId || costReadiness.compositions === 0}
           className="card order-2 overflow-hidden xl:col-span-2"
         >
           <summary className="cursor-pointer list-none px-5 py-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <strong className="text-slate-900">Preparar obra (antes das medições e orçamentos)</strong>
-              <span className="text-xs text-slate-500">Zona · cotações · composições · capítulos com custo</span>
+              <strong className="text-slate-900">Preparar custos do orçamento</strong>
+              <span className="text-xs text-slate-500">Zona · preços · composições</span>
             </div>
           </summary>
           <div className="border-t border-slate-200 px-5 py-3 text-sm text-slate-600">
-            Faça isto uma vez por obra. Depois pode criar várias medições e vários orçamentos/cenários sem repetir a preparação de preços.
+            Esta preparação afecta apenas preços do orçamento. O levantamento de quantidades continua independente.
           </div>
           <div className="grid gap-px border-t border-slate-200 bg-slate-200 sm:grid-cols-2 xl:grid-cols-4">
             {[
               { n: 1, title: "Zona da obra", value: project.zoneId ? "Definida" : "Em falta", detail: project.zoneId ? zones.find((zone) => zone.id === project.zoneId)?.name ?? "Zona seleccionada" : "Defina a zona no cartão de dados da obra.", ok: Boolean(project.zoneId), href: undefined as string | undefined },
-              { n: 2, title: "Cotações de materiais", value: `${costReadiness.quoted}/${costReadiness.materials}`, detail: `${costReadiness.suppliers} cotação(ões) de mercado; materiais com preço aplicável.`, ok: costReadiness.suppliers > 0 && costReadiness.quoted > 0, href: "/gestao/cotacoes" },
+              { n: 2, title: "Preços de fornecedores", value: `${costReadiness.quoted}/${costReadiness.materials}`, detail: `${costReadiness.suppliers} preço(s) de fornecedor disponível(is). Opcional: o catálogo base continua utilizável.`, ok: costReadiness.quoted > 0, href: "/gestao/fornecedores" },
               { n: 3, title: "Preços adoptados", value: `${costReadiness.zonePriced}/${costReadiness.materials}`, detail: project.zoneId ? "Preços próprios da zona; restantes usam preço base." : "A aguardar zona para validar cobertura.", ok: Boolean(project.zoneId) && costReadiness.zonePriced === costReadiness.materials, href: "/catalogo" },
               { n: 4, title: "Composições / capítulos", value: String(costReadiness.compositions), detail: "Ligue capítulos a composições no Catálogo para o custo unitário entrar no orçamento.", ok: costReadiness.compositions > 0, href: "/catalogo" },
             ].map((item) => (
@@ -625,10 +626,10 @@ export default function ProjectDetailPage() {
         </details>
         )}
 
-        {/* Medições técnicas */}
+        {/* Levantamentos técnicos */}
         {showMedicao && (
         <section className="card order-3">
-          <SectionHeader title="Medições" description="Quantidades, memória de cálculo e origem dos dados — sem preços" actions={<IconRuler className="w-4 h-4 text-blue-700" />} />
+          <SectionHeader title="Levantamentos" description="Quantidades e origem dos dados, sem preços" actions={<IconRuler className="w-4 h-4 text-blue-700" />} />
           <ul>
             {measurementDocuments.map((d) => (
               <li key={d.id} className="table-row group">
@@ -637,12 +638,12 @@ export default function ProjectDetailPage() {
                   <span className="flex shrink-0 flex-wrap items-center gap-2">
                     <span className="badge badge-brand">Quantidades</span>
                     <span className={`badge ${DOC_STATUS_BADGE[d.status] ?? "badge-gray"}`}>{d.status}</span>
-                    <button onClick={(e) => handleDeleteDocument(e, d.id, d.title)} className="icon-btn-danger opacity-0 pointer-coarse:opacity-100 group-hover:opacity-100" title="Eliminar medição"><IconTrash className="h-3.5 w-3.5" /></button>
+                    <button onClick={(e) => handleDeleteDocument(e, d.id, d.title)} className="icon-btn-danger opacity-0 pointer-coarse:opacity-100 group-hover:opacity-100" title="Eliminar levantamento"><IconTrash className="h-3.5 w-3.5" /></button>
                   </span>
                 </Link>
               </li>
             ))}
-            {measurementDocuments.length === 0 && <li className="px-5 py-4 text-sm text-gray-400">Sem medição técnica. Prepare uma a partir das plantas ou manualmente.</li>}
+            {measurementDocuments.length === 0 && <li className="px-5 py-4 text-sm text-gray-400">Sem levantamento. Prepare um a partir das plantas ou manualmente.</li>}
           </ul>
         </section>
         )}
@@ -814,7 +815,7 @@ export default function ProjectDetailPage() {
         {showCertificados && (
         <section id="certificados-obra" className="card order-8 xl:col-span-2 scroll-mt-24">
           <SectionHeader
-            title="Medições da obra"
+            title="Autos de medição"
             description="Registe o trabalho executado em cada período"
             actions={<IconClipboard className="w-4 h-4 text-blue-700" />}
           />
@@ -831,7 +832,7 @@ export default function ProjectDetailPage() {
                 <li key={c.id} className="table-row group">
                   <Link to={`/autos/${c.id}`} className="flex items-center justify-between px-5 py-3">
                     <span className="font-medium text-gray-900">
-                      Medição n.º {c.number} <span className="text-gray-400 font-normal">— {c.periodDate}</span>
+                      Auto n.º {c.number} <span className="text-gray-400 font-normal">— {c.periodDate}</span>
                     </span>
                     <span className="flex items-center gap-2">
                       <span className={`badge ${DOC_STATUS_BADGE[c.status] ?? "badge-gray"}`}>{c.status}</span>
@@ -846,7 +847,7 @@ export default function ProjectDetailPage() {
                   </Link>
                 </li>
               ))}
-              {certificates.length === 0 && <li className="px-5 py-4 text-sm text-gray-400">Ainda não há medições de execução.</li>}
+              {certificates.length === 0 && <li className="px-5 py-4 text-sm text-gray-400">Ainda não há autos de medição.</li>}
             </ul>
             <form onSubmit={handleCreateCertificate} className="flex gap-2 items-end px-5 py-4 flex-wrap">
               <div className="flex-1 min-w-[160px]">
@@ -865,7 +866,7 @@ export default function ProjectDetailPage() {
               </div>
               <button type="submit" className="btn btn-primary" disabled={!selectedDocId}>
                 <IconPlus className="w-4 h-4" />
-                Nova medição
+                Novo auto
               </button>
             </form>
           </div>

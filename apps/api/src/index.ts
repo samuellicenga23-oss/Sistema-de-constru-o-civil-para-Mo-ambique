@@ -11,9 +11,11 @@ import { startWeeklyProjectTrashScheduler } from "./services/projectStorage.js";
 import { startSubscriptionReminderScheduler } from "./services/subscriptionReminders.js";
 import { startSupplierPriceFeedScheduler } from "./services/supplierPriceFeed.js";
 import { startQuoteRequestExpiryScheduler } from "./services/quoteRequestExpiry.js";
+import { startOperationalHealthMonitor } from "./services/operationalHealth.js";
 
 const app = await buildApp();
 let shuttingDown = false;
+let stopOperationalHealthMonitor: (() => void) | null = null;
 
 async function shutdown(signal: string) {
   if (shuttingDown) return;
@@ -25,6 +27,8 @@ async function shutdown(signal: string) {
   }, 10_000);
   forcedExit.unref();
   try {
+    stopOperationalHealthMonitor?.();
+    stopOperationalHealthMonitor = null;
     await app.close();
     await sql.end({ timeout: 5 });
     clearTimeout(forcedExit);
@@ -57,6 +61,7 @@ try {
   startSubscriptionReminderScheduler(app.log);
   startSupplierPriceFeedScheduler(app.log);
   startQuoteRequestExpiryScheduler(app.log);
+  stopOperationalHealthMonitor = startOperationalHealthMonitor(app.log);
 } catch (error) {
   app.log.fatal(error, "API failed to start");
   captureException(error);

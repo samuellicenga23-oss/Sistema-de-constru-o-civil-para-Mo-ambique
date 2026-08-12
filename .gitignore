@@ -11,3 +11,4 @@ uploads/
 __pycache__/
 *.pyc
 *.tsbuildinfo
+.deploy/

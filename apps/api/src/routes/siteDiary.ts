@@ -13,6 +13,7 @@ import { detectImageExtension } from "../services/imageValidation.js";
 import { buildSiteDiaryPdf } from "../services/siteDiaryExport.js";
 import { loadCompanyBrand } from "../services/companyBrand.js";
 import { env } from "../env.js";
+import { recordAuditEvent } from "../services/auditTrail.js";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista", "engenheiro_fiscal"] as const;
 
@@ -37,7 +38,7 @@ const entrySchema = z.object({
   taskProgress: z.array(z.object({ taskId: z.string().uuid(), progressPercent: z.number().min(0).max(100), notes: z.string().optional() })).optional(),
   consumptions: z.array(z.object({ materialId: z.string().uuid(), quantity: z.number().positive(), notes: z.string().optional() })).optional(),
 });
-const entryUpdateSchema = entrySchema.omit({ taskProgress: true, consumptions: true }).partial();
+const entryUpdateSchema = entrySchema.partial();
 
 // Exportado para uso em routes/files.ts (serve as fotos do diário, agora autenticadas).
 export async function assertEntryOwned(entryId: string, companyId: string) {
@@ -83,8 +84,10 @@ export async function siteDiaryRoutes(app: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     const { taskProgress = [], consumptions = [], ...entryData } = parsed.data;
     if (taskProgress.length) {
-      const tasks = await db.select().from(scheduleTasks).where(inArray(scheduleTasks.id, taskProgress.map((item) => item.taskId)));
-      if (tasks.length !== new Set(taskProgress.map((item) => item.taskId)).size || tasks.some((task) => task.projectId !== projectId)) {
+      const taskIds = Array.from(new Set(taskProgress.map((item) => item.taskId)));
+      if (taskIds.length !== taskProgress.length) return reply.code(400).send({ error: "A mesma actividade foi indicada mais de uma vez" });
+      const tasks = await db.select().from(scheduleTasks).where(inArray(scheduleTasks.id, taskIds));
+      if (tasks.length !== taskIds.length || tasks.some((task) => task.projectId !== projectId)) {
         return reply.code(400).send({ error: "Uma das tarefas não pertence ao cronograma desta obra" });
       }
     }
@@ -138,6 +141,12 @@ export async function siteDiaryRoutes(app: FastifyInstance) {
       return { row } as const;
     });
     if ("error" in result) return reply.code(409).send({ error: result.error });
+    await recordAuditEvent({
+      companyId: companyIdOf(request), projectId, actorUserId: request.currentUser!.id,
+      entityType: "site_diary", entityId: result.row.id, action: "created",
+      after: { date: result.row.date, workDone: result.row.workDone },
+      metadata: { taskProgressCount: taskProgress.length, consumptionCount: consumptions.length },
+    });
     return reply.code(201).send(result.row);
   });
 
@@ -148,8 +157,79 @@ export async function siteDiaryRoutes(app: FastifyInstance) {
 
     const parsed = entryUpdateSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
-    const [row] = await db.update(siteDiaryEntries).set(parsed.data).where(eq(siteDiaryEntries.id, id)).returning();
-    return row;
+    const { taskProgress, consumptions, ...entryData } = parsed.data;
+
+    if (taskProgress) {
+      const taskIds = Array.from(new Set(taskProgress.map((item) => item.taskId)));
+      if (taskIds.length !== taskProgress.length) return reply.code(400).send({ error: "A mesma actividade foi indicada mais de uma vez" });
+      if (taskIds.length) {
+        const tasks = await db.select().from(scheduleTasks).where(inArray(scheduleTasks.id, taskIds));
+        if (tasks.length !== taskIds.length || tasks.some((task) => task.projectId !== entry.projectId)) {
+          return reply.code(400).send({ error: "Uma das actividades não pertence ao cronograma desta obra" });
+        }
+      }
+    }
+    if (consumptions) {
+      const materialIds = Array.from(new Set(consumptions.map((item) => item.materialId)));
+      if (materialIds.length) {
+        const visibleMaterials = await db.select().from(materials).where(and(inArray(materials.id, materialIds), or(isNull(materials.companyId), eq(materials.companyId, companyIdOf(request)))));
+        if (visibleMaterials.length !== materialIds.length) return reply.code(400).send({ error: "Um dos materiais não existe no Catálogo" });
+      }
+    }
+
+    const result = await db.transaction(async (tx) => {
+      if (consumptions) {
+        const previous = await tx.select().from(stockMovements).where(and(eq(stockMovements.diaryEntryId, id), eq(stockMovements.type, "saida")));
+        const materialIds = Array.from(new Set([...previous.map((item) => item.materialId), ...consumptions.map((item) => item.materialId)])).sort();
+        for (const materialId of materialIds) {
+          await tx.execute(drizzleSql`select pg_advisory_xact_lock(hashtext(${`${entry.projectId}:${materialId}`}))`);
+        }
+        if (materialIds.length) {
+          const movements = await tx.select().from(stockMovements).where(and(eq(stockMovements.projectId, entry.projectId), inArray(stockMovements.materialId, materialIds)));
+          for (const materialId of materialIds) {
+            const currentBalance = movements.filter((movement) => movement.materialId === materialId).reduce((sum, movement) => sum + (movement.type === "entrada" ? Number(movement.quantity) : -Number(movement.quantity)), 0);
+            const restoredFromThisEntry = previous.filter((movement) => movement.materialId === materialId).reduce((sum, movement) => sum + Number(movement.quantity), 0);
+            const requested = consumptions.filter((item) => item.materialId === materialId).reduce((sum, item) => sum + item.quantity, 0);
+            const available = currentBalance + restoredFromThisEntry;
+            if (requested > available + 0.0001) {
+              const material = await tx.select().from(materials).where(eq(materials.id, materialId)).limit(1);
+              return { error: `Stock insuficiente de ${material[0]?.name ?? "material"}: disponível ${available.toFixed(2)} ${material[0]?.unit ?? ""}` } as const;
+            }
+          }
+        }
+        await tx.delete(stockMovements).where(and(eq(stockMovements.diaryEntryId, id), eq(stockMovements.type, "saida")));
+        if (consumptions.length) await tx.insert(stockMovements).values(consumptions.map((item) => ({
+          projectId: entry.projectId,
+          materialId: item.materialId,
+          type: "saida" as const,
+          quantity: item.quantity.toString(),
+          notes: item.notes ?? "Consumo registado no Diário de Obra",
+          diaryEntryId: id,
+          createdByUserId: request.currentUser!.id,
+          date: entryData.date ?? entry.date,
+        })));
+      }
+      if (taskProgress) {
+        await tx.delete(siteDiaryTaskProgress).where(eq(siteDiaryTaskProgress.diaryEntryId, id));
+        if (taskProgress.length) await tx.insert(siteDiaryTaskProgress).values(taskProgress.map((item) => ({
+          diaryEntryId: id,
+          scheduleTaskId: item.taskId,
+          progressPercent: item.progressPercent.toString(),
+          notes: item.notes,
+        })));
+      }
+      const [row] = await tx.update(siteDiaryEntries).set(entryData).where(eq(siteDiaryEntries.id, id)).returning();
+      return { row } as const;
+    });
+    if ("error" in result) return reply.code(409).send({ error: result.error });
+    await recordAuditEvent({
+      companyId: companyIdOf(request), projectId: entry.projectId, actorUserId: request.currentUser!.id,
+      entityType: "site_diary", entityId: id, action: "corrected",
+      before: { date: entry.date, workDone: entry.workDone },
+      after: { date: result.row.date, workDone: result.row.workDone },
+      metadata: { taskProgressUpdated: taskProgress !== undefined, consumptionsUpdated: consumptions !== undefined },
+    });
+    return result.row;
   });
 
   app.delete("/api/site-diary/:id", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
@@ -157,6 +237,11 @@ export async function siteDiaryRoutes(app: FastifyInstance) {
     const entry = await assertEntryOwned(id, companyIdOf(request));
     if (!entry) return { ok: true };
     await db.delete(siteDiaryEntries).where(eq(siteDiaryEntries.id, id));
+    await recordAuditEvent({
+      companyId: companyIdOf(request), projectId: entry.projectId, actorUserId: request.currentUser!.id,
+      entityType: "site_diary", entityId: id, action: "deleted",
+      before: { date: entry.date, workDone: entry.workDone },
+    });
     return { ok: true };
   });
 

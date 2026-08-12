@@ -1,4 +1,15 @@
 import "dotenv/config";
+import { execFileSync } from "node:child_process";
+import { DEV_SESSION_SECRET, validateEnvironment } from "./envValidation.js";
+
+function detectedRelease(): string {
+  if (process.env.SIGO_RELEASE) return process.env.SIGO_RELEASE;
+  try {
+    return execFileSync("git", ["rev-parse", "--short=12", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || "dev";
+  } catch {
+    return "dev";
+  }
+}
 
 function required(name: string): string {
   const value = process.env[name];
@@ -7,31 +18,16 @@ function required(name: string): string {
 }
 
 const isProduction = process.env.NODE_ENV === "production";
-const DEV_SESSION_SECRET = "dev-secret-change-me";
 
 // Em produção, estes dois segredos nunca podem ficar por omissão — sem isto a aplicação
 // arrancava "a funcionar" com um cookie de sessão previsível (qualquer atacante que leia o
 // código-fonte consegue forjar sessões) ou com o plant-service acessível sem autenticação
 // interna. Falhar cedo no arranque é preferível a descobrir isto depois de estar exposto.
-if (isProduction) {
-  const sessionSecret = process.env.SESSION_COOKIE_SECRET;
-  if (!sessionSecret || sessionSecret === DEV_SESSION_SECRET) {
-    throw new Error(
-      "SESSION_COOKIE_SECRET tem de estar definido em produção (e diferente do valor de desenvolvimento)."
-    );
-  }
-  if (!process.env.PLANT_SERVICE_TOKEN) {
-    throw new Error("PLANT_SERVICE_TOKEN tem de estar definido em produção.");
-  }
-  // Links de email (convite fornecedor, lembretes, etc.) precisam de URL absoluta.
-  if (!process.env.PUBLIC_URL && !process.env.FRONTEND_URL && !process.env.SUPPLIER_PUBLIC_URL) {
-    throw new Error(
-      "PUBLIC_URL (ou FRONTEND_URL / SUPPLIER_PUBLIC_URL) tem de estar definido em produção para links em emails.",
-    );
-  }
-}
+validateEnvironment(process.env);
 
 export const env = {
+  // Identificador comum ao frontend e à API (idealmente o SHA curto do commit).
+  release: detectedRelease(),
   databaseUrl: required("DATABASE_URL"),
   port: Number(process.env.PORT ?? 4000),
   sessionCookieSecret: process.env.SESSION_COOKIE_SECRET ?? DEV_SESSION_SECRET,
@@ -41,6 +37,8 @@ export const env = {
   // Obrigatório em produção (verificado acima, antes deste objecto ser construído).
   plantServiceToken: process.env.PLANT_SERVICE_TOKEN,
   uploadsDir: process.env.UPLOADS_DIR ?? "./uploads",
+  backupDir: process.env.SIGO_BACKUP_DIR ?? (isProduction ? "/home/sigo/backups" : "./backups"),
+  operationalCheckIntervalMs: Number(process.env.OPERATIONAL_CHECK_INTERVAL_MS ?? 300_000),
   isProduction,
   // Origem(ns) permitida(s) para CORS, separadas por vírgula (ex: "https://app.mediobra.co.mz").
   // Em produção sem isto definido, o CORS fica fechado por omissão (nenhuma origem externa) —

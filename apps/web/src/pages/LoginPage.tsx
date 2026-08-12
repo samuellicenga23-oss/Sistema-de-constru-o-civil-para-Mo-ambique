@@ -48,6 +48,7 @@ export default function LoginPage() {
     const code = searchParams.get("error");
     if (code) setError(GOOGLE_ERROR_MESSAGES[code] ?? "Não foi possível entrar com Google.");
     if (code === "email_nao_verificado" || code === "token_expirado") setNeedsVerification(true);
+    if (searchParams.get("password_reset") === "1") setResendMessage("Palavra-passe alterada. Já pode entrar.");
   }, [searchParams]);
 
   useEffect(() => {
@@ -172,9 +173,7 @@ export default function LoginPage() {
               </div>
 
               <div>
-                <label className="mb-1.5 block text-[13px] font-semibold text-ink" htmlFor={passwordId}>
-                  Palavra-passe
-                </label>
+                <div className="mb-1.5 flex items-center justify-between gap-3"><label className="block text-[13px] font-semibold text-ink" htmlFor={passwordId}>Palavra-passe</label><Link to="/recuperar-palavra-passe" className="text-xs font-semibold text-teal-700 hover:underline">Esqueceu-se?</Link></div>
                 <div className="relative">
                   <input
                     id={passwordId}

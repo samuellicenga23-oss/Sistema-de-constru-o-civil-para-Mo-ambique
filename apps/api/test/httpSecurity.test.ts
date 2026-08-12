@@ -17,6 +17,12 @@ describe("Segurança HTTP", () => {
     expect(response.headers["cache-control"]).toBe("no-store");
   });
 
+  it("mantém o diagnóstico operacional reservado ao super administrador", async () => {
+    const response = await app.inject({ method: "GET", url: "/api/admin/operational-health" });
+    expect([401, 403]).toContain(response.statusCode);
+    expect(response.headers["cache-control"]).toBe("no-store");
+  });
+
   it("bloqueia mutações de origem cruzada em produção", () => {
     expect(mutationOriginAllowed({ production: true, method: "POST", host: "sud30s.org", origin: "https://evil.example", fetchSite: "cross-site" })).toBe(false);
     expect(mutationOriginAllowed({ production: true, method: "POST", host: "sud30s.org", origin: "https://evil.example" })).toBe(false);

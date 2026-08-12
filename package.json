@@ -23,7 +23,9 @@
     "db:seed": "npm run db:seed --workspace=apps/api",
     "db:sync-sigo-prices": "npm run db:sync-sigo-prices --workspace=apps/api",
     "bootstrap:admin": "npm run bootstrap:admin --workspace=apps/api --",
-    "test": "npm run test --workspace=apps/api && npm run test --workspace=apps/web"
+    "test": "npm run test --workspace=apps/api && npm run test --workspace=apps/web",
+    "quality:release": "node scripts/release-readiness.mjs",
+    "smoke:production": "node scripts/production-smoke.mjs"
   },
   "devDependencies": {
     "drizzle-orm": "^0.45.2",

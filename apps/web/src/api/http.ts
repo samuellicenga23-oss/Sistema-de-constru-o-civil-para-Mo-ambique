@@ -16,6 +16,7 @@ export class ApiError extends Error {
     public upgradeHint?: string,
     public actionPath?: string,
     public details?: ApiErrorDetails,
+    public requestId?: string,
   ) {
     super(message);
   }
@@ -61,7 +62,7 @@ export async function request<T>(path: string, options?: RequestInit & { timeout
     if (error instanceof DOMException && (error.name === "TimeoutError" || error.name === "AbortError")) {
       throw new ApiError(408, "O servidor demorou demasiado a responder. Tente novamente.");
     }
-    throw error;
+    throw new ApiError(0, "Não foi possível ligar ao SIGO. Verifique a internet e tente novamente.", "NETWORK_ERROR");
   }
 
   if (!res.ok) {
@@ -87,7 +88,12 @@ export async function request<T>(path: string, options?: RequestInit & { timeout
         blockers: Array.isArray(body.blockers) ? body.blockers.filter((item: unknown): item is string => typeof item === "string") : undefined,
         readiness: body.readiness && typeof body.readiness === "object" ? body.readiness as ApiErrorDetails["readiness"] : undefined,
       },
+      typeof body.requestId === "string" ? body.requestId : res.headers.get("x-request-id") ?? undefined,
     );
+  }
+  const contentType = res.headers.get("content-type") ?? "";
+  if (!contentType.includes("application/json")) {
+    throw new ApiError(502, "O servidor devolveu uma resposta inválida. Actualize a aplicação e tente novamente.", "INVALID_SERVER_RESPONSE");
   }
   return res.json();
 }

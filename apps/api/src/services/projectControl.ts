@@ -1,6 +1,6 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { budgetDocuments, financialEntries, invoiceCreditNotes, invoiceReceipts, materials, projectInvoices, purchaseOrders, stockMovements, supplierInvoiceCreditNotes, supplierInvoicePayments, supplierInvoices } from "../db/schema.js";
+import { budgetDocuments, financialEntries, invoiceCreditNotes, invoiceReceipts, materials, measurementCertificates, projectInvoices, purchaseOrders, siteDiaryEntries, stockMovements, supplierInvoiceCreditNotes, supplierInvoicePayments, supplierInvoices } from "../db/schema.js";
 import { getBudgetDocumentSummary } from "./boqEngine.js";
 import { getProjectSchedule } from "./scheduleEngine.js";
 
@@ -9,6 +9,10 @@ type ControlAlert = { code: string; level: AlertLevel; title: string; detail: st
 
 function today() {
   return new Date().toISOString().slice(0, 10);
+}
+
+function daysBetween(earlier: string, later: string) {
+  return Math.floor((Date.parse(`${later}T00:00:00Z`) - Date.parse(`${earlier}T00:00:00Z`)) / 86_400_000);
 }
 
 function plannedPercent(start: string, end: string, referenceDate: string) {
@@ -24,7 +28,7 @@ function plannedPercent(start: string, end: string, referenceDate: string) {
 // diário não traz custo próprio, valoriza-a pelo custo médio das entradas efectivamente registadas
 // para aquele material na mesma obra e identifica-a como estimativa no consumidor da API.
 export async function getProjectControl(projectId: string, currency: string) {
-  const [documents, entries, movements, orders, supplierBills, clientInvoices, schedule] = await Promise.all([
+  const [documents, entries, movements, orders, supplierBills, clientInvoices, certificates, diaryEntries, schedule] = await Promise.all([
     db.select().from(budgetDocuments).where(eq(budgetDocuments.projectId, projectId)),
     db.select().from(financialEntries).where(eq(financialEntries.projectId, projectId)),
     db.select({ movement: stockMovements, materialName: materials.name, unit: materials.unit })
@@ -34,6 +38,8 @@ export async function getProjectControl(projectId: string, currency: string) {
     db.select().from(purchaseOrders).where(eq(purchaseOrders.projectId, projectId)),
     db.select().from(supplierInvoices).where(eq(supplierInvoices.projectId, projectId)),
     db.select().from(projectInvoices).where(eq(projectInvoices.projectId, projectId)),
+    db.select().from(measurementCertificates).where(eq(measurementCertificates.projectId, projectId)),
+    db.select().from(siteDiaryEntries).where(eq(siteDiaryEntries.projectId, projectId)),
     getProjectSchedule(projectId),
   ]);
 
@@ -153,21 +159,64 @@ export async function getProjectControl(projectId: string, currency: string) {
 
   const alerts: ControlAlert[] = [];
   if (!approvedDocument) alerts.push({ code: "budget_missing", level: "critical", title: "Orçamento por aprovar", detail: "A obra ainda não tem referência contratual para controlo físico-financeiro.", href: `/projectos/${projectId}` });
+  if (approvedDocument && contractedValue <= 0) alerts.push({ code: "contract_value_zero", level: "critical", title: "Valor contratado inválido", detail: "O orçamento aprovado tem total igual a zero. Corrija preços e quantidades antes de controlar a obra.", href: `/documentos/${approvedDocument.id}?fase=orcamento` });
+  if (!leaves.length) alerts.push({ code: "schedule_missing", level: "critical", title: "Cronograma em falta", detail: "Gere ou importe o cronograma antes de iniciar o acompanhamento da execução.", href: `/projectos/${projectId}/cronograma?fase=gestao` });
+  const unlinkedTasks = leaves.filter((task) => !task.budgetLineItemId && !task.budgetChapterCode);
+  if (unlinkedTasks.length) alerts.push({ code: "schedule_unlinked", level: "warning", title: "Actividades sem orçamento", detail: `${unlinkedTasks.length} actividade(s) não têm ligação ao mapa de quantidades; o avanço financeiro pode ficar incompleto.`, href: `/projectos/${projectId}/cronograma?fase=gestao` });
   if (expectedProgress >= 10 && progressGap <= -10) alerts.push({ code: "schedule_delay", level: "warning", title: "Execução abaixo do planeado", detail: `Previsto ${expectedProgress.toFixed(2)}%; realizado ${actualProgress.toFixed(2)}%.`, href: `/projectos/${projectId}/cronograma` });
   if (contractedValue > 0 && financial.paidCost > contractedValue) alerts.push({ code: "cost_over_contract", level: "critical", title: "Custo pago acima do contrato", detail: "Os pagamentos de despesa já ultrapassaram o valor contratado.", href: `/projectos/${projectId}/financeiro` });
   const overdueOrders = orders.filter((order) => order.status === "aprovado" && order.requiredByDate && order.requiredByDate < date);
   if (overdueOrders.length) alerts.push({ code: "purchase_overdue", level: "warning", title: "Compras em atraso", detail: `${overdueOrders.length} ordem(ns) aprovada(s) ultrapassou(aram) a data necessária.`, href: `/projectos/${projectId}/compras` });
   const exhausted = stock.filter((item) => item.consumedQty > 0 && item.balance <= 0);
   if (exhausted.length) alerts.push({ code: "stock_exhausted", level: "warning", title: "Material sem saldo", detail: `${exhausted.slice(0, 2).map((item) => item.materialName).join(", ")}${exhausted.length > 2 ? " e outros" : ""}.`, href: `/projectos/${projectId}/compras` });
+  const negativeStock = stock.filter((item) => item.balance < -0.0001);
+  if (negativeStock.length) alerts.push({ code: "stock_negative", level: "critical", title: "Stock negativo", detail: `${negativeStock.length} material(is) têm saídas superiores às entradas. Reveja os movimentos.`, href: `/projectos/${projectId}/compras?fase=gestao` });
+  if (stock.some((item) => item.estimatedCost)) alerts.push({ code: "stock_cost_estimated", level: "info", title: "Consumo com custo estimado", detail: "Há saídas valorizadas pelo custo médio porque não possuem custo unitário próprio.", href: `/projectos/${projectId}/compras?fase=gestao` });
+  const submittedCertificates = certificates.filter((certificate) => certificate.status === "submetido");
+  if (submittedCertificates.length) alerts.push({ code: "certificate_pending", level: "warning", title: "Autos aguardam decisão", detail: `${submittedCertificates.length} Auto(s) submetido(s) precisam de aprovação ou devolução.`, href: `/projectos/${projectId}?fase=gestao#certificados-obra` });
+  const draftInvoices = clientInvoices.filter((invoice) => invoice.status === "rascunho");
+  if (draftInvoices.length) alerts.push({ code: "client_invoice_draft", level: "info", title: "Facturas por emitir", detail: `${draftInvoices.length} factura(s) de Auto estão em rascunho.`, href: `/projectos/${projectId}/financeiro?fase=gestao` });
+  const overdueClientInvoices = clientInvoices.filter((invoice) => ["emitida", "parcial"].includes(invoice.status) && invoice.dueDate && invoice.dueDate < date);
+  if (overdueClientInvoices.length) alerts.push({ code: "client_invoice_overdue", level: "warning", title: "Recebimentos vencidos", detail: `${overdueClientInvoices.length} factura(s) ao cliente ultrapassaram o vencimento.`, href: `/projectos/${projectId}/financeiro?fase=gestao` });
+  const overdueSupplierInvoices = supplierBills.filter((invoice) => ["aprovada", "parcialmente_paga"].includes(invoice.status) && invoice.dueDate && invoice.dueDate < date);
+  if (overdueSupplierInvoices.length) alerts.push({ code: "supplier_invoice_overdue", level: "warning", title: "Pagamentos vencidos", detail: `${overdueSupplierInvoices.length} factura(s) de fornecedor ultrapassaram o vencimento.`, href: `/projectos/${projectId}/compras?fase=gestao` });
+  const lastDiaryDate = diaryEntries.reduce<string | null>((latest, entry) => !latest || entry.date > latest ? entry.date : latest, null);
+  const scheduleStarted = Boolean(schedule.startDate && schedule.startDate <= date);
+  const scheduleOpen = !schedule.endDate || schedule.endDate >= date || actualProgress < 99.99;
+  if (scheduleStarted && scheduleOpen && (!lastDiaryDate || daysBetween(lastDiaryDate, date) >= 3)) {
+    alerts.push({ code: "diary_stale", level: "warning", title: "Diário desactualizado", detail: lastDiaryDate ? `Último relatório há ${daysBetween(lastDiaryDate, date)} dias.` : "Ainda não existe relatório diário nesta obra.", href: `/projectos/${projectId}/diario?fase=gestao` });
+  }
   if (financial.certified > financial.received + 0.01) alerts.push({ code: "certified_unpaid", level: "info", title: "Autos por receber", detail: "Existem autos aprovados ainda não recebidos financeiramente.", href: `/projectos/${projectId}/financeiro` });
+
+  const alertRank: Record<AlertLevel, number> = { critical: 0, warning: 1, info: 2 };
+  alerts.sort((a, b) => alertRank[a.level] - alertRank[b.level]);
+  const nextAction = alerts[0] ?? (actualProgress < 100
+    ? { code: "diary_continue", level: "info" as const, title: "Registar andamento", detail: "Actualize os trabalhos, consumos e progresso do dia.", href: `/projectos/${projectId}/diario?fase=gestao` }
+    : { code: "project_review", level: "info" as const, title: "Rever encerramento", detail: "Confirme saldos, facturas e documentos finais da obra.", href: `/projectos/${projectId}?fase=gestao` });
 
   return {
     currency,
     basis: { approvedBudgetDocumentId: approvedDocument?.id ?? null, referenceDate: date, stockConsumptionEstimated: stock.some((item) => item.estimatedCost) },
     commercial: { contractedValue, certifiedValue: financial.certified, receivedValue: financial.received, receivableValue: financial.receivable },
     cost: { paidValue: financial.paidCost, committedValue: financial.committedCost, consumedStockValue, cashMargin: financial.received - financial.paidCost },
-    schedule: { expectedProgress, actualProgress, progressGap, plannedValue: schedule.plannedValue, executedValue: schedule.executedValue },
+    schedule: {
+      expectedProgress, actualProgress, progressGap, plannedValue: schedule.plannedValue, executedValue: schedule.executedValue,
+      startDate: schedule.startDate,
+      endDate: schedule.endDate,
+      phases: schedule.tasks.filter((task) => !task.parentId).map((task) => ({
+        id: task.id, name: task.name, startDate: task.startDate, endDate: task.endDate, progress: task.progress, status: task.status,
+      })),
+    },
     stock: stock.slice(0, 8),
     alerts,
+    operations: {
+      nextAction,
+      criticalCount: alerts.filter((alert) => alert.level === "critical").length,
+      warningCount: alerts.filter((alert) => alert.level === "warning").length,
+      lastDiaryDate,
+      openPurchaseOrders: orders.filter((order) => order.status === "aprovado").length,
+      pendingClientInvoices: clientInvoices.filter((invoice) => ["rascunho", "emitida", "parcial"].includes(invoice.status)).length,
+      pendingSupplierInvoices: supplierBills.filter((invoice) => ["submetida", "em_revisao", "divergente", "aprovada", "parcialmente_paga"].includes(invoice.status)).length,
+    },
   };
 }

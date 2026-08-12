@@ -208,6 +208,10 @@ export const users = pgTable("users", {
   emailVerifiedAt: timestamp("email_verified_at"),
   emailVerificationToken: varchar("email_verification_token", { length: 64 }),
   emailVerificationExpiresAt: timestamp("email_verification_expires_at"),
+  // O link transporta o token original; a base guarda apenas o SHA-256. Assim, uma leitura
+  // indevida da tabela não transforma imediatamente estes registos em links utilizáveis.
+  passwordResetTokenHash: varchar("password_reset_token_hash", { length: 64 }).unique(),
+  passwordResetExpiresAt: timestamp("password_reset_expires_at"),
 });
 
 export const sessions = pgTable("sessions", {
@@ -497,7 +501,7 @@ export const projects = pgTable("projects", {
    * mais nada. Null = partilha desligada.
    */
   publicShareToken: varchar("public_share_token", { length: 64 }).unique(),
-});
+}, (table) => [index("projects_company_created_idx").on(table.companyId, table.createdAt)]);
 
 export const usageEvents = pgTable(
   "usage_events",
@@ -602,7 +606,7 @@ export const budgetDocuments = pgTable("budget_documents", {
       }
     | null
   >(),
-});
+}, (table) => [index("budget_documents_project_created_idx").on(table.projectId, table.createdAt)]);
 
 /** Jobs persistentes de importação de mapas (sobrevivem a restart da API). */
 export const measurementImportJobsTable = pgTable(
@@ -640,7 +644,7 @@ export const budgetSections = pgTable("budget_sections", {
   // Identifica estruturas geradas pelo SIGO sem confundir mapas importados que usem códigos
   // semelhantes. Também permite evoluir o modelo adaptativo sem alterar documentos existentes.
   templateKey: varchar("template_key", { length: 50 }),
-});
+}, (table) => [index("budget_sections_document_sort_idx").on(table.documentId, table.sortOrder)]);
 
 export const lineItems = pgTable("line_items", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -657,7 +661,10 @@ export const lineItems = pgTable("line_items", {
   compositionId: uuid("composition_id").references(() => costCompositions.id),
   origin: lineItemOriginEnum("origin").notNull().default("manual"),
   sortOrder: integer("sort_order").notNull().default(0),
-});
+}, (table) => [
+  index("line_items_section_sort_idx").on(table.sectionId, table.sortOrder),
+  index("line_items_parent_idx").on(table.parentId),
+]);
 
 // ---------- Medições dimensionais (mapa de medições por item do orçamento) ----------
 // Cada linha é uma medição concreta: nº de vezes × comprimento × largura × altura = parcial.
@@ -733,7 +740,7 @@ export const measurementCertificates = pgTable("measurement_certificates", {
   approvedByUserId: uuid("approved_by_user_id").references(() => users.id),
   approvalNote: text("approval_note"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+}, (table) => [index("measurement_certificates_project_created_idx").on(table.projectId, table.createdAt)]);
 
 export const measurementCertificateLines = pgTable("measurement_certificate_lines", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -908,7 +915,11 @@ export const plants = pgTable("plants", {
   // de páginas reconhecidos como arquitectura, estrutura, hidrossanitário, electricidade, etc.
   documentAnalysis: jsonb("document_analysis").$type<DocumentAnalysis | null>(),
   uploadedAt: timestamp("uploaded_at").notNull().defaultNow(),
-}, (table) => [index("plants_file_hash_idx").on(table.fileHash, table.parserVersion)]);
+}, (table) => [
+  index("plants_file_hash_idx").on(table.fileHash, table.parserVersion),
+  index("plants_project_uploaded_idx").on(table.projectId, table.uploadedAt),
+  index("plants_status_updated_idx").on(table.processingStatus, table.processingUpdatedAt),
+]);
 
 export const extractedRooms = pgTable("extracted_rooms", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -1046,7 +1057,10 @@ export const financialEntries = pgTable("financial_entries", {
   sourceId: uuid("source_id"),
   createdByUserId: uuid("created_by_user_id").references(() => users.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-}, (table) => [unique("financial_entry_source_unique").on(table.projectId, table.sourceType, table.sourceId)]);
+}, (table) => [
+  unique("financial_entry_source_unique").on(table.projectId, table.sourceType, table.sourceId),
+  index("financial_entries_project_status_idx").on(table.projectId, table.status),
+]);
 
 // Factura comercial emitida a partir de um Auto aprovado. O valor do Auto fica imutável na
 // factura; recebimentos parciais vivem numa tabela própria em vez de deformar um lançamento
@@ -1583,7 +1597,7 @@ export const siteDiaryEntries = pgTable("site_diary_entries", {
   photoUrls: jsonb("photo_urls").$type<string[]>().notNull().default([]),
   createdByUserId: uuid("created_by_user_id").references(() => users.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+}, (table) => [index("site_diary_entries_project_date_idx").on(table.projectId, table.date)]);
 
 export const siteDiaryTaskProgress = pgTable("site_diary_task_progress", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -1874,7 +1888,7 @@ export const purchaseOrders = pgTable("purchase_orders", {
   ivaRate: numeric("iva_rate", { precision: 5, scale: 4 }).notNull().default("0.16"),
   createdByUserId: uuid("created_by_user_id").references(() => users.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+}, (table) => [index("purchase_orders_project_status_idx").on(table.projectId, table.status)]);
 
 // Linhas de ordem de compra ligadas a um material real do Catálogo (não texto livre) — a mesma
 // entidade `materials` usada nas composições de custo. Isto é o que liga Compras ao resto do
@@ -2439,6 +2453,8 @@ export const notifications = pgTable(
   (table) => [
     index("notifications_user_unread_idx").on(table.userId, table.readAt),
     index("notifications_supplier_account_unread_idx").on(table.supplierAccountId, table.readAt),
+    index("notifications_user_created_idx").on(table.userId, table.createdAt),
+    index("notifications_supplier_created_idx").on(table.supplierAccountId, table.createdAt),
   ],
 );
 

@@ -3,18 +3,25 @@ import { Link } from 'react-router-dom';
 import { Logo } from './brand/Logo';
 
 const columns = [
-{
-  title: 'Plataforma',
-  links: ['Medições', 'Orçamentos', 'Catálogo de preços', 'Cronograma', 'Autos de medição']
-},
-{
-  title: 'Empresa',
-  links: ['Sobre o SIGO', 'Clientes', 'Parceiros', 'Trabalhar connosco']
-},
-{
-  title: 'Recursos',
-  links: ['Centro de ajuda', 'Guia de orçamentação', 'Estado do serviço', 'Contacto']
-}];
+  {
+    title: 'Plataforma',
+    links: [
+      ['Levantamentos', '/#produto'], ['Orçamentos', '/#produto'], ['Gestão da obra', '/#plataforma'], ['Planos', '/#planos'],
+    ],
+  },
+  {
+    title: 'SIGO',
+    links: [
+      ['Como funciona', '/#plataforma'], ['Perguntas frequentes', '/#faq'], ['Criar conta', '/registar'], ['Entrar', '/login'],
+    ],
+  },
+  {
+    title: 'Contacto',
+    links: [
+      ['Email', 'mailto:licsenga.samuel@mechanical.co.mz'], ['WhatsApp', 'https://wa.me/258866384194'], ['Termos', '/legal/termos'], ['Privacidade', '/legal/privacidade'],
+    ],
+  },
+] as const;
 
 
 export function SiteFooter() {
@@ -38,13 +45,13 @@ export function SiteFooter() {
             <div key={col.title}>
                 <p className="text-eyebrow font-bold uppercase text-teal-bright">{col.title}</p>
                 <ul className="mt-4 space-y-2.5">
-                  {col.links.map((l) =>
-                <li key={l}>
+                  {col.links.map(([label, href]) =>
+                <li key={label}>
                       <a
-                    href="#produto"
+                    href={href}
                     className="text-[13.5px] text-white/65 transition-colors hover:text-white">
                     
-                        {l}
+                        {label}
                       </a>
                     </li>
                 )}
@@ -59,12 +66,12 @@ export function SiteFooter() {
             © 2026 SIGO — Sistema Integrado de Gestão de Obras. Todos os direitos reservados.
           </p>
           <div className="flex items-center gap-5 text-[12.5px] text-white/55">
-            <a href="#planos" className="hover:text-white">
+            <Link to="/legal/termos" className="hover:text-white">
               Termos
-            </a>
-            <a href="#planos" className="hover:text-white">
+            </Link>
+            <Link to="/legal/privacidade" className="hover:text-white">
               Privacidade
-            </a>
+            </Link>
             <Link to="/login" className="font-semibold text-teal-bright hover:text-white">
               Entrar no SIGO
             </Link>

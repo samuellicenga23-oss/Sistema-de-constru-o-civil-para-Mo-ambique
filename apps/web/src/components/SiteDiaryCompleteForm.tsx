@@ -13,21 +13,26 @@ type Props = {
   stock: StockSummaryLine[];
   saving: boolean;
   initialDate: string;
+  initialData?: SiteDiaryEntryInput;
   onClose: () => void;
   onSubmit: (input: SiteDiaryEntryInput) => Promise<void>;
 };
 
-export default function SiteDiaryCompleteForm({ projectName, tasks, stock, saving, initialDate, onClose, onSubmit }: Props) {
-  const [date, setDate] = useState(initialDate);
-  const [weather, setWeather] = useState("Sol");
-  const [workers, setWorkers] = useState("");
-  const [entryTime, setEntryTime] = useState("07:00");
-  const [exitTime, setExitTime] = useState("17:00");
-  const [equipment, setEquipment] = useState("");
-  const [workDone, setWorkDone] = useState("");
-  const [notes, setNotes] = useState("");
-  const [taskProgress, setTaskProgress] = useState<Array<{ taskId: string; progressPercent: string; notes: string }>>([]);
-  const [consumptions, setConsumptions] = useState<Array<{ materialId: string; quantity: string; notes: string }>>([]);
+export default function SiteDiaryCompleteForm({ projectName, tasks, stock, saving, initialDate, initialData, onClose, onSubmit }: Props) {
+  const [date, setDate] = useState(initialData?.date ?? initialDate);
+  const [weather, setWeather] = useState(initialData?.weather ?? "Sol");
+  const [workers, setWorkers] = useState(initialData?.workersPresent != null ? String(initialData.workersPresent) : "");
+  const [entryTime, setEntryTime] = useState(initialData?.entryTime ?? "07:00");
+  const [exitTime, setExitTime] = useState(initialData?.exitTime ?? "17:00");
+  const [equipment, setEquipment] = useState(initialData?.equipmentPresent ?? "");
+  const [workDone, setWorkDone] = useState(initialData?.workDone ?? "");
+  const [notes, setNotes] = useState(initialData?.incidents ?? "");
+  const [taskProgress, setTaskProgress] = useState<Array<{ taskId: string; progressPercent: string; notes: string }>>(
+    initialData?.taskProgress?.map((item) => ({ taskId: item.taskId, progressPercent: String(item.progressPercent), notes: item.notes ?? "" })) ?? [],
+  );
+  const [consumptions, setConsumptions] = useState<Array<{ materialId: string; quantity: string; notes: string }>>(
+    initialData?.consumptions?.map((item) => ({ materialId: item.materialId, quantity: String(item.quantity), notes: item.notes ?? "" })) ?? [],
+  );
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -46,7 +51,7 @@ export default function SiteDiaryCompleteForm({ projectName, tasks, stock, savin
   }
 
   return (
-    <Modal title="Registo diário completo" subtitle={`${projectName} · ${date}`} onClose={() => !saving && onClose()} maxWidth="max-w-4xl">
+    <Modal title={initialData ? "Corrigir relatório diário" : "Novo relatório diário"} subtitle={`${projectName} · ${date}`} onClose={() => !saving && onClose()} maxWidth="max-w-4xl">
       <form onSubmit={submit} className="space-y-4">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <label><span className="label">Data *</span><input required type="date" value={date} onChange={(event) => setDate(event.target.value)} className="input" /></label>
@@ -93,7 +98,7 @@ export default function SiteDiaryCompleteForm({ projectName, tasks, stock, savin
           </details>
         </div>
 
-        <div className="flex justify-end gap-2 border-t border-slate-200 pt-4"><button type="button" className="btn btn-secondary" onClick={onClose}>Cancelar</button><button type="submit" disabled={saving} className="btn btn-primary">{saving ? "A submeter…" : "Submeter registo diário"}</button></div>
+        <div className="flex justify-end gap-2 border-t border-slate-200 pt-4"><button type="button" className="btn btn-secondary" onClick={onClose}>Cancelar</button><button type="submit" disabled={saving} className="btn btn-primary">{saving ? "A guardar…" : initialData ? "Guardar correcção" : "Submeter relatório"}</button></div>
       </form>
     </Modal>
   );

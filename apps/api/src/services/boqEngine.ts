@@ -1,4 +1,4 @@
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { budgetDocuments, budgetSections, lineItems } from "../db/schema.js";
 import { calculateBudgetTotals } from "./budgetTotals.js";
@@ -196,4 +196,55 @@ export async function getBudgetDocumentSummary(documentId: string): Promise<Budg
   }
 
   return { document, sections: sectionNodes, ...totals };
+}
+
+/**
+ * Calcula apenas o total comercial de vários documentos numa única consulta.
+ *
+ * O painel não consome a árvore, descrições nem especificações técnicas. Montar o resumo
+ * completo para cada documento fazia 4+ consultas por documento (N+1). A soma das folhas
+ * produz exactamente o mesmo subtotal e as mesmas regras comerciais do resumo completo.
+ */
+export async function getBudgetDocumentTotals(
+  documents: Array<typeof budgetDocuments.$inferSelect>,
+): Promise<Map<string, number>> {
+  if (documents.length === 0) return new Map();
+
+  const documentIds = documents.map((document) => document.id);
+  const rows = await db
+    .select({
+      documentId: budgetSections.documentId,
+      quantity: lineItems.quantity,
+      unitPrice: lineItems.unitPrice,
+    })
+    .from(budgetSections)
+    .innerJoin(lineItems, eq(lineItems.sectionId, budgetSections.id))
+    .where(and(inArray(budgetSections.documentId, documentIds), eq(lineItems.kind, "item")));
+
+  return calculateBudgetDocumentTotals(documents, rows);
+}
+
+export function calculateBudgetDocumentTotals(
+  documents: Array<typeof budgetDocuments.$inferSelect>,
+  rows: Array<{ documentId: string; quantity: string | null; unitPrice: string | null }>,
+): Map<string, number> {
+  const directTotals = new Map<string, number>();
+  for (const row of rows) {
+    directTotals.set(
+      row.documentId,
+      (directTotals.get(row.documentId) ?? 0) + Number(row.quantity ?? 0) * Number(row.unitPrice ?? 0),
+    );
+  }
+
+  return new Map(documents.map((document) => {
+    const subtotal1 = directTotals.get(document.id) ?? 0;
+    const totals = calculateBudgetTotals(subtotal1, {
+      siteCostsRate: Number(document.siteCostsRate),
+      indirectCostsRate: Number(document.indirectCostsRate),
+      contingenciasRate: Number(document.contingenciasRate),
+      profitMarginRate: Number(document.profitMarginRate),
+      ivaRate: Number(document.ivaRate),
+    });
+    return [document.id, totals.total];
+  }));
 }

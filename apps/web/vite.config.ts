@@ -1,9 +1,25 @@
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { VitePWA } from "vite-plugin-pwa";
+import { execFileSync } from "node:child_process";
 
-export default defineConfig({
+function detectedRelease(explicit?: string) {
+  if (explicit) return explicit;
+  try {
+    return execFileSync("git", ["rev-parse", "--short=12", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || "dev";
+  } catch {
+    return "dev";
+  }
+}
+
+export default defineConfig(({ mode }) => {
+  const buildEnv = loadEnv(mode, process.cwd(), "");
+  const release = detectedRelease(buildEnv.SIGO_RELEASE || buildEnv.VITE_SIGO_RELEASE);
+  return ({
+  define: {
+    __SIGO_RELEASE__: JSON.stringify(release),
+  },
   plugins: [
     react(),
     tailwindcss(),
@@ -19,15 +35,17 @@ export default defineConfig({
         clientsClaim: true,
         // Assets versionados são guardados pelo runtime. Não os incluir no precache evita que
         // o service worker volte a descarregar bundles antigos preservados para abas abertas.
-        globPatterns: ["**/*.{html,ico,svg,webmanifest}", "favicon.png", "icon-*.png", "brand/*.png"],
+        // O HTML deve vir sempre do servidor depois de um deploy, nunca de um cache antigo.
+        globPatterns: ["**/*.{ico,svg,webmanifest}", "favicon.png", "icon-*.png", "brand/*.png"],
+        navigateFallback: null,
         navigateFallbackDenylist: [/^\/api\//, /^\/uploads\//, /^\/fornecedor\//],
         runtimeCaching: [
           {
             urlPattern: /^\/assets\//,
-            handler: "StaleWhileRevalidate",
+            handler: "CacheFirst",
             options: {
               // Nome versionado: ao mudar, o SW abandona caches antigos (cleanupOutdatedCaches).
-              cacheName: "sigo-versioned-assets-20260809c",
+              cacheName: "sigo-versioned-assets-20260812e",
               expiration: { maxEntries: 80, maxAgeSeconds: 7 * 24 * 60 * 60 },
             },
           },
@@ -82,4 +100,5 @@ export default defineConfig({
       },
     },
   },
+  });
 });

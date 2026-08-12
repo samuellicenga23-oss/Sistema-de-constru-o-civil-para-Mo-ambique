@@ -10,7 +10,7 @@ import ProjectWorkspaceNav from "../components/ProjectWorkspaceNav";
 import Modal from "../components/Modal";
 import PageSearch from "../components/PageSearch";
 import { SectionHeader } from "../components/WorkspaceUI";
-import { IconBack, IconPlus, IconTrash, IconDownload, IconUpload } from "../components/icons";
+import { IconBack, IconPlus, IconTrash, IconDownload, IconUpload, IconPencil } from "../components/icons";
 import SiteDiaryCompleteForm from "../components/SiteDiaryCompleteForm";
 
 function todayStr() {
@@ -38,6 +38,7 @@ export default function ProjectSiteDiaryPage() {
   const [saving, setSaving] = useState(false);
   const [uploadingPhotoFor, setUploadingPhotoFor] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [editingEntry, setEditingEntry] = useState<SiteDiaryEntry | null>(null);
   const [formMode, setFormMode] = useState<"quick" | "full">("quick");
   const [query, setQuery] = useState("");
 
@@ -128,6 +129,41 @@ export default function ProjectSiteDiaryPage() {
     }
   }
 
+  async function handleCompleteUpdate(input: SiteDiaryEntryInput) {
+    if (!editingEntry) return;
+    setError(null);
+    setSaving(true);
+    try {
+      await siteDiaryApi.update(editingEntry.id, input);
+      setEditingEntry(null);
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível corrigir o relatório diário");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const editingInput: SiteDiaryEntryInput | undefined = editingEntry ? {
+    date: editingEntry.date,
+    weather: editingEntry.weather ?? undefined,
+    workersPresent: editingEntry.workersPresent ?? undefined,
+    equipmentPresent: editingEntry.equipmentPresent ?? undefined,
+    workDone: editingEntry.workDone,
+    incidents: editingEntry.incidents ?? undefined,
+    entryTime: editingEntry.entryTime ?? undefined,
+    exitTime: editingEntry.exitTime ?? undefined,
+    taskProgress: editingEntry.taskProgress.map((item) => ({ taskId: item.scheduleTaskId, progressPercent: item.progressPercent, notes: item.notes ?? undefined })),
+    consumptions: editingEntry.consumptions.map((item) => ({ materialId: item.materialId, quantity: item.quantity, notes: item.notes ?? undefined })),
+  } : undefined;
+  const editingStock = useMemo(() => {
+    if (!editingEntry) return stock;
+    return stock.map((line) => ({
+      ...line,
+      balance: line.balance + editingEntry.consumptions.filter((item) => item.materialId === line.materialId).reduce((sum, item) => sum + item.quantity, 0),
+    }));
+  }, [stock, editingEntry]);
+
   async function handleDelete(entry: SiteDiaryEntry) {
     const ok = await confirm({
       title: "Eliminar registo?",
@@ -207,6 +243,7 @@ export default function ProjectSiteDiaryPage() {
         <section className="card"><SectionHeader title="Relatórios diários" description={`${entries.length} dia(s) registado(s)`} actions={<button type="button" onClick={() => setShowForm(true)} className="btn btn-primary btn-sm"><IconPlus className="h-3.5 w-3.5" /> Novo relatório</button>} /></section>
         <PageSearch value={query} onChange={setQuery} placeholder="Pesquisar por data, trabalho, material ou ocorrência…" resultLabel={`${filteredEntries.length} registo(s)`} />
         {showForm && <SiteDiaryCompleteForm projectName={project.name} tasks={tasks} stock={stock} saving={saving} initialDate={todayStr()} onClose={() => setShowForm(false)} onSubmit={handleCompleteCreate} />}
+        {editingEntry && <SiteDiaryCompleteForm projectName={project.name} tasks={tasks} stock={editingStock} saving={saving} initialDate={editingEntry.date} initialData={editingInput} onClose={() => setEditingEntry(null)} onSubmit={handleCompleteUpdate} />}
         {showForm && false && <Modal title="Novo registo do Diário" subtitle={`${date} · ${project!.name}`} onClose={() => !saving && setShowForm(false)} maxWidth={formMode === "full" ? "max-w-6xl" : "max-w-lg"}>
           <form onSubmit={handleCreate} className="space-y-3">
             <div className="flex gap-2 text-xs">
@@ -386,6 +423,9 @@ export default function ProjectSiteDiaryPage() {
                         <IconDownload className="w-3.5 h-3.5" />
                         Exportar PDF
                       </a>
+                      <button type="button" onClick={() => setEditingEntry(entry)} className="btn btn-secondary btn-sm">
+                        <IconPencil className="h-3.5 w-3.5" /> Corrigir
+                      </button>
                       <button onClick={() => handleDelete(entry)} className="btn btn-sm ml-auto border-red-200 bg-white text-red-600 hover:bg-red-50">
                         Eliminar registo
                       </button>

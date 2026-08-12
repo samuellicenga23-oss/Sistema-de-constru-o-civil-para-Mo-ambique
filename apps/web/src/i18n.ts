@@ -4,7 +4,7 @@ const messages = {
   pt: {
     platformPanel: "Painel da Plataforma",
     dashboard: "Painel",
-    measurements: "Medições",
+    measurements: "Levantamentos",
     budgets: "Orçamentos",
     catalog: "Catálogo de Preços",
     suppliers: "Fornecedores",
@@ -29,7 +29,7 @@ const messages = {
   en: {
     platformPanel: "Platform Control Center",
     dashboard: "Dashboard",
-    measurements: "Measurements",
+    measurements: "Quantity take-offs",
     budgets: "Budgets",
     catalog: "Price Catalogue",
     suppliers: "Suppliers",

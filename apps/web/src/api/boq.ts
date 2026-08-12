@@ -38,6 +38,15 @@ export type SiteManagementOverview = {
   receivedValue: number;
   cashMargin: number;
   alerts: Array<{ code: string; level: "critical" | "warning" | "info"; title: string; detail: string; href: string }>;
+  operations: {
+    nextAction: { code: string; level: "critical" | "warning" | "info"; title: string; detail: string; href: string };
+    criticalCount: number;
+    warningCount: number;
+    lastDiaryDate: string | null;
+    openPurchaseOrders: number;
+    pendingClientInvoices: number;
+    pendingSupplierInvoices: number;
+  };
   schedule: { startDate: string | null; endDate: string | null; phases: SchedulePhaseSummary[] };
 };
 

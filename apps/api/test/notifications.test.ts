@@ -33,10 +33,11 @@ async function extractCookie(res: { headers: Record<string, unknown> }, name: st
 describe("Sino de notificações in-app", () => {
   it("o fornecedor recebe uma notificação in-app ao ser pedida uma cotação e pode marcá-la como lida", async () => {
     const [zone] = await db.insert(priceZones).values({ companyId: null, name: "Beira (teste sino)" }).returning();
+    const [material] = await db.insert(materials).values({ companyId: null, name: "Cimento (teste sino)", unit: "un", baseUnitCost: "450" }).returning();
     const registerRes = await app.inject({
       method: "POST",
       url: "/api/supplier/auth/register",
-      payload: { name: "Fornecedor Sino", email: "fornecedor-sino@test.local", password: "senhaFornecedor1", zoneId: zone.id },
+      payload: { name: "Fornecedor Sino", email: "fornecedor-sino@test.local", password: "senhaFornecedor1", zoneId: zone.id, offersMaterials: true, materialIds: [material.id] },
     });
     const supplierCookie = await extractCookie(registerRes, "sid_sup");
     const [supplierRow] = await db.select().from(suppliers).where(eq(suppliers.name, "Fornecedor Sino")).limit(1);
@@ -44,13 +45,12 @@ describe("Sino de notificações in-app", () => {
     const company = await createCompany("Empresa Sino");
     await createUser(company.id, "admin_empresa", "admin-sino@test.local");
     const companyCookie = await loginCookie(app, "admin-sino@test.local");
-    const [material] = await db.insert(materials).values({ companyId: null, name: "Cimento (teste sino)", unit: "un", baseUnitCost: "450" }).returning();
 
     await app.inject({
       method: "POST",
       url: "/api/quote-requests",
       headers: { cookie: companyCookie },
-      payload: { supplierId: supplierRow.id, title: "Pedido para o sino", lines: [{ kind: "material", resourceId: material.id }] },
+      payload: { supplierId: supplierRow.id, title: "Pedido para o sino", lines: [{ kind: "material", resourceId: material.id, quantity: 1 }] },
     });
 
     const listRes = await app.inject({ method: "GET", url: "/api/supplier/notifications", headers: { cookie: supplierCookie } });
@@ -59,7 +59,7 @@ describe("Sino de notificações in-app", () => {
     expect(body.unreadCount).toBe(1);
     expect(body.items[0].title).toBe("Novo pedido de cotação");
     expect(body.items[0].readAt).toBeNull();
-    expect(body.items[0].link).toBe("/painel");
+    expect(body.items[0].link).toBe("/oportunidades");
 
     const readRes = await app.inject({ method: "POST", url: `/api/supplier/notifications/${body.items[0].id}/read`, headers: { cookie: supplierCookie } });
     expect(readRes.statusCode).toBe(200);
@@ -74,10 +74,11 @@ describe("Sino de notificações in-app", () => {
 
   it("a empresa recebe uma notificação in-app quando o fornecedor responde à cotação", async () => {
     const [zone] = await db.insert(priceZones).values({ companyId: null, name: "Nampula (teste sino empresa)" }).returning();
+    const [material] = await db.insert(materials).values({ companyId: null, name: "Areia (teste sino empresa)", unit: "m3", baseUnitCost: "300" }).returning();
     const registerRes = await app.inject({
       method: "POST",
       url: "/api/supplier/auth/register",
-      payload: { name: "Fornecedor Sino Empresa", email: "fornecedor-sino-empresa@test.local", password: "senhaFornecedor1", zoneId: zone.id },
+      payload: { name: "Fornecedor Sino Empresa", email: "fornecedor-sino-empresa@test.local", password: "senhaFornecedor1", zoneId: zone.id, offersMaterials: true, materialIds: [material.id] },
     });
     const supplierCookie = await extractCookie(registerRes, "sid_sup");
     const [supplierRow] = await db.select().from(suppliers).where(eq(suppliers.name, "Fornecedor Sino Empresa")).limit(1);
@@ -85,13 +86,12 @@ describe("Sino de notificações in-app", () => {
     const company = await createCompany("Empresa Sino Empresa");
     await createUser(company.id, "admin_empresa", "admin-sino-empresa@test.local");
     const companyCookie = await loginCookie(app, "admin-sino-empresa@test.local");
-    const [material] = await db.insert(materials).values({ companyId: null, name: "Areia (teste sino empresa)", unit: "m3", baseUnitCost: "300" }).returning();
 
     const createRes = await app.inject({
       method: "POST",
       url: "/api/quote-requests",
       headers: { cookie: companyCookie },
-      payload: { supplierId: supplierRow.id, title: "Pedido respondido", lines: [{ kind: "material", resourceId: material.id }] },
+      payload: { supplierId: supplierRow.id, title: "Pedido respondido", lines: [{ kind: "material", resourceId: material.id, quantity: 1 }] },
     });
     const quoteRequest = createRes.json() as { id: string };
 
@@ -122,7 +122,7 @@ describe("Ordem de compra — mudança de estado avisa o fornecedor do marketpla
     await app.inject({
       method: "POST",
       url: "/api/supplier/auth/register",
-      payload: { name: "Fornecedor Notificações", email: "fornecedor-notif@test.local", password: "senhaFornecedor1", zoneId: zone.id },
+      payload: { name: "Fornecedor Notificações", email: "fornecedor-notif@test.local", password: "senhaFornecedor1", zoneId: zone.id, offersMaterials: true },
     });
     const [supplierRow] = await db.select().from(suppliers).where(eq(suppliers.name, "Fornecedor Notificações")).limit(1);
 
@@ -155,7 +155,7 @@ describe("Ordem de compra — mudança de estado avisa o fornecedor do marketpla
     await app.inject({
       method: "POST",
       url: "/api/supplier/auth/register",
-      payload: { name: "Fornecedor Notificações B", email: "fornecedor-notif-b@test.local", password: "senhaFornecedor1", zoneId: zone.id },
+      payload: { name: "Fornecedor Notificações B", email: "fornecedor-notif-b@test.local", password: "senhaFornecedor1", zoneId: zone.id, offersMaterials: true },
     });
     const [supplierRow] = await db.select().from(suppliers).where(eq(suppliers.name, "Fornecedor Notificações B")).limit(1);
 
@@ -186,7 +186,7 @@ describe("Pedidos de cotação — expiração automática", () => {
     await app.inject({
       method: "POST",
       url: "/api/supplier/auth/register",
-      payload: { name: "Fornecedor Expiração", email: "fornecedor-expiracao@test.local", password: "senhaFornecedor1", zoneId: zone.id },
+      payload: { name: "Fornecedor Expiração", email: "fornecedor-expiracao@test.local", password: "senhaFornecedor1", zoneId: zone.id, offersMaterials: true },
     });
     const [supplierRow] = await db.select().from(suppliers).where(eq(suppliers.name, "Fornecedor Expiração")).limit(1);
 

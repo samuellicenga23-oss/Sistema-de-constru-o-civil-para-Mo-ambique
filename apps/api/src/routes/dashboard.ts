@@ -1,9 +1,9 @@
 import type { FastifyInstance } from "fastify";
-import { eq, inArray, count, desc } from "drizzle-orm";
+import { and, eq, inArray, count, desc, lt, sum } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { projects, budgetDocuments, measurementCertificates, plants, financialEntries, purchaseOrders } from "../db/schema.js";
 import { requireCompanyUser } from "../auth/middleware.js";
-import { getBudgetDocumentSummary } from "../services/boqEngine.js";
+import { getBudgetDocumentTotals } from "../services/boqEngine.js";
 
 // Soma por moeda — nunca um único número global, porque projectos diferentes da mesma empresa
 // podem estar em MZN ou USD (mesmo princípio já usado no resumo financeiro por projecto).
@@ -27,14 +27,18 @@ export async function dashboardRoutes(app: FastifyInstance) {
 
     // Cada projecto pode ter a sua própria moeda — não somar valores entre moedas diferentes,
     // por isso o total é apresentado por projecto, não como uma soma global única.
-    const projectSummaries = await Promise.all(
-      companyProjects.map(async (p) => {
-        const projectDocs = documents.filter((d) => d.projectId === p.id);
-        const summaries = await Promise.all(projectDocs.map((d) => getBudgetDocumentSummary(d.id)));
-        const total = summaries.reduce((sum, s) => sum + (s?.total ?? 0), 0);
-        return { id: p.id, name: p.name, currency: p.currency, documentCount: projectDocs.length, total };
-      })
-    );
+    const documentTotals = await getBudgetDocumentTotals(documents);
+    const documentsByProject = new Map<string, typeof documents>();
+    for (const document of documents) {
+      const list = documentsByProject.get(document.projectId) ?? [];
+      list.push(document);
+      documentsByProject.set(document.projectId, list);
+    }
+    const projectSummaries = companyProjects.map((p) => {
+      const projectDocs = documentsByProject.get(p.id) ?? [];
+      const total = projectDocs.reduce((sum, document) => sum + (documentTotals.get(document.id) ?? 0), 0);
+      return { id: p.id, name: p.name, currency: p.currency, documentCount: projectDocs.length, total };
+    });
 
     const [certificatesRow] = projectIds.length
       ? await db.select({ value: count() }).from(measurementCertificates).where(inArray(measurementCertificates.projectId, projectIds))
@@ -47,7 +51,13 @@ export async function dashboardRoutes(app: FastifyInstance) {
     // Financeiro agregado de todos os projectos da empresa (contas a pagar/receber, recebido,
     // despesas) — pedido explícito da Fase 1 para o painel principal, antes só existia por
     // projecto individual (Módulo Financeiro).
-    const allEntries = projectIds.length ? await db.select().from(financialEntries).where(inArray(financialEntries.projectId, projectIds)) : [];
+    const financialGroups = projectIds.length
+      ? await db
+          .select({ type: financialEntries.type, status: financialEntries.status, currency: financialEntries.currency, amount: sum(financialEntries.amount) })
+          .from(financialEntries)
+          .where(inArray(financialEntries.projectId, projectIds))
+          .groupBy(financialEntries.type, financialEntries.status, financialEntries.currency)
+      : [];
     const contasAPagar: CurrencyTotals = {};
     const contasAReceber: CurrencyTotals = {};
     const valorRecebido: CurrencyTotals = {};
@@ -55,27 +65,37 @@ export async function dashboardRoutes(app: FastifyInstance) {
     const today = new Date().toISOString().slice(0, 10);
     let contasVencidas = 0;
 
-    for (const e of allEntries) {
-      const amount = Number(e.amount);
+    for (const e of financialGroups) {
+      const amount = Number(e.amount ?? 0);
       if (e.type === "receita") {
         if (e.status === "pago") addTo(valorRecebido, e.currency, amount);
-        else {
-          addTo(contasAReceber, e.currency, amount);
-          if (e.dueDate && e.dueDate < today) contasVencidas++;
-        }
+        else addTo(contasAReceber, e.currency, amount);
       } else {
         if (e.status === "pago") addTo(despesas, e.currency, amount);
-        else {
-          addTo(contasAPagar, e.currency, amount);
-          if (e.dueDate && e.dueDate < today) contasVencidas++;
-        }
+        else addTo(contasAPagar, e.currency, amount);
       }
+    }
+    if (projectIds.length) {
+      const [overdue] = await db
+        .select({ value: count() })
+        .from(financialEntries)
+        .where(and(
+          inArray(financialEntries.projectId, projectIds),
+          eq(financialEntries.status, "pendente"),
+          lt(financialEntries.dueDate, today),
+        ));
+      contasVencidas = Number(overdue.value);
     }
 
     // Ordens de compra ainda não recebidas nem canceladas — "pendente" no sentido de ainda
     // precisar de acção (aprovar, ou aguardar entrega).
-    const allOrders = projectIds.length ? await db.select({ status: purchaseOrders.status }).from(purchaseOrders).where(inArray(purchaseOrders.projectId, projectIds)) : [];
-    const ordensCompraPendentes = allOrders.filter((o) => o.status === "rascunho" || o.status === "aprovado").length;
+    const [pendingOrders] = projectIds.length
+      ? await db.select({ value: count() }).from(purchaseOrders).where(and(
+          inArray(purchaseOrders.projectId, projectIds),
+          inArray(purchaseOrders.status, ["rascunho", "aprovado"]),
+        ))
+      : [{ value: 0 }];
+    const ordensCompraPendentes = Number(pendingOrders.value);
 
     const recentCertificates = projectIds.length
       ? await db

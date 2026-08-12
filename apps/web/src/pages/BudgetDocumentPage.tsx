@@ -258,18 +258,18 @@ export default function BudgetDocumentPage() {
         setSummary(s);
         const projectData = await boqApi.getProject(s.document.projectId);
         setProject(projectData);
-        const [c, d, plants] = await Promise.all([
+        const [c, d, plantDetails] = await Promise.all([
           catalogApi.listCompositions(projectData.zoneId ?? undefined),
           measurementApi.dashboard(s.document.projectId, documentId),
-          plantsApi.list(s.document.projectId),
+          plantsApi.listDetails(s.document.projectId),
         ]);
         setCompositions(c);
         setDashboard(d);
-        const processed = plants.filter((p) =>
+        const processedDetails = plantDetails.filter(({ plant: p }) =>
           p.processingStatus === "concluido"
           && (!p.documentAnalysis?.requiresIdentityConfirmation || p.documentAnalysis.identityConfirmed),
         );
-        const newestFirst = [...processed].reverse();
+        const newestFirst = [...processedDetails].reverse();
 
         // A planta estrutural é escolhida pelo que ela TEM (resumo estrutural real), não só
         // pela etiqueta de disciplina escolhida ao carregar — o extractor lê o que encontrar no
@@ -277,21 +277,20 @@ export default function BudgetDocumentPage() {
         // com a disciplina trocada por engano (ex: carregado como "arquitectura") não pode
         // deixar de alimentar o Assistente só por causa da etiqueta errada.
         const structural =
-          newestFirst.find((p) => p.discipline === "estrutura" && p.structuralSummary) ??
-          newestFirst.find((p) => p.structuralSummary);
-        setStructuralPlant(structural ?? null);
+          newestFirst.find(({ plant: p }) => p.discipline === "estrutura" && p.structuralSummary) ??
+          newestFirst.find(({ plant: p }) => p.structuralSummary);
+        setStructuralPlant(structural?.plant ?? null);
 
         // Um projecto pode distribuir pisos e mapas de vãos por vários PDFs. Consolidar todos
         // os ficheiros válidos evita que o primeiro PDF com salas esconda portas/janelas que só
         // aparecem noutra prancha ou num mapa separado.
-        const plantDetails = await Promise.all(newestFirst.map(async (plant) => ({ plant, detail: await plantsApi.detail(plant.id) })));
-        const architectural = plantDetails.filter(({ detail }) => detail.rooms.length > 0 || detail.openings.length > 0);
-        const needsOpeningReview = architectural.find(({ detail }) => detail.openings.some((opening) =>
+        const architectural = newestFirst.filter(({ rooms, openings }) => rooms.length > 0 || openings.length > 0);
+        const needsOpeningReview = architectural.find(({ openings }) => openings.some((opening) =>
           opening.needsConfirmation || !opening.widthM || !opening.heightM || opening.location === "desconhecida",
         ));
         setArchitecturePlant(needsOpeningReview?.plant ?? architectural[0]?.plant ?? null);
-        setArchitectureRooms(mergePlantRooms(architectural.map(({ detail }) => detail.rooms)));
-        setArchitectureOpenings(mergePlantOpenings(architectural.map(({ detail }) => detail.openings)));
+        setArchitectureRooms(mergePlantRooms(architectural.map(({ rooms }) => rooms)));
+        setArchitectureOpenings(mergePlantOpenings(architectural.map(({ openings }) => openings)));
       })
       .catch((err) => setError(err.message))
       .finally(() => setPlantContextLoading(false));

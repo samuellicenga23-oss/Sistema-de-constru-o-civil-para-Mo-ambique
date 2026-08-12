@@ -64,6 +64,9 @@ export async function financialRoutes(app: FastifyInstance) {
 
     const parsed = entrySchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    if (parsed.data.status === "pago" || parsed.data.paidDate) {
+      return reply.code(400).send({ error: "Crie o lançamento como pendente. A confirmação do pagamento é feita depois por um administrador." });
+    }
     const { amount, ...rest } = parsed.data;
     const [row] = await db
       .insert(financialEntries)
@@ -87,10 +90,14 @@ export async function financialRoutes(app: FastifyInstance) {
     if (entry.sourceType === "supplier_invoice" && (parsed.data.status !== undefined || parsed.data.paidDate !== undefined)) {
       return reply.code(409).send({ error: "Registe pagamentos na factura do fornecedor; este lançamento é apenas o reflexo da conta a pagar" });
     }
+    if ((parsed.data.status !== undefined || parsed.data.paidDate !== undefined) && request.currentUser!.role !== "admin_empresa") {
+      return reply.code(403).send({ error: "A confirmação ou correcção de pagamentos exige um administrador da empresa" });
+    }
+    const resultingStatus = parsed.data.status ?? entry.status;
+    if (parsed.data.paidDate && resultingStatus !== "pago") {
+      return reply.code(400).send({ error: "A data de pagamento só pode ser indicada num lançamento pago" });
+    }
     if (parsed.data.status === "pago" && entry.status !== "pago") {
-      if (request.currentUser!.role !== "admin_empresa") {
-        return reply.code(403).send({ error: "A baixa de um pagamento exige um administrador da empresa" });
-      }
       if (!entry.sourceType && entry.createdByUserId === request.currentUser!.id) {
         return reply.code(409).send({ error: "Quem criou este lançamento não pode confirmar o seu próprio pagamento" });
       }
@@ -99,9 +106,14 @@ export async function financialRoutes(app: FastifyInstance) {
       return reply.code(409).send({ error: "O valor deste lançamento é sincronizado com o documento de origem; altere apenas o pagamento" });
     }
     const { amount, ...rest } = parsed.data;
+    const paidDate = parsed.data.status === "pendente"
+      ? null
+      : parsed.data.status === "pago" && !parsed.data.paidDate
+        ? new Date().toISOString().slice(0, 10)
+        : parsed.data.paidDate;
     const [row] = await db
       .update(financialEntries)
-      .set({ ...rest, amount: amount !== undefined ? amount.toString() : undefined })
+      .set({ ...rest, paidDate, amount: amount !== undefined ? amount.toString() : undefined })
       .where(eq(financialEntries.id, id))
       .returning();
     await recordAuditEvent({

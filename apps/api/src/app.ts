@@ -53,6 +53,57 @@ import { notificationRoutes } from "./routes/notifications.js";
 import { mutationOriginAllowed, SECURITY_HEADERS } from "./services/httpSecurity.js";
 import { captureException } from "./services/monitoring.js";
 import { normalizeSigoDecimals } from "@sigo/shared";
+import { recordHttpResponse } from "./services/httpMetrics.js";
+
+function expectedMigrationAt(): number {
+  try {
+    const journalPath = path.resolve(process.cwd(), "drizzle/meta/_journal.json");
+    const journal = JSON.parse(readFileSync(journalPath, "utf8")) as { entries?: Array<{ when?: unknown }> };
+    return Math.max(0, ...(journal.entries ?? []).map((entry) => Number(entry.when ?? 0)).filter(Number.isFinite));
+  } catch {
+    return 0;
+  }
+}
+const EXPECTED_MIGRATION_AT = expectedMigrationAt();
+
+type ServiceCheck = { status: "ok" | "error"; latencyMs: number; detail?: string; version?: string };
+
+async function databaseReadiness(): Promise<ServiceCheck & { migrationCurrent?: number; migrationExpected: number }> {
+  const startedAt = Date.now();
+  const migrationExpected = EXPECTED_MIGRATION_AT;
+  try {
+    await sql`select 1`;
+    const rows = await sql<{ createdAt: string | null }[]>`
+      select max(created_at)::text as "createdAt" from drizzle.__drizzle_migrations
+    `;
+    const migrationCurrent = Number(rows[0]?.createdAt ?? 0);
+    if (migrationExpected === 0) {
+      return { status: "error", latencyMs: Date.now() - startedAt, detail: "migration_manifest_unavailable", migrationCurrent, migrationExpected };
+    }
+    if (migrationCurrent < migrationExpected) {
+      return { status: "error", latencyMs: Date.now() - startedAt, detail: "pending_migrations", migrationCurrent, migrationExpected };
+    }
+    return { status: "ok", latencyMs: Date.now() - startedAt, migrationCurrent, migrationExpected };
+  } catch {
+    return { status: "error", latencyMs: Date.now() - startedAt, detail: "database_unavailable", migrationExpected };
+  }
+}
+
+async function plantServiceReadiness(): Promise<ServiceCheck> {
+  const startedAt = Date.now();
+  try {
+    const response = await fetch(`${env.plantServiceUrl}/health`, {
+      headers: env.plantServiceToken ? { "x-internal-token": env.plantServiceToken } : undefined,
+      signal: AbortSignal.timeout(2_500),
+    });
+    if (!response.ok) return { status: "error", latencyMs: Date.now() - startedAt, detail: `http_${response.status}` };
+    const body = await response.json() as { status?: unknown; parserVersion?: unknown };
+    if (body.status !== "ok") return { status: "error", latencyMs: Date.now() - startedAt, detail: "invalid_response" };
+    return { status: "ok", latencyMs: Date.now() - startedAt, version: typeof body.parserVersion === "string" ? body.parserVersion : undefined };
+  } catch {
+    return { status: "error", latencyMs: Date.now() - startedAt, detail: "plant_service_unavailable" };
+  }
+}
 
 // Separado de index.ts (que só chama isto e depois app.listen()) para os testes poderem
 // construir a mesma app real e usar app.inject() — pedidos HTTP simulados em memória, sem abrir
@@ -88,6 +139,7 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
 
   app.addHook("onSend", async (request, reply, payload) => {
     for (const [name, value] of Object.entries(SECURITY_HEADERS)) reply.header(name, value);
+    reply.header("X-SIGO-Release", env.release);
     const requestUrl = request.raw.url ?? "";
     if (requestUrl.startsWith("/api/") && !requestUrl.startsWith("/api/health")) {
       reply.header("Cache-Control", "no-store");
@@ -103,6 +155,12 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
       reply.header("Cache-Control", "no-cache, must-revalidate");
     }
     return payload;
+  });
+
+  app.addHook("onResponse", async (request, reply) => {
+    // A rota declarada (ex.: /api/projects/:id) evita guardar IDs, tokens ou query strings e
+    // permite descobrir gargalos reais sem cardinalidade ilimitada.
+    recordHttpResponse(reply.statusCode, reply.elapsedTime, request.routeOptions.url);
   });
 
   app.setErrorHandler((error, request, reply) => {
@@ -133,9 +191,21 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   await app.register(fastifyStatic, { root: path.resolve(env.uploadsDir, "logos"), prefix: "/uploads/logos/" });
   await app.register(fastifyStatic, { root: path.resolve(env.uploadsDir, "avatars"), prefix: "/uploads/avatars/", decorateReply: false });
 
-  app.get("/api/health", async () => {
-    const [{ now }] = await sql<{ now: Date }[]>`select now()`;
-    return { status: "ok", dbTime: now };
+  // Liveness não depende da base: distingue processo caído de dependência indisponível.
+  app.get("/api/health", async (_request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    return { status: "ok", release: env.release, uptimeSeconds: Math.round(process.uptime()) };
+  });
+
+  // Readiness verifica em paralelo a base, migrações e o leitor de plantas.
+  app.get("/api/ready", async (_request, reply) => {
+    reply.header("Cache-Control", "no-store");
+    const [database, plantService] = await Promise.all([databaseReadiness(), plantServiceReadiness()]);
+    const coreReady = database.status === "ok";
+    const fullyOperational = coreReady && plantService.status === "ok";
+    // O leitor é uma capacidade isolada: se falhar, novos PDFs aguardam, mas orçamento,
+    // diário, compras e financeiro continuam acessíveis. Só base/migrações tornam a API indisponível.
+    return reply.code(coreReady ? 200 : 503).send({ status: fullyOperational ? "ready" : "degraded", release: env.release, services: { database, plantService } });
   });
 
   await app.register(authRoutes);

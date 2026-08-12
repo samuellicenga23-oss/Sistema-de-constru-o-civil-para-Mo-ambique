@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import rateLimit from "@fastify/rate-limit";
 import { z } from "zod";
 import { eq, desc } from "drizzle-orm";
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { db } from "../db/index.js";
@@ -53,6 +53,16 @@ const changePasswordSchema = z.object({
   currentPassword: z.string().min(1),
   newPassword: z.string().min(8, "A palavra-passe deve ter pelo menos 8 caracteres"),
 });
+
+const forgotPasswordSchema = z.object({ email: z.string().trim().toLowerCase().email() });
+const resetPasswordSchema = z.object({
+  token: z.string().length(64),
+  newPassword: z.string().min(8, "A palavra-passe deve ter pelo menos 8 caracteres"),
+});
+
+function hashResetToken(token: string) {
+  return createHash("sha256").update(token).digest("hex");
+}
 
 // `secure` só em produção (HTTPS) — em dev corre em http://localhost, onde um cookie "secure"
 // nunca seria enviado de volta pelo browser.
@@ -241,6 +251,76 @@ export async function authRoutes(app: FastifyInstance) {
       }
       // Resposta genérica sempre — não revela se a conta existe ou já está verificada.
       return { ok: true, message: "Se existir uma conta por confirmar com este email, foi enviado um novo link." };
+    },
+  );
+
+  app.post(
+    "/api/auth/forgot-password",
+    { config: { rateLimit: { max: 3, timeWindow: "1 hour" } } },
+    async (request, reply) => {
+      const parsed = forgotPasswordSchema.safeParse(request.body);
+      if (!parsed.success) return reply.code(400).send({ error: "Email inválido" });
+
+      const [user] = await db.select().from(users).where(eq(users.email, parsed.data.email)).limit(1);
+      if (user?.isActive) {
+        const token = randomBytes(32).toString("hex");
+        const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+        await db
+          .update(users)
+          .set({ passwordResetTokenHash: hashResetToken(token), passwordResetExpiresAt: expiresAt })
+          .where(eq(users.id, user.id));
+
+        try {
+          const { sendEmail, emailLayout } = await import("../services/mailer.js");
+          const resetUrl = `${env.frontendUrl.replace(/\/$/, "")}/repor-palavra-passe?token=${token}`;
+          await sendEmail(
+            {
+              to: user.email,
+              subject: "SIGO — Repor palavra-passe",
+              html: emailLayout(
+                "Repor palavra-passe",
+                `<p>Olá ${user.name}, recebemos um pedido para alterar a palavra-passe da sua conta. Este link é válido durante 60 minutos. Se não fez o pedido, ignore esta mensagem.</p>`,
+                resetUrl,
+                "Escolher nova palavra-passe",
+              ),
+            },
+            app.log,
+          );
+        } catch (error) {
+          // A resposta continua genérica para não revelar se o email está registado.
+          app.log.error({ err: error }, "Falha ao enviar email de recuperação de palavra-passe");
+        }
+      }
+
+      return { ok: true, message: "Se existir uma conta activa com este email, receberá um link de recuperação." };
+    },
+  );
+
+  app.post(
+    "/api/auth/reset-password",
+    { config: { rateLimit: { max: 5, timeWindow: "15 minutes" } } },
+    async (request, reply) => {
+      const parsed = resetPasswordSchema.safeParse(request.body);
+      if (!parsed.success) return reply.code(400).send({ error: "Link inválido ou palavra-passe demasiado curta" });
+
+      const tokenHash = hashResetToken(parsed.data.token);
+      const [user] = await db.select().from(users).where(eq(users.passwordResetTokenHash, tokenHash)).limit(1);
+      if (!user || !user.isActive || !user.passwordResetExpiresAt || user.passwordResetExpiresAt < new Date()) {
+        return reply.code(400).send({ error: "Este link expirou ou já foi utilizado" });
+      }
+
+      const passwordHash = await hashPassword(parsed.data.newPassword);
+      await db
+        .update(users)
+        .set({
+          passwordHash,
+          mustChangePassword: false,
+          passwordResetTokenHash: null,
+          passwordResetExpiresAt: null,
+        })
+        .where(eq(users.id, user.id));
+      await deleteAllSessionsForUser(user.id);
+      return { ok: true };
     },
   );
 

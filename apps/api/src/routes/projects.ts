@@ -22,10 +22,11 @@ import { getProjectWorkflowStatus } from "../services/projectWorkflow.js";
 import { resolveOrCreateMaterialByName } from "../services/materialResolution.js";
 import { syncProjectPlantMeasurements } from "../services/plantMeasurementSync.js";
 import { getProjectControl } from "../services/projectControl.js";
-import { getProjectSchedule } from "../services/scheduleEngine.js";
 import { CURRENCIES, DEFAULT_IVA_RATE, getPlanDefinition, UNITS } from "@sigo/shared";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista"] as const;
+const siteManagementOverviewCache = new Map<string, { expiresAt: number; value: unknown[] }>();
+const SITE_MANAGEMENT_CACHE_MS = 10_000;
 
 const materialSpecificationSchema = z.object({
   name: z.string().trim().min(2).max(200),
@@ -193,6 +194,8 @@ export async function projectRoutes(app: FastifyInstance) {
   // Painel da Gestão de Obras: saúde física/financeira de cada obra pronta, num único pedido.
   app.get("/api/projects/site-management-overview", { preHandler: requireCompanyUser }, async (request) => {
     const companyId = request.currentUser!.companyId!;
+    const cached = siteManagementOverviewCache.get(companyId);
+    if (cached && cached.expiresAt > Date.now()) return cached.value;
     const approved = await db
       .select({ projectId: budgetDocuments.projectId })
       .from(budgetDocuments)
@@ -215,20 +218,7 @@ export async function projectRoutes(app: FastifyInstance) {
     const results = await Promise.all(
       readyProjects.map(async (project) => {
         try {
-          const [control, schedule] = await Promise.all([
-            getProjectControl(project.id, project.currency),
-            getProjectSchedule(project.id),
-          ]);
-          const phases = schedule.tasks
-            .filter((task) => !task.parentId)
-            .map((task) => ({
-              id: task.id,
-              name: task.name,
-              startDate: task.startDate,
-              endDate: task.endDate,
-              progress: task.progress,
-              status: task.status,
-            }));
+          const control = await getProjectControl(project.id, project.currency);
           return {
             projectId: project.id,
             projectName: project.name,
@@ -240,7 +230,8 @@ export async function projectRoutes(app: FastifyInstance) {
             receivedValue: control.commercial.receivedValue,
             cashMargin: control.cost.cashMargin,
             alerts: control.alerts,
-            schedule: { startDate: schedule.startDate, endDate: schedule.endDate, phases },
+            operations: control.operations,
+            schedule: { startDate: control.schedule.startDate, endDate: control.schedule.endDate, phases: control.schedule.phases },
           };
         } catch {
           return {
@@ -253,12 +244,20 @@ export async function projectRoutes(app: FastifyInstance) {
             contractedValue: 0,
             receivedValue: 0,
             cashMargin: 0,
-            alerts: [],
+            alerts: [{ code: "control_unavailable", level: "critical" as const, title: "Diagnóstico indisponível", detail: "Não foi possível consolidar os dados desta obra. Abra a obra para rever os módulos.", href: `/projectos/${project.id}?fase=gestao` }],
+            operations: {
+              nextAction: { code: "control_unavailable", level: "critical" as const, title: "Rever dados da obra", detail: "O diagnóstico não conseguiu consolidar os módulos.", href: `/projectos/${project.id}?fase=gestao` },
+              criticalCount: 1, warningCount: 0, lastDiaryDate: null, openPurchaseOrders: 0, pendingClientInvoices: 0, pendingSupplierInvoices: 0,
+            },
             schedule: { startDate: null, endDate: null, phases: [] },
           };
         }
       }),
     );
+    siteManagementOverviewCache.set(companyId, { expiresAt: Date.now() + SITE_MANAGEMENT_CACHE_MS, value: results });
+    if (siteManagementOverviewCache.size > 500) {
+      for (const [key, value] of siteManagementOverviewCache) if (value.expiresAt <= Date.now()) siteManagementOverviewCache.delete(key);
+    }
     return results;
   });
 

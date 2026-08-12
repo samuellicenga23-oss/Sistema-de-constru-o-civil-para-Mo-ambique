@@ -15,7 +15,10 @@ function money(value: number, currency: string) {
 }
 
 function healthLabel(overview?: SiteManagementOverview) {
-  if (!overview || (overview.expectedProgress < 1 && overview.actualProgress < 1)) return { label: "Por iniciar", cls: "badge-gray" };
+  if (!overview) return { label: "Por iniciar", cls: "badge-gray" };
+  if (overview.operations.criticalCount > 0) return { label: "Bloqueio", cls: "badge-red" };
+  if (overview.operations.warningCount > 0) return { label: "Atenção", cls: "badge-yellow" };
+  if (overview.expectedProgress < 1 && overview.actualProgress < 1) return { label: "Por iniciar", cls: "badge-gray" };
   if (overview.progressGap <= -10) return { label: "Atrasada", cls: "badge-red" };
   if (overview.progressGap >= 10) return { label: "Adiantada", cls: "badge-green" };
   return { label: "No prazo", cls: "badge-green" };
@@ -74,7 +77,7 @@ export default function SiteManagementPage() {
             {visibleProjects.map((project) => {
               const health = overviewByProject.get(project.id);
               const status = healthLabel(health);
-              const importantAlert = health?.alerts.find((alert) => alert.level === "critical") ?? health?.alerts.find((alert) => alert.level === "warning");
+              const nextAction = health?.operations.nextAction;
               const progress = Math.max(0, Math.min(100, health?.actualProgress ?? 0));
               return (
                 <article key={project.id} className="card overflow-hidden">
@@ -87,19 +90,32 @@ export default function SiteManagementPage() {
                       <span className={`badge ${status.cls}`}>{status.label}</span>
                     </div>
 
-                    <div className="mt-5 flex items-end justify-between gap-3">
-                      <div><span className="text-xs text-slate-500">Execução</span><strong className="mt-0.5 block text-xl tabular-nums text-slate-950">{progress.toFixed(0)}%</strong></div>
-                      {health && health.contractedValue > 0 && <div className="text-right"><span className="text-xs text-slate-500">Recebido</span><strong className="mt-0.5 block text-sm tabular-nums text-slate-900">{money(health.receivedValue, health.currency)}</strong></div>}
+                    <div className="mt-5 grid grid-cols-3 gap-3">
+                      <div><span className="text-xs text-slate-500">Previsto</span><strong className="mt-0.5 block text-lg tabular-nums text-slate-950">{(health?.expectedProgress ?? 0).toFixed(0)}%</strong></div>
+                      <div><span className="text-xs text-slate-500">Real</span><strong className="mt-0.5 block text-lg tabular-nums text-slate-950">{progress.toFixed(0)}%</strong></div>
+                      {health && health.contractedValue > 0 && <div className="text-right"><span className="text-xs text-slate-500">Recebido</span><strong className="mt-0.5 block truncate text-sm tabular-nums text-slate-900">{money(health.receivedValue, health.currency)}</strong></div>}
                     </div>
                     <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-brand-600" style={{ width: `${progress}%` }} /></div>
 
-                    {importantAlert && (
-                      <Link to={importantAlert.href} className="mt-4 flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900 hover:bg-amber-100">
+                    {nextAction && (
+                      <Link to={nextAction.href} className={`mt-4 flex items-center gap-2 rounded-lg px-3 py-2.5 text-xs ${nextAction.level === "critical" ? "bg-red-50 text-red-900 hover:bg-red-100" : nextAction.level === "warning" ? "bg-amber-50 text-amber-900 hover:bg-amber-100" : "bg-blue-50 text-blue-900 hover:bg-blue-100"}`}>
                         <IconAlertTriangle className="h-4 w-4 shrink-0" />
-                        <span className="min-w-0 flex-1 truncate"><strong>{importantAlert.title}</strong> · {importantAlert.detail}</span>
-                        <span className="font-semibold">Resolver</span>
+                        <span className="min-w-0 flex-1"><strong className="block">{nextAction.title}</strong><span className="line-clamp-1 opacity-80">{nextAction.detail}</span></span>
+                        <span className="font-semibold">Abrir</span>
                       </Link>
                     )}
+                    {health && <div className="mt-3 flex flex-wrap gap-1.5 text-[11px] text-slate-600">
+                      {health.operations.lastDiaryDate && <span className="rounded-full bg-slate-100 px-2 py-1">Diário {new Date(`${health.operations.lastDiaryDate}T12:00:00`).toLocaleDateString("pt-MZ", { day: "2-digit", month: "short" })}</span>}
+                      {health.operations.openPurchaseOrders > 0 && <span className="rounded-full bg-slate-100 px-2 py-1">{health.operations.openPurchaseOrders} compra(s) abertas</span>}
+                      {health.operations.pendingClientInvoices > 0 && <span className="rounded-full bg-slate-100 px-2 py-1">{health.operations.pendingClientInvoices} factura(s) cliente</span>}
+                      {health.operations.pendingSupplierInvoices > 0 && <span className="rounded-full bg-slate-100 px-2 py-1">{health.operations.pendingSupplierInvoices} factura(s) fornecedor</span>}
+                    </div>}
+                    {health && health.alerts.length > 1 && <details className="mt-3 rounded-lg border border-slate-200 bg-white">
+                      <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-slate-700">Ver todas as pendências ({health.alerts.length})</summary>
+                      <div className="divide-y divide-slate-100 border-t border-slate-100">
+                        {health.alerts.map((alert) => <Link key={alert.code} to={alert.href} className="flex items-center justify-between gap-3 px-3 py-2 text-xs hover:bg-slate-50"><span className="min-w-0"><strong className="block text-slate-800">{alert.title}</strong><span className="line-clamp-1 text-slate-500">{alert.detail}</span></span><span className={alert.level === "critical" ? "text-red-700" : alert.level === "warning" ? "text-amber-700" : "text-blue-700"}>Abrir</span></Link>)}
+                      </div>
+                    </details>}
                   </div>
 
                   <div className="flex flex-wrap gap-2 border-t border-slate-100 bg-slate-50/70 px-4 py-3">

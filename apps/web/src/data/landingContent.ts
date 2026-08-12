@@ -11,7 +11,7 @@ export type LandingPricingPlan = {
 export const features = [
   {
     icon: "Ruler",
-    title: "Medições sobre plantas",
+    title: "Levantamentos sobre plantas",
     description:
       "Levante quantidades directamente das plantas e mantenha a rastreabilidade até ao item do mapa.",
   },
@@ -143,7 +143,7 @@ export const suppliersSection = {
 export const faqs = [
   {
     q: "O SIGO funciona com fraca ligação à internet no estaleiro?",
-    a: "Sim. O diário de obra e as medições de campo funcionam offline no telemóvel e sincronizam automaticamente quando a ligação regressa.",
+    a: "A aplicação pode ser instalada no telemóvel, mas o envio e a consulta de dados da obra ainda precisam de ligação à internet. O modo offline completo está em desenvolvimento.",
   },
   {
     q: "Como funcionam os fornecedores nos planos?",

@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { budgetDocuments, financialEntries, measurementCertificateFieldLines, measurementCertificateLines, measurementCertificates, users } from "../db/schema.js";
+import { budgetDocuments, measurementCertificateFieldLines, measurementCertificateLines, measurementCertificates, users } from "../db/schema.js";
 import { requireCompanyUser, requireRole } from "../auth/middleware.js";
 import { assertCertificateOwned, assertDocumentOwned, assertProjectOwned } from "../services/accessControl.js";
 import {
@@ -187,39 +187,17 @@ export async function measurementCertificateRoutes(app: FastifyInstance) {
       approvalNote: parsed.data.decisionNote ?? certificate.approvalNote,
     }).where(eq(measurementCertificates.id, id)).returning();
 
-    // Receitas antigas permanecem consultáveis; Autos novos passam a factura primeiro e não criam receita directa.
-    if (parsed.success && parsed.data.status === "aprovado" && false) {
-      const [document] = await db.select().from(budgetDocuments).where(eq(budgetDocuments.id, certificate.budgetDocumentId)).limit(1);
-      const periodSubtotal = detail!.lines.reduce((sum, line) => sum + line.periodValue, 0);
-      const grossAmount = calculateBudgetTotals(periodSubtotal, {
-        siteCostsRate: Number(document?.siteCostsRate ?? 0),
-        indirectCostsRate: Number(document?.indirectCostsRate ?? 0),
-        contingenciasRate: Number(document?.contingenciasRate ?? 0),
-        profitMarginRate: Number(document?.profitMarginRate ?? 0),
-        ivaRate: Number(document?.ivaRate ?? 0),
-      }).total;
-      const [existing] = await db.select().from(financialEntries).where(and(
-        eq(financialEntries.projectId, certificate.projectId),
-        eq(financialEntries.sourceType, "measurement_certificate"),
-        eq(financialEntries.sourceId, id)
-      )).limit(1);
-      if (!existing && grossAmount > 0) {
-        await db.insert(financialEntries).values({
-          projectId: certificate.projectId,
-          type: "receita",
-          category: "Autos de medição",
-          description: `Receita automática do Auto de Medição n.º ${certificate.number}`,
-          amount: grossAmount.toFixed(2),
-          currency: document?.currency ?? "MZN",
-          dueDate: certificate.periodDate,
-          status: "pendente",
-          sourceType: "measurement_certificate",
-          sourceId: id,
-          createdByUserId: request.currentUser!.id,
-        });
+    // Um Auto aprovado tem sempre uma factura em rascunho. Se a criação financeira falhar,
+    // devolvemos o Auto ao estado submetido para não deixar a execução e o financeiro divergirem.
+    if (parsed.data.status === "aprovado") {
+      try {
+        await createDraftInvoiceForCertificate(id, request.currentUser!.id);
+      } catch (error) {
+        await db.update(measurementCertificates).set({ status: "submetido", approvedAt: null, approvedByUserId: null }).where(eq(measurementCertificates.id, id));
+        app.log.error({ err: error, certificateId: id }, "Falha ao criar factura do Auto aprovado; aprovação revertida");
+        return reply.code(500).send({ error: "Não foi possível concluir a aprovação porque a factura não foi criada. O Auto continua submetido." });
       }
     }
-    if (parsed.data.status === "aprovado") await createDraftInvoiceForCertificate(id, request.currentUser!.id);
     await recordAuditEvent({
       companyId: request.currentUser!.companyId!,
       projectId: certificate.projectId,

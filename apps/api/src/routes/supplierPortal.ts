@@ -172,13 +172,14 @@ export async function supplierPortalRoutes(app: FastifyInstance) {
   app.get("/api/supplier/quote-requests/:id", { preHandler: requireSupplierAuth }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const supplierIds = await ownedSupplierIds(supplierAccountIdOf(request));
+    if (!supplierIds.length) return reply.code(404).send({ error: "Pedido não encontrado" });
     const [row] = await db
       .select({ quoteRequest: quoteRequests, companyName: companies.name, brandName: companies.brandName, companyPhone: companies.phone, projectName: projects.name, buyerName: users.name, buyerEmail: users.email })
       .from(quoteRequests)
       .innerJoin(companies, eq(quoteRequests.companyId, companies.id))
       .leftJoin(projects, eq(quoteRequests.projectId, projects.id))
       .leftJoin(users, eq(quoteRequests.createdByUserId, users.id))
-      .where(and(eq(quoteRequests.id, id), inArray(quoteRequests.supplierId, supplierIds.length ? supplierIds : ["__none__"])))
+      .where(and(eq(quoteRequests.id, id), inArray(quoteRequests.supplierId, supplierIds)))
       .limit(1);
     if (!row) return reply.code(404).send({ error: "Pedido não encontrado" });
     const lines = await db.select().from(quoteRequestLines).where(eq(quoteRequestLines.quoteRequestId, id)).orderBy(quoteRequestLines.sortOrder);

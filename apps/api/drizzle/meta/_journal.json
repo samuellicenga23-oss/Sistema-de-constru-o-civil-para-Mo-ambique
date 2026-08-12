@@ -540,6 +540,20 @@
       "when": 1786350000000,
       "tag": "0076_plant_review_requests",
       "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1786536000000,
+      "tag": "0077_password_reset",
+      "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1786543200000,
+      "tag": "0078_performance_indexes",
+      "breakpoints": true
     }
   ]
 }

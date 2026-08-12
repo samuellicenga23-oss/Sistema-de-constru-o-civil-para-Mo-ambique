@@ -11,7 +11,7 @@ import {
   type PlatformPayment,
   type SubscriptionUpdateInput,
 } from "../api/companies";
-import { dashboardApi, type AdminStats } from "../api/dashboard";
+import { dashboardApi, type AdminStats, type OperationalHealth } from "../api/dashboard";
 import { adminSuppliersApi, type AdminSupplierAccount, type AdminQuoteRequestStats } from "../api/adminSuppliers";
 import { plantsApi, type PlantReviewRequest } from "../api/plants";
 import MoneyInput from "../components/MoneyInput";
@@ -94,6 +94,14 @@ function formatBytes(bytes: number) {
   return `${value.toFixed(value >= 10 || i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
+function formatUptime(seconds: number) {
+  const days = Math.floor(seconds / 86_400);
+  const hours = Math.floor((seconds % 86_400) / 3_600);
+  if (days > 0) return `${days}d ${hours}h`;
+  const minutes = Math.floor(seconds / 60);
+  return hours > 0 ? `${hours}h ${minutes % 60}min` : `${minutes}min`;
+}
+
 const STORAGE_CATEGORY_META: Record<string, { pt: string; en: string; tone: string }> = {
   plants: { pt: "Plantas (PDF)", en: "Plant PDFs", tone: "bg-sky-500" },
   site_diary: { pt: "Diário de obra", en: "Site diary", tone: "bg-emerald-500" },
@@ -165,6 +173,8 @@ export default function SuperAdminPage() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [users, setUsers] = useState<AdminCompanyUser[]>([]);
   const [stats, setStats] = useState<AdminStats | null>(null);
+  const [operationalHealth, setOperationalHealth] = useState<OperationalHealth | null>(null);
+  const [healthLoading, setHealthLoading] = useState(false);
   const [selectedCompanyId, setSelectedCompanyId] = useState("");
   const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -413,6 +423,15 @@ export default function SuperAdminPage() {
     setSelectedCompanyId((current) => current || companyRows[0]?.id || "");
   }
 
+  async function reloadOperationalHealth() {
+    setHealthLoading(true);
+    try {
+      setOperationalHealth(await dashboardApi.operationalHealth());
+    } finally {
+      setHealthLoading(false);
+    }
+  }
+
   useEffect(() => {
     reload().catch((err) => setError(err.message));
     reloadPendingProofs().catch((err) => setError(err.message));
@@ -421,6 +440,7 @@ export default function SuperAdminPage() {
     reloadSuppliers().catch((err) => setError(err.message));
     companiesApi.getMailStatus().then((r) => setMailEnabled(r.enabled)).catch(() => setMailEnabled(false));
     companiesApi.getMonitoringStatus().then((r) => setMonitoringEnabled(r.enabled)).catch(() => setMonitoringEnabled(false));
+    reloadOperationalHealth().catch((err) => setError(err instanceof Error ? err.message : String(err)));
   }, []);
 
   async function handleApproveProof(proof: PaymentProof) {
@@ -902,6 +922,48 @@ export default function SuperAdminPage() {
               <StatCard label={en ? "Users · Projects" : "Utilizadores · Projectos"} value={`${stats.totalUsers} · ${stats.totalProjects}`} />
             </div>
 
+            <section className={`card overflow-hidden border ${operationalHealth?.status === "critical" ? "border-red-200" : operationalHealth?.status === "warning" ? "border-amber-200" : "border-emerald-200"}`}>
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
+                <div className="flex items-center gap-3">
+                  <span className={`h-3 w-3 rounded-full ${operationalHealth?.status === "critical" ? "bg-red-500" : operationalHealth?.status === "warning" ? "bg-amber-500" : operationalHealth ? "bg-emerald-500" : "bg-slate-300"}`} />
+                  <div>
+                    <h2 className="section-title">{en ? "Operational status" : "Estado operacional"}</h2>
+                    <p className="text-xs text-slate-500">
+                      {operationalHealth
+                        ? `${operationalHealth.status === "ok" ? (en ? "Normal" : "Normal") : operationalHealth.status === "warning" ? (en ? "Attention required" : "Requer atenção") : (en ? "Critical action required" : "Acção crítica necessária")} · ${operationalHealth.release} · ${fmtDate(operationalHealth.checkedAt)}`
+                        : en ? "Checking services…" : "A verificar serviços…"}
+                    </p>
+                  </div>
+                </div>
+                <button type="button" className="btn btn-secondary btn-sm" disabled={healthLoading} onClick={() => void reloadOperationalHealth()}>
+                  {healthLoading ? "…" : en ? "Check now" : "Verificar agora"}
+                </button>
+              </div>
+              {operationalHealth && <>
+                <div className="grid divide-y divide-slate-100 sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-4">
+                  <div className="px-5 py-4"><span className="block text-xs text-slate-500">PostgreSQL</span><strong className={operationalHealth.services.database.level === "ok" ? "text-emerald-700" : "text-red-700"}>{operationalHealth.services.database.level === "ok" ? `${operationalHealth.services.database.latencyMs} ms` : en ? "Unavailable" : "Indisponível"}</strong></div>
+                  <div className="px-5 py-4"><span className="block text-xs text-slate-500">{en ? "Plant reader" : "Leitor de plantas"}</span><strong className={operationalHealth.services.plantService.level === "ok" ? "text-emerald-700" : "text-amber-700"}>{operationalHealth.services.plantService.level === "ok" ? `${operationalHealth.services.plantService.latencyMs} ms` : "Offline"}</strong></div>
+                  <div className="px-5 py-4"><span className="block text-xs text-slate-500">{en ? "Disk used" : "Disco utilizado"}</span><strong className={(operationalHealth.storage.usedPercent ?? 0) >= 92 ? "text-red-700" : (operationalHealth.storage.usedPercent ?? 0) >= 80 ? "text-amber-700" : "text-slate-900"}>{operationalHealth.storage.usedPercent == null ? "n/d" : `${operationalHealth.storage.usedPercent}%`}</strong></div>
+                  <div className="px-5 py-4"><span className="block text-xs text-slate-500">{en ? "Latest backup" : "Último backup"}</span><strong className={operationalHealth.backup.ageHours == null || operationalHealth.backup.ageHours >= 54 ? "text-red-700" : operationalHealth.backup.ageHours >= 30 ? "text-amber-700" : "text-slate-900"}>{operationalHealth.backup.ageHours == null ? (en ? "Not found" : "Não encontrado") : `${Math.round(operationalHealth.backup.ageHours)}h`}</strong></div>
+                </div>
+                <div className="border-t border-slate-100 px-5 py-4">
+                  <div className="mb-3 flex flex-wrap gap-2 text-xs text-slate-600">
+                    <span className="badge">Uptime {formatUptime(operationalHealth.uptimeSeconds)}</span>
+                    <span className="badge">{operationalHealth.queues.plantsActive} {en ? "plants active" : "plantas activas"}</span>
+                    <span className="badge">{operationalHealth.queues.importsActive} {en ? "imports active" : "imports activos"}</span>
+                    <span className={`badge ${operationalHealth.queues.reviewsOverdue ? "badge-red" : "badge-gray"}`}>{operationalHealth.queues.reviewsOverdue} {en ? "reviews overdue" : "revisões fora do SLA"}</span>
+                    <span className={`badge ${operationalHealth.http.errorRatePercent >= 3 ? "badge-red" : "badge-gray"}`}>{operationalHealth.http.requests} req · {operationalHealth.http.averageLatencyMs} ms · {operationalHealth.http.errorRatePercent}% 5xx</span>
+                  </div>
+                  <div className="space-y-2">
+                    {operationalHealth.checks.slice(0, 4).map((check) => <div key={check.key} className={`rounded-xl border px-3 py-2.5 ${check.level === "critical" ? "border-red-200 bg-red-50" : check.level === "warning" ? "border-amber-200 bg-amber-50" : "border-emerald-200 bg-emerald-50"}`}>
+                      <div className="flex flex-wrap items-start justify-between gap-2"><div><strong className="text-sm text-slate-950">{check.label}</strong><p className="mt-0.5 text-xs text-slate-600">{check.detail}</p></div>{check.action && <span className="max-w-sm text-xs font-medium text-slate-700">{check.action}</span>}</div>
+                    </div>)}
+                    {operationalHealth.checks.length > 4 && <details className="rounded-xl border border-slate-200"><summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-slate-700">{en ? `See ${operationalHealth.checks.length - 4} more` : `Ver mais ${operationalHealth.checks.length - 4}`}</summary><div className="border-t border-slate-100 px-3 py-2 text-xs text-slate-600">{operationalHealth.checks.slice(4).map((check) => <p key={check.key} className="py-1"><strong>{check.label}</strong> · {check.detail}</p>)}</div></details>}
+                  </div>
+                </div>
+              </>}
+            </section>
+
             <div className="grid gap-4 lg:grid-cols-2">
               <section className="card p-5">
                 <h2 className="section-title">{en ? "Portfolio by plan" : "Carteira por plano"}</h2>
@@ -933,23 +995,11 @@ export default function SuperAdminPage() {
                 <h2 className="section-title">{en ? "Platform services" : "Serviços da plataforma"}</h2>
                 <div className="mt-4 grid gap-3 sm:grid-cols-3">
                   <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
-                    <p className="text-xs text-slate-500">API</p>
-                    <strong className={stats.services.api ? "text-emerald-700" : "text-red-700"}>
-                      {stats.services.api ? (en ? "Online" : "Operacional") : "Offline"}
-                    </strong>
-                  </div>
-                  <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
-                    <p className="text-xs text-slate-500">Plant service</p>
-                    <strong className={stats.services.plantService ? "text-emerald-700" : "text-red-700"}>
-                      {stats.services.plantService ? (en ? "Online" : "Operacional") : "Offline"}
-                    </strong>
-                  </div>
-                  <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
                     <p className="text-xs text-slate-500">Assistente Ollama</p>
                     <strong className="text-slate-800">
                       {(() => {
-                        const ai = stats.services.plantAi as { enabled?: boolean; reachable?: boolean; model?: string } | null | undefined;
-                        if (!stats.services.plantService) return en ? "n/a" : "n/d";
+                        const ai = operationalHealth?.services.plantService.ai;
+                        if (operationalHealth?.services.plantService.level !== "ok") return en ? "n/a" : "n/d";
                         if (!ai?.enabled) return en ? "Off" : "Desligada";
                         if (!ai.reachable) return "Ollama offline";
                         return ai.model ? `Ollama · ${ai.model}` : "Ollama";

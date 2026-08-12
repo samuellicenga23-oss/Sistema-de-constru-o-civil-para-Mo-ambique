@@ -932,6 +932,12 @@ export async function companyRoutes(app: FastifyInstance) {
     return { enabled: isMonitoringEnabled() };
   });
 
+  app.get("/api/admin/operational-health", { preHandler: requireRole("super_admin") }, async (_request, reply) => {
+    const { getOperationalHealth } = await import("../services/operationalHealth.js");
+    reply.header("Cache-Control", "no-store");
+    return getOperationalHealth();
+  });
+
   app.post("/api/admin/monitoring/test", { preHandler: requireRole("super_admin") }, async (request, reply) => {
     const { isMonitoringEnabled, captureException: capture } = await import("../services/monitoring.js");
     if (!isMonitoringEnabled()) {
@@ -1056,23 +1062,6 @@ export async function companyRoutes(app: FastifyInstance) {
     const [{ value: totalUsers }] = await db.select({ value: count() }).from(users);
     const [{ value: totalProjects }] = await db.select({ value: count() }).from(projects);
 
-    let plantServiceUp = false;
-    let plantAi: unknown = null;
-    try {
-      const res = await fetch(`${env.plantServiceUrl}/health`, { signal: AbortSignal.timeout(3000) });
-      plantServiceUp = res.ok;
-      if (res.ok) {
-        try {
-          const body = (await res.json()) as { ai?: unknown };
-          plantAi = body.ai ?? null;
-        } catch {
-          plantAi = null;
-        }
-      }
-    } catch {
-      plantServiceUp = false;
-    }
-
     return {
       totalCompanies: allCompanies.length,
       activeCompanies,
@@ -1086,7 +1075,6 @@ export async function companyRoutes(app: FastifyInstance) {
       collectedThisMonthMzn: Math.round(collectedThisMonthMzn),
       expiringSoon,
       nearLimit,
-      services: { api: true, plantService: plantServiceUp, plantAi },
     };
   });
 

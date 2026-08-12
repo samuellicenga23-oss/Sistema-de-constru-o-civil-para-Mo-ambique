@@ -1,5 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { captureException } from "../monitoring";
+import { recoverApplication } from "../releaseRecovery";
 
 type Props = { children: ReactNode };
 type State = { error: Error | null };
@@ -24,11 +25,11 @@ export default class AppErrorBoundary extends Component<Props, State> {
         <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-raised">
           <p className="font-display text-lg font-bold text-ink">Algo falhou ao carregar</p>
           <p className="mt-2 text-sm leading-6 text-slate-500">
-            A interface encontrou um erro inesperado. Recarregue a página ou volte ao início.
+            Não foi possível abrir esta página. Actualize a aplicação; o seu trabalho guardado não será apagado.
           </p>
           <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-center">
-            <button type="button" className="btn btn-primary" onClick={() => window.location.reload()}>
-              Recarregar
+            <button type="button" className="btn btn-primary" onClick={() => void recoverApplication()}>
+              Actualizar aplicação
             </button>
             <a href="/" className="btn btn-secondary">
               Ir ao início

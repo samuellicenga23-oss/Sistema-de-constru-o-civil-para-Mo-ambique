@@ -8,6 +8,8 @@ import RegisterPage from "./pages/RegisterPage";
 import PublicLandingPage from "./pages/PublicLandingPage";
 import CheckoutPage from "./pages/CheckoutPage";
 import PublicProjectPage from "./pages/PublicProjectPage";
+import LegalPage from "./pages/LegalPage";
+import { ForgotPasswordPage, ResetPasswordPage } from "./pages/PasswordRecoveryPage";
 
 const DashboardPage = lazy(() => import("./pages/DashboardPage"));
 const CatalogPage = lazy(() => import("./pages/CatalogPage"));
@@ -63,6 +65,9 @@ function AppRoutes() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/registar" element={<RegisterPage />} />
+      <Route path="/recuperar-palavra-passe" element={<ForgotPasswordPage />} />
+      <Route path="/repor-palavra-passe" element={<ResetPasswordPage />} />
+      <Route path="/legal/:page" element={<LegalPage />} />
       <Route path="/obra/:token" element={<PublicProjectPage />} />
       <Route path="/" element={<PublicLandingPage />} />
       <Route path="/checkout/:planSlug" element={<CheckoutPage />} />
@@ -131,7 +136,7 @@ function AppRoutes() {
         }
       />
       <Route path="/fornecedores" element={<Navigate to="/gestao/fornecedores" replace />} />
-      <Route path="/fornecedores/pedidos" element={<Navigate to="/gestao/cotacoes" replace />} />
+      <Route path="/fornecedores/pedidos" element={<Navigate to="/gestao" replace />} />
       {/* O Portal do Fornecedor (/fornecedor/*) é um site à parte — apps/supplier — nunca uma
           rota deste SPA. Ver apps/api/src/app.ts para o mapeamento de produção. */}
       <Route path="/projectos" element={<Navigate to="/orcamentos" replace />} />

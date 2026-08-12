@@ -247,30 +247,121 @@ automático de 80→443, e trata da renovação automática do certificado.
 
 ```bash
 curl https://SEU_DOMINIO/api/health
+curl https://SEU_DOMINIO/api/ready
 ```
-Deve devolver `{"status":"ok","dbTime":"..."}`. Depois abrir `https://SEU_DOMINIO` no browser —
+`/api/health` confirma que o processo Node está vivo. `/api/ready` confirma separadamente a base,
+as migrações e o leitor de plantas. Só considerar o deploy concluído quando devolver
+`{"status":"ready",...}`. Depois abrir `https://SEU_DOMINIO` no browser —
 deve aparecer o ecrã de login. Entra com `super@sigo.local` (já com a password que definiste
 no passo 6, não a do seed) para o painel da plataforma, e cria aí as empresas/clientes reais.
 
 ## 10. Actualizações futuras
 
+O procedimento recomendado é agora único e verificável:
+
 ```bash
 cd /var/www/sigo
-git pull
-npm install
-npm run build
-npm run db:migrate   # só se houver migrações novas
-pm2 reload sigo-api
-sudo systemctl restart sigo-plant-service   # só se o plant-service tiver mudado
+bash deploy/deploy.sh
 ```
+
+Na instalação CloudPanel actualmente usada pelo SIGO, o caminho é
+`/home/sigo/htdocs/sud30s.org`; esse já é o valor por omissão dos scripts. Noutro servidor:
+
+```bash
+SIGO_PROJECT_DIR=/var/www/sigo SIGO_BACKUP_DIR=/var/backups/sigo bash deploy/deploy.sh
+```
+
+O deploy:
+
+1. bloqueia execuções concorrentes;
+2. exige `main`, árvore rastreada limpa, espaço em disco, `.env` protegido e supervisores activos;
+3. actualiza apenas por fast-forward de `origin/main`;
+4. cria e valida um backup PostgreSQL antes da migração;
+5. instala com `npm ci` e compila API, painel e portal numa pasta isolada;
+6. aplica migrações e activa os builds apenas depois do build completo passar;
+7. reinicia PM2/systemd e exige `/api/ready` totalmente operacional;
+8. regista a release anterior e a última release aprovada em `.deploy/` (ignorado pelo Git).
+
+O identificador da release é o SHA Git e entra automaticamente tanto no frontend como na API.
+Abas antigas detectam a incompatibilidade e actualizam o cache sem intervenção manual.
+
+### Rollback de código
+
+```bash
+cd /home/sigo/htdocs/sud30s.org
+cat .deploy/previous-release
+bash deploy/rollback.sh <COMMIT_CONFIRMADO> --confirm
+```
+
+O rollback cria outro backup, recompila a release escolhida, mantém `main` activa e valida
+`/api/ready`. **Não restaura nem desfaz a base automaticamente**: migrações devem ser compatíveis
+com a release anterior. Restaurar a base pode apagar diários, compras, facturas e outros dados
+criados depois do backup, por isso exige janela de manutenção e decisão explícita.
 
 ## 11. Backups (recomendado antes de ires para produção a sério)
 
-Backup diário da base de dados via cron (`crontab -e` como root ou um utilizador com acesso):
+Backup manual verificado (não mostra `DATABASE_URL`):
 
 ```bash
-0 3 * * * pg_dump -U sigo_app -h localhost sigo | gzip > /var/backups/sigo-$(date +\%F).sql.gz
+cd /home/sigo/htdocs/sud30s.org
+bash deploy/backup.sh
+# Incluir também uploads numa cópia periódica:
+bash deploy/backup.sh --with-uploads
 ```
 
-E não esquecer de incluir `apps/api/uploads/` (plantas carregadas, logótipos de empresas) num
-backup regular também — não está na base de dados.
+Backup diário da base de dados via cron (`crontab -e` como o utilizador `sigo`):
+
+```bash
+0 3 * * * cd /home/sigo/htdocs/sud30s.org && /usr/bin/bash deploy/backup.sh >> /home/sigo/backups/backup.log 2>&1
+```
+
+Cada dump usa o formato custom do PostgreSQL, é validado com `pg_restore --list`, recebe SHA-256
+e permissões privadas. A retenção automática é de 30 dias. Os uploads devem integrar um backup
+externo regular; guardar tudo apenas no mesmo disco da VPS não protege contra perda do servidor.
+
+## 12. Estado operacional e alertas
+
+O Centro de Controlo do super administrador apresenta release activa, uptime, latência da base,
+leitor de plantas, filas presas, falhas recentes, revisões fora do SLA, disco, backup, email e
+Sentry. A API repete esta verificação periodicamente e envia email apenas quando surge um estado
+crítico, após seis horas se persistir, e quando o estado normaliza.
+
+Diagnóstico rápido directamente na VPS, sem sessão web e sem imprimir credenciais:
+
+```bash
+cd /home/sigo/htdocs/sud30s.org
+bash deploy/status.sh
+```
+
+O comando termina com código `0` quando tudo está normal e `1` quando encontra um problema. Pode
+ser ligado a um monitor externo ou cron; não deve ser exposto como endpoint público com detalhes.
+
+## 13. Critérios automáticos de publicação
+
+Antes de publicar, execute na raiz do projecto:
+
+```bash
+npm run quality:release
+npm run build
+npm test
+```
+
+`quality:release` bloqueia ficheiros operacionais em falta, variáveis obrigatórias não
+documentadas, manifesto de migrations inválido, ficheiros sensíveis rastreados pelo Git e erros
+de whitespace. Uma árvore local com alterações gera aviso; na VPS o `preflight.sh` continua a
+bloqueá-la.
+
+Depois de activar os builds, `deploy/deploy.sh` executa automaticamente:
+
+```bash
+node scripts/production-smoke.mjs "$PUBLIC_URL" --expected-release=<sha>
+```
+
+O smoke test confirma API, migrations, leitor de plantas, website, MIME dos assets, cache,
+cabeçalhos de segurança, protecção de rotas privadas e Portal do Fornecedor. Se falhar durante o
+deploy, os builds anteriores são repostos antes de a release ser marcada como aprovada. Pode ser
+executado manualmente, sem credenciais e sem criar dados:
+
+```bash
+npm run smoke:production -- https://SEU_DOMINIO
+```

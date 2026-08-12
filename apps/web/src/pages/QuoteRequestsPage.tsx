@@ -3,11 +3,9 @@ import { Link } from "react-router-dom";
 import Layout from "../components/Layout";
 import GestaoTabs from "../components/GestaoTabs";
 import Modal from "../components/Modal";
-import QuoteRequestModal from "../components/QuoteRequestModal";
 import { quoteRequestsApi, type QuoteRequest, type QuoteRequestDetail, type QuoteRequestStatus } from "../api/quoteRequests";
-import { suppliersApi, type Supplier } from "../api/suppliers";
 import { ApiError } from "../api/http";
-import { IconClipboard, IconDownload, IconPlus } from "../components/icons";
+import { IconClipboard, IconDownload } from "../components/icons";
 
 const STATUS_LABELS: Record<QuoteRequestStatus, string> = {
   enviado: "Enviado — a aguardar resposta",
@@ -34,14 +32,10 @@ function formatMoney(value: string | null, currency: string) {
 
 export default function QuoteRequestsPage() {
   const [requests, setRequests] = useState<QuoteRequest[]>([]);
-  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [detail, setDetail] = useState<QuoteRequestDetail | null>(null);
   const [busy, setBusy] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
-  const [pickingSupplier, setPickingSupplier] = useState(false);
-  const [quoteSupplier, setQuoteSupplier] = useState<Supplier | null>(null);
-  const [selectedSupplierId, setSelectedSupplierId] = useState("");
 
   async function reload() {
     setRequests(await quoteRequestsApi.list());
@@ -49,13 +43,6 @@ export default function QuoteRequestsPage() {
 
   useEffect(() => {
     reload().catch((err) => setError(err.message));
-    suppliersApi
-      .list()
-      .then((rows) => {
-        setSuppliers(rows);
-        setSelectedSupplierId((current) => current || rows.find((s) => s.supplierAccountId)?.id || rows[0]?.id || "");
-      })
-      .catch(() => setSuppliers([]));
   }, []);
 
   async function openDetail(id: string) {
@@ -114,47 +101,22 @@ export default function QuoteRequestsPage() {
     }
   }
 
-  function openCreateFlow() {
-    setError(null);
-    setDetail(null);
-    setPickingSupplier(true);
-  }
-
-  function confirmSupplierPick() {
-    const supplier = suppliers.find((s) => s.id === selectedSupplierId);
-    if (!supplier) {
-      setError("Escolha um fornecedor para o pedido.");
-      return;
-    }
-    if (!supplier.supplierAccountId) {
-      setError("Este fornecedor ainda não tem conta no Portal do Fornecedor — não pode receber o pedido.");
-      return;
-    }
-    setPickingSupplier(false);
-    setQuoteSupplier(supplier);
-  }
-
   return (
     <Layout
-      title="Gestão da obra"
-      subtitle="Cotações: peça preços aos fornecedores, acompanhe respostas e descarregue o PDF de comparação (Profissional+)"
+      title="Arquivo de cotações gerais"
+      subtitle="Consulta dos pedidos criados no fluxo anterior"
       actions={
-        <button type="button" onClick={openCreateFlow} className="btn btn-primary btn-sm">
-          <IconPlus className="h-3.5 w-3.5" />
-          Novo pedido de cotação
-        </button>
+        <Link to="/gestao" className="btn btn-primary btn-sm">Escolher obra</Link>
       }
     >
       <div className="mx-auto w-full max-w-5xl space-y-5">
         <GestaoTabs />
-        {error && !detail && !pickingSupplier && !quoteSupplier && <p className="text-sm text-red-600">{error}</p>}
+        {error && !detail && <p className="text-sm text-red-600">{error}</p>}
 
-        <div className="rounded-xl border border-teal-200 bg-teal-50/60 px-4 py-3 text-sm text-teal-950">
-          <p className="font-semibold">Como funciona o pedido de cotação</p>
+        <div className="rounded-xl border border-blue-200 bg-blue-50/60 px-4 py-3 text-sm text-blue-950">
+          <p className="font-semibold">As novas cotações pertencem a uma obra</p>
           <p className="mt-1 text-[13px] leading-relaxed text-teal-900/90">
-            Crie um pedido a um fornecedor da sua empresa (incl. SIGO Preços). Ele responde no Portal do Fornecedor; aceite aqui para
-            usar nas compras. No Profissional+, o PDF de comparação ordena quem tem o material — zona da obra primeiro, depois do melhor
-            preço ao mais caro.
+            Abra a obra e entre em Compras e stock. O sistema leva as necessidades do orçamento, pede preços e transforma a escolha em pedido sem duplicar os materiais.
           </p>
         </div>
 
@@ -170,10 +132,7 @@ export default function QuoteRequestsPage() {
                   </p>
                 </div>
               </div>
-              <button type="button" onClick={openCreateFlow} className="btn btn-secondary btn-sm">
-                <IconPlus className="h-3.5 w-3.5" />
-                Novo pedido
-              </button>
+              <Link to="/gestao" className="btn btn-secondary btn-sm">Abrir uma obra</Link>
             </div>
           </div>
           <div className="divide-y divide-slate-100">
@@ -191,59 +150,13 @@ export default function QuoteRequestsPage() {
             ))}
             {requests.length === 0 && (
               <div className="space-y-3 px-5 py-10 text-center">
-                <p className="text-sm text-slate-500">Ainda não há cotações. Crie um pedido para um fornecedor com conta no Portal.</p>
-                <button type="button" onClick={openCreateFlow} className="btn btn-primary btn-sm">
-                  <IconPlus className="h-3.5 w-3.5" />
-                  Novo pedido de cotação
-                </button>
+                <p className="text-sm text-slate-500">Não existem pedidos no arquivo anterior.</p>
+                <Link to="/gestao" className="btn btn-primary btn-sm">Escolher obra para comprar</Link>
               </div>
             )}
           </div>
         </section>
       </div>
-
-      {pickingSupplier && (
-        <Modal title="Novo pedido de cotação" subtitle="Escolha o fornecedor que vai receber o pedido" onClose={() => setPickingSupplier(false)} maxWidth="max-w-lg">
-          {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
-          {suppliers.length === 0 ? (
-            <p className="text-sm text-slate-500">Sem fornecedores disponíveis. O SIGO Preços aparece automaticamente após a sincronização do catálogo.</p>
-          ) : (
-            <div className="space-y-4">
-              <div>
-                <label className="label">Fornecedor</label>
-                <select value={selectedSupplierId} onChange={(e) => setSelectedSupplierId(e.target.value)} className="input">
-                  {suppliers.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.isReference ? `${s.name} (referência)` : s.name}
-                      {!s.supplierAccountId ? " — sem portal" : ""}
-                    </option>
-                  ))}
-                </select>
-                <p className="mt-1.5 text-[11px] text-slate-500">Só fornecedores com conta no Portal do Fornecedor podem receber o pedido.</p>
-              </div>
-              <div className="flex flex-col-reverse gap-2 border-t border-slate-200 pt-4 sm:flex-row sm:justify-end">
-                <button type="button" onClick={() => setPickingSupplier(false)} className="btn btn-secondary">
-                  Cancelar
-                </button>
-                <button type="button" onClick={confirmSupplierPick} className="btn btn-primary">
-                  Continuar
-                </button>
-              </div>
-            </div>
-          )}
-        </Modal>
-      )}
-
-      {quoteSupplier && (
-        <QuoteRequestModal
-          supplier={quoteSupplier}
-          onClose={() => setQuoteSupplier(null)}
-          onCreated={() => {
-            setQuoteSupplier(null);
-            reload().catch((err) => setError(err.message));
-          }}
-        />
-      )}
 
       {detail && (
         <Modal title={detail.title} subtitle={`${detail.supplierName}${detail.projectName ? ` · ${detail.projectName}` : ""}`} onClose={() => setDetail(null)} maxWidth="max-w-2xl">

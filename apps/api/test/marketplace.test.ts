@@ -37,7 +37,7 @@ describe("SIGO Fornecedores — marketplace nacional", () => {
     const registerRes = await app.inject({
       method: "POST",
       url: "/api/supplier/auth/register",
-      payload: { name: "Materiais do Sul", email: "materiais-sul@test.local", password: "senhaFornecedor1", zoneId: zone.id },
+      payload: { name: "Materiais do Sul", email: "materiais-sul@test.local", password: "senhaFornecedor1", zoneId: zone.id, offersMaterials: true, materialIds: [material.id] },
     });
     expect(registerRes.statusCode).toBe(201);
     const supplierCookie = await extractCookie(registerRes, "sid_sup");
@@ -77,10 +77,11 @@ describe("SIGO Fornecedores — marketplace nacional", () => {
 
   it("bloqueia o marketplace e a leitura de preços de fornecedor para o plano Individual", async () => {
     const [zone] = await db.insert(priceZones).values({ companyId: null, name: "Beira (teste gate)" }).returning();
+    const [material] = await db.insert(materials).values({ companyId: null, name: "Material bloqueado", unit: "un", baseUnitCost: "10" }).returning();
     const registerRes = await app.inject({
       method: "POST",
       url: "/api/supplier/auth/register",
-      payload: { name: "Fornecedor Bloqueado", email: "fornecedor-bloqueado@test.local", password: "senhaFornecedor1", zoneId: zone.id },
+      payload: { name: "Fornecedor Bloqueado", email: "fornecedor-bloqueado@test.local", password: "senhaFornecedor1", zoneId: zone.id, offersMaterials: true, materialIds: [material.id] },
     });
     const [supplierRow] = await db.select().from(suppliers).where(eq(suppliers.name, "Fornecedor Bloqueado")).limit(1);
     void registerRes;
@@ -103,7 +104,7 @@ describe("SIGO Fornecedores — marketplace nacional", () => {
       method: "POST",
       url: "/api/quote-requests",
       headers: { cookie },
-      payload: { supplierId: supplierRow.id, title: "Pedido bloqueado", lines: [{ kind: "material", resourceId: supplierRow.id }] },
+      payload: { supplierId: supplierRow.id, title: "Pedido bloqueado", lines: [{ kind: "material", resourceId: material.id, quantity: 1 }] },
     });
     expect(rfqRes.statusCode).toBe(402);
 
@@ -123,7 +124,7 @@ describe("Catálogo — «melhor cotação» inclui o marketplace nacional", () 
     await app.inject({
       method: "POST",
       url: "/api/supplier/auth/register",
-      payload: { name: "Fornecedor Nampula", email: "fornecedor-nampula@test.local", password: "senhaFornecedor1", zoneId: zone.id },
+      payload: { name: "Fornecedor Nampula", email: "fornecedor-nampula@test.local", password: "senhaFornecedor1", zoneId: zone.id, offersMaterials: true, materialIds: [material.id] },
     });
     const supplierCookie = await (async () => {
       const res = await app.inject({ method: "POST", url: "/api/supplier/auth/login", payload: { email: "fornecedor-nampula@test.local", password: "senhaFornecedor1" } });
@@ -171,7 +172,7 @@ describe("Ordem de compra — fornecedor do marketplace com contacto", () => {
     await app.inject({
       method: "POST",
       url: "/api/supplier/auth/register",
-      payload: { name: "Pedreira Chimoio", email: "pedreira-chimoio@test.local", password: "senhaFornecedor1", phone: "+258841234567", zoneId: zone.id },
+      payload: { name: "Pedreira Chimoio", email: "pedreira-chimoio@test.local", password: "senhaFornecedor1", phone: "+258841234567", zoneId: zone.id, offersMaterials: true },
     });
     const [supplierRow] = await db.select().from(suppliers).where(eq(suppliers.name, "Pedreira Chimoio")).limit(1);
     expect(supplierRow.contact).toBe("+258841234567");
@@ -217,10 +218,11 @@ describe("Ordem de compra — fornecedor do marketplace com contacto", () => {
 describe("Contacto de compras — o fornecedor vê quem pediu, para poder ligar", () => {
   it("mostra o nome/email de quem pediu a cotação e o telefone da empresa ao fornecedor", async () => {
     const [zone] = await db.insert(priceZones).values({ companyId: null, name: "Quelimane (teste contacto)" }).returning();
+    const [material] = await db.insert(materials).values({ companyId: null, name: "Cimento cola (teste contacto)", unit: "kg", baseUnitCost: "40" }).returning();
     const registerRes = await app.inject({
       method: "POST",
       url: "/api/supplier/auth/register",
-      payload: { name: "Fornecedor Contacto", email: "fornecedor-contacto@test.local", password: "senhaFornecedor1", zoneId: zone.id },
+      payload: { name: "Fornecedor Contacto", email: "fornecedor-contacto@test.local", password: "senhaFornecedor1", zoneId: zone.id, offersMaterials: true, materialIds: [material.id] },
     });
     const supplierCookie = await extractCookie(registerRes, "sid_sup");
     const [supplierRow] = await db.select().from(suppliers).where(eq(suppliers.name, "Fornecedor Contacto")).limit(1);
@@ -230,12 +232,11 @@ describe("Contacto de compras — o fornecedor vê quem pediu, para poder ligar"
     await createUser(company.id, "admin_empresa", "compras@test.local");
     const companyCookie = await loginCookie(app, "compras@test.local");
 
-    const [material] = await db.insert(materials).values({ companyId: null, name: "Cimento cola (teste contacto)", unit: "kg", baseUnitCost: "40" }).returning();
     const createRes = await app.inject({
       method: "POST",
       url: "/api/quote-requests",
       headers: { cookie: companyCookie },
-      payload: { supplierId: supplierRow.id, title: "Cotação com contacto", lines: [{ kind: "material", resourceId: material.id }] },
+      payload: { supplierId: supplierRow.id, title: "Cotação com contacto", lines: [{ kind: "material", resourceId: material.id, quantity: 1 }] },
     });
     const quoteRequest = createRes.json() as { id: string };
 

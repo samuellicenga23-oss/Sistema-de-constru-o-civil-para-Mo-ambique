@@ -123,7 +123,7 @@ describe("Centro de Controlo — visão do Portal do Fornecedor", () => {
     const registerRes = await app.inject({
       method: "POST",
       url: "/api/supplier/auth/register",
-      payload: { name: "Fornecedor Visível No Admin", email: "fornecedor-admin-visivel@test.local", password: "senhaFornecedor1", zoneId: zone.id },
+      payload: { name: "Fornecedor Visível No Admin", email: "fornecedor-admin-visivel@test.local", password: "senhaFornecedor1", zoneId: zone.id, offersMaterials: true },
     });
     expect(registerRes.statusCode).toBe(201);
 

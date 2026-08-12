@@ -106,7 +106,7 @@ export default function Layout({
       ? [{ to: "/admin", label: t("platformPanel"), icon: IconSettings, section: "admin" as const }]
       : ([
           { to: "/painel", label: t("dashboard"), shortLabel: "Painel", icon: IconHome, exact: true, module: "dashboard" as const, section: "fases" as const },
-          { to: "/medicoes", label: t("measurements"), shortLabel: "Medições", icon: IconRuler, module: "measurements" as const, permission: "medicoes.ver", section: "fases" as const },
+          { to: "/medicoes", label: t("measurements"), shortLabel: "Levantamentos", icon: IconRuler, module: "measurements" as const, permission: "medicoes.ver", section: "fases" as const },
           { to: "/orcamentos", label: t("budgets"), shortLabel: "Orçamentos", icon: IconFolder, module: "budgets" as const, permission: "orcamentos.ver", section: "fases" as const },
           {
             to: "/gestao",

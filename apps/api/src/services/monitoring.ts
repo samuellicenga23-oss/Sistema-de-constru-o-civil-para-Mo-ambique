@@ -17,6 +17,7 @@ export function initMonitoring(): void {
   Sentry.init({
     dsn: env.sentryDsn!,
     environment: env.isProduction ? "production" : "development",
+    release: env.release,
     tracesSampleRate: 0.1,
   });
 }

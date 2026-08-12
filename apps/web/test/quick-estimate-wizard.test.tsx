@@ -39,9 +39,13 @@ describe("QuickEstimateWizard — dados manuais", () => {
   it("permite completar manualmente a espessura estrutural", () => {
     render(<QuickEstimateWizard documentId="doc-1" onClose={() => {}} onApplied={() => {}} architectureRooms={architectureRooms} />);
 
+    // Sem planta estrutural, o utilizador escolhe explicitamente o grupo Estrutura.
+    fireEvent.click(screen.getByText("Estrutura"));
     fireEvent.click(screen.getByRole("button", { name: "Seguinte" }));
 
-    const slabInput = screen.getByLabelText("Espessura da Laje — Piso Térreo (m)");
+    // O motor já não inventa uma laje por piso; em modo manual ela é criada explicitamente.
+    fireEvent.click(screen.getByRole("button", { name: "Adicionar laje" }));
+    const slabInput = screen.getByLabelText("Espessura da Laje 1 (m)");
     expect(slabInput).toHaveValue(null);
     fireEvent.change(slabInput, { target: { value: "0.18" } });
     expect(slabInput).toHaveValue(0.18);

@@ -17,7 +17,8 @@
     "db:sync-standard-document": "tsx src/db/syncStandardDocument.ts",
     "plant:reprocess": "tsx src/db/reprocessPlant.ts",
     "bootstrap:admin": "tsx src/db/bootstrapAdmin.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:unit": "vitest run --config vitest.unit.config.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",

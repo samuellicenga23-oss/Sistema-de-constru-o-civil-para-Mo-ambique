@@ -292,6 +292,29 @@ export async function plantRoutes(app: FastifyInstance) {
     return db.select().from(plants).where(eq(plants.projectId, projectId)).orderBy(plants.uploadedAt);
   });
 
+  // Contexto consolidado do assistente: 4 consultas fixas, independentemente do número de PDFs.
+  // Evita o padrão anterior em que o browser fazia três consultas adicionais por planta.
+  app.get("/api/projects/:projectId/plants/details", { preHandler: requireCompanyUser }, async (request, reply) => {
+    const { projectId } = request.params as { projectId: string };
+    const companyId = request.currentUser!.companyId!;
+    const project = await assertProjectOwned(projectId, companyId);
+    if (!project) return reply.code(404).send({ error: "Projecto não encontrado" });
+    const projectPlants = await db.select().from(plants).where(eq(plants.projectId, projectId)).orderBy(plants.uploadedAt);
+    const ids = projectPlants.map((plant) => plant.id);
+    if (ids.length === 0) return [];
+    const [rooms, openings, rebarSchedules] = await Promise.all([
+      db.select().from(extractedRooms).where(inArray(extractedRooms.plantId, ids)),
+      db.select().from(extractedOpenings).where(inArray(extractedOpenings.plantId, ids)),
+      db.select().from(extractedRebarSchedules).where(inArray(extractedRebarSchedules.plantId, ids)),
+    ]);
+    return projectPlants.map((plant) => ({
+      plant,
+      rooms: rooms.filter((room) => room.plantId === plant.id),
+      openings: openings.filter((opening) => opening.plantId === plant.id),
+      rebarSchedules: rebarSchedules.filter((line) => line.plantId === plant.id),
+    }));
+  });
+
   app.post("/api/projects/:projectId/plants", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
     const { projectId } = request.params as { projectId: string };
     const companyId = request.currentUser!.companyId!;
