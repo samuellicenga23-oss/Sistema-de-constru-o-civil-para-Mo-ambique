@@ -78,7 +78,7 @@ export default function ProjectDetailPage() {
   useEffect(() => {
     companiesApi
       .me()
-      .then((data) => setDirectApproval(planUsesDirectDocumentApproval(data.company.subscription?.plan)))
+      .then((data) => setDirectApproval(planUsesDirectDocumentApproval(data.subscription?.plan ?? data.company.subscription?.plan)))
       .catch(() => setDirectApproval(false));
   }, []);
 

@@ -20,7 +20,7 @@ app = FastAPI(title="SIGO Plant Service")
 # em produção, permissivo em dev sem configuração" (achado da auditoria).
 PLANT_SERVICE_TOKEN = os.environ.get("PLANT_SERVICE_TOKEN")
 IS_PRODUCTION = os.environ.get("ENVIRONMENT") == "production"
-PARSER_VERSION = "2026.08-openings-fix-1"
+PARSER_VERSION = "2026.08-openings-fix-2"
 PARSER_CONCURRENCY = max(1, min(2, int(os.environ.get("PLANT_PARSER_CONCURRENCY", "1"))))
 PARSER_CACHE_SIZE = max(1, min(20, int(os.environ.get("PLANT_PARSER_CACHE_SIZE", "6"))))
 parser_slots = asyncio.Semaphore(PARSER_CONCURRENCY)

@@ -226,16 +226,22 @@ export default function PlantReviewPage() {
   }
 
   function openingPayload(opening: ExtractedOpening): OpeningInput {
+    const widthM = opening.widthM != null && String(opening.widthM).trim() !== "" ? Number(opening.widthM) : null;
+    const heightM = opening.heightM != null && String(opening.heightM).trim() !== "" ? Number(opening.heightM) : null;
+    const sillHeightM = opening.sillHeightM != null && String(opening.sillHeightM).trim() !== "" ? Number(opening.sillHeightM) : null;
+    const location = opening.location === "desconhecida" && opening.designation?.startsWith("Próximo de")
+      ? "interior"
+      : opening.location;
     return {
       kind: opening.kind,
       code: opening.code,
       designation: opening.designation,
-      widthM: opening.widthM ? Number(opening.widthM) : null,
-      heightM: opening.heightM ? Number(opening.heightM) : null,
-      sillHeightM: opening.sillHeightM ? Number(opening.sillHeightM) : null,
+      widthM: Number.isFinite(widthM) && (widthM as number) > 0 ? widthM : null,
+      heightM: Number.isFinite(heightM) && (heightM as number) > 0 ? heightM : null,
+      sillHeightM: Number.isFinite(sillHeightM) && (sillHeightM as number) >= 0 ? sillHeightM : null,
       quantity: opening.quantity,
       floor: opening.floor,
-      location: opening.location,
+      location,
       material: opening.material,
       materialId: opening.materialId,
       technicalSpecification: opening.technicalSpecification,
@@ -244,12 +250,27 @@ export default function PlantReviewPage() {
     };
   }
 
+  function openingConfirmBlockers(opening: ExtractedOpening): string[] {
+    const payload = openingPayload(opening);
+    const blockers: string[] = [];
+    if (!payload.widthM) blockers.push("indique a largura");
+    if (!payload.heightM) blockers.push("indique a altura");
+    if (payload.location === "desconhecida") blockers.push("defina se a parede é interior ou exterior");
+    return blockers;
+  }
+
   async function saveOpening(opening: ExtractedOpening) {
     if (!id) return;
+    const blockers = openingConfirmBlockers(opening);
+    if (blockers.length) {
+      setError(`Não é possível confirmar: ${blockers.join("; ")}.`);
+      return;
+    }
     setSavingOpeningId(opening.id);
     setError(null);
     try {
-      const updated = await plantsApi.updateOpening(id, opening.id, { ...openingPayload(opening), confirmed: true });
+      const payload = openingPayload(opening);
+      const updated = await plantsApi.updateOpening(id, opening.id, { ...payload, confirmed: true });
       setOpenings((items) => items.map((item) => item.id === updated.id ? updated : item));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Não foi possível guardar o vão");
@@ -387,7 +408,13 @@ export default function PlantReviewPage() {
           <div><label className="label">Material</label><button type="button" className="input input-sm flex w-full items-center justify-between gap-2 text-left" onClick={() => openMaterialEditor(opening)}><span className={linkedMaterial ? "truncate font-medium text-slate-900" : "text-slate-500"}>{linkedMaterial?.name ?? "Indicar material"}</span><span className="shrink-0 text-xs font-semibold text-brand-700">{linkedMaterial ? `${Number(openingPrices[opening.id] || linkedMaterial.effectiveUnitCost).toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${linkedMaterial.currency}/${materialUnit} · Alterar` : "Escolher ou criar"}</span></button></div>
           <div><label className="label">Especificação técnica</label><textarea className="input min-h-20 resize-y" value={opening.technicalSpecification ?? ""} placeholder="Perfil, acabamento, vidro, ferragens ou referência" onChange={(event) => setOpenings((items) => items.map((item) => item.id === opening.id ? { ...item, technicalSpecification: event.target.value || null, needsConfirmation: true } : item))} /></div>
         </div>
-        <div className="mt-3 flex flex-wrap justify-end gap-2"><button type="button" className="btn btn-secondary btn-sm text-red-600" onClick={() => deleteOpening(opening.id)}><IconTrash className="h-4 w-4" /> Eliminar</button><button type="button" className="btn btn-primary btn-sm" disabled={savingOpeningId === opening.id || !opening.widthM || !opening.heightM || opening.location === "desconhecida"} onClick={() => saveOpening(opening)}>{savingOpeningId === opening.id ? "A guardar" : opening.needsConfirmation ? "Confirmar e guardar" : "Guardar alterações"}</button></div>
+        <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+          {openingConfirmBlockers(opening).length > 0 && (
+            <span className="mr-auto text-xs text-amber-700">Falta: {openingConfirmBlockers(opening).join("; ")}.</span>
+          )}
+          <button type="button" className="btn btn-secondary btn-sm text-red-600" onClick={() => deleteOpening(opening.id)}><IconTrash className="h-4 w-4" /> Eliminar</button>
+          <button type="button" className="btn btn-primary btn-sm" disabled={savingOpeningId === opening.id || openingConfirmBlockers(opening).length > 0} onClick={() => saveOpening(opening)}>{savingOpeningId === opening.id ? "A guardar" : opening.needsConfirmation ? "Confirmar e guardar" : "Guardar alterações"}</button>
+        </div>
       </div>
     );
   }

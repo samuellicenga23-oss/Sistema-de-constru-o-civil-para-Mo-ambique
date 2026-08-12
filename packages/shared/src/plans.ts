@@ -252,8 +252,10 @@ export function normalizePlanKey(key: string | null | undefined): PublicSubscrip
   return LEGACY_PLAN_MIGRATION[key] ?? "individual";
 }
 
-/** Plano Individual (1 utilizador): medições/orçamentos aprovam-se directamente, sem passo «Submeter». */
+/** Plano Individual (1 utilizador): medições/orçamentos aprovam-se directamente, sem passo «Submeter».
+ * Sem plano conhecido, exige submissão (mais seguro do que assumir Individual). */
 export function planUsesDirectDocumentApproval(plan: string | null | undefined): boolean {
+  if (plan == null || String(plan).trim() === "") return false;
   return normalizePlanKey(plan) === "individual";
 }
 

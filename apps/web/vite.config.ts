@@ -45,7 +45,7 @@ export default defineConfig(({ mode }) => {
             handler: "CacheFirst",
             options: {
               // Nome versionado: ao mudar, o SW abandona caches antigos (cleanupOutdatedCaches).
-              cacheName: "sigo-versioned-assets-20260812e",
+              cacheName: "sigo-versioned-assets-20260812f",
               expiration: { maxEntries: 80, maxAgeSeconds: 7 * 24 * 60 * 60 },
             },
           },

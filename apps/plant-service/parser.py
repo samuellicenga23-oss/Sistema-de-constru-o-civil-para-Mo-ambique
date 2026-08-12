@@ -1197,7 +1197,8 @@ def extract_openings_spatial(page, page_number: int, text: str) -> list[Opening]
             return "desconhecida", None
         distance, label = min(candidates)
         if distance <= 160:
-            return "desconhecida", f"Próximo de {label}"
+            # Sala próxima ⇒ vão interior; a etiqueta fica em designation para o utilizador.
+            return "interior", f"Próximo de {label}"
         return "desconhecida", None
 
     drawings = page.get_drawings()

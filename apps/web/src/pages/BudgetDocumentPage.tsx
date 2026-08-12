@@ -214,7 +214,7 @@ export default function BudgetDocumentPage() {
   useEffect(() => {
     companiesApi
       .me()
-      .then((data) => setDirectApproval(planUsesDirectDocumentApproval(data.company.subscription?.plan)))
+      .then((data) => setDirectApproval(planUsesDirectDocumentApproval(data.subscription?.plan ?? data.company.subscription?.plan)))
       .catch(() => setDirectApproval(false));
   }, []);
 
@@ -797,7 +797,7 @@ export default function BudgetDocumentPage() {
           )}
           {isMeasurementDocument && !isClientView && document.status !== "aprovado" && (
             <span className="hidden text-xs text-slate-500 sm:inline">
-              {directApproval ? "Aprove a medição para criar o orçamento" : "Aprove a medição para enviar a Orçamentos"}
+              {directApproval ? "Aprove a medição para criar o orçamento" : "Submeta e aprove a medição para criar o orçamento"}
             </span>
           )}
           {!isMeasurementDocument && document.status !== "rascunho" && !isClientView && (
