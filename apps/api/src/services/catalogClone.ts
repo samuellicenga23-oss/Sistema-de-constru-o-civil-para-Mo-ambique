@@ -63,10 +63,13 @@ export async function cloneCompositionForCompany(sourceId: string, companyId: st
     companyId, code: source.code, name: source.name, category: source.category, description: source.description,
     measurementCriteria: source.measurementCriteria, executionNotes: source.executionNotes, outputUnit: source.outputUnit, currency: source.currency,
     auxiliaryCostPct: source.auxiliaryCostPct, indirectCostPct: source.indirectCostPct, profitMarginPct: source.profitMarginPct,
-    version: source.version, sourceName: source.sourceName, sourceReference: source.sourceReference, isActive: source.isActive,
+    version: 1, sourceName: source.sourceName, sourceReference: source.sourceReference, isActive: source.isActive,
     crewSize: source.crewSize, productiveHoursPerDay: source.productiveHoursPerDay, outputPerDay: source.outputPerDay,
     productivitySource: source.productivitySource, productivityNotes: source.productivityNotes,
     defaultMeasurementFormula: source.defaultMeasurementFormula,
+    visibility: "company",
+    parentCompositionId: source.id,
+    ownerUserId: null,
   }).returning();
 
   const [labourLines, materialLines, equipmentLines, subcompositionLines, derivedLines] = await Promise.all([
@@ -81,5 +84,54 @@ export async function cloneCompositionForCompany(sourceId: string, companyId: st
   if (equipmentLines.length) await db.insert(compositionEquipmentLines).values(equipmentLines.map((line) => ({ compositionId: copy.id, equipmentId: line.equipmentId, qtyPerUnit: line.qtyPerUnit, notes: line.notes })));
   if (subcompositionLines.length) await db.insert(compositionSubcompositionLines).values(subcompositionLines.map((line) => ({ compositionId: copy.id, subcompositionId: line.subcompositionId, qtyPerUnit: line.qtyPerUnit, notes: line.notes })));
   if (derivedLines.length) await db.insert(compositionDerivedCostLines).values(derivedLines.map((line) => ({ compositionId: copy.id, name: line.name, basis: line.basis, percentage: line.percentage, notes: line.notes })));
+  return copy;
+}
+
+async function copyCompositionLines(sourceId: string, targetId: string) {
+  const [labourLines, materialLines, equipmentLines, subcompositionLines, derivedLines] = await Promise.all([
+    db.select().from(compositionLabourLines).where(eq(compositionLabourLines.compositionId, sourceId)),
+    db.select().from(compositionMaterialLines).where(eq(compositionMaterialLines.compositionId, sourceId)),
+    db.select().from(compositionEquipmentLines).where(eq(compositionEquipmentLines.compositionId, sourceId)),
+    db.select().from(compositionSubcompositionLines).where(eq(compositionSubcompositionLines.compositionId, sourceId)),
+    db.select().from(compositionDerivedCostLines).where(eq(compositionDerivedCostLines.compositionId, sourceId)),
+  ]);
+  if (labourLines.length) await db.insert(compositionLabourLines).values(labourLines.map((line) => ({ compositionId: targetId, labourCategoryId: line.labourCategoryId, qtyPerUnit: line.qtyPerUnit, notes: line.notes })));
+  if (materialLines.length) await db.insert(compositionMaterialLines).values(materialLines.map((line) => ({ compositionId: targetId, materialId: line.materialId, qtyPerUnit: line.qtyPerUnit, wastePct: line.wastePct, notes: line.notes })));
+  if (equipmentLines.length) await db.insert(compositionEquipmentLines).values(equipmentLines.map((line) => ({ compositionId: targetId, equipmentId: line.equipmentId, qtyPerUnit: line.qtyPerUnit, notes: line.notes })));
+  if (subcompositionLines.length) await db.insert(compositionSubcompositionLines).values(subcompositionLines.map((line) => ({ compositionId: targetId, subcompositionId: line.subcompositionId, qtyPerUnit: line.qtyPerUnit, notes: line.notes })));
+  if (derivedLines.length) await db.insert(compositionDerivedCostLines).values(derivedLines.map((line) => ({ compositionId: targetId, name: line.name, basis: line.basis, percentage: line.percentage, notes: line.notes })));
+}
+
+export async function forkCompositionToUser(sourceId: string, companyId: string, ownerUserId: string) {
+  const [source] = await db.select().from(costCompositions).where(eq(costCompositions.id, sourceId)).limit(1);
+  if (!source) return null;
+  const [copy] = await db.insert(costCompositions).values({
+    companyId,
+    ownerUserId,
+    visibility: "private",
+    parentCompositionId: source.id,
+    code: source.code,
+    name: source.name,
+    category: source.category,
+    description: source.description,
+    measurementCriteria: source.measurementCriteria,
+    executionNotes: source.executionNotes,
+    outputUnit: source.outputUnit,
+    currency: source.currency,
+    auxiliaryCostPct: source.auxiliaryCostPct,
+    indirectCostPct: source.indirectCostPct,
+    profitMarginPct: source.profitMarginPct,
+    version: 1,
+    sourceName: source.sourceName,
+    sourceReference: source.sourceReference,
+    isActive: source.isActive,
+    crewSize: source.crewSize,
+    productiveHoursPerDay: source.productiveHoursPerDay,
+    outputPerDay: source.outputPerDay,
+    productivitySource: source.productivitySource,
+    productivityNotes: source.productivityNotes,
+    defaultMeasurementFormula: source.defaultMeasurementFormula,
+  }).returning();
+  await copyCompositionLines(sourceId, copy.id);
   return copy;
 }

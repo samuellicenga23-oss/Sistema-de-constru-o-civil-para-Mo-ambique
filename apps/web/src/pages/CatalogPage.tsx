@@ -38,6 +38,7 @@ export default function CatalogPage() {
   const [materials, setMaterials] = useState<Material[]>([]);
   const [compositions, setCompositions] = useState<CostComposition[]>([]);
   const [chapterCount, setChapterCount] = useState(0);
+  const [compositionScope, setCompositionScope] = useState<"mine" | "company" | "shared" | "sigo">("mine");
   const [compositionQuery, setCompositionQuery] = useState("");
   const [labourQuery, setLabourQuery] = useState("");
   const [materialQuery, setMaterialQuery] = useState("");
@@ -67,7 +68,7 @@ export default function CatalogPage() {
     const [lc, m, c] = await Promise.all([
       catalogApi.listLabourCategories(),
       catalogApi.listMaterials(),
-      catalogApi.listCompositions(),
+      catalogApi.listCompositions(undefined, compositionScope),
     ]);
     setLabourCategories(lc);
     setMaterials(m);
@@ -77,7 +78,7 @@ export default function CatalogPage() {
 
   useEffect(() => {
     reload().catch((err) => { setError(err.message); setLoading(false); });
-  }, []);
+  }, [compositionScope]);
 
   const categories = useMemo(() => Array.from(new Set(compositions.map((c) => c.category))).sort(), [compositions]);
 
@@ -202,6 +203,23 @@ export default function CatalogPage() {
         {tab === "composicoes" && (
           <section className="card overflow-hidden">
             <div className="px-5 py-4 border-b border-slate-200 space-y-3 bg-slate-50/60">
+              <div className="flex flex-wrap gap-1">
+                {([
+                  ["mine", "Minhas"],
+                  ["company", "Empresa"],
+                  ["shared", "Partilhadas"],
+                  ["sigo", "SIGO"],
+                ] as const).map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setCompositionScope(id)}
+                    className={`btn btn-sm ${compositionScope === id ? "btn-primary" : "btn-secondary"}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
               <div className="flex flex-wrap items-center gap-3 justify-between">
                 <input
                   type="search"

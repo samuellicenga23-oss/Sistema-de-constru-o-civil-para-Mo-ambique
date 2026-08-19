@@ -12,7 +12,7 @@ export async function truncateAll() {
   await sql`TRUNCATE TABLE
     sessions, users, subscriptions, companies,
     materials, labour_categories, equipment, price_zones, material_zone_prices,
-    cost_compositions, composition_labour_lines, composition_material_lines, composition_equipment_lines,
+    cost_compositions, composition_shares, composition_labour_lines, composition_material_lines, composition_equipment_lines,
     work_item_templates,
     projects, budget_documents, budget_sections, line_items, measurement_lines,
     measurement_certificates, measurement_certificate_lines,

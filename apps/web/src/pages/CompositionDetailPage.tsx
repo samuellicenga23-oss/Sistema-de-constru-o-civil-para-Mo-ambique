@@ -1,12 +1,15 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { catalogApi, type CostCompositionDetail, type LabourCategory, type Material, type Equipment } from "../api/catalog";
 import Layout from "../components/Layout";
 import LoadingState from "../components/LoadingState";
 import AlertBanner from "../components/AlertBanner";
+import Modal from "../components/Modal";
 import { useConfirmDialog } from "../hooks/useConfirmDialog";
+import { useAuth } from "../auth/AuthContext";
 import { IconTrash, IconPlus, IconBack } from "../components/icons";
 import CompositionTechnicalV2Panel from "../components/CompositionTechnicalV2Panel";
+import { resolveSupplierLookupId } from "../utils/resourceIdentity";
 
 function money(value: string | number) {
   return Number(value).toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -22,30 +25,27 @@ function formatSupplierHint(summaries: Map<string, SupplierSummary>, refId: stri
 
 type ResourceTab = "materials" | "labour" | "equipment";
 
-// Resolve por NOME, nunca pelo id da linha: composições ainda não clonadas para esta empresa
-// apontam para o recurso GLOBAL, mas os preços de fornecedor ficam sempre ligados ao recurso da
-// PRÓPRIA empresa (clonado automaticamente ao editar) — o mesmo princípio já usado no `fallback`
-// de cada LineEditor para o custo do recurso.
-async function buildSupplierSummaryByRefId<TLine extends { refId: string; name: string }, TOption extends { id: string; name: string }>(
+async function buildSupplierSummaryByRefId<TLine extends { refId: string; familyKey?: string | null }, TOption extends { id: string; familyKey?: string | null }>(
   lines: TLine[],
   currentOptions: TOption[],
   fetchSuppliers: (id: string) => Promise<Array<{ supplierName: string; currency: string; unitCost?: string; hourlyCost?: string }>>
 ): Promise<Map<string, SupplierSummary>> {
-  const nameByRefId = new Map(lines.map((l) => [l.refId, l.name]));
-  const uniqueNames = Array.from(new Set(lines.map((l) => l.name)));
+  const uniqueLookups = Array.from(new Set(lines.map((line) => resolveSupplierLookupId(line, currentOptions))));
   const summaries = await Promise.all(
-    uniqueNames.map(async (name) => {
-      const lookupId = currentOptions.find((o) => o.name === name)?.id ?? lines.find((l) => l.name === name)?.refId;
-      if (!lookupId) return [name, null] as const;
+    uniqueLookups.map(async (lookupId) => {
       const rows = await fetchSuppliers(lookupId).catch(() => []);
-      if (rows.length === 0) return [name, null] as const;
+      if (rows.length === 0) return [lookupId, null] as const;
       const cost = (r: (typeof rows)[number]) => Number(r.unitCost ?? r.hourlyCost ?? 0);
       const cheapest = rows.reduce((min, r) => (cost(r) < cost(min) ? r : min), rows[0]);
-      return [name, { count: rows.length, cheapest: { supplierName: cheapest.supplierName, unitCost: cost(cheapest), currency: cheapest.currency } }] as const;
-    })
+      return [lookupId, { count: rows.length, cheapest: { supplierName: cheapest.supplierName, unitCost: cost(cheapest), currency: cheapest.currency } }] as const;
+    }),
   );
-  const summaryByName = new Map(summaries.filter(([, v]) => v !== null) as [string, SupplierSummary][]);
-  return new Map(Array.from(nameByRefId.entries()).flatMap(([refId, name]) => (summaryByName.has(name) ? [[refId, summaryByName.get(name)!]] : [])));
+  const summaryByLookup = new Map(summaries.filter(([, value]) => value !== null) as [string, SupplierSummary][]);
+  return new Map(lines.flatMap((line) => {
+    const lookupId = resolveSupplierLookupId(line, currentOptions);
+    const summary = summaryByLookup.get(lookupId);
+    return summary ? [[line.refId, summary] as const] : [];
+  }));
 }
 
 // Linha editável do editor: recurso escolhido + rendimento/consumo por unidade de saída.
@@ -233,6 +233,7 @@ function LineEditor({
 
 export default function CompositionDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const { confirm, dialog } = useConfirmDialog();
   const [detail, setDetail] = useState<CostCompositionDetail | null>(null);
@@ -257,6 +258,10 @@ export default function CompositionDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [showShare, setShowShare] = useState(false);
+  const [shareEmail, setShareEmail] = useState("");
+  const [sharePermission, setSharePermission] = useState<"view" | "edit">("view");
+  const [shares, setShares] = useState<Array<{ userId: string; permission: "view" | "edit"; email: string; name: string }>>([]);
   const [supplierSummaryByMaterial, setSupplierSummaryByMaterial] = useState<Map<string, SupplierSummary>>(new Map());
   const [supplierSummaryByLabour, setSupplierSummaryByLabour] = useState<Map<string, SupplierSummary>>(new Map());
   const [supplierSummaryByEquipment, setSupplierSummaryByEquipment] = useState<Map<string, SupplierSummary>>(new Map());
@@ -362,6 +367,43 @@ export default function CompositionDetailPage() {
     navigate("/catalogo");
   }
 
+  async function handleFork() {
+    if (!id) return;
+    setError(null);
+    try {
+      const copy = await catalogApi.forkComposition(id);
+      navigate(`/catalogo/composicoes/${copy.id}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao duplicar");
+    }
+  }
+
+  async function openShare() {
+    if (!id) return;
+    setError(null);
+    try {
+      const data = await catalogApi.listCompositionShares(id);
+      setShares(data.shares);
+      setShowShare(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao abrir partilha");
+    }
+  }
+
+  async function handleShare(e: FormEvent) {
+    e.preventDefault();
+    if (!id) return;
+    setError(null);
+    try {
+      await catalogApi.shareComposition(id, { email: shareEmail.trim(), permission: sharePermission });
+      setShareEmail("");
+      const data = await catalogApi.listCompositionShares(id);
+      setShares(data.shares);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao partilhar");
+    }
+  }
+
   if (!detail) {
     return <LoadingState fullScreen label="A carregar composição..." />;
   }
@@ -387,10 +429,14 @@ export default function CompositionDetailPage() {
   return (
     <Layout
       title={detail.name}
-      subtitle={`Composição de custo · ${detail.category} · por ${detail.outputUnit}`}
+      subtitle={`${detail.visibility === "private" ? "Minha" : detail.visibility === "shared" ? "Partilhada" : detail.visibility === "global" ? "SIGO" : "Empresa"} · ${detail.category} · v${detail.version} · por ${detail.outputUnit}`}
       actions={
         <>
           <span className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold tabular-nums text-slate-900">{money(unitCost)} MZN/{detail.outputUnit}</span>
+          <button type="button" onClick={() => void handleFork()} className="btn btn-secondary btn-sm">Duplicar</button>
+          {detail.ownerUserId === user?.id && (
+            <button type="button" onClick={() => void openShare()} className="btn btn-secondary btn-sm">Partilhar</button>
+          )}
           <button onClick={handleSave} disabled={saving} className="btn btn-primary btn-sm">{saving ? "A guardar..." : "Guardar"}</button>
         </>
       }
@@ -446,6 +492,30 @@ export default function CompositionDetailPage() {
         </div>
 
       </div>
+      {showShare && (
+        <Modal title="Partilhar" onClose={() => setShowShare(false)}>
+          <form onSubmit={handleShare} className="space-y-3">
+            <input className="input" type="email" required placeholder="email" value={shareEmail} onChange={(e) => setShareEmail(e.target.value)} />
+            <select className="input" value={sharePermission} onChange={(e) => setSharePermission(e.target.value as "view" | "edit")}>
+              <option value="view">Ver</option>
+              <option value="edit">Editar</option>
+            </select>
+            <button type="submit" className="btn btn-primary w-full">Partilhar</button>
+          </form>
+          <ul className="mt-4 space-y-2 text-sm">
+            {shares.map((share) => (
+              <li key={share.userId} className="flex items-center justify-between gap-2">
+                <span>{share.name} · {share.permission === "edit" ? "Editar" : "Ver"}</span>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={async () => {
+                  if (!id) return;
+                  await catalogApi.revokeCompositionShare(id, share.userId);
+                  setShares((current) => current.filter((row) => row.userId !== share.userId));
+                }}>Revogar</button>
+              </li>
+            ))}
+          </ul>
+        </Modal>
+      )}
       {dialog}
     </Layout>
   );

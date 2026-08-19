@@ -3,6 +3,7 @@ import { request } from "./http";
 export type LabourCategory = {
   id: string;
   companyId: string | null;
+  familyKey?: string | null;
   code: string | null;
   name: string;
   monthlySalary: string;
@@ -21,6 +22,7 @@ export type LabourCategory = {
 export type Material = {
   id: string;
   companyId: string | null;
+  familyKey?: string | null;
   code: string | null;
   name: string;
   category: string;
@@ -60,6 +62,9 @@ export type Material = {
 export type CostComposition = {
   id: string;
   companyId: string | null;
+  ownerUserId?: string | null;
+  visibility?: "private" | "shared" | "company" | "global";
+  parentCompositionId?: string | null;
   code: string | null;
   name: string;
   category: string;
@@ -92,6 +97,7 @@ export type CostComposition = {
 export type CompositionLineDetail = {
   id: string;
   refId: string;
+  familyKey?: string | null;
   qtyPerUnit: string;
   wastePct?: string;
   notes?: string | null;
@@ -110,6 +116,7 @@ export type CostCompositionDetail = CostComposition & {
 export type Equipment = {
   id: string;
   companyId: string | null;
+  familyKey?: string | null;
   name: string;
   unit: string;
   hourlyCost: string;
@@ -259,13 +266,22 @@ export const catalogApi = {
   ) => request<Material>(`/catalog/materials/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteMaterial: (id: string) => request<{ ok: true }>(`/catalog/materials/${id}`, { method: "DELETE" }),
 
-  listCompositions: (zoneId?: string) => request<CostComposition[]>(`/catalog/compositions${zoneId ? `?zoneId=${zoneId}` : ""}`),
+  listCompositions: (zoneId?: string, scope?: string) =>
+    request<CostComposition[]>(`/catalog/compositions${zoneId || scope ? `?${new URLSearchParams({ ...(zoneId ? { zoneId } : {}), ...(scope ? { scope } : {}) }).toString()}` : ""}`),
   getComposition: (id: string, zoneId?: string) => request<CostCompositionDetail>(`/catalog/compositions/${id}${zoneId ? `?zoneId=${zoneId}` : ""}`),
   createComposition: (data: CompositionSaveInput) =>
     request<CostComposition>("/catalog/compositions", { method: "POST", body: JSON.stringify(data) }),
   updateComposition: (id: string, data: CompositionSaveInput) =>
     request<CostComposition>(`/catalog/compositions/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteComposition: (id: string) => request<{ ok: true }>(`/catalog/compositions/${id}`, { method: "DELETE" }),
+  forkComposition: (id: string) =>
+    request<CostComposition>(`/catalog/compositions/${id}/fork`, { method: "POST" }),
+  listCompositionShares: (id: string) =>
+    request<{ visibility: string; ownerUserId: string | null; shares: Array<{ id: string; userId: string; permission: "view" | "edit"; email: string; name: string }> }>(`/catalog/compositions/${id}/shares`),
+  shareComposition: (id: string, data: { email: string; permission: "view" | "edit" }) =>
+    request<unknown>(`/catalog/compositions/${id}/shares`, { method: "POST", body: JSON.stringify(data) }),
+  revokeCompositionShare: (id: string, userId: string) =>
+    request<{ ok: true }>(`/catalog/compositions/${id}/shares/${userId}`, { method: "DELETE" }),
   listEquipment: () => request<Equipment[]>("/catalog/equipment"),
 
   listPriceZones: () => request<PriceZone[]>("/catalog/price-zones"),

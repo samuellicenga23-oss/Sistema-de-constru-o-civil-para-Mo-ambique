@@ -74,13 +74,18 @@ export async function getZoneIdForSection(sectionId: string): Promise<string | n
 // se confiar num compositionId vindo do cliente para calcular/gravar um preço — sem isto, um
 // utilizador podia enviar o id de uma composição privada de OUTRA empresa e o servidor calculava
 // o custo a partir dos rendimentos/preços confidenciais dessa empresa (achado da auditoria).
-export async function assertCompositionVisible(compositionId: string, companyId: string) {
-  const [row] = await db
-    .select()
-    .from(costCompositions)
-    .where(and(eq(costCompositions.id, compositionId), or(isNull(costCompositions.companyId), eq(costCompositions.companyId, companyId))))
-    .limit(1);
-  return row ?? null;
+export async function assertCompositionVisible(compositionId: string, companyId: string, userId?: string | null) {
+  const [row] = await db.select().from(costCompositions).where(eq(costCompositions.id, compositionId)).limit(1);
+  if (!row) return null;
+  if (row.companyId == null) return row;
+  if (row.companyId !== companyId) return null;
+  if (row.visibility === "company") return row;
+  if (userId && row.ownerUserId === userId) return row;
+  if (row.visibility === "shared" && userId) {
+    const { getSharePermission } = await import("./compositionAccess.js");
+    if (await getSharePermission(compositionId, userId)) return row;
+  }
+  return null;
 }
 
 export async function assertLineItemOwned(lineItemId: string, companyId: string) {

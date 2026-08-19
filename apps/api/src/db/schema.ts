@@ -38,6 +38,8 @@ export const subscriptionStatusEnum = pgEnum("subscription_status", ["trial", "a
 export const plantDisciplineEnum = pgEnum("plant_discipline", ["arquitectura", "estrutura"]);
 export const plantStatusEnum = pgEnum("plant_status", ["pendente", "processando", "concluido", "erro"]);
 export const plantReviewStatusEnum = pgEnum("plant_review_status", ["aberto", "em_analise", "resolvido"]);
+export const compositionVisibilityEnum = pgEnum("composition_visibility", ["private", "shared", "company", "global"]);
+export const compositionSharePermissionEnum = pgEnum("composition_share_permission", ["view", "edit"]);
 export const plantReviewReasonEnum = pgEnum("plant_review_reason", ["erro_processamento", "extraccao_incompleta", "pedido_utilizador"]);
 
 // ---------- Multi-tenant / Auth ----------
@@ -366,9 +368,24 @@ export const costCompositions = pgTable("cost_compositions", {
   version: integer("version").notNull().default(1),
   sourceName: varchar("source_name", { length: 180 }),
   sourceReference: text("source_reference"),
+  ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "set null" }),
+  visibility: compositionVisibilityEnum("visibility").notNull().default("company"),
+  parentCompositionId: uuid("parent_composition_id").references((): AnyPgColumn => costCompositions.id, { onDelete: "set null" }),
   isActive: boolean("is_active").notNull().default(true),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
+
+export const compositionShares = pgTable("composition_shares", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  compositionId: uuid("composition_id").notNull().references(() => costCompositions.id, { onDelete: "cascade" }),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  permission: compositionSharePermissionEnum("permission").notNull().default("view"),
+  createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [
+  unique("composition_shares_pair_unique").on(table.compositionId, table.userId),
+  index("composition_shares_user_idx").on(table.userId),
+]);
 
 export const compositionLabourLines = pgTable("composition_labour_lines", {
   id: uuid("id").primaryKey().defaultRandom(),

@@ -889,7 +889,7 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
     const issues: Array<{ lineItemId: string; description: string; reason: string }> = [];
 
     for (const item of compositionItems) {
-      const composition = await assertCompositionVisible(item.compositionId, companyId);
+      const composition = await assertCompositionVisible(item.compositionId, companyId, request.currentUser!.id);
       if (!composition) {
         issues.push({ lineItemId: item.id, description: item.description, reason: "Composição indisponível" });
         continue;
@@ -1174,7 +1174,7 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
     if (data.compositionId) {
       // Confirma que a composição é visível a esta empresa (partilhada ou própria) antes de
       // confiar nela para calcular um preço — nunca aceitar cegamente um id vindo do cliente.
-      const composition = await assertCompositionVisible(data.compositionId, companyId);
+      const composition = await assertCompositionVisible(data.compositionId, companyId, request.currentUser!.id);
       if (!composition) return reply.code(400).send({ error: "Composição de custo não encontrada" });
       const zoneId = await getZoneIdForSection(id);
       const breakdown = await computeCompositionUnitCostV2(data.compositionId, companyId, zoneId);
@@ -1235,7 +1235,7 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
     let unitPrice = data.unitPrice;
     let origin: "manual" | "planta" | "composicao" | undefined;
     if (data.compositionId) {
-      const composition = await assertCompositionVisible(data.compositionId, companyId);
+      const composition = await assertCompositionVisible(data.compositionId, companyId, request.currentUser!.id);
       if (!composition) return reply.code(400).send({ error: "Composição de custo não encontrada" });
       const zoneId = await getZoneIdForSection(existing.sectionId);
       const breakdown = await computeCompositionUnitCostV2(data.compositionId, companyId, zoneId);

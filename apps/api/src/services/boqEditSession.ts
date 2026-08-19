@@ -88,7 +88,7 @@ export async function applyBoqEditSession(input: {
         let unitPrice = fields.unitPrice;
         let origin: "manual" | "planta" | "composicao" | undefined;
         if (fields.compositionId) {
-          const composition = await assertCompositionVisible(fields.compositionId, input.companyId);
+          const composition = await assertCompositionVisible(fields.compositionId, input.companyId, input.actorUserId);
           if (!composition) throw new BoqEditValidationError("Composição de custo não encontrada");
           const zoneId = await getZoneIdForSection(existing.sectionId);
           unitPrice = (await computeCompositionUnitCostV2(fields.compositionId, input.companyId, zoneId)).unitCost;
@@ -126,7 +126,7 @@ export async function applyBoqEditSession(input: {
         let unitPrice = operation.fields.unitPrice ?? null;
         let origin: "manual" | "composicao" = "manual";
         if (operation.fields.compositionId) {
-          const composition = await assertCompositionVisible(operation.fields.compositionId, input.companyId);
+          const composition = await assertCompositionVisible(operation.fields.compositionId, input.companyId, input.actorUserId);
           if (!composition) throw new BoqEditValidationError("Composição de custo não encontrada");
           const zoneId = await getZoneIdForSection(operation.sectionId);
           unitPrice = (await computeCompositionUnitCostV2(operation.fields.compositionId, input.companyId, zoneId)).unitCost;

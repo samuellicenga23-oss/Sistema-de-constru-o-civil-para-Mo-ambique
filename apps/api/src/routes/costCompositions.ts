@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
-import { eq, isNull, or, and, inArray } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import {
   costCompositions,
@@ -8,25 +8,30 @@ import {
   compositionEquipmentLines,
   compositionSubcompositionLines,
   compositionDerivedCostLines,
+  compositionShares,
   labourCategories,
   materials,
   equipment,
   materialZonePrices,
+  users,
 } from "../db/schema.js";
 import { requireRole } from "../auth/middleware.js";
 import { companyScope } from "../services/costEngine.js";
 import { computeCompositionUnitCostV2 } from "../services/costEngineV2.js";
 import { assertAcyclicCompositionGraph, resolveResourcesByIdentity } from "../services/compositionV2Engine.js";
-import { cloneCompositionForCompany } from "../services/catalogClone.js";
+import { cloneCompositionForCompany, forkCompositionToUser } from "../services/catalogClone.js";
 import { costCompositionInputSchema } from "@sigo/shared";
+import { z } from "zod";
+import { canEditComposition, compositionVisibleCondition, getVisibleComposition, listSharedCompositionIds, matchesCompositionScope, type CompositionActor } from "../services/compositionAccess.js";
+import { recordAuditEvent } from "../services/auditTrail.js";
 
 const CATALOG_ROLES = ["super_admin", "admin_empresa", "orcamentista"] as const;
 
-function scopeFilter(request: FastifyRequest) {
-  const { role, companyId } = request.currentUser!;
-  if (role === "super_admin") return isNull(costCompositions.companyId);
-  return or(isNull(costCompositions.companyId), eq(costCompositions.companyId, companyId!));
+function actorOf(request: FastifyRequest): CompositionActor {
+  const user = request.currentUser!;
+  return { id: user.id, role: user.role, companyId: user.companyId };
 }
+
 function targetCompanyId(request: FastifyRequest): string | null {
   const { role, companyId } = request.currentUser!;
   return role === "super_admin" ? null : companyId!;
@@ -90,17 +95,24 @@ export async function costCompositionRoutes(app: FastifyInstance) {
   const auth = { preHandler: requireRole(...CATALOG_ROLES) };
 
   app.get("/api/catalog/compositions", auth, async (request: FastifyRequest) => {
-    const { zoneId } = request.query as { zoneId?: string };
+    const { zoneId, scope } = request.query as { zoneId?: string; scope?: string };
     const companyId = request.currentUser!.companyId;
-    const rows = await db.select().from(costCompositions).where(scopeFilter(request));
-    const deduped = dedupeByName(rows).sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
-    return Promise.all(deduped.map(async (row) => ({ ...row, ...(await computeCompositionUnitCostV2(row.id, companyId, zoneId)) })));
+    const actor = actorOf(request);
+    const visible = await compositionVisibleCondition(actor);
+    const rows = await db.select().from(costCompositions).where(visible);
+    const sharedIds = new Set(await listSharedCompositionIds(actor.id));
+    const filtered = rows.filter((row) => matchesCompositionScope(row, scope, actor, sharedIds, row.id));
+    const personal = filtered.filter((row) => row.visibility === "private" || row.visibility === "shared");
+    const library = dedupeByName(filtered.filter((row) => row.companyId == null || row.visibility === "company"));
+    const catalog = scope === "mine" || scope === "shared" ? filtered : [...personal, ...library];
+    const sorted = catalog.sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
+    return Promise.all(sorted.map(async (row) => ({ ...row, ...(await computeCompositionUnitCostV2(row.id, companyId, zoneId)) })));
   });
 
   app.get("/api/catalog/compositions/:id", auth, async (request, reply) => {
     const { id } = request.params as { id: string };
     const { zoneId } = request.query as { zoneId?: string };
-    const [composition] = await db.select().from(costCompositions).where(and(eq(costCompositions.id, id), scopeFilter(request))).limit(1);
+    const composition = await getVisibleComposition(id, actorOf(request));
     if (!composition) return reply.code(404).send({ error: "Composição não encontrada" });
 
     const [labourLines, materialLines, equipmentLines, subcompositionRows, derivedCostLines, breakdown] = await Promise.all([
@@ -190,7 +202,18 @@ export async function costCompositionRoutes(app: FastifyInstance) {
     }
     try {
       const created = await db.transaction(async (tx) => {
-        const [composition] = await tx.insert(costCompositions).values({ ...data, companyId, auxiliaryCostPct: "0", indirectCostPct: "0", profitMarginPct: "0", crewSize: data.crewSize ?? null, productiveHoursPerDay: data.productiveHoursPerDay?.toString() ?? null, outputPerDay: data.outputPerDay?.toString() ?? null }).returning();
+        const [composition] = await tx.insert(costCompositions).values({
+          ...data,
+          companyId,
+          ownerUserId: request.currentUser!.id,
+          visibility: companyId ? "private" : "global",
+          auxiliaryCostPct: "0",
+          indirectCostPct: "0",
+          profitMarginPct: "0",
+          crewSize: data.crewSize ?? null,
+          productiveHoursPerDay: data.productiveHoursPerDay?.toString() ?? null,
+          outputPerDay: data.outputPerDay?.toString() ?? null,
+        }).returning();
         await validateSubcompositionGraph(composition.id, subcompositionLines);
         await replaceV2Lines(tx, composition.id, { labourLines, materialLines, equipmentLines, subcompositionLines, derivedCostLines });
         return composition;
@@ -205,9 +228,18 @@ export async function costCompositionRoutes(app: FastifyInstance) {
   app.put("/api/catalog/compositions/:id", auth, async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
     const companyId = targetCompanyId(request);
-    let [target] = await db.select().from(costCompositions).where(and(eq(costCompositions.id, id), companyId ? eq(costCompositions.companyId, companyId) : isNull(costCompositions.companyId))).limit(1);
-    if (!target && companyId) { const cloned = await cloneCompositionForCompany(id, companyId); if (!cloned) return reply.code(404).send({ error: "Composição não encontrada" }); target = cloned; }
+    const actor = actorOf(request);
+    let target = await getVisibleComposition(id, actor);
     if (!target) return reply.code(404).send({ error: "Composição não encontrada" });
+    if (!(await canEditComposition(target, actor))) {
+      if (target.companyId == null && companyId) {
+        const cloned = await cloneCompositionForCompany(id, companyId);
+        if (!cloned) return reply.code(404).send({ error: "Composição não encontrada" });
+        target = cloned;
+      } else {
+        return reply.code(403).send({ error: "Sem permissão para editar esta composição" });
+      }
+    }
     const parsed = costCompositionInputSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     const { labourLines, materialLines, equipmentLines, subcompositionLines, derivedCostLines, ...data } = parsed.data;
@@ -246,6 +278,16 @@ export async function costCompositionRoutes(app: FastifyInstance) {
       });
       const breakdown = await computeCompositionUnitCostV2(target.id, companyId);
       const [updated] = await db.select().from(costCompositions).where(eq(costCompositions.id, target.id)).limit(1);
+      if (companyId) {
+        await recordAuditEvent({
+          companyId,
+          actorUserId: actor.id,
+          entityType: "cost_composition",
+          entityId: target.id,
+          action: "version",
+          metadata: { version: updated?.version ?? target.version + 1 },
+        });
+      }
       return { ...updated, ...breakdown };
     } catch (cause) {
       return reply.code(409).send({ error: cause instanceof Error ? cause.message : "Não foi possível actualizar a composição" });
@@ -257,13 +299,18 @@ export async function costCompositionRoutes(app: FastifyInstance) {
   app.put("/api/catalog/compositions/:id/technical-v2", auth, async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
     const companyId = targetCompanyId(request);
-    let [target] = await db.select().from(costCompositions).where(and(eq(costCompositions.id, id), companyId ? eq(costCompositions.companyId, companyId) : isNull(costCompositions.companyId))).limit(1);
-    if (!target && companyId) {
-      const cloned = await cloneCompositionForCompany(id, companyId);
-      if (!cloned) return reply.code(404).send({ error: "Composição não encontrada" });
-      target = cloned;
-    }
+    const actor = actorOf(request);
+    let target = await getVisibleComposition(id, actor);
     if (!target) return reply.code(404).send({ error: "Composição não encontrada" });
+    if (!(await canEditComposition(target, actor))) {
+      if (target.companyId == null && companyId) {
+        const cloned = await cloneCompositionForCompany(id, companyId);
+        if (!cloned) return reply.code(404).send({ error: "Composição não encontrada" });
+        target = cloned;
+      } else {
+        return reply.code(403).send({ error: "Sem permissão para editar esta composição" });
+      }
+    }
     const parsed = technicalV2Schema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     try {
@@ -302,10 +349,85 @@ export async function costCompositionRoutes(app: FastifyInstance) {
 
   app.delete("/api/catalog/compositions/:id", auth, async (request, reply) => {
     const { id } = request.params as { id: string };
-    const companyId = targetCompanyId(request);
+    const actor = actorOf(request);
+    const target = await getVisibleComposition(id, actor);
+    if (!target) return reply.code(404).send({ error: "Composição não encontrada" });
+    if (!(await canEditComposition(target, actor))) return reply.code(403).send({ error: "Sem permissão para eliminar esta composição" });
     const usedAsSubcomposition = await db.select({ id: compositionSubcompositionLines.id }).from(compositionSubcompositionLines).where(eq(compositionSubcompositionLines.subcompositionId, id)).limit(1);
     if (usedAsSubcomposition.length) return reply.code(409).send({ error: "Esta composição é usada como subcomposição e não pode ser eliminada." });
-    await db.delete(costCompositions).where(and(eq(costCompositions.id, id), companyId ? eq(costCompositions.companyId, companyId) : isNull(costCompositions.companyId)));
+    await db.delete(costCompositions).where(eq(costCompositions.id, id));
+    return { ok: true };
+  });
+
+  app.post("/api/catalog/compositions/:id/fork", auth, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const actor = actorOf(request);
+    const companyId = targetCompanyId(request);
+    if (!companyId) return reply.code(400).send({ error: "Apenas empresas podem duplicar composições" });
+    const source = await getVisibleComposition(id, actor);
+    if (!source) return reply.code(404).send({ error: "Composição não encontrada" });
+    const { assertCustomCompositionSlot } = await import("../services/subscriptionEntitlements.js");
+    const block = await assertCustomCompositionSlot(companyId);
+    if (block) return reply.code(403).send({ error: block.error, code: block.code, upgradeHint: block.upgradeHint, actionPath: block.actionPath });
+    const copy = await forkCompositionToUser(id, companyId, actor.id);
+    if (!copy) return reply.code(404).send({ error: "Composição não encontrada" });
+    const breakdown = await computeCompositionUnitCostV2(copy.id, companyId);
+    return reply.code(201).send({ ...copy, ...breakdown });
+  });
+
+  app.get("/api/catalog/compositions/:id/shares", auth, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const actor = actorOf(request);
+    const composition = await getVisibleComposition(id, actor);
+    if (!composition) return reply.code(404).send({ error: "Composição não encontrada" });
+    if (composition.ownerUserId !== actor.id && actor.role !== "admin_empresa") return reply.code(403).send({ error: "Sem permissão para ver partilhas" });
+    const rows = await db
+      .select({
+        id: compositionShares.id,
+        userId: compositionShares.userId,
+        permission: compositionShares.permission,
+        email: users.email,
+        name: users.name,
+      })
+      .from(compositionShares)
+      .innerJoin(users, eq(compositionShares.userId, users.id))
+      .where(eq(compositionShares.compositionId, id));
+    return { visibility: composition.visibility, ownerUserId: composition.ownerUserId, shares: rows };
+  });
+
+  app.post("/api/catalog/compositions/:id/shares", auth, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const actor = actorOf(request);
+    const composition = await getVisibleComposition(id, actor);
+    if (!composition) return reply.code(404).send({ error: "Composição não encontrada" });
+    if (composition.ownerUserId !== actor.id) return reply.code(403).send({ error: "Só o dono pode partilhar" });
+    const parsed = z.object({ email: z.string().email(), permission: z.enum(["view", "edit"]) }).safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    const [colleague] = await db.select().from(users).where(and(eq(users.email, parsed.data.email.toLowerCase()), eq(users.companyId, actor.companyId!))).limit(1);
+    if (!colleague) return reply.code(404).send({ error: "Utilizador não encontrado nesta empresa" });
+    if (colleague.id === actor.id) return reply.code(400).send({ error: "Não é possível partilhar consigo próprio" });
+    await db.update(costCompositions).set({ visibility: "shared", updatedAt: new Date() }).where(eq(costCompositions.id, id));
+    const [share] = await db.insert(compositionShares).values({
+      compositionId: id,
+      userId: colleague.id,
+      permission: parsed.data.permission,
+      createdByUserId: actor.id,
+    }).onConflictDoUpdate({
+      target: [compositionShares.compositionId, compositionShares.userId],
+      set: { permission: parsed.data.permission },
+    }).returning();
+    return reply.code(201).send(share);
+  });
+
+  app.delete("/api/catalog/compositions/:id/shares/:userId", auth, async (request, reply) => {
+    const { id, userId } = request.params as { id: string; userId: string };
+    const actor = actorOf(request);
+    const composition = await getVisibleComposition(id, actor);
+    if (!composition) return reply.code(404).send({ error: "Composição não encontrada" });
+    if (composition.ownerUserId !== actor.id) return reply.code(403).send({ error: "Só o dono pode revogar partilha" });
+    await db.delete(compositionShares).where(and(eq(compositionShares.compositionId, id), eq(compositionShares.userId, userId)));
+    const remaining = await db.select({ id: compositionShares.id }).from(compositionShares).where(eq(compositionShares.compositionId, id)).limit(1);
+    if (!remaining.length) await db.update(costCompositions).set({ visibility: "private", updatedAt: new Date() }).where(eq(costCompositions.id, id));
     return { ok: true };
   });
 }
