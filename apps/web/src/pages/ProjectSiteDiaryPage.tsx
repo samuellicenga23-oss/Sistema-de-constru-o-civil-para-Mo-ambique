@@ -409,7 +409,8 @@ export default function ProjectSiteDiaryPage() {
                         {uploadingPhotoFor === entry.id ? "A carregar..." : "Adicionar foto"}
                         <input
                           type="file"
-                          accept="image/png,image/jpeg,image/webp,image/gif"
+                          accept="image/*"
+                          capture="environment"
                           className="hidden"
                           onChange={(e) => {
                             const file = e.target.files?.[0];

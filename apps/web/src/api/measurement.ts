@@ -34,6 +34,10 @@ export type MeasurementLine = {
   notes: string | null;
   overrunReason: string | null;
   hasOverrun: boolean;
+  measuredQty?: number;
+  proposedQty?: number | null;
+  certifiedQty?: number | null;
+  variationQty?: number;
   hasFieldMemory?: boolean;
   sectionId: string;
   sectionName: string;

@@ -9,6 +9,7 @@ import {
   measurementCertificates,
 } from "../db/schema.js";
 import { calculateBudgetTotals } from "./budgetTotals.js";
+import { certificateLineQuantities } from "./certificateQuantities.js";
 import { technicalDescription } from "./technicalDescriptions.js";
 
 async function getLeafItemIds(budgetDocumentId: string): Promise<string[]> {
@@ -186,20 +187,31 @@ export async function getCertificateDetail(certificateId: string) {
       const budgetedQty = line.budgetedQty === null ? null : Number(line.budgetedQty);
       const cumulativeQty = Number(line.cumulativeQty);
       const periodQty = Number(line.periodQty);
+      const previousQty = cumulativeQty - periodQty;
+      const quantities = certificateLineQuantities({
+        status: certificate.status,
+        periodQty,
+        previousQty,
+        budgetedQty,
+      });
       return {
         ...line,
         description: technicalDescription(line.description),
         unitPrice,
         budgetedQty,
         cumulativeQty,
-        previousQty: cumulativeQty - periodQty,
+        previousQty,
         periodQty,
         periodValue: periodQty * unitPrice,
         cumulativeValue: cumulativeQty * unitPrice,
         remainingQty: budgetedQty === null ? null : budgetedQty - cumulativeQty,
         percentExecuted: budgetedQty ? (cumulativeQty / budgetedQty) * 100 : null,
-        hasOverrun: budgetedQty !== null && cumulativeQty > budgetedQty + 0.0001,
+        hasOverrun: quantities.variationQty > 0.0001,
         hasFieldMemory: linesWithFieldMemory.has(line.id),
+        measuredQty: quantities.measuredQty,
+        proposedQty: quantities.proposedQty,
+        certifiedQty: quantities.certifiedQty,
+        variationQty: quantities.variationQty,
       };
     }),
   };

@@ -108,7 +108,7 @@ export default function MeasurementCertificateSimple(props: Props) {
                         <td className="py-3 text-right tabular-nums">{line.budgetedQty === null ? "—" : number(line.budgetedQty)}</td>
                         <td className="py-3 text-right tabular-nums text-slate-500">{number(line.previousQty)}</td>
                         <td className="py-2 text-right">{locked || line.hasFieldMemory ? <strong>{number(line.periodQty)}</strong> : <div className="ml-auto flex w-32 gap-1"><input className={`input h-9 text-right ${overrun ? "border-red-400" : ""}`} type="number" min="0" step="0.01" value={draft.periodQty} onChange={(event) => setDrafts((currentDrafts) => ({ ...currentDrafts, [line.id]: { ...draft, periodQty: event.target.value } }))} /><button type="button" title="Guardar" className="btn btn-primary h-9 px-2" disabled={savingLine === line.id} onClick={() => saveLine(line)}>✓</button></div>}</td>
-                        <td className="py-3 text-right tabular-nums"><strong>{number(locked ? line.cumulativeQty : total)}</strong>{line.budgetedQty !== null && <span className={`block text-[10px] ${overrun ? "text-red-700" : "text-slate-400"}`}>saldo {number(line.budgetedQty - (locked ? line.cumulativeQty : total))}</span>}</td>
+                        <td className="py-3 text-right tabular-nums"><strong>{number(locked ? line.cumulativeQty : total)}</strong>{line.budgetedQty !== null && <span className={`block text-[10px] ${overrun ? "text-red-700" : "text-slate-400"}`}>saldo {number(line.budgetedQty - (locked ? line.cumulativeQty : total))}</span>}{line.certifiedQty != null && <span className="block text-[10px] text-emerald-700">cert. {number(line.certifiedQty)}</span>}{(line.variationQty ?? 0) > 0 && <span className="block text-[10px] text-red-700">var. {number(line.variationQty ?? 0)}</span>}</td>
                         <td className="px-4 py-3 text-right font-semibold tabular-nums">{number((locked ? line.periodQty : current) * line.unitPrice)}</td>
                       </tr>;
                     })}</tbody>
@@ -129,13 +129,14 @@ export default function MeasurementCertificateSimple(props: Props) {
                   <div className="flex justify-between"><dt className="text-slate-400">Acumulado</dt><dd>{number(props.cumulativeTotal)}</dd></div>
                   <div className="flex justify-between"><dt className="text-slate-400">Saldo do contrato</dt><dd>{number(props.contractTotal - props.cumulativeTotal)}</dd></div>
                   <div className="flex justify-between"><dt className="text-slate-400">Itens medidos</dt><dd>{props.measuredItems}</dd></div>
-                  {props.overruns > 0 && <div className="flex justify-between text-red-300"><dt>Quantidades adicionais</dt><dd>{props.overruns}</dd></div>}
+                  {props.overruns > 0 && <div className="flex justify-between text-red-300"><dt>Variação fora do contrato</dt><dd>{props.overruns}</dd></div>}
+                  {certificate.status === "aprovado" && <div className="flex justify-between text-emerald-300"><dt>Certificado</dt><dd>Aprovado</dd></div>}
                 </dl>
                 <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-700"><div className="h-full bg-brand-500" style={{ width: `${Math.min(100, props.progress)}%` }} /></div>
                 <p className="mt-1 text-right text-xs text-slate-400">{props.progress.toFixed(2)}% executado</p>
               </div>
               <div className="border-t border-slate-700 bg-slate-900 p-4">
-                {certificate.status === "rascunho" && <button className="btn w-full bg-white text-slate-950" disabled={busy} onClick={() => changeStatus("submetido")}>Enviar para fiscalização</button>}
+                {certificate.status === "rascunho" && <button className="btn w-full bg-white text-slate-950" disabled={busy} onClick={() => changeStatus("submetido")}>Submeter</button>}
                 {certificate.status === "submetido" && <div className="grid grid-cols-2 gap-2"><button className="btn btn-secondary" disabled={busy} onClick={() => changeStatus("rascunho")}>Devolver</button><button className="btn bg-emerald-600 text-white" disabled={busy} onClick={() => changeStatus("aprovado")}>Aprovar</button></div>}
                 {certificate.status === "aprovado" && <div className="rounded-lg bg-emerald-900/50 px-3 py-2 text-center text-sm font-semibold text-emerald-200">Medição aprovada</div>}
               </div>
