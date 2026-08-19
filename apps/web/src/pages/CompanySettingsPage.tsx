@@ -169,7 +169,7 @@ export default function CompanySettingsPage() {
   const plan = getPlanDefinition(subscription?.plan ?? "free");
 
   return (
-    <Layout title="Empresa" subtitle="Identidade, parâmetros de cálculo e equipa">
+    <Layout title="Empresa">
       <div className="mx-auto w-full max-w-4xl space-y-5">
         {error && <AlertBanner tone="error" onDismiss={() => setError(null)}>{error}</AlertBanner>}
         {message && <AlertBanner tone="success" onDismiss={() => setMessage(null)}>{message}</AlertBanner>}

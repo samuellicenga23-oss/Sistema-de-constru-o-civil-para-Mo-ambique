@@ -520,7 +520,6 @@ export default function PracticeOfficePage() {
   return (
     <Layout
       title="Comercial"
-      subtitle="Clientes, propostas por fases, parcelas de honorários e documentos com marca da empresa"
       actions={
         canManage ? (
           <div className="flex flex-wrap gap-2">
@@ -1491,8 +1490,7 @@ export default function PracticeOfficePage() {
         >
           <form className="space-y-4" onSubmit={saveLinkProject}>
             <p className="text-xs text-slate-500">
-              Isto liga uma <strong>obra de execução</strong> no SIGO. O projecto de serviços (Arquitectura, Fiscalização, etc.)
-              define-se em «Equipa &amp; margem» — são conceitos distintos.
+              Obra de execução. A equipa de serviços define-se em «Equipa &amp; margem».
             </p>
             <div>
               <label className="label">Projecto / obra existente</label>

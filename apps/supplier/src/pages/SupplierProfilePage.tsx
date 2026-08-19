@@ -107,9 +107,7 @@ export default function SupplierProfilePage() {
           <div className="hero-panel-content">
             <p className="hero-eyebrow">Conta e marketplace</p>
             <h1 className="hero-title">O seu perfil</h1>
-            <p className="hero-subtitle">
-              Estes dados aparecem às empresas de construção quando pesquisam fornecedores na sua zona.
-            </p>
+            <p className="hero-subtitle">Ficha visível às empresas da sua zona.</p>
           </div>
         </section>
 

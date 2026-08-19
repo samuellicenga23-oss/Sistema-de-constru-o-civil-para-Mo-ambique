@@ -896,7 +896,6 @@ export default function BudgetDocumentPage() {
           <section className="card overflow-hidden">
             <SectionHeader
               title="Especificações técnicas"
-              description="Materiais e acabamentos definidos nas especificações do projecto — aplicados automaticamente aos itens do orçamento (sanitários, revestimentos, pinturas, etc.)"
               actions={
                 <button type="button" onClick={handleApplySpecifications} disabled={applyingSpecs} className="btn btn-secondary btn-sm">
                   {applyingSpecs ? "A aplicar..." : "Actualizar no mapa"}
@@ -919,9 +918,7 @@ export default function BudgetDocumentPage() {
                   ))}
                 </ul>
               ) : (
-                <p className="text-sm text-slate-500">
-                  Ainda não há materiais especificados no projecto. Adicione na ficha do projecto (ex: tipo de sanita, acabamento de pavimento, cor de tinta) — o SIGO associa automaticamente aos capítulos 6, 7 e 11 do mapa.
-                </p>
+                <p className="text-sm text-slate-500">Sem especificações no projecto.</p>
               )}
               {materialSpecs.length > 8 && <p className="mt-2 text-xs text-slate-400">+ {materialSpecs.length - 8} materiais — ver ficha completa no projecto</p>}
             </div>
@@ -989,8 +986,8 @@ export default function BudgetDocumentPage() {
                   </span>
                   <div className="min-w-0">
                     <h2 className="text-sm font-semibold text-slate-900">Importar medições</h2>
-                    <p className="mt-1 max-w-2xl text-xs leading-relaxed text-slate-500">
-                      Actualize quantidades ou crie itens a partir de Excel/PDF — colunas Item/Código e Quant. (Descrição e Un. opcionais).
+                    <p className="mt-1 max-w-2xl text-xs text-slate-500">
+                      Excel/PDF — colunas Item/Código e Quant.
                     </p>
                   </div>
                 </div>
@@ -1042,8 +1039,8 @@ export default function BudgetDocumentPage() {
                   </h2>
                   <p className="mt-1 max-w-2xl text-xs leading-relaxed text-slate-500">
                     {compositionLinkedCount > 0
-                      ? "Actualize os preços depois de alterar cotações ou a zona da obra. Quantidades e preços manuais não mudam."
-                      : "Este mapa usa preços próprios; o SIGO preserva os valores recebidos."}
+                      ? "Quantidades e preços manuais não mudam."
+                      : "Preços próprios — valores recebidos preservados."}
                   </p>
                   <p className="mt-2 text-xs font-medium text-slate-700">
                     {compositionLinkedCount > 0
@@ -1095,8 +1092,8 @@ export default function BudgetDocumentPage() {
                 <h2 className="text-sm font-semibold text-amber-950">
                   {unpricedItems.length} item(ns) sem preço — precisa de atenção
                 </h2>
-                <p className="mt-1 text-xs leading-relaxed text-amber-800">
-                  Cada linha abaixo está destacada a amarelo no mapa. Ligue ao catálogo (composição) ou preencha o preço unitário manualmente antes de submeter.
+                <p className="mt-1 text-xs text-amber-800">
+                  Ligue ao catálogo ou preencha o preço unitário antes de submeter.
                 </p>
               </div>
               <ul className="divide-y divide-amber-100">
@@ -1214,11 +1211,10 @@ export default function BudgetDocumentPage() {
               <div className="px-3 py-2 overflow-x-auto">
                 {section.items.length === 0 ? (
                   <div className="py-8 text-center">
-                    <p className="text-sm font-medium text-slate-700">Comece pelos trabalhos desta medição</p>
-                    <p className="mt-1 text-xs text-slate-500">Escolha o âmbito no assistente ou crie um capítulo livre.</p>
+                    <p className="text-sm font-medium text-slate-700">Sem itens</p>
                     {!isReadOnly && <div className="mt-4 flex flex-wrap justify-center gap-2">
-                      {isMeasurementDocument && <button type="button" onClick={() => setShowWizard(true)} className="btn btn-primary btn-sm"><IconRuler className="h-3.5 w-3.5" />Escolher trabalhos</button>}
-                      <button type="button" onClick={() => setAddingIn(section.id)} className="btn btn-secondary btn-sm"><IconPlus className="h-3.5 w-3.5" />Criar manualmente</button>
+                      {isMeasurementDocument && <button type="button" onClick={() => setShowWizard(true)} className="btn btn-primary btn-sm"><IconRuler className="h-3.5 w-3.5" />Assistente</button>}
+                      <button type="button" onClick={() => setAddingIn(section.id)} className="btn btn-secondary btn-sm"><IconPlus className="h-3.5 w-3.5" />Adicionar</button>
                     </div>}
                   </div>
                 ) : (
@@ -1276,10 +1272,9 @@ export default function BudgetDocumentPage() {
           {!isReadOnly && <details className="card overflow-hidden">
             <summary className="cursor-pointer px-5 py-4 hover:bg-slate-50">
               <span className="text-sm font-semibold text-slate-900">Opções manuais e importações</span>
-              <span className="ml-2 text-xs font-normal text-slate-500">Adicionar secções ou usar medições já preparadas em Excel</span>
             </summary>
           <section className="border-t border-slate-200">
-            <SectionHeader title="Estrutura do orçamento" description="Adicione uma nova secção, edifício ou área da obra" />
+            <SectionHeader title="Estrutura do orçamento" />
             <form onSubmit={handleAddSection} className="flex gap-2 items-end p-5">
               <input
                 required
@@ -1296,10 +1291,7 @@ export default function BudgetDocumentPage() {
           </section>
 
           <section className="border-t border-slate-200">
-            <SectionHeader
-              title="Importar medições"
-              description="Actualize quantidades ou crie itens a partir de Excel/PDF. Depois do upload, reveja o mapeamento antes de aplicar."
-            />
+            <SectionHeader title="Importar medições" />
             <div className="px-4 py-4 sm:px-5">
               <form onSubmit={handleImportMeasurements} className="flex flex-col gap-3 sm:flex-row sm:items-end">
                 <div className="min-w-0 flex-1">
@@ -1458,7 +1450,7 @@ export default function BudgetDocumentPage() {
       {showRepriceConfirm && (
         <ConfirmDialog
           title="Actualizar preços do orçamento?"
-          message="O SIGO recalculará apenas os itens ligados a composições, usando os preços adoptados para a zona actual da obra. Quantidades e preços manuais permanecem iguais."
+          message="Recalcula só os itens ligados a composições, com os preços da zona actual. Quantidades e preços manuais permanecem iguais."
           confirmLabel="Actualizar preços"
           busy={repricing}
           onConfirm={handleReprice}

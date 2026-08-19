@@ -629,7 +629,7 @@ export default function ProjectDetailPage() {
         {/* Levantamentos técnicos */}
         {showMedicao && (
         <section className="card order-3">
-          <SectionHeader title="Levantamentos" description="Quantidades e origem dos dados, sem preços" actions={<IconRuler className="w-4 h-4 text-blue-700" />} />
+          <SectionHeader title="Levantamentos" actions={<IconRuler className="w-4 h-4 text-blue-700" />} />
           <ul>
             {measurementDocuments.map((d) => (
               <li key={d.id} className="table-row group">
@@ -643,7 +643,7 @@ export default function ProjectDetailPage() {
                 </Link>
               </li>
             ))}
-            {measurementDocuments.length === 0 && <li className="px-5 py-4 text-sm text-gray-400">Sem levantamento. Prepare um a partir das plantas ou manualmente.</li>}
+            {measurementDocuments.length === 0 && <li className="px-5 py-4 text-sm text-gray-400">Sem levantamento.</li>}
           </ul>
         </section>
         )}
@@ -651,7 +651,7 @@ export default function ProjectDetailPage() {
         {/* Orçamentos */}
         {showOrcamento && (
         <section className="card order-3">
-          <SectionHeader title="Orçamentos" description="Cenários comerciais a partir das medições — sem repetir quantidades" actions={<IconDoc className="w-4 h-4 text-blue-700" />} />
+          <SectionHeader title="Orçamentos" actions={<IconDoc className="w-4 h-4 text-blue-700" />} />
           <ul>
             {budgetDocuments.map((d) => {
               const sourceMeasurement = d.sourceMeasurementDocumentId
@@ -715,7 +715,7 @@ export default function ProjectDetailPage() {
         {/* Plantas */}
         {showPlantas && (
         <section id="plantas-do-projecto" className="card order-4 scroll-mt-24">
-          <SectionHeader title="Projectos e desenhos" description="Carregue arquitectura, estrutura ou outras disciplinas disponíveis" actions={<IconMap className="w-4 h-4 text-blue-700" />} />
+          <SectionHeader title="Projectos e desenhos" actions={<IconMap className="w-4 h-4 text-blue-700" />} />
           <ul>
             {plants.map((p) => (
               <li key={p.id} className="table-row group">
@@ -786,7 +786,7 @@ export default function ProjectDetailPage() {
             ))}
             {plants.length === 0 && (
               <li className="px-5 py-4 text-sm text-gray-400">
-                Carregue um projecto completo ou ficheiros separados. O SIGO identifica as disciplinas e organiza as páginas automaticamente antes do diagnóstico.
+                Sem PDFs.
               </li>
             )}
           </ul>
@@ -801,7 +801,6 @@ export default function ProjectDetailPage() {
             <div className="min-w-0">
               <label className="label">Ficheiro PDF</label>
               <input type="file" name="plantFile" accept="application/pdf" required className="input py-1.5 file:mr-3 file:rounded-md file:border-0 file:bg-brand-100 file:text-brand-800 file:px-2.5 file:py-1 file:text-xs file:font-medium" />
-              <p className="mt-1 text-[11px] text-slate-500">Arquitectura, estrutura ou projecto completo — o SIGO detecta automaticamente.</p>
             </div>
             <button type="submit" disabled={uploading} className="btn btn-primary w-full sm:w-auto">
               <IconUpload className="w-4 h-4" />
@@ -816,7 +815,6 @@ export default function ProjectDetailPage() {
         <section id="certificados-obra" className="card order-8 xl:col-span-2 scroll-mt-24">
           <SectionHeader
             title="Autos de medição"
-            description="Registe o trabalho executado em cada período"
             actions={<IconClipboard className="w-4 h-4 text-blue-700" />}
           />
           {approvedBudgetDocuments.length === 0 ? (

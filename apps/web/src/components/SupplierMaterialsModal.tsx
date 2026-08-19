@@ -61,15 +61,11 @@ export default function SupplierMaterialsModal({ supplier, onClose }: { supplier
   return (
     <Modal
       title={supplier.name}
-      subtitle="Livro de preços (consulta). Criar ou alterar preços e produtos só é permitido no Portal do Fornecedor."
+      subtitle="Consulta — alterações no Portal do Fornecedor"
       onClose={onClose}
       maxWidth="max-w-4xl"
     >
       {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
-
-      <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs leading-relaxed text-slate-700">
-        No SIGO pode ver estes preços e pedir confirmação de preço e disponibilidade, indicando as quantidades. O fornecedor actualiza o seu catálogo directamente no portal.
-      </div>
 
       <div className="workspace-tabs mb-5">
         {TABS.filter((t) => !supplier.isReference || t.id === "materiais").map((t) => (

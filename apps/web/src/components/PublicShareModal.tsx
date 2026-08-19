@@ -106,11 +106,11 @@ export default function PublicShareModal({ projectId, onClose }: { projectId: st
   }
 
   return (
-    <Modal title="Partilhar com o dono da obra" subtitle="Link público sem login — escolhe o que o dono vê" onClose={onClose}>
+    <Modal title="Partilhar com o dono da obra" subtitle="Link público sem login" onClose={onClose}>
       <div className="space-y-4">
         {error && <AlertBanner tone="error">{error}</AlertBanner>}
         <p className="text-sm text-slate-600">
-          Nunca mostra custos internos nem composições. Os valores são certificados / de contrato com o dono.
+          Não mostra custos internos nem composições.
         </p>
 
         {status?.enabled && url ? (

@@ -575,7 +575,7 @@ export default function QuickCalcPage() {
   }
 
   return (
-    <Layout title="Cálculos Rápidos" subtitle="Calculadoras avulsas para a obra — sem ligação a nenhum projecto, com exportação directa a PDF">
+    <Layout title="Cálculos Rápidos">
       <div className="space-y-5 max-w-3xl">
         {error && <p className="text-sm text-red-600">{error}</p>}
 

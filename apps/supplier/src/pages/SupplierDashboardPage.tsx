@@ -177,10 +177,10 @@ export default function SupplierDashboardPage() {
     const hasPrices = pricedCount > 0;
     const inboxClear = pending.length === 0 && pendingRfqs === 0;
     return [
-      { id: "perfil", done: hasZone, label: "Completar ficha e zona", href: "/perfil", hint: "As empresas filtram por região" },
-      { id: "oferta", done: hasOffer, label: "Definir o que vende", href: "/oferta", hint: "Materiais, mão-de-obra ou máquinas" },
-      { id: "precos", done: hasPrices, label: "Publicar pelo menos um preço", href: "/precos", hint: catalogCount ? `${pricedCount}/${catalogCount} com preço` : "Actualize o catálogo" },
-      { id: "pedidos", done: inboxClear, label: pendingTotal ? `Responder ${pendingTotal} pedido(s)` : "Caixa de pedidos em dia", href: "/oportunidades", hint: "Respostas rápidas fecham mais negócios" },
+      { id: "perfil", done: hasZone, label: "Completar ficha e zona", href: "/perfil", hint: profile?.location ?? "" },
+      { id: "oferta", done: hasOffer, label: "Definir o que vende", href: "/oferta", hint: "" },
+      { id: "precos", done: hasPrices, label: "Publicar pelo menos um preço", href: "/precos", hint: catalogCount ? `${pricedCount}/${catalogCount} com preço` : "" },
+      { id: "pedidos", done: inboxClear, label: pendingTotal ? `Responder ${pendingTotal} pedido(s)` : "Caixa de pedidos em dia", href: "/oportunidades", hint: "" },
     ];
   }, [profile, pricedCount, catalogCount, pending, pendingRfqs, pendingTotal]);
 
@@ -203,8 +203,8 @@ export default function SupplierDashboardPage() {
             <h1 className="hero-title">Olá, {account.name.split(" ")[0]}</h1>
             <p className="hero-subtitle">
               {pendingTotal > 0
-                ? `Tem ${pendingTotal} pedido${pendingTotal === 1 ? "" : "s"} de cotação à espera.`
-                : "Sem pedidos pendentes. Mantenha o catálogo e os preços actualizados."}
+                ? `${pendingTotal} pedido${pendingTotal === 1 ? "" : "s"} por responder.`
+                : "Sem pedidos pendentes."}
             </p>
             {profile?.location && (
               <p className="hero-meta">
@@ -271,8 +271,7 @@ export default function SupplierDashboardPage() {
         <div className="two-col fade-up delay-1">
           <section className="card overflow-hidden">
             <div className="card-header">
-              <h2>Como estar pronto ({checklistDone}/{checklist.length})</h2>
-              <p>Complete estes passos para receber mais pedidos</p>
+              <h2>Preparação ({checklistDone}/{checklist.length})</h2>
             </div>
             <div className="checklist">
               {checklist.map((item) => (
@@ -280,7 +279,7 @@ export default function SupplierDashboardPage() {
                   <span className="checklist-mark">{item.done ? <IconCheck size={13} /> : null}</span>
                   <div>
                     <strong>{item.label}</strong>
-                    <span>{item.hint}</span>
+                    {item.hint ? <span>{item.hint}</span> : null}
                   </div>
                   <IconArrowRight size={14} className="text-muted-sm" />
                 </Link>

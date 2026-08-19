@@ -112,7 +112,7 @@ export default function SchedulePlanningWizard(props: Props) {
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-blue-700">Novo cronograma</p>
             <h3 className="mt-1 text-lg font-semibold text-slate-950">Plano de execução da obra</h3>
-            <p className="mt-1 text-sm text-slate-500">Confirme os pisos e a sequência. O SIGO organiza o restante.</p>
+            <p className="mt-1 text-sm text-slate-500">Pisos e sequência.</p>
           </div>
           {props.onClose && <button type="button" className="btn btn-ghost btn-sm" onClick={props.onClose}>Fechar</button>}
         </div>

@@ -110,10 +110,7 @@ export default function SupplierOfferingsPage() {
           <div className="hero-panel-content">
             <p className="hero-eyebrow">A sua oferta</p>
             <h1 className="hero-title">O que vendo</h1>
-            <p className="hero-subtitle">
-              Escolha se vende materiais, fornece mão-de-obra ou aluga máquinas, e seleccione só os produtos da lista. O resto não aparece em Meus
-              preços. Se faltar um item, cadastre-o no sistema.
-            </p>
+            <p className="hero-subtitle">Materiais, mão-de-obra ou máquinas.</p>
           </div>
         </section>
 

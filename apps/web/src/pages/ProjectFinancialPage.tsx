@@ -261,7 +261,6 @@ export default function ProjectFinancialPage() {
     <>
     <Layout
       title={`Financeiro — ${project.name}`}
-      subtitle="Caixa da obra: compras, autos e pagamentos"
       actions={
         <Link to={`/projectos/${projectId}${searchParams.get("fase") === "gestao" ? "?fase=gestao" : ""}`} className="btn btn-ghost btn-sm">
           <IconBack className="w-3.5 h-3.5" />
@@ -272,7 +271,7 @@ export default function ProjectFinancialPage() {
       <div className="mx-auto w-full max-w-7xl space-y-5">
         <ProjectWorkspaceNav projectId={projectId!} />
         {error && <p className="text-sm text-red-600">{error}</p>}
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-blue-100 bg-blue-50/70 px-4 py-2.5 text-xs text-blue-900"><strong>Compras e autos sincronizados.</strong><span>Registe aqui apenas movimentos fora desses fluxos.</span></div>
+        <div className="flex"><span className="badge badge-green">Sincronizado</span></div>
 
         {/* Indicadores */}
         <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-7">
@@ -289,7 +288,6 @@ export default function ProjectFinancialPage() {
         <section className="card overflow-hidden">
           <SectionHeader
             title="Pagamentos do cliente"
-            description="Plano e parcelas que o dono da obra vê no link público — separado do caixa interno."
             actions={
               <button type="button" className="btn btn-primary btn-sm" onClick={() => setShowClientPayments(true)}>
                 Gerir pagamentos
@@ -373,13 +371,13 @@ export default function ProjectFinancialPage() {
         </section>}
 
         <section className="card overflow-hidden">
-          <SectionHeader title="Contrato e conta-corrente" description={contract ? `${contract.contractNumber} · ${contract.clientName}` : "Defina a referência comercial antes de emitir facturas."} actions={<button type="button" className="btn btn-secondary btn-sm" onClick={() => { setContractNumber(contract?.contractNumber ?? ""); setContractClient(contract?.clientName ?? project.client ?? ""); setContractAmount(contract?.originalAmount ?? ""); setShowContractForm(true); }}>{contract ? "Ver contrato" : "Criar contrato"}</button>} />
+          <SectionHeader title="Contrato e conta-corrente" description={contract ? `${contract.contractNumber} · ${contract.clientName}` : undefined} actions={<button type="button" className="btn btn-secondary btn-sm" onClick={() => { setContractNumber(contract?.contractNumber ?? ""); setContractClient(contract?.clientName ?? project.client ?? ""); setContractAmount(contract?.originalAmount ?? ""); setShowContractForm(true); }}>{contract ? "Ver contrato" : "Criar contrato"}</button>} />
           {statement ? <div className="grid gap-px bg-slate-100 sm:grid-cols-2 lg:grid-cols-5"><div className="bg-white px-5 py-3 text-sm"><span className="text-xs text-slate-500">Valor revisto</span><strong className="mt-1 block">{fmt(statement.contract.revisedAmount, statement.currency)}</strong></div><div className="bg-white px-5 py-3 text-sm"><span className="text-xs text-slate-500">Facturado</span><strong className="mt-1 block">{fmt(statement.totals.invoiced, statement.currency)}</strong></div><div className="bg-white px-5 py-3 text-sm"><span className="text-xs text-slate-500">Notas de crédito</span><strong className="mt-1 block text-red-600">−{fmt(statement.totals.credited, statement.currency)}</strong></div><div className="bg-white px-5 py-3 text-sm"><span className="text-xs text-slate-500">Recebido</span><strong className="mt-1 block text-green-700">{fmt(statement.totals.received, statement.currency)}</strong></div><div className="bg-white px-5 py-3 text-sm"><span className="text-xs text-slate-500">Por receber</span><strong className="mt-1 block text-amber-700">{fmt(statement.totals.outstanding, statement.currency)}</strong></div></div> : <p className="px-5 py-4 text-sm text-slate-500">Sem contrato configurado.</p>}
         </section>
-        {showContractForm && <Modal title="Contrato da obra" subtitle="O valor original fica protegido depois da activação; alterações seguem como adendas." onClose={() => !saving && setShowContractForm(false)} maxWidth="max-w-2xl"><form onSubmit={handleSaveContract} className="space-y-4"><div className="grid gap-3 sm:grid-cols-2"><div><label className="label">Número do contrato</label><input required className="input" value={contractNumber} onChange={(e) => setContractNumber(e.target.value)} /></div><div><label className="label">Cliente</label><input required className="input" value={contractClient} onChange={(e) => setContractClient(e.target.value)} /></div><div><label className="label">Valor original ({project.currency})</label><MoneyInput required className="input" value={contractAmount} onValueChange={setContractAmount} /></div></div><div className="flex justify-end gap-2"><button type="button" className="btn btn-secondary" onClick={() => setShowContractForm(false)}>Cancelar</button><button disabled={saving} className="btn btn-primary">Guardar contrato</button></div></form></Modal>}
+        {showContractForm && <Modal title="Contrato da obra" subtitle="O valor original fica protegido após activação; alterações seguem como adendas." onClose={() => !saving && setShowContractForm(false)} maxWidth="max-w-2xl"><form onSubmit={handleSaveContract} className="space-y-4"><div className="grid gap-3 sm:grid-cols-2"><div><label className="label">Número do contrato</label><input required className="input" value={contractNumber} onChange={(e) => setContractNumber(e.target.value)} /></div><div><label className="label">Cliente</label><input required className="input" value={contractClient} onChange={(e) => setContractClient(e.target.value)} /></div><div><label className="label">Valor original ({project.currency})</label><MoneyInput required className="input" value={contractAmount} onValueChange={setContractAmount} /></div></div><div className="flex justify-end gap-2"><button type="button" className="btn btn-secondary" onClick={() => setShowContractForm(false)}>Cancelar</button><button disabled={saving} className="btn btn-primary">Guardar contrato</button></div></form></Modal>}
 
         <section className="card overflow-hidden">
-          <SectionHeader title="Facturas e recebimentos" description="Autos aprovados geram facturas em rascunho; emita e registe recebimentos totais ou parciais." />
+          <SectionHeader title="Facturas e recebimentos" />
           {!invoices.length ? <p className="px-5 py-5 text-sm text-slate-500">Ainda não existem facturas. Aprove um Auto de Medição para preparar a primeira.</p> : <div className="divide-y divide-slate-100">{invoices.map((invoice) => (
             <article key={invoice.id} className="px-5 py-4">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -397,7 +395,7 @@ export default function ProjectFinancialPage() {
         {/* Fluxo de caixa mensal */}
         {summary.fluxoCaixaMensal.length > 0 && (
           <section className="card">
-            <SectionHeader title="Fluxo de caixa mensal" description="Receitas e despesas efectivamente pagas por mês" />
+            <SectionHeader title="Fluxo de caixa mensal" />
             <div className="divide-y divide-slate-100 sm:hidden">{summary.fluxoCaixaMensal.map((m) => <div key={`mobile-${m.month}`} className="p-4"><div className="flex items-center justify-between"><strong className="text-sm text-slate-900">{m.month}</strong><strong className={`text-sm tabular-nums ${m.saldo >= 0 ? "text-green-700" : "text-red-600"}`}>{fmt(m.saldo, currency)}</strong></div><div className="mt-2 flex justify-between text-xs"><span className="text-green-700">Receitas {fmt(m.receitas, currency)}</span><span className="text-red-600">Despesas {fmt(m.despesas, currency)}</span></div></div>)}</div>
             <div className="hidden overflow-x-auto sm:block">
               <table className="w-full text-sm min-w-[480px]">
@@ -427,7 +425,7 @@ export default function ProjectFinancialPage() {
         )}
 
         {/* Novo lançamento */}
-        <section className="card overflow-hidden"><SectionHeader title="Movimentos manuais" description="Valores que não vêm de compras nem autos" actions={<button type="button" onClick={() => setShowForm(true)} className="btn btn-primary btn-sm"><IconPlus className="h-3.5 w-3.5" /> Novo lançamento</button>} /></section>
+        <section className="card overflow-hidden"><SectionHeader title="Movimentos manuais" actions={<button type="button" onClick={() => setShowForm(true)} className="btn btn-primary btn-sm"><IconPlus className="h-3.5 w-3.5" /> Novo lançamento</button>} /></section>
         {showForm && <Modal title="Novo lançamento financeiro" subtitle={`Receita ou despesa · ${project.name}`} onClose={() => !saving && setShowForm(false)} maxWidth="max-w-3xl"><form onSubmit={handleCreate} className="grid gap-4 sm:grid-cols-2">
             <div>
               <label className="label">Tipo</label>

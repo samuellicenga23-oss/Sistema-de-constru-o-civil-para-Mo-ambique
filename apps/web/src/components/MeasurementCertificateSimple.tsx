@@ -61,8 +61,7 @@ export default function MeasurementCertificateSimple(props: Props) {
 
         <section className="card flex flex-wrap items-center justify-between gap-4 p-4">
           <div>
-            <strong className="text-sm text-slate-950">Registe apenas o trabalho executado neste período</strong>
-            <p className="mt-1 text-xs text-slate-500">O acumulado, saldo e valor são calculados automaticamente.</p>
+            <strong className="text-sm text-slate-950">Este período</strong>
           </div>
           <div className="flex items-center gap-1 text-xs font-semibold">
             <span className={certificate.status === "rascunho" ? "badge badge-brand" : "badge badge-green"}>1 Medir</span>

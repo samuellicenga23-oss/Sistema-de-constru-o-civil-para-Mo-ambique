@@ -168,7 +168,7 @@ export default function CatalogPage() {
   }
 
   return (
-    <Layout title="Catálogo de Preços" subtitle="Recursos e preços usados nos orçamentos.">
+    <Layout title="Catálogo de Preços">
       <div className="mx-auto w-full max-w-7xl space-y-5">
         {error && <AlertBanner tone="error" onDismiss={() => setError(null)}>{error}</AlertBanner>}
         {message && <AlertBanner tone="success" onDismiss={() => setMessage(null)}>{message}</AlertBanner>}
@@ -211,7 +211,7 @@ export default function CatalogPage() {
                   className="input max-w-xs"
                 />
                 <button type="button" onClick={() => setShowCompositionForm(true)} className="btn btn-primary btn-sm"><IconPlus className="h-3.5 w-3.5" /> Nova composição</button>
-                {showCompositionForm && <Modal title="Nova composição" subtitle="Crie a ficha base e adicione os recursos no passo seguinte" onClose={() => setShowCompositionForm(false)}><form onSubmit={handleCreateComposition} className="space-y-4">
+                {showCompositionForm && <Modal title="Nova composição" onClose={() => setShowCompositionForm(false)}><form onSubmit={handleCreateComposition} className="space-y-4">
                   <div><label className="label">Nome do serviço</label>
                   <input
                     required

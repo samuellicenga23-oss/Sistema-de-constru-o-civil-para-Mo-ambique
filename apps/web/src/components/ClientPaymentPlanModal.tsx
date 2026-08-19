@@ -175,7 +175,7 @@ export default function ClientPaymentPlanModal({
     <>
       <Modal
         title="Gestão de pagamentos do cliente"
-        subtitle="Plano, parcelas e registo de pagamentos — o que o dono da obra vê no link público"
+        subtitle="Plano e parcelas visíveis no link público"
         onClose={() => !busy && onClose()}
         maxWidth="max-w-3xl"
       >

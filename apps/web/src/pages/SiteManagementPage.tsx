@@ -48,7 +48,7 @@ export default function SiteManagementPage() {
   const averageProgress = overview.length ? overview.reduce((sum, item) => sum + item.actualProgress, 0) / overview.length : 0;
 
   return (
-    <Layout title="Gestão de obras" subtitle="Acompanhe cada obra e entre directamente no trabalho necessário">
+    <Layout title="Gestão de obras">
       <div className="mx-auto w-full max-w-7xl space-y-5">
         <GestaoTabs />
         {error && <p className="text-sm text-red-600">{error}</p>}
@@ -68,7 +68,7 @@ export default function SiteManagementPage() {
             <EmptyState
               icon={<IconFolder className="h-8 w-8" />}
               title="Nenhuma obra em gestão"
-              description="As obras com orçamento aprovado aparecem aqui."
+              description="Sem obras com orçamento aprovado."
               action={<Link to="/orcamentos" className="btn btn-primary btn-sm">Ver orçamentos</Link>}
             />
           </div>

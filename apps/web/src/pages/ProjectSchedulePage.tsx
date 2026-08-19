@@ -217,7 +217,6 @@ export default function ProjectSchedulePage() {
   return (
     <Layout
       title={`Cronograma — ${project.name}`}
-      subtitle="Planeamento, dependências e progresso da obra"
       actions={
         <>
           <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-1">
@@ -288,7 +287,6 @@ export default function ProjectSchedulePage() {
               <div className="min-w-0">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-blue-700">Plano de execução</p>
                 <h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-950">Cronograma da obra</h2>
-                <p className="mt-1 max-w-2xl text-sm text-slate-500">Gantt e folha de actividades sincronizados.</p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <button type="button" className="btn btn-secondary btn-sm" onClick={() => setSetupOpen((v) => !v)}>

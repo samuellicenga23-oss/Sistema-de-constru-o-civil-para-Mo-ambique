@@ -366,7 +366,6 @@ export default function WorkChapterLibrary({
       {draft && (
         <Modal
           title={draft.originalCode ? "Editar capítulo" : "Novo capítulo"}
-          subtitle="Ligue cada item a uma composição para o custo unitário entrar nas medições e orçamentos"
           onClose={() => setDraft(null)}
         >
           <form onSubmit={save} className="space-y-4">
@@ -517,7 +516,6 @@ export default function WorkChapterLibrary({
       {quick && (
         <Modal
           title="Composição rápida"
-          subtitle="Defina rendimentos principais e ligue o custo unitário ao item do capítulo"
           onClose={() => setQuick(null)}
         >
           <form onSubmit={saveQuickComposition} className="space-y-4">

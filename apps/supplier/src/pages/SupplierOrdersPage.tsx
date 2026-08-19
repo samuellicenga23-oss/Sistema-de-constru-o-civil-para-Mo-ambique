@@ -51,7 +51,7 @@ export default function SupplierOrdersPage() {
           <div className="hero-panel-content">
             <p className="hero-eyebrow">Execução comercial</p>
             <h1 className="hero-title">Ordens de Compra</h1>
-            <p className="hero-subtitle">Confirme encomendas, prepare cargas e comunique a expedição à obra.</p>
+            <p className="hero-subtitle">Confirmar, preparar e expedir.</p>
           </div>
         </section>
 

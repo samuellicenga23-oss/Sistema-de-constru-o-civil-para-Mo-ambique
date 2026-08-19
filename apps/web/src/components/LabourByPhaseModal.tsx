@@ -18,7 +18,7 @@ export default function LabourByPhaseModal({ certificateId, onClose }: { certifi
     measurementApi.labourByPhase(certificateId).then(setData).catch((cause) => setError(cause instanceof Error ? cause.message : "Erro ao calcular mão de obra"));
   }, [certificateId]);
 
-  return <Modal title="Mão de obra por fase" subtitle="Horas e custo derivados das composições dos trabalhos medidos" onClose={onClose} maxWidth="max-w-5xl">
+  return <Modal title="Mão de obra por fase" onClose={onClose} maxWidth="max-w-5xl">
     {error && <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
     {!error && !data && <p className="py-8 text-center text-sm text-slate-400">A calcular equipas e horas necessárias...</p>}
     {data && <div className="space-y-4">

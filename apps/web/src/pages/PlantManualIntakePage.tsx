@@ -158,14 +158,14 @@ function FamilyCard({
 }: {
   id: string;
   title: string;
-  subtitle: string;
+  subtitle?: string;
   children: ReactNode;
 }) {
   return (
     <section id={id} className="card scroll-mt-24 overflow-hidden">
       <div className="border-b border-slate-100 bg-slate-50 px-5 py-3">
         <h2 className="text-base font-semibold text-slate-950">{title}</h2>
-        <p className="mt-0.5 text-sm text-slate-600">{subtitle}</p>
+        {subtitle && <p className="mt-0.5 text-sm text-slate-600">{subtitle}</p>}
       </div>
       <div className="space-y-4 p-5">{children}</div>
     </section>
@@ -429,7 +429,6 @@ export default function PlantManualIntakePage() {
   return (
     <Layout
       title="Completar dados da planta"
-      subtitle="Um bloco por família estrutural — medidas e aço juntos, como no mapa de quantidades"
       actions={
         <div className="flex gap-2">
           <Link to={`/plantas/${plant.id}`} className="btn btn-ghost btn-sm">
@@ -454,14 +453,13 @@ export default function PlantManualIntakePage() {
             {" · "}Total {rebarPreview.totalSteelWeightKg.toFixed(2)} kg
           </p>
           <p className="mt-1 text-xs text-slate-500">
-            Valores editáveis abaixo por família. Total de trabalho: <strong className="tabular-nums text-slate-800">{steelTotalPreview.toFixed(2)} kg</strong>
+            Total de trabalho: <strong className="tabular-nums text-slate-800">{steelTotalPreview.toFixed(2)} kg</strong>
           </p>
         </div>
 
         <FamilyCard
           id="sapatas"
           title="1. Sapatas / fundações"
-          subtitle="Quantidade, medidas médias e kg de aço desta família"
         >
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="text-sm">
@@ -490,7 +488,6 @@ export default function PlantManualIntakePage() {
         <FamilyCard
           id="pilares"
           title="2. Pilares"
-          subtitle="Contagem e armadura longitudinal dos pilares"
         >
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="text-sm">
@@ -516,7 +513,6 @@ export default function PlantManualIntakePage() {
         <FamilyCard
           id="vigas"
           title="3. Vigas por laje"
-          subtitle="Cada grupo identifica as vigas da respectiva laje (nível) — qtd, comprimento, secção e aço"
         >
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-xs text-slate-500">
@@ -637,7 +633,6 @@ export default function PlantManualIntakePage() {
         <FamilyCard
           id="lajes"
           title="4. Lajes"
-          subtitle="Área, espessura e armadura superior/inferior — mesmo pop-up de gestão"
         >
           <div className="flex items-center justify-between gap-2">
             <p className="text-sm text-slate-600">
@@ -677,7 +672,6 @@ export default function PlantManualIntakePage() {
         <FamilyCard
           id="escadas"
           title="5. Escadas"
-          subtitle="Se existirem escadas no projecto estrutural — quantidade e aço separado do total"
         >
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="text-sm">
@@ -703,7 +697,6 @@ export default function PlantManualIntakePage() {
         <FamilyCard
           id="compartimentos"
           title="6. Compartimentos"
-          subtitle="Área para pavimentos; perímetro para paredes e acabamentos."
         >
           <div className="flex items-center justify-between gap-2">
             <p className="text-sm text-slate-500">{rooms.length} compartimento(s)</p>
@@ -744,7 +737,6 @@ export default function PlantManualIntakePage() {
         <FamilyCard
           id="notas"
           title="7. Notas de medição"
-          subtitle="O que o leitor não captou bem — fica no pedido de regularização"
         >
           <textarea
             className="input min-h-28"
@@ -755,9 +747,9 @@ export default function PlantManualIntakePage() {
         </FamilyCard>
 
         <section id="regularizacao" className="card scroll-mt-24 border-slate-200 bg-slate-50 p-5">
-          <h2 className="text-base font-semibold text-slate-950">Regularização do leitor (último passo)</h2>
-          <p className="mt-2 text-sm leading-relaxed text-slate-700">
-            A equipa SIGO já pode melhorar a análise desta planta (SLA até {slaHours}h). Isto é independente de guardar as suas medições.
+          <h2 className="text-base font-semibold text-slate-950">Regularização do leitor</h2>
+          <p className="mt-2 text-sm text-slate-700">
+            SLA {slaHours}h · independente de guardar as medições.
           </p>
           {gaps.length > 0 && (
             <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-slate-800">

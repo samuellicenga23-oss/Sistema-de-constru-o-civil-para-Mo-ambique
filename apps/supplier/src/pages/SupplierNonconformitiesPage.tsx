@@ -97,7 +97,7 @@ export default function SupplierNonconformitiesPage() {
           <div className="hero-panel-content">
             <p className="hero-eyebrow">Qualidade</p>
             <h1 className="hero-title">Não-conformidades</h1>
-            <p className="hero-subtitle">Materiais rejeitados pela obra, solução acordada e cadeia de devolução.</p>
+            <p className="hero-subtitle">Materiais rejeitados e devoluções.</p>
           </div>
         </section>
 

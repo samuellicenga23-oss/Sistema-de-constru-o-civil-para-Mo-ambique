@@ -862,7 +862,6 @@ export default function SuperAdminPage() {
   return (
     <Layout
       title={en ? "SIGO Control Center" : "Centro de Controlo SIGO"}
-      subtitle={en ? "Billing, usage, subscriptions and platform health" : "Facturação, uso, subscrições e estado da plataforma"}
       actions={
         <button type="button" onClick={() => setShowCreateCompany(true)} className="btn btn-primary btn-sm">
           <IconPlus className="h-4 w-4" />
@@ -1776,9 +1775,7 @@ export default function SuperAdminPage() {
           <>
             <section className="card p-4">
               <p className="text-sm text-slate-600">
-                {en
-                  ? "Create supplier portal accounts, reset passwords, and follow who is connected. Suppliers never see this panel."
-                  : "Crie contas do Portal do Fornecedor, redefina palavras-passe e acompanhe quem está ligado. Os fornecedores nunca vêem este painel."}
+                {en ? "Suppliers never see this panel." : "Os fornecedores nunca vêem este painel."}
               </p>
             </section>
 
@@ -1806,9 +1803,7 @@ export default function SuperAdminPage() {
             <section className="card p-4">
               <h2 className="section-title">{en ? "Create supplier account" : "Criar conta de fornecedor"}</h2>
               <p className="mt-0.5 text-xs text-slate-500">
-                {en
-                  ? "Creates the portal login and a national marketplace profile so the supplier can set prices immediately."
-                  : "Cria o login do portal e uma ficha no marketplace nacional para o fornecedor poder indicar preços de imediato."}
+                {en ? "Portal login and marketplace profile." : "Login do portal e ficha no marketplace."}
               </p>
               <form onSubmit={handleCreateSupplier} className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 <div>
@@ -2422,7 +2417,6 @@ export default function SuperAdminPage() {
       {showCreateCompany && (
         <Modal
           title={en ? "New company" : "Nova empresa"}
-          subtitle={en ? "Creates the company and its first administrator" : "Cria a empresa e o primeiro administrador"}
           onClose={() => setShowCreateCompany(false)}
           maxWidth="max-w-3xl"
         >

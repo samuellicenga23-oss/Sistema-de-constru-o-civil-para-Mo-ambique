@@ -132,10 +132,10 @@ export default function QuoteRequestModal({
       {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
       <form onSubmit={handleSubmit} className="space-y-4">
         {isMarketplace ? (
-          <div className="rounded-lg border border-teal-200 bg-teal-50/50 px-3 py-2.5 text-[12.5px] leading-relaxed text-teal-950">
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-[12.5px] text-slate-700">
             {supplierMaterials.length
-              ? `Este fornecedor tem ${supplierMaterials.length} material(is) no catálogo SIGO. Escolha a partir dessa lista para o pedido ficar ligado ao que ele vende.`
-              : "Este fornecedor ainda não publicou o que vende. Peça-lhe para completar o catálogo no portal, ou use itens da sua empresa com atenção."}
+              ? `${supplierMaterials.length} material(is) no catálogo.`
+              : "Sem catálogo publicado."}
           </div>
         ) : (
           <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-[12.5px] leading-relaxed text-slate-700">

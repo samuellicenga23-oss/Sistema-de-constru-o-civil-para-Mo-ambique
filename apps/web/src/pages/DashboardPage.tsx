@@ -116,7 +116,7 @@ export default function DashboardPage() {
   return (
     <Layout
       title={`${greeting}, ${user?.name?.split(" ")[0] ?? ""}`}
-      subtitle={`${todayLabel} · estado das obras e decisões pendentes`}
+      subtitle={todayLabel}
       actions={
         <Link to="/medicoes" className="btn btn-primary btn-sm">
           <IconPlus className="w-3.5 h-3.5" />
@@ -230,7 +230,7 @@ export default function DashboardPage() {
                   <h2 className="section-title mt-1 text-base">Certificados recentes</h2>
                 </div>
                 {data.recentCertificates.length === 0 ? (
-                  <EmptyState title="Ainda não há certificados de obra." description="Aprove um orçamento e registe o avanço físico por período." />
+                  <EmptyState title="Sem certificados." />
                 ) : (
                   <ul className="space-y-2">
                     {data.recentCertificates.map((c) => (
@@ -261,8 +261,7 @@ export default function DashboardPage() {
               </div>
               {data.projects.length === 0 ? (
                 <EmptyState
-                  title="Ainda não há projectos."
-                  description="Crie a primeira obra para começar a orçamentar."
+                  title="Sem projectos."
                   action={
                     <Link to="/medicoes" className="btn btn-primary">
                       <IconPlus className="w-4 h-4" />

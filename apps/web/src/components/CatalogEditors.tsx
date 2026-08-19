@@ -65,7 +65,7 @@ export function LabourEditor({
     * (1 + (numeric(form.socialChargesPct) + numeric(form.complementaryCostsPct)) / 100);
 
   return (
-    <Modal title={item ? "Ficha de mão-de-obra" : "Nova categoria de mão-de-obra"} subtitle="Salário, encargos, horas produtivas e vigência do custo." onClose={onClose} maxWidth="max-w-3xl">
+    <Modal title={item ? "Ficha de mão-de-obra" : "Nova categoria de mão-de-obra"} onClose={onClose} maxWidth="max-w-3xl">
       <form onSubmit={submit} className="space-y-5">
         <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 flex items-center justify-between gap-4">
           <div><p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Custo horário carregado</p><p className="text-xs text-blue-700/80">Salário ÷ horas produtivas + encargos sociais e complementares.</p></div>
@@ -119,7 +119,7 @@ export function MaterialEditor({
   }
 
   return (
-    <Modal title={item ? "Editar material" : "Novo material"} subtitle="Dados usados nas composições e compras." onClose={onClose} maxWidth="max-w-3xl">
+    <Modal title={item ? "Editar material" : "Novo material"} onClose={onClose} maxWidth="max-w-3xl">
       <form onSubmit={submit} className="space-y-5">
         <div className="flex items-center justify-between gap-4 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3">
           <span className="text-sm font-semibold text-blue-900">Preço aplicado</span>
@@ -183,7 +183,7 @@ export function ZoneEditor({ item, onClose, onSave }: { item: PriceZone | null; 
     materialAdjustmentPct: numeric(form.materialAdjustmentPct), labourAdjustmentPct: numeric(form.labourAdjustmentPct), equipmentAdjustmentPct: numeric(form.equipmentAdjustmentPct), defaultTransportPct: numeric(form.defaultTransportPct),
     sourceName: nullable(form.sourceName), sourceReference: nullable(form.sourceReference), effectiveDate: nullable(form.effectiveDate) }); } finally { setSaving(false); } }
   return (
-    <Modal title={item ? "Configurar zona de preço" : "Nova zona de preço"} subtitle="Ajustes geográficos aplicados apenas quando não existe um preço específico do recurso para a zona." onClose={onClose} maxWidth="max-w-3xl">
+    <Modal title={item ? "Configurar zona de preço" : "Nova zona de preço"} subtitle="Só aplica se não houver preço específico da zona." onClose={onClose} maxWidth="max-w-3xl">
       <form onSubmit={submit} className="space-y-5">
         <div className="grid gap-4 sm:grid-cols-3"><Field label="Nome da zona"><input required className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field><Field label="Província"><input className="input" value={form.province} onChange={(e) => setForm({ ...form, province: e.target.value })} /></Field><Field label="Distrito"><input className="input" value={form.district} onChange={(e) => setForm({ ...form, district: e.target.value })} /></Field></div>
         <div className="rounded-xl border border-amber-100 bg-amber-50 p-4"><p className="text-sm font-semibold text-amber-950 mb-3">Factores de localização sobre o preço base</p><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><Field label="Materiais (%)"><input type="number" step="0.01" className="input" value={form.materialAdjustmentPct} onChange={(e) => setForm({ ...form, materialAdjustmentPct: e.target.value })} /></Field><Field label="Transporte (%)"><input min="0" type="number" step="0.01" className="input" value={form.defaultTransportPct} onChange={(e) => setForm({ ...form, defaultTransportPct: e.target.value })} /></Field><Field label="Mão-de-obra (%)"><input type="number" step="0.01" className="input" value={form.labourAdjustmentPct} onChange={(e) => setForm({ ...form, labourAdjustmentPct: e.target.value })} /></Field><Field label="Equipamento (%)"><input type="number" step="0.01" className="input" value={form.equipmentAdjustmentPct} onChange={(e) => setForm({ ...form, equipmentAdjustmentPct: e.target.value })} /></Field></div></div>

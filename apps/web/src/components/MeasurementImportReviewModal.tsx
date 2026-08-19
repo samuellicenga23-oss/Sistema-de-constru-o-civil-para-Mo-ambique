@@ -223,7 +223,7 @@ export default function MeasurementImportReviewModal({
   return (
     <Modal
       title="Rever importação de medições"
-      subtitle={`${preview.rowsRead} linha(s) — confirme destino e composição. Código igual ao SIGO com outra descrição: mantém-se só nesta medição.`}
+      subtitle={`${preview.rowsRead} linha(s) — confirme destino e composição. Código igual com outra descrição: só nesta medição.`}
       onClose={onClose}
       maxWidth="max-w-6xl"
     >

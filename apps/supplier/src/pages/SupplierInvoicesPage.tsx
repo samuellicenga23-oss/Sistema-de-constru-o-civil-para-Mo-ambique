@@ -73,7 +73,7 @@ export default function SupplierInvoicesPage() {
   if (loading || !account) return <AppShell accountName={account?.name ?? "…"}><main className="portal-main"><div className="skeleton" style={{ height: "16rem" }} /></main></AppShell>;
   return <AppShell accountName={account.name}>
     <main className="portal-main">
-      <section className="hero-panel fade-up"><div className="hero-panel-content"><p className="hero-eyebrow">Contas a receber</p><h1 className="hero-title">Facturas</h1><p className="hero-subtitle">Facture apenas quantidades aceites pela obra. O SIGO confere automaticamente OC × recepção × factura.</p><p style={{ marginTop: "0.75rem" }}><Link to="/nao-conformidades" className="link-strong">Ver não-conformidades →</Link></p></div></section>
+      <section className="hero-panel fade-up"><div className="hero-panel-content"><p className="hero-eyebrow">Contas a receber</p><h1 className="hero-title">Facturas</h1><p className="hero-subtitle">Quantidades aceites · OC × recepção × factura</p><p style={{ marginTop: "0.75rem" }}><Link to="/nao-conformidades" className="link-strong">Ver não-conformidades →</Link></p></div></section>
       {error && <div className="card card-pad" style={{ color: "#b42318" }}>{error}</div>}
       <div className="card card-pad">
         <h2 style={{ marginTop: 0 }}>Emitir factura</h2>

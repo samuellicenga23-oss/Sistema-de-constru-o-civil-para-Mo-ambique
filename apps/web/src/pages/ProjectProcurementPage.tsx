@@ -461,7 +461,6 @@ export default function ProjectProcurementPage() {
   return (
     <Layout
       title={`Compras e stock — ${project.name}`}
-      subtitle="Comprar, receber e controlar materiais da obra"
       actions={<div className="flex flex-wrap items-center gap-2">{canRequest && <button type="button" className="btn btn-primary btn-sm" onClick={openManualRequisition}><IconPlus className="h-4 w-4" /> Adicionar compra</button>}<Link className="btn btn-secondary btn-sm" to="/gestao/fornecedores">Fornecedores</Link><Link className="btn btn-ghost btn-sm" to={`/projectos/${project.id}${faseQuery}`}><IconBack className="h-4 w-4" /> Projecto</Link></div>}
     >
       <div className="mx-auto w-full max-w-[1500px] space-y-5">
@@ -470,7 +469,7 @@ export default function ProjectProcurementPage() {
         {marketLocked && <AlertBanner tone="warning">{marketLocked}</AlertBanner>}
 
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <MetricCard label="Falta comprar" value={money(plan?.shortageTotal ?? 0, project.currency)} note="Materiais ainda não cobertos" />
+          <MetricCard label="Falta comprar" value={money(plan?.shortageTotal ?? 0, project.currency)} />
           <MetricCard label="Por aprovar" value={reqApproval.length} tone={reqApproval.length ? "warning" : "neutral"} />
           <MetricCard label="Cotações abertas" value={openRfqs.length} note="Aguardam fornecedores" />
           <MetricCard label="Por receber" value={awaitingReceipt.length} note="Pedidos já aprovados" />
@@ -547,7 +546,7 @@ export default function ProjectProcurementPage() {
 
         {view === "requisicoes" && (
           <section className="space-y-3">
-            <SectionHeader title="Aprovações de compra" description="Confirme internamente antes de pedir preços aos fornecedores" />
+            <SectionHeader title="Aprovações de compra" />
             {visibleReqs.length === 0 ? (
               <EmptyState
                 title="Ainda não há compras para aprovar"
@@ -571,7 +570,7 @@ export default function ProjectProcurementPage() {
 
         {view === "cotacoes" && (
           <section className="space-y-3">
-            <SectionHeader title="Cotações" description="Compare os fornecedores que responderam e escolha a melhor proposta" />
+            <SectionHeader title="Cotações" />
             {visibleRfqs.length === 0 ? (
               <EmptyState
                 title="Ainda não há pedidos de cotação"
@@ -596,7 +595,7 @@ export default function ProjectProcurementPage() {
 
         {view === "ordens" && (
           <section className="space-y-3">
-            <SectionHeader title="Pedidos aos fornecedores" description="Criados automaticamente depois de escolher uma cotação" />
+            <SectionHeader title="Pedidos aos fornecedores" />
             {visibleOrders.length === 0 ? (
               <EmptyState
                 title="Ainda não há pedidos aos fornecedores"
@@ -631,7 +630,7 @@ export default function ProjectProcurementPage() {
 
         {view === "stock" && (
           <section className="card overflow-hidden">
-            <SectionHeader title="Stock da obra" description="Saldo actual após entradas e consumos" />
+            <SectionHeader title="Stock da obra" />
             {visibleStock.length === 0 ? (
               <div className="p-5">
                 <EmptyState
@@ -828,7 +827,6 @@ export default function ProjectProcurementPage() {
               </div>
               <div>
                 <h3 className="font-semibold">Adjudicação</h3>
-                <p className="mt-1 text-xs text-slate-500">O SIGO recomenda critérios, mas a decisão é humana e fica auditada.</p>
                 <div className="mt-3 space-y-3">
                   {comparison.lines.map((line) => {
                     const sum = (awardDraft[line.id] ?? []).reduce((s, a) => s + Number(a.quantity || 0), 0);

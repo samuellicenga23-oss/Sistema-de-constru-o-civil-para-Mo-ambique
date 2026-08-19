@@ -104,7 +104,6 @@ export default function QuoteRequestsPage() {
   return (
     <Layout
       title="Arquivo de cotações gerais"
-      subtitle="Consulta dos pedidos criados no fluxo anterior"
       actions={
         <Link to="/gestao" className="btn btn-primary btn-sm">Escolher obra</Link>
       }
@@ -113,24 +112,12 @@ export default function QuoteRequestsPage() {
         <GestaoTabs />
         {error && !detail && <p className="text-sm text-red-600">{error}</p>}
 
-        <div className="rounded-xl border border-blue-200 bg-blue-50/60 px-4 py-3 text-sm text-blue-950">
-          <p className="font-semibold">As novas cotações pertencem a uma obra</p>
-          <p className="mt-1 text-[13px] leading-relaxed text-teal-900/90">
-            Abra a obra e entre em Compras e stock. O sistema leva as necessidades do orçamento, pede preços e transforma a escolha em pedido sem duplicar os materiais.
-          </p>
-        </div>
-
         <section className="card overflow-hidden">
           <div className="border-b border-slate-200 p-4 sm:p-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <IconClipboard className="h-4 w-4 text-brand-700" />
-                <div>
-                  <h2 className="section-title text-base">Cotações recebidas</h2>
-                  <p className="mt-0.5 text-xs text-slate-500">
-                    Fornecedores respondem no Portal (gratuito para quem vende). Aceite aqui para usar nas compras da obra.
-                  </p>
-                </div>
+                <h2 className="section-title text-base">Cotações recebidas</h2>
               </div>
               <Link to="/gestao" className="btn btn-secondary btn-sm">Abrir uma obra</Link>
             </div>
@@ -150,8 +137,8 @@ export default function QuoteRequestsPage() {
             ))}
             {requests.length === 0 && (
               <div className="space-y-3 px-5 py-10 text-center">
-                <p className="text-sm text-slate-500">Não existem pedidos no arquivo anterior.</p>
-                <Link to="/gestao" className="btn btn-primary btn-sm">Escolher obra para comprar</Link>
+                <p className="text-sm text-slate-500">Sem pedidos.</p>
+                <Link to="/gestao" className="btn btn-primary btn-sm">Escolher obra</Link>
               </div>
             )}
           </div>

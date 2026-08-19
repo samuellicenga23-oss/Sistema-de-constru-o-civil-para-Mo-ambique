@@ -137,7 +137,7 @@ export default function CreditsPage() {
   }, [highlightImports, highlightPlants]);
 
   return (
-    <Layout title="Créditos e planos" subtitle="Packs extra e upgrade de capacidade">
+    <Layout title="Créditos e planos">
       <div className="mx-auto w-full max-w-5xl space-y-8">
         <header className="space-y-2">
           <p className="max-w-2xl text-sm text-slate-600">

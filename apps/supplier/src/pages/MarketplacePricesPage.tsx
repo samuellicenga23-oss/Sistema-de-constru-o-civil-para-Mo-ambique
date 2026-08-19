@@ -248,9 +248,7 @@ export default function MarketplacePricesPage() {
           <div className="hero-panel-content">
             <p className="hero-eyebrow">SIGO Fornecedores</p>
             <h1 className="hero-title">Catálogo e preços</h1>
-            <p className="hero-subtitle">
-              Gerir o que vende e os preços públicos. As empresas pedem cotação a partir desta lista — não a partir de cópias de pedidos.
-            </p>
+            <p className="hero-subtitle">Preços públicos do que vende.</p>
             <p style={{ marginTop: "0.75rem" }}>
               <a href="/oferta" className="link-strong" onClick={(e) => { e.preventDefault(); navigate("/oferta"); }}>
                 Escolher ou cadastrar o que vendo →

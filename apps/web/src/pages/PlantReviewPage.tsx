@@ -682,15 +682,13 @@ export default function PlantReviewPage() {
           <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-brand-700">
-                {gaps.length > 0 ? "Análise parcial — acção necessária" : "Análise concluída"}
+                {gaps.length > 0 ? "Análise parcial" : "Análise concluída"}
               </p>
               <h2 className="mt-1 text-lg font-bold text-slate-900">
-                {gaps.length > 0 ? "Alguns dados em falta — preencha ou aguarde a revisão" : "Resumo da planta — confirme só se necessário"}
+                {gaps.length > 0 ? "Dados em falta" : "Resumo da planta"}
               </h2>
               <p className="mt-1 max-w-2xl text-sm text-slate-600">
-                {rooms.length} compartimento(s) · {totalRoomsArea.toFixed(2)} m² · {gaps.length > 0
-                  ? "pode completar no formulário dedicado enquanto a equipa melhora o motor (resposta em até 5h)."
-                  : "pode medir já ou corrigir pisos abaixo."}
+                {rooms.length} compartimento(s) · {totalRoomsArea.toFixed(2)} m²
               </p>
             </div>
             <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
@@ -713,7 +711,7 @@ export default function PlantReviewPage() {
             </div>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-5 py-3 text-xs text-slate-600">
-            <span>{identityBlocked ? "A combinação automática está suspensa até confirmar as disciplinas." : "Tem outra disciplina? Adicione-a antes ou depois; os dados serão combinados automaticamente."}</span>
+            {identityBlocked && <span>Combinação suspensa até confirmar as disciplinas.</span>}
             <Link to={`/projectos/${plant.projectId}#plantas-do-projecto`} className="font-semibold text-brand-700 hover:underline">Adicionar outro projecto →</Link>
           </div>
         </section>
@@ -756,7 +754,6 @@ export default function PlantReviewPage() {
                     <div>
                       <p className="text-sm font-bold">{section.label}</p>
                       <p className="mt-0.5 text-xs opacity-75">{pageRange(section.startPage, section.endPage)} · {section.pageCount} página(s)</p>
-                      <p className="mt-1 text-[10px] font-semibold uppercase tracking-wide opacity-70">Secção organizada</p>
                       {section.identity && (section.identity.owner || section.identity.location || section.identity.projectTitle) && (
                         <div className="mt-2 space-y-0.5 text-[11px] leading-snug opacity-80">
                           {section.identity.projectTitle && <p><span className="font-semibold">Obra:</span> {section.identity.projectTitle}</p>}
@@ -1211,15 +1208,10 @@ export default function PlantReviewPage() {
       {gapPopup && (
         <Modal
           title="Regularizar este ponto"
-          subtitle="Edite o elemento em Completar dados ou confirme após a revisão do motor"
           onClose={() => setGapPopup(null)}
           maxWidth="max-w-lg"
         >
           <p className="text-sm leading-relaxed text-slate-800">{gapPopup}</p>
-          <p className="mt-3 text-xs text-slate-500">
-            Em medições profissionais, cada família (sapatas, pilares, vigas da laje N, lajes, escadas) deve ter
-            quantidade, geometria e kg de aço separados — assim o orçamento não mistura armaduras.
-          </p>
           <div className="mt-5 flex flex-wrap justify-end gap-2">
             <button type="button" className="btn btn-secondary" onClick={() => setGapPopup(null)}>Fechar</button>
             {gapCompletarHash(gapPopup) === "portas-janelas" ? (
@@ -1248,7 +1240,6 @@ export default function PlantReviewPage() {
       {familyPopup && (
         <Modal
           title={familyPopup.title}
-          subtitle="Dados detectados — edite no formulário dedicado se precisar corrigir"
           onClose={() => setFamilyPopup(null)}
           maxWidth="max-w-lg"
         >

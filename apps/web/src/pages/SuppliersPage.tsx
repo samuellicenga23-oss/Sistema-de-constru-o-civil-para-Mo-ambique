@@ -96,7 +96,6 @@ export default function SuppliersPage() {
   return (
     <Layout
       title="Fornecedores e preços"
-      subtitle="Contactos e materiais vendidos por cada fornecedor"
       actions={
         <a href="/fornecedor/registar" target="_blank" rel="noreferrer" className="btn btn-secondary btn-sm">Adicionar fornecedor</a>
       }

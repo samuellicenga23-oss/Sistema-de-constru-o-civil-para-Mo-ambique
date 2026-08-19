@@ -238,7 +238,6 @@ export default function ProjectsPage() {
         {showForm && (
           <Modal
             title={workspace === "medicoes" ? "Novo levantamento" : "Novo orçamento"}
-            subtitle={workspace === "medicoes" ? "Identifique a obra e escolha como obter as quantidades." : "Crie o orçamento ou importe medições já concluídas."}
             onClose={() => !creating && setShowForm(false)}
             maxWidth="max-w-2xl"
           >
@@ -279,7 +278,6 @@ export default function ProjectsPage() {
                   onChange={(e) => setFloors(Math.max(1, Math.min(20, Number(e.target.value) || 1)))}
                   className="input"
                 />
-                <p className="mt-1 text-xs text-slate-500">Usado para sequenciar a estrutura e as paredes piso a piso no cronograma.</p>
               </div>
               <div className="sm:col-span-2">
                 <label className="label">{workspace === "medicoes" ? "Como deseja medir?" : "Origem das quantidades"}</label>
@@ -309,14 +307,13 @@ export default function ProjectsPage() {
               </div>
               {workspace === "orcamentos" && (
                 <div className="sm:col-span-2 flex flex-col gap-2 rounded-lg border border-brand-200 bg-brand-50 px-4 py-3 text-sm text-ink sm:flex-row sm:items-center sm:justify-between">
-                  <span>Já mediu esta obra no SIGO?</span>
-                  <Link to="/medicoes" onClick={() => setShowForm(false)} className="font-semibold text-brand-800 hover:underline">Abrir Levantamentos e enviar para orçamento →</Link>
+                  <span>Medição existente?</span>
+                  <Link to="/medicoes" onClick={() => setShowForm(false)} className="font-semibold text-brand-800 hover:underline">Abrir Levantamentos →</Link>
                 </div>
               )}
               {workspace === "medicoes" && startMode === "plantas" && <div className="sm:col-span-2 rounded-xl border border-slate-200 bg-slate-50 p-4">
                 <div className="mb-3">
                   <p className="text-sm font-semibold text-slate-900">Projectos técnicos</p>
-                  <p className="mt-0.5 text-xs text-slate-500">Envie o conjunto completo ou as especialidades separadas.</p>
                 </div>
                 <div className="mb-4 rounded-lg border border-brand-200 bg-white p-3">
                   <label className="label">Projecto completo ou conjunto de especialidades (PDF)</label>
@@ -416,8 +413,7 @@ export default function ProjectsPage() {
         ) : workspaceProjects.length === 0 && !showForm ? (
           <div className="card">
             <EmptyState
-              title={workspace === "medicoes" ? "Ainda não há medições." : "Ainda não há orçamentos."}
-              description={workspace === "medicoes" ? "Crie a primeira obra para levantar quantidades." : "Crie um orçamento ou envie um levantamento concluído."}
+              title={workspace === "medicoes" ? "Sem medições." : "Sem orçamentos."}
               icon={<IconFolder className="h-6 w-6" />}
               action={
                 <button onClick={() => setShowForm(true)} className="btn btn-primary">

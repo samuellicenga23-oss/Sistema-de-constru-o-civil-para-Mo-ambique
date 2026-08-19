@@ -228,7 +228,6 @@ export default function ProjectSiteDiaryPage() {
     <>
     <Layout
       title={`Diário de Obra — ${project.name}`}
-      subtitle="Trabalhos, equipa, materiais e ocorrências por dia"
       actions={
         <Link to={`/projectos/${projectId}${searchParams.get("fase") === "gestao" ? "?fase=gestao" : ""}`} className="btn btn-ghost btn-sm">
           <IconBack className="w-3.5 h-3.5" />
