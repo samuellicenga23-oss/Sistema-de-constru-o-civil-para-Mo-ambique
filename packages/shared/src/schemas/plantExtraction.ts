@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { structuralColumnGroupSchema, structuralFloorSchema } from "../structuralColumns.js";
 
 // Normalized response returned by the plant-service (`POST /parse`).
 export const extractedRoomSchema = z.object({
@@ -104,6 +105,9 @@ export const structuralSummarySchema = z.object({
   beamsAvgHeightCm: z.number().nonnegative(),
   beamsConcreteVolumeM3: z.number().nonnegative(),
   beamGroups: z.array(structuralBeamGroupSchema).default([]),
+  columnGroups: z.array(structuralColumnGroupSchema).default([]),
+  floors: z.array(structuralFloorSchema).default([]),
+  columnsConcreteVolumeM3: z.number().nonnegative().optional().default(0),
   staircasesCount: z.number().int().nonnegative(),
   slabsCount: z.number().int().nonnegative(),
   slabsAvgThicknessCm: z.number().nonnegative(),

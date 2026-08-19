@@ -13,18 +13,55 @@ export type StructuralBeamGroup = {
   steelWeightKg: number;
 };
 
+export type StructuralColumnGroup = {
+  id?: string;
+  code: string;
+  designation?: string;
+  shape?: "rectangular" | "circular" | "custom";
+  widthCm?: number | null;
+  depthCm?: number | null;
+  diameterCm?: number | null;
+  quantity: number;
+  fromFloor?: string | null;
+  toFloor?: string | null;
+  explicitHeightM?: number | null;
+  longitudinalBarCount?: number | null;
+  longitudinalDiameterMm?: number | null;
+  stirrupDiameterMm?: number | null;
+  stirrupSpacingCm?: number | null;
+  concreteVolumeM3?: number;
+  steelWeightKg?: number;
+  steelSource?: "map" | "calculated" | "estimate" | "manual";
+  sourcePage?: number;
+  confidence?: number;
+  needsConfirmation?: boolean;
+};
+
+export type StructuralFloor = {
+  id?: string;
+  label: string;
+  sortOrder: number;
+  elevationM?: number | null;
+  floorToFloorHeightM?: number | null;
+  slabThicknessM?: number | null;
+  source?: "plant" | "manual";
+};
+
 export type StructuralSummary = {
   footingsCount: number;
   footingsAvgWidthCm: number;
   footingsAvgLengthCm: number;
   footingsAvgDepthCm: number;
   columnsCount: number;
+  columnsConcreteVolumeM3?: number;
   beamsCount: number;
   beamsTotalLengthM: number;
   beamsAvgWidthCm: number;
   beamsAvgHeightCm: number;
   beamsConcreteVolumeM3: number;
   beamGroups?: StructuralBeamGroup[];
+  columnGroups?: StructuralColumnGroup[];
+  floors?: StructuralFloor[];
   staircasesCount: number;
   slabsCount: number;
   slabsAvgThicknessCm: number;
@@ -366,6 +403,12 @@ export const plantsApi = {
 
   updateSlabs: (plantId: string, slabs: StructuralSlab[]) =>
     request<Plant>(`/plants/${plantId}/slabs`, { method: "PUT", body: JSON.stringify({ slabs }) }),
+
+  updateColumns: (plantId: string, columnGroups: StructuralColumnGroup[], floors?: StructuralFloor[]) =>
+    request<Plant>(`/plants/${plantId}/columns`, { method: "PUT", body: JSON.stringify({ columnGroups, floors }) }),
+
+  updateFloors: (plantId: string, floors: StructuralFloor[]) =>
+    request<Plant>(`/plants/${plantId}/floors`, { method: "PUT", body: JSON.stringify({ floors }) }),
 
   confirmIdentity: (plantId: string) =>
     request<Plant>(`/plants/${plantId}/confirm-identity`, { method: "POST", body: JSON.stringify({ confirmed: true }) }),

@@ -20,7 +20,7 @@ app = FastAPI(title="SIGO Plant Service")
 # em produção, permissivo em dev sem configuração" (achado da auditoria).
 PLANT_SERVICE_TOKEN = os.environ.get("PLANT_SERVICE_TOKEN")
 IS_PRODUCTION = os.environ.get("ENVIRONMENT") == "production"
-PARSER_VERSION = "2026.08-openings-fix-2"
+PARSER_VERSION = "2026.08-columns-1"
 PARSER_CONCURRENCY = max(1, min(2, int(os.environ.get("PLANT_PARSER_CONCURRENCY", "1"))))
 PARSER_CACHE_SIZE = max(1, min(20, int(os.environ.get("PLANT_PARSER_CACHE_SIZE", "6"))))
 parser_slots = asyncio.Semaphore(PARSER_CONCURRENCY)
@@ -133,18 +133,53 @@ class BeamGroupOut(BaseModel):
     steelWeightKg: float = 0
 
 
+class ColumnGroupOut(BaseModel):
+    code: str
+    designation: str | None = None
+    shape: str = "rectangular"
+    widthCm: float | None = None
+    depthCm: float | None = None
+    diameterCm: float | None = None
+    quantity: int
+    fromFloor: str | None = None
+    toFloor: str | None = None
+    explicitHeightM: float | None = None
+    longitudinalBarCount: int | None = None
+    longitudinalDiameterMm: float | None = None
+    stirrupDiameterMm: float | None = None
+    stirrupSpacingCm: float | None = None
+    concreteVolumeM3: float = 0
+    steelWeightKg: float = 0
+    steelSource: str = "calculated"
+    sourcePage: int | None = None
+    confidence: float = 0.5
+    needsConfirmation: bool = True
+
+
+class StructuralFloorOut(BaseModel):
+    label: str
+    sortOrder: int
+    elevationM: float | None = None
+    floorToFloorHeightM: float | None = None
+    slabThicknessM: float | None = None
+    source: str = "plant"
+
+
 class StructuralSummaryOut(BaseModel):
     footingsCount: int
     footingsAvgWidthCm: float
     footingsAvgLengthCm: float
     footingsAvgDepthCm: float
     columnsCount: int
+    columnsConcreteVolumeM3: float = 0
     beamsCount: int
     beamsTotalLengthM: float
     beamsAvgWidthCm: float
     beamsAvgHeightCm: float
     beamsConcreteVolumeM3: float
     beamGroups: list[BeamGroupOut] = Field(default_factory=list)
+    columnGroups: list[ColumnGroupOut] = Field(default_factory=list)
+    floors: list[StructuralFloorOut] = Field(default_factory=list)
     staircasesCount: int
     slabsCount: int
     slabsAvgThicknessCm: float
@@ -289,6 +324,7 @@ def build_parse_response(result) -> ParseResponse:
             footingsAvgLengthCm=summary.footings_avg_length_cm,
             footingsAvgDepthCm=summary.footings_avg_depth_cm,
             columnsCount=summary.columns_count,
+            columnsConcreteVolumeM3=summary.columns_concrete_volume_m3,
             beamsCount=summary.beams_count,
             beamsTotalLengthM=summary.beams_total_length_m,
             beamsAvgWidthCm=summary.beams_avg_width_cm,
@@ -342,6 +378,41 @@ def build_parse_response(result) -> ParseResponse:
                     steelWeightKg=group.steel_weight_kg,
                 )
                 for group in summary.beam_groups
+            ],
+            columnGroups=[
+                ColumnGroupOut(
+                    code=group.code,
+                    shape=group.shape,
+                    widthCm=group.width_cm,
+                    depthCm=group.depth_cm,
+                    diameterCm=group.diameter_cm,
+                    quantity=group.quantity,
+                    fromFloor=group.from_floor,
+                    toFloor=group.to_floor,
+                    explicitHeightM=group.explicit_height_m,
+                    longitudinalBarCount=group.longitudinal_bar_count,
+                    longitudinalDiameterMm=group.longitudinal_diameter_mm,
+                    stirrupDiameterMm=group.stirrup_diameter_mm,
+                    stirrupSpacingCm=group.stirrup_spacing_cm,
+                    concreteVolumeM3=group.concrete_volume_m3,
+                    steelWeightKg=group.steel_weight_kg,
+                    steelSource=group.steel_source,
+                    sourcePage=group.source_page,
+                    confidence=group.confidence,
+                    needsConfirmation=group.needs_confirmation,
+                )
+                for group in summary.column_groups
+            ],
+            floors=[
+                StructuralFloorOut(
+                    label=floor.label,
+                    sortOrder=floor.sort_order,
+                    elevationM=floor.elevation_m,
+                    floorToFloorHeightM=floor.floor_to_floor_height_m,
+                    slabThicknessM=floor.slab_thickness_m,
+                    source=floor.source,
+                )
+                for floor in summary.floors
             ],
         )
         if summary

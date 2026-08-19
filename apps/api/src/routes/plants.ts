@@ -9,7 +9,7 @@ import { plants, projects as projectTable, extractedRooms, extractedOpenings, ex
 import { requireCompanyUser, requireRole } from "../auth/middleware.js";
 import { assertProjectOwned, assertPlantOwned } from "../services/accessControl.js";
 import { env } from "../env.js";
-import { extractedSlabSchema, plantParseResultSchema, PLANT_DISCIPLINES, fixedSigo, structuralSummarySchema } from "@sigo/shared";
+import { extractedSlabSchema, plantParseResultSchema, PLANT_DISCIPLINES, fixedSigo, structuralSummarySchema, structuralColumnGroupSchema, structuralFloorSchema, finalizeColumnGroup, syncColumnAggregatesFromGroups } from "@sigo/shared";
 import { loadWorkChapterLibrary } from "../services/boqTemplate.js";
 import { syncProjectPlantMeasurements } from "../services/plantMeasurementSync.js";
 import { recordAuditEvent } from "../services/auditTrail.js";
@@ -25,7 +25,7 @@ const clientPlantIdSchema = z.string().uuid();
 // Manter alinhado com a geração estrutural do plant-service. O valor participa da
 // chave de cache da BD; ao mudar a leitura de lajes por nível, análises antigas não
 // podem ser reutilizadas silenciosamente em novos uploads do mesmo PDF.
-const PLANT_PARSER_VERSION = "2026.08-openings-fix-2";
+const PLANT_PARSER_VERSION = "2026.08-columns-1";
 type PlantDetectionContext = { tags: string[]; parserVersion: string };
 
 async function getPlantDetectionContext(companyId: string): Promise<PlantDetectionContext> {
@@ -620,6 +620,91 @@ export async function plantRoutes(app: FastifyInstance) {
       ) || current.slabsSteelWeightKg || 0,
     };
     const [updated] = await db.update(plants).set({ structuralSummary }).where(eq(plants.id, id)).returning();
+    return updated;
+  });
+
+  app.put("/api/plants/:id/columns", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const companyId = request.currentUser!.companyId!;
+    const plant = await assertPlantOwned(id, companyId);
+    if (!plant) return reply.code(404).send({ error: "Planta não encontrada" });
+    const parsed = z.object({
+      columnGroups: z.array(structuralColumnGroupSchema).max(200),
+      floors: z.array(structuralFloorSchema).max(40).optional(),
+    }).safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+
+    const current = plant.structuralSummary ?? {
+      footingsCount: 0,
+      footingsAvgWidthCm: 0,
+      footingsAvgLengthCm: 0,
+      footingsAvgDepthCm: 0,
+      columnsCount: 0,
+      beamsCount: 0,
+      beamsTotalLengthM: 0,
+      beamsAvgWidthCm: 0,
+      beamsAvgHeightCm: 0,
+      beamsConcreteVolumeM3: 0,
+      staircasesCount: 0,
+      slabsCount: 0,
+      slabsAvgThicknessCm: 0,
+      totalSteelWeightKg: 0,
+    };
+    const floors = (parsed.data.floors ?? current.floors ?? []).map((floor, index) => structuralFloorSchema.parse({
+      ...floor,
+      id: floor.id ?? `floor-${index}`,
+      sortOrder: floor.sortOrder ?? index,
+    }));
+    const columnGroups = parsed.data.columnGroups.map((group, index) => finalizeColumnGroup(
+      structuralColumnGroupSchema.parse({ ...group, id: group.id ?? `column-group-${index}` }),
+      floors,
+    ));
+    const aggregates = syncColumnAggregatesFromGroups(columnGroups);
+    const mapSteel = Number(current.columnsSteelWeightKg ?? 0);
+    const structuralSummary = {
+      ...current,
+      floors,
+      columnGroups,
+      columnsCount: aggregates.columnsCount,
+      columnsConcreteVolumeM3: aggregates.columnsConcreteVolumeM3,
+      columnsSteelWeightKg: mapSteel > 0 ? mapSteel : aggregates.columnsCalculatedSteelWeightKg,
+    };
+    const [updated] = await db.update(plants).set({ structuralSummary }).where(eq(plants.id, id)).returning();
+    await syncProjectPlantMeasurements(plant.projectId);
+    return updated;
+  });
+
+  app.put("/api/plants/:id/floors", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const companyId = request.currentUser!.companyId!;
+    const plant = await assertPlantOwned(id, companyId);
+    if (!plant) return reply.code(404).send({ error: "Planta não encontrada" });
+    const parsed = z.object({ floors: z.array(structuralFloorSchema).max(40) }).safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+
+    const current = plant.structuralSummary;
+    if (!current) return reply.code(400).send({ error: "Planta sem resumo estrutural" });
+    const floors = parsed.data.floors.map((floor, index) => structuralFloorSchema.parse({
+      ...floor,
+      sortOrder: floor.sortOrder ?? index,
+      id: floor.id ?? `floor-${index}`,
+    }));
+    const columnGroups = (current.columnGroups ?? []).map((group, index) => finalizeColumnGroup(
+      structuralColumnGroupSchema.parse({ ...group, id: group.id ?? `column-group-${index}` }),
+      floors,
+    ));
+    const aggregates = syncColumnAggregatesFromGroups(columnGroups);
+    const mapSteel = Number(current.columnsSteelWeightKg ?? 0);
+    const structuralSummary = {
+      ...current,
+      floors,
+      columnGroups,
+      columnsCount: columnGroups.length ? aggregates.columnsCount : current.columnsCount,
+      columnsConcreteVolumeM3: aggregates.columnsConcreteVolumeM3,
+      columnsSteelWeightKg: mapSteel > 0 ? mapSteel : aggregates.columnsCalculatedSteelWeightKg,
+    };
+    const [updated] = await db.update(plants).set({ structuralSummary }).where(eq(plants.id, id)).returning();
+    await syncProjectPlantMeasurements(plant.projectId);
     return updated;
   });
 

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { plantsApi, type ExtractedOpening, type ExtractedRoom, type ExtractedRebarLine, type OpeningInput, type Plant, type SlabRebarLayer, type StructuralSlab } from "../api/plants";
+import { plantsApi, type ExtractedOpening, type ExtractedRoom, type ExtractedRebarLine, type OpeningInput, type Plant, type SlabRebarLayer, type StructuralSlab, type StructuralColumnGroup, type StructuralFloor } from "../api/plants";
 import { boqApi } from "../api/boq";
 import { catalogApi, type Material } from "../api/catalog";
 import Layout from "../components/Layout";
@@ -93,6 +93,10 @@ export default function PlantReviewPage() {
   const [slabManagerOpen, setSlabManagerOpen] = useState(false);
   const [slabDrafts, setSlabDrafts] = useState<StructuralSlab[]>([]);
   const [savingSlabs, setSavingSlabs] = useState(false);
+  const [columnManagerOpen, setColumnManagerOpen] = useState(false);
+  const [columnDrafts, setColumnDrafts] = useState<StructuralColumnGroup[]>([]);
+  const [floorDrafts, setFloorDrafts] = useState<StructuralFloor[]>([]);
+  const [savingColumns, setSavingColumns] = useState(false);
   const [gapPopup, setGapPopup] = useState<string | null>(null);
   const [familyPopup, setFamilyPopup] = useState<FamilyPopup | null>(null);
 
@@ -438,6 +442,60 @@ export default function PlantReviewPage() {
       };
     }));
     setSlabManagerOpen(true);
+  }
+
+  function openColumnManager() {
+    const summary = plant?.structuralSummary;
+    setColumnDrafts((summary?.columnGroups ?? []).map((group, index) => ({
+      ...group,
+      id: group.id ?? `column-group-${index}`,
+      shape: group.shape ?? "rectangular",
+      quantity: group.quantity || 1,
+    })));
+    const floors = summary?.floors?.length
+      ? summary.floors
+      : availableOpeningFloors.filter((floor) => floor !== UNASSIGNED_FLOOR).map((label, sortOrder) => ({
+          label,
+          sortOrder,
+          floorToFloorHeightM: null,
+          source: "plant" as const,
+        }));
+    setFloorDrafts(floors);
+    setColumnManagerOpen(true);
+  }
+
+  function addColumnGroup() {
+    setColumnDrafts((items) => [...items, {
+      id: `column-group-${items.length}`,
+      code: `P${items.length + 1}`,
+      shape: "rectangular",
+      quantity: 1,
+      widthCm: null,
+      depthCm: null,
+      fromFloor: floorDrafts[0]?.label ?? null,
+      toFloor: floorDrafts[0]?.label ?? null,
+      explicitHeightM: null,
+      concreteVolumeM3: 0,
+      steelWeightKg: 0,
+      steelSource: "manual",
+      needsConfirmation: true,
+      confidence: 0.4,
+    }]);
+  }
+
+  async function saveColumns() {
+    if (!plant) return;
+    setSavingColumns(true);
+    setError(null);
+    try {
+      const updated = await plantsApi.updateColumns(plant.id, columnDrafts, floorDrafts);
+      setPlant(updated);
+      setColumnManagerOpen(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível guardar os pilares");
+    } finally {
+      setSavingColumns(false);
+    }
   }
 
   function addSlab() {
@@ -883,19 +941,12 @@ export default function PlantReviewPage() {
               <button
                 type="button"
                 className="rounded-lg border border-gray-200 p-3 text-left transition-colors hover:border-brand-300 hover:bg-brand-50"
-                onClick={() => setFamilyPopup({
-                  id: "pilares",
-                  title: "Pilares",
-                  hash: "pilares",
-                  lines: [
-                    `${structuralSummary.columnsCount} pilar(es)`,
-                    `Aço ${roundStructuralQty(Number(structuralSummary.columnsSteelWeightKg ?? steelByFamily.columnsSteelWeightKg)).toFixed(2)} kg`,
-                    `Armaduras: ${columnDiameterLabel}`,
-                  ],
-                })}
+                onClick={openColumnManager}
               >
                 <p className="text-xl font-semibold text-gray-900">{structuralSummary.columnsCount}</p>
-                <p className="muted">pilares · {roundStructuralQty(Number(structuralSummary.columnsSteelWeightKg ?? steelByFamily.columnsSteelWeightKg)).toFixed(2)} kg aço</p>
+                <p className="muted">
+                  pilares · {Number(structuralSummary.columnsConcreteVolumeM3 ?? 0).toFixed(2)} m³ · {roundStructuralQty(Number(structuralSummary.columnsSteelWeightKg ?? steelByFamily.columnsSteelWeightKg)).toFixed(2)} kg aço
+                </p>
                 <p className="mt-1 text-[11px] leading-snug text-slate-500">{columnDiameterLabel}</p>
                 <span className="mt-1 block text-xs font-semibold text-brand-700">Ver / editar</span>
               </button>
@@ -965,6 +1016,43 @@ export default function PlantReviewPage() {
                 Escadas <strong className="block text-sm text-slate-900">{roundStructuralQty(Number(structuralSummary.stairsSteelWeightKg ?? steelByFamily.stairsSteelWeightKg)).toFixed(2)} kg</strong>
               </div>
             </div>
+            {(structuralSummary.columnGroups?.length ?? 0) > 0 && (
+              <div className="mb-3 overflow-x-auto">
+                <table className="w-full min-w-[640px] text-left text-sm">
+                  <thead className="text-xs uppercase tracking-wide text-slate-500">
+                    <tr>
+                      <th className="py-1.5 font-semibold">Grupo</th>
+                      <th className="py-1.5 font-semibold">Piso</th>
+                      <th className="py-1.5 font-semibold">Secção</th>
+                      <th className="py-1.5 font-semibold">h</th>
+                      <th className="py-1.5 font-semibold">Betão</th>
+                      <th className="py-1.5 font-semibold">Aço</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {structuralSummary.columnGroups!.map((group, index) => (
+                      <tr key={group.id ?? `${group.code}-${index}`} className="border-t border-slate-100">
+                        <td className="py-1.5 font-medium text-slate-900">{group.code} · {group.quantity} un</td>
+                        <td className="py-1.5 text-slate-600">{group.fromFloor ?? "—"}</td>
+                        <td className="py-1.5 text-slate-600">
+                          {group.shape === "circular" && group.diameterCm
+                            ? `Ø${group.diameterCm} cm`
+                            : group.widthCm && group.depthCm
+                              ? `${group.widthCm}×${group.depthCm} cm`
+                              : "—"}
+                        </td>
+                        <td className="py-1.5 text-slate-600">{group.explicitHeightM ? `${Number(group.explicitHeightM).toFixed(2)} m` : "—"}</td>
+                        <td className="py-1.5 tabular-nums">{Number(group.concreteVolumeM3 ?? 0).toFixed(2)} m³</td>
+                        <td className="py-1.5 tabular-nums">
+                          {Number(group.steelWeightKg ?? 0).toFixed(2)} kg
+                          {group.steelSource === "calculated" ? " calc." : group.steelSource === "map" ? " mapa" : ""}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
             {(structuralSummary.beamGroups?.length ?? 0) > 0 && (
               <div className="mb-3 grid gap-2 sm:grid-cols-2">
                 {structuralSummary.beamGroups!.map((group, index) => (
@@ -993,8 +1081,7 @@ export default function PlantReviewPage() {
               {steelByFamily.otherSteelWeightKg > 0 ? ` (inclui ${steelByFamily.otherSteelWeightKg.toFixed(2)} kg não classificados)` : ""}
             </p>
             <p className="text-xs text-gray-500 mb-3">
-              Clique em cada família para ver o detalhe ou editar em Completar dados. Os números alimentam medições e orçamento
-              (sapatas, pilares, vigas por laje, lajes e escadas).
+              {structuralSummary.columnsCount} pilar(es) · {Number(structuralSummary.columnsConcreteVolumeM3 ?? 0).toFixed(2)} m³ betão
             </p>
           </section>
         )}
@@ -1254,6 +1341,10 @@ export default function PlantReviewPage() {
               <button type="button" className="btn btn-primary" onClick={() => { setFamilyPopup(null); openSlabManager(); }}>
                 Gerir lajes
               </button>
+            ) : familyPopup.hash === "pilares" ? (
+              <button type="button" className="btn btn-primary" onClick={() => { setFamilyPopup(null); openColumnManager(); }}>
+                Gerir pilares
+              </button>
             ) : (
               <Link
                 to={`/plantas/${plant.id}/completar#${familyPopup.hash}`}
@@ -1263,6 +1354,102 @@ export default function PlantReviewPage() {
                 Editar em Completar dados
               </Link>
             )}
+          </div>
+        </Modal>
+      )}
+      {columnManagerOpen && (
+        <Modal title="Pilares" onClose={() => setColumnManagerOpen(false)} maxWidth="max-w-6xl">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <strong className="text-sm text-slate-900">{columnDrafts.reduce((sum, group) => sum + group.quantity, 0)} pilar(es)</strong>
+            <button type="button" className="btn btn-primary btn-sm" onClick={addColumnGroup}>Adicionar grupo</button>
+          </div>
+          {floorDrafts.length > 0 && (
+            <div className="mb-4 overflow-x-auto rounded-xl border border-slate-200">
+              <table className="w-full min-w-[480px] text-sm">
+                <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-semibold">Piso</th>
+                    <th className="px-3 py-2 text-left font-semibold">Pé-direito (m)</th>
+                    <th className="px-3 py-2 text-left font-semibold">Cota (m)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {floorDrafts.map((floor, index) => (
+                    <tr key={floor.id ?? floor.label} className="border-t border-slate-100">
+                      <td className="px-3 py-2 font-medium">{floor.label}</td>
+                      <td className="px-3 py-2">
+                        <input
+                          className="input input-sm"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={floor.floorToFloorHeightM ?? ""}
+                          onChange={(event) => setFloorDrafts((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, floorToFloorHeightM: event.target.value ? Number(event.target.value) : null, source: "manual" } : item))}
+                        />
+                      </td>
+                      <td className="px-3 py-2">
+                        <input
+                          className="input input-sm"
+                          type="number"
+                          step="0.01"
+                          value={floor.elevationM ?? ""}
+                          onChange={(event) => setFloorDrafts((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, elevationM: event.target.value ? Number(event.target.value) : null, source: "manual" } : item))}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] text-sm">
+              <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th className="px-2 py-2 text-left">Código</th>
+                  <th className="px-2 py-2 text-left">Un</th>
+                  <th className="px-2 py-2 text-left">Forma</th>
+                  <th className="px-2 py-2 text-left">Secção (cm)</th>
+                  <th className="px-2 py-2 text-left">h (m)</th>
+                  <th className="px-2 py-2 text-left">Piso</th>
+                </tr>
+              </thead>
+              <tbody>
+                {columnDrafts.map((group, index) => (
+                  <tr key={group.id ?? `${group.code}-${index}`} className="border-t border-slate-100">
+                    <td className="px-2 py-2"><input className="input input-sm" value={group.code} onChange={(event) => setColumnDrafts((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, code: event.target.value } : item))} /></td>
+                    <td className="px-2 py-2"><input className="input input-sm w-16" type="number" min="1" value={group.quantity} onChange={(event) => setColumnDrafts((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, quantity: Math.max(1, Number(event.target.value) || 1) } : item))} /></td>
+                    <td className="px-2 py-2">
+                      <select className="input input-sm" value={group.shape ?? "rectangular"} onChange={(event) => setColumnDrafts((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, shape: event.target.value as StructuralColumnGroup["shape"] } : item))}>
+                        <option value="rectangular">Rect.</option>
+                        <option value="circular">Circ.</option>
+                      </select>
+                    </td>
+                    <td className="px-2 py-2">
+                      {group.shape === "circular" ? (
+                        <input className="input input-sm w-20" type="number" min="0" placeholder="Ø" value={group.diameterCm ?? ""} onChange={(event) => setColumnDrafts((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, diameterCm: event.target.value ? Number(event.target.value) : null } : item))} />
+                      ) : (
+                        <div className="flex gap-1">
+                          <input className="input input-sm w-16" type="number" min="0" placeholder="l" value={group.widthCm ?? ""} onChange={(event) => setColumnDrafts((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, widthCm: event.target.value ? Number(event.target.value) : null } : item))} />
+                          <input className="input input-sm w-16" type="number" min="0" placeholder="c" value={group.depthCm ?? ""} onChange={(event) => setColumnDrafts((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, depthCm: event.target.value ? Number(event.target.value) : null } : item))} />
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-2 py-2"><input className="input input-sm w-20" type="number" min="0" step="0.01" value={group.explicitHeightM ?? ""} onChange={(event) => setColumnDrafts((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, explicitHeightM: event.target.value ? Number(event.target.value) : null } : item))} /></td>
+                    <td className="px-2 py-2">
+                      <select className="input input-sm" value={group.fromFloor ?? ""} onChange={(event) => setColumnDrafts((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, fromFloor: event.target.value || null, toFloor: event.target.value || null } : item))}>
+                        <option value="">—</option>
+                        {floorDrafts.map((floor) => <option key={floor.label} value={floor.label}>{floor.label}</option>)}
+                      </select>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="mt-4 flex justify-end gap-2">
+            <button type="button" className="btn btn-secondary" onClick={() => setColumnManagerOpen(false)}>Fechar</button>
+            <button type="button" className="btn btn-primary" disabled={savingColumns} onClick={() => void saveColumns()}>{savingColumns ? "A guardar…" : "Guardar"}</button>
           </div>
         </Modal>
       )}

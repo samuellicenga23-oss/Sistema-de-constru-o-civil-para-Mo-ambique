@@ -868,6 +868,7 @@ export const plants = pgTable("plants", {
     footingsAvgLengthCm: number;
     footingsAvgDepthCm: number;
     columnsCount: number;
+    columnsConcreteVolumeM3?: number;
     beamsCount: number;
     beamsTotalLengthM: number;
     beamsAvgWidthCm: number;
@@ -883,6 +884,38 @@ export const plants = pgTable("plants", {
       avgWidthCm?: number;
       avgHeightCm?: number;
       steelWeightKg?: number;
+    }>;
+    columnGroups?: Array<{
+      id?: string;
+      code: string;
+      designation?: string;
+      shape?: "rectangular" | "circular" | "custom";
+      widthCm?: number | null;
+      depthCm?: number | null;
+      diameterCm?: number | null;
+      quantity: number;
+      fromFloor?: string | null;
+      toFloor?: string | null;
+      explicitHeightM?: number | null;
+      longitudinalBarCount?: number | null;
+      longitudinalDiameterMm?: number | null;
+      stirrupDiameterMm?: number | null;
+      stirrupSpacingCm?: number | null;
+      concreteVolumeM3?: number;
+      steelWeightKg?: number;
+      steelSource?: "map" | "calculated" | "estimate" | "manual";
+      sourcePage?: number;
+      confidence?: number;
+      needsConfirmation?: boolean;
+    }>;
+    floors?: Array<{
+      id?: string;
+      label: string;
+      sortOrder: number;
+      elevationM?: number | null;
+      floorToFloorHeightM?: number | null;
+      slabThicknessM?: number | null;
+      source?: "plant" | "manual";
     }>;
     staircasesCount: number;
     slabsCount: number;

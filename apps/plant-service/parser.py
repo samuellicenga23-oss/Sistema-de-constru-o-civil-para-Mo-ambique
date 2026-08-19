@@ -7,6 +7,7 @@ confirmado por análise real de um projecto de exemplo (Projecto Completo Gil.pd
 Reconstrução geométrica de paredes a partir de cotas/linhas fica fora de âmbito (ver plano).
 """
 import re
+import math
 import unicodedata
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
@@ -82,6 +83,30 @@ class Footing:
 class ColumnGroup:
     refs: list[str]
     page: int
+    shape: str = "rectangular"
+    width_cm: float | None = None
+    depth_cm: float | None = None
+    diameter_cm: float | None = None
+    from_floor: str | None = None
+    to_floor: str | None = None
+    explicit_height_m: float | None = None
+    longitudinal_bar_count: int | None = None
+    longitudinal_diameter_mm: float | None = None
+    stirrup_diameter_mm: float | None = None
+    stirrup_spacing_cm: float | None = None
+    steel_weight_kg: float = 0.0
+    steel_source: str = "calculated"
+    confidence: float = 0.4
+
+
+@dataclass
+class StructuralFloor:
+    label: str
+    sort_order: int
+    elevation_m: float | None = None
+    floor_to_floor_height_m: float | None = None
+    slab_thickness_m: float | None = None
+    source: str = "plant"
 
 
 @dataclass
@@ -162,7 +187,10 @@ class StructuralSummary:
     beams_steel_weight_kg: float = 0.0
     slabs_steel_weight_kg: float = 0.0
     stairs_steel_weight_kg: float = 0.0
+    columns_concrete_volume_m3: float = 0.0
     beam_groups: list["BeamGroupSummary"] = field(default_factory=list)
+    column_groups: list["ColumnGroupSummary"] = field(default_factory=list)
+    floors: list["StructuralFloor"] = field(default_factory=list)
 
 
 @dataclass
@@ -177,6 +205,29 @@ class BeamGroupSummary:
     avg_width_cm: float
     avg_height_cm: float
     steel_weight_kg: float
+
+
+@dataclass
+class ColumnGroupSummary:
+    code: str
+    shape: str
+    width_cm: float | None
+    depth_cm: float | None
+    diameter_cm: float | None
+    quantity: int
+    from_floor: str | None
+    to_floor: str | None
+    explicit_height_m: float | None
+    longitudinal_bar_count: int | None
+    longitudinal_diameter_mm: float | None
+    stirrup_diameter_mm: float | None
+    stirrup_spacing_cm: float | None
+    concrete_volume_m3: float
+    steel_weight_kg: float
+    steel_source: str
+    source_page: int
+    confidence: float
+    needs_confirmation: bool
 
 
 def _classify_steel_weights(
@@ -876,6 +927,12 @@ ELEMENT_LABEL_PATTERN = re.compile(
 # PILARES" do CYPE CAD — ex: "P01", "P05 e P18", "P07, P09, P15 e P16", "(P23-P22)",
 # "P01=P02=P10=P11" (pilares agrupados por "=").
 FOOTING_REF_LINE = re.compile(r"^\(?P\d+(?:\s*(?:,|e|-|=)\s*P\d+)*\)?$", re.IGNORECASE)
+COLUMN_LONG_ARM = re.compile(r"Arm\.\s*Long\.?:\s*(.+)$", re.IGNORECASE)
+COLUMN_TRANS_ARM = re.compile(r"Armaduras\s+transversais:\s*[ØøΦO]\s*(\d+)", re.IGNORECASE)
+COLUMN_HEIGHT_INTERVAL = re.compile(r"0\s*a\s*(\d+)", re.IGNORECASE)
+COLUMN_SECTION_DIM = re.compile(r"^(\d{2,3})\s*[x×]\s*(\d{2,3})$", re.IGNORECASE)
+COLUMN_DIAMETER = re.compile(r"^[ØøΦ]\s*(\d{2,3})$")
+COLUMN_BAR_SPEC = re.compile(r"(\d+)\s*[ØøΦO]\s*(\d{1,2})", re.IGNORECASE)
 # Malha do quadro de fundação — ex: "4Ø10a/15", "9Ø12a/12.5", "15Ø12a/15"
 FOOTING_MESH_SPEC_LINE = re.compile(
     r"^(?P<count>\d{1,2})\s*[ØøΦ]\s*(?P<diameter>\d{1,2})\s*a\s*/\s*(?P<spacing>\d+(?:[.,]\d+)?)$",
@@ -2145,26 +2202,245 @@ def extract_column_groups(text: str, page_number: int) -> list[ColumnGroup]:
     # imediatamente a seguir ao título — desde que "QUADRO DE PILARES" apareça nessa página.
     if "QUADRO DE PILARES" not in text.upper():
         return []
-    lines = [l.strip() for l in text.split("\n")]
+    lines = [l.strip() for l in text.split("\n") if l.strip()]
+    page_floor, _ = detect_floor_label(text)
+    starts = [i for i, line in enumerate(lines) if FOOTING_REF_LINE.match(line)]
     groups: list[ColumnGroup] = []
-    run: list[str] = []
-
-    def flush(run: list[str]) -> None:
-        if len(run) < 2:
-            return
-        for ref_line in run:
-            refs = re.findall(r"P\d+", ref_line)
-            if refs:
-                groups.append(ColumnGroup(refs=refs, page=page_number))
-
-    for line in lines:
-        if FOOTING_REF_LINE.match(line):
-            run.append(line)
-        else:
-            flush(run)
-            run = []
-    flush(run)
+    for pos, start in enumerate(starts):
+        end = starts[pos + 1] if pos + 1 < len(starts) else min(len(lines), start + 40)
+        block = lines[start:end]
+        refs = re.findall(r"P\d+", block[0], flags=re.IGNORECASE)
+        if not refs:
+            continue
+        groups.append(_column_group_from_block(refs, block[1:], page_number, page_floor))
     return groups
+
+
+def _column_group_from_block(refs: list[str], block: list[str], page_number: int, page_floor: str | None) -> ColumnGroup:
+    width_cm = depth_cm = diameter_cm = None
+    shape = "rectangular"
+    long_count = long_diameter = stirrup_diameter = stirrup_spacing = None
+    height_m = None
+    block_floor, _ = detect_floor_label("\n".join(block))
+    numbers: list[float] = []
+    for line in block:
+        section = COLUMN_SECTION_DIM.match(line)
+        if section:
+            width_cm = float(section.group(1))
+            depth_cm = float(section.group(2))
+            continue
+        diameter = COLUMN_DIAMETER.match(line)
+        if diameter and width_cm is None:
+            diameter_cm = float(diameter.group(1))
+            shape = "circular"
+            continue
+        long_match = COLUMN_LONG_ARM.search(line)
+        if long_match:
+            parts = COLUMN_BAR_SPEC.findall(long_match.group(1))
+            if parts:
+                long_count = sum(int(count) for count, _diameter in parts)
+                long_diameter = max(float(diameter) for _count, diameter in parts)
+            continue
+        trans_match = COLUMN_TRANS_ARM.search(line)
+        if trans_match:
+            stirrup_diameter = float(trans_match.group(1))
+            continue
+        interval = COLUMN_HEIGHT_INTERVAL.search(line)
+        if interval:
+            height_m = round(float(interval.group(1)) / 100, 2)
+            continue
+        if re.fullmatch(r"\d+(?:[.,]\d+)?", line):
+            numbers.append(float(line.replace(",", ".")))
+    if width_cm is None and diameter_cm is None:
+        section_candidates = [value for value in numbers if 12 <= value <= 80]
+        if len(section_candidates) >= 2:
+            width_cm, depth_cm = section_candidates[0], section_candidates[1]
+        elif len(section_candidates) == 1:
+            width_cm = depth_cm = section_candidates[0]
+    if stirrup_spacing is None:
+        spacing_candidates = [value for value in numbers if 8 <= value <= 30]
+        if spacing_candidates:
+            stirrup_spacing = spacing_candidates[-1]
+    confidence = 0.35
+    if width_cm and depth_cm:
+        confidence += 0.25
+    if height_m:
+        confidence += 0.2
+    if long_count:
+        confidence += 0.15
+    return ColumnGroup(
+        refs=refs,
+        page=page_number,
+        shape=shape,
+        width_cm=width_cm,
+        depth_cm=depth_cm,
+        diameter_cm=diameter_cm,
+        from_floor=block_floor or page_floor,
+        to_floor=block_floor or page_floor,
+        explicit_height_m=height_m,
+        longitudinal_bar_count=long_count,
+        longitudinal_diameter_mm=long_diameter,
+        stirrup_diameter_mm=stirrup_diameter,
+        stirrup_spacing_cm=stirrup_spacing,
+        confidence=min(0.95, confidence),
+    )
+
+
+def _floor_sort_key(label: str) -> int:
+    floor = label.lower()
+    if "cave" in floor or "subsolo" in floor:
+        return -10
+    if "térreo" in floor or "terreo" in floor or "rés" in floor:
+        return 0
+    match = re.search(r"(\d+)", floor)
+    if match:
+        return int(match.group(1))
+    if "superior" in floor:
+        return 50
+    if "anexo" in floor:
+        return 80
+    if "cobertura" in floor:
+        return 90
+    return 60
+
+
+def _dedupe_column_groups(groups: list[ColumnGroup]) -> list[ColumnGroup]:
+    best: dict[tuple[str, ...], ColumnGroup] = {}
+    for group in groups:
+        key = tuple(sorted(ref.upper() for ref in group.refs))
+        previous = best.get(key)
+        score = (
+            (1 if group.width_cm or group.diameter_cm else 0)
+            + (1 if group.explicit_height_m else 0)
+            + (1 if group.longitudinal_bar_count else 0)
+            + group.confidence
+        )
+        previous_score = 0.0
+        if previous:
+            previous_score = (
+                (1 if previous.width_cm or previous.diameter_cm else 0)
+                + (1 if previous.explicit_height_m else 0)
+                + (1 if previous.longitudinal_bar_count else 0)
+                + previous.confidence
+            )
+        if previous is None or score >= previous_score:
+            best[key] = group
+    return list(best.values())
+
+
+def _rebar_kg_per_m(diameter_mm: float) -> float:
+    diameter_m = diameter_mm / 1000
+    return (math.pi / 4) * diameter_m * diameter_m * 7850
+
+
+def _column_height_m(group: ColumnGroup, floors: list[StructuralFloor]) -> float | None:
+    if group.explicit_height_m and group.explicit_height_m > 0:
+        return group.explicit_height_m
+    by_label = {floor.label: floor for floor in floors}
+    start = by_label.get(group.from_floor or "")
+    end = by_label.get(group.to_floor or "")
+    if start and end and start.elevation_m is not None and end.elevation_m is not None:
+        delta = abs(end.elevation_m - start.elevation_m)
+        return delta if delta > 0 else None
+    host = start or end
+    if host and host.floor_to_floor_height_m:
+        return host.floor_to_floor_height_m
+    return None
+
+
+def _column_concrete_m3(group: ColumnGroup, height_m: float | None) -> float:
+    quantity = max(len(group.refs), 1)
+    if not height_m or height_m <= 0:
+        return 0.0
+    if group.shape == "circular" and group.diameter_cm:
+        diameter_m = group.diameter_cm / 100
+        return round(quantity * math.pi * diameter_m * diameter_m * 0.25 * height_m, 2)
+    if group.width_cm and group.depth_cm:
+        return round(quantity * (group.width_cm / 100) * (group.depth_cm / 100) * height_m, 2)
+    return 0.0
+
+
+def _column_steel_kg(group: ColumnGroup, height_m: float | None) -> float:
+    quantity = max(len(group.refs), 1)
+    if not height_m or not group.longitudinal_bar_count or not group.longitudinal_diameter_mm:
+        return 0.0
+    longitudinal = quantity * group.longitudinal_bar_count * height_m * 1.1 * _rebar_kg_per_m(group.longitudinal_diameter_mm)
+    stirrups = 0.0
+    spacing_m = (group.stirrup_spacing_cm or 0) / 100
+    if group.stirrup_diameter_mm and spacing_m > 0:
+        if group.shape == "circular" and group.diameter_cm:
+            perimeter_m = math.pi * (group.diameter_cm / 100)
+        else:
+            perimeter_m = 2 * ((group.width_cm or 0) + (group.depth_cm or 0)) / 100
+        if perimeter_m > 0:
+            stirrups = quantity * math.ceil(height_m / spacing_m) * perimeter_m * _rebar_kg_per_m(group.stirrup_diameter_mm)
+    return round(longitudinal + stirrups, 2)
+
+
+def _summarise_column_groups(groups: list[ColumnGroup], floors: list[StructuralFloor]) -> list[ColumnGroupSummary]:
+    summaries: list[ColumnGroupSummary] = []
+    for group in groups:
+        height_m = _column_height_m(group, floors)
+        concrete = _column_concrete_m3(group, height_m)
+        steel = _column_steel_kg(group, height_m)
+        summaries.append(
+            ColumnGroupSummary(
+                code="=".join(group.refs),
+                shape=group.shape,
+                width_cm=group.width_cm,
+                depth_cm=group.depth_cm,
+                diameter_cm=group.diameter_cm,
+                quantity=len(group.refs),
+                from_floor=group.from_floor,
+                to_floor=group.to_floor,
+                explicit_height_m=group.explicit_height_m or height_m,
+                longitudinal_bar_count=group.longitudinal_bar_count,
+                longitudinal_diameter_mm=group.longitudinal_diameter_mm,
+                stirrup_diameter_mm=group.stirrup_diameter_mm,
+                stirrup_spacing_cm=group.stirrup_spacing_cm,
+                concrete_volume_m3=concrete,
+                steel_weight_kg=steel,
+                steel_source="calculated" if steel > 0 else "calculated",
+                source_page=group.page,
+                confidence=group.confidence,
+                needs_confirmation=concrete <= 0 or height_m is None,
+            )
+        )
+    return summaries
+
+
+def _build_structural_floors(
+    rooms: list[Room],
+    slabs: list[SlabSummary],
+    column_groups: list[ColumnGroup],
+    beam_spans: list[BeamSpan],
+) -> list[StructuralFloor]:
+    labels: list[str] = []
+    seen: set[str] = set()
+
+    def add(label: str | None) -> None:
+        if not label:
+            return
+        key = label.strip()
+        if not key or key in seen:
+            return
+        seen.add(key)
+        labels.append(key)
+
+    for room in rooms:
+        add(room.floor)
+    for slab in slabs:
+        add(slab.floor)
+    for group in column_groups:
+        add(group.from_floor)
+        add(group.to_floor)
+    for span in beam_spans:
+        add(span.floor)
+    labels.sort(key=_floor_sort_key)
+    return [
+        StructuralFloor(label=label, sort_order=index, source="plant")
+        for index, label in enumerate(labels)
+    ]
 
 
 def extract_beam_spans(text: str, page_number: int) -> list[BeamSpan]:
@@ -2478,6 +2754,7 @@ def build_structural_summary(
     rebar_schedules: list[RebarLine],
     staircases: list[Staircase],
     slabs: list[Slab],
+    rooms: list[Room] | None = None,
 ) -> StructuralSummary | None:
     if not footings and not column_groups and not beam_spans and not rebar_schedules and not staircases and not slabs:
         return None
@@ -2489,6 +2766,7 @@ def build_structural_summary(
     footing_lengths = [f.length_cm for f in footings for _ in f.refs]
     footing_depths = [f.height_cm for f in footings for _ in f.refs]
 
+    column_groups = _dedupe_column_groups(column_groups)
     column_refs = {ref for g in column_groups for ref in g.refs}
 
     # Cada piso numera os seus pórticos a partir de 1 — "Pórtico 1" do Piso 1 e "Pórtico 1" do
@@ -2531,6 +2809,9 @@ def build_structural_summary(
         slabs_steel = slab_map_steel
 
     beam_groups = _build_beam_groups(beam_spans, slab_summaries, beams_steel, rebar_schedules)
+    floors = _build_structural_floors(rooms or [], slab_summaries, column_groups, beam_spans)
+    column_summaries = _summarise_column_groups(column_groups, floors)
+    columns_concrete = round(sum(group.concrete_volume_m3 for group in column_summaries), 2)
 
     return StructuralSummary(
         footings_count=len(footing_refs),
@@ -2538,6 +2819,7 @@ def build_structural_summary(
         footings_avg_length_cm=round(_avg(footing_lengths), 2),
         footings_avg_depth_cm=round(_avg(footing_depths), 2),
         columns_count=len(column_refs),
+        columns_concrete_volume_m3=columns_concrete,
         beams_count=len(beam_porticos),
         beams_total_length_m=round(sum(beam_lengths), 2),
         beams_avg_width_cm=round(_avg(beam_widths), 2),
@@ -2558,6 +2840,8 @@ def build_structural_summary(
         slabs_steel_weight_kg=slabs_steel,
         stairs_steel_weight_kg=stairs_steel,
         beam_groups=beam_groups,
+        column_groups=column_summaries,
+        floors=floors,
     )
 
 
@@ -3398,7 +3682,7 @@ def parse_pdf(file_bytes: bytes, progress_callback=None, detection_tags: list[st
 
     doc.close()
     structural_summary = build_structural_summary(
-        footings, column_groups, beam_spans, rebar_schedules, staircases, slabs
+        footings, column_groups, beam_spans, rebar_schedules, staircases, slabs, selected_rooms
     )
     document_analysis.hydrosanitary_summary = extract_hydrosanitary_summary(
         document_analysis,

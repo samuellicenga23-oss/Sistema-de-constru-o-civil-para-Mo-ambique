@@ -1,4 +1,5 @@
 import unittest
+import math
 
 import fitz
 
@@ -546,6 +547,67 @@ S = 12,35 m2
         self.assertIn("cctv", result.document_analysis.matched_tags)
         self.assertIn("incendio", result.document_analysis.matched_tags)
         self.assertNotIn("elevador", result.document_analysis.matched_tags)
+
+
+class ColumnScheduleTests(unittest.TestCase):
+    def test_reads_rectangular_column_geometry_and_height(self):
+        from parser import extract_column_groups, _dedupe_column_groups, _summarise_column_groups
+
+        text = """
+QUADRO DE PILARES
+Piso Térreo
+P1=P2=P3=P21
+30
+20
+Arm. Long.: 4Ø12
+Armaduras transversais: Ø6
+Intervalo
+(cm)
+0 a 330
+22
+15
+P4=P17
+25x40
+Arm. Long.: 6Ø12
+Armaduras transversais: Ø8
+0 a 300
+20
+"""
+        groups = _dedupe_column_groups(extract_column_groups(text, 44))
+        self.assertEqual(len(groups), 2)
+        first = next(group for group in groups if group.refs[0] == "P1")
+        self.assertEqual(first.width_cm, 30)
+        self.assertEqual(first.depth_cm, 20)
+        self.assertEqual(first.explicit_height_m, 3.3)
+        self.assertEqual(first.longitudinal_bar_count, 4)
+        self.assertEqual(first.longitudinal_diameter_mm, 12)
+        summaries = _summarise_column_groups(groups, [])
+        first_summary = next(summary for summary in summaries if summary.code.startswith("P1"))
+        self.assertAlmostEqual(first_summary.concrete_volume_m3, 4 * 0.30 * 0.20 * 3.3, places=2)
+
+    def test_reads_circular_column_and_does_not_duplicate_on_reprocess(self):
+        from parser import extract_column_groups, _dedupe_column_groups, _column_concrete_m3
+
+        text = """
+QUADRO DE PILARES
+P6
+Ø40
+Arm. Long.: 8Ø16
+0 a 280
+"""
+        first = extract_column_groups(text, 12)
+        second = extract_column_groups(text, 12)
+        merged = _dedupe_column_groups([*first, *second])
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0].shape, "circular")
+        self.assertEqual(merged[0].diameter_cm, 40)
+        self.assertAlmostEqual(_column_concrete_m3(merged[0], 2.8), round(math.pi * 0.4 * 0.4 * 0.25 * 2.8, 2), places=2)
+
+    def test_does_not_invent_volume_without_height(self):
+        from parser import ColumnGroup, _column_concrete_m3
+
+        group = ColumnGroup(refs=["P9"], page=1, width_cm=30, depth_cm=30)
+        self.assertEqual(_column_concrete_m3(group, None), 0)
 
 
 if __name__ == "__main__":

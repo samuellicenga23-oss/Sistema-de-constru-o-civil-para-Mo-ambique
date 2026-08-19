@@ -320,7 +320,13 @@ export default function QuickEstimateWizard({
   // Ajustes avançados: itens que por omissão usam sempre um rácio genérico (nenhuma planta dá
   // estes dados) — se o utilizador souber o valor real, substitui a estimativa. Vazio = manter
   // o rácio genérico.
-  const [columnConcreteVolumeM3, setColumnConcreteVolumeM3] = useState("");
+  const [columnConcreteVolumeM3, setColumnConcreteVolumeM3] = useState(
+    structuralSummary?.columnsConcreteVolumeM3 && structuralSummary.columnsConcreteVolumeM3 > 0
+      ? structuralSummary.columnsConcreteVolumeM3.toFixed(2)
+      : structuralSummary?.columnGroups?.length
+        ? String(structuralSummary.columnGroups.reduce((sum, group) => sum + Number(group.concreteVolumeM3 ?? 0), 0).toFixed(2))
+        : "",
+  );
   const [formworkAreaM2, setFormworkAreaM2] = useState("");
   const [backfillEarthVolumeM3, setBackfillEarthVolumeM3] = useState("");
   const [sewerPipe110M, setSewerPipe110M] = useState("");

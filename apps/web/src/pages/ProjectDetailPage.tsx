@@ -584,6 +584,30 @@ export default function ProjectDetailPage() {
             </label>
             )}
           </div>
+          {showPrepararObra && plants.some((plant) => (plant.structuralSummary?.floors?.length ?? 0) > 0) && (
+            <div className="border-t border-slate-100 px-5 py-4">
+              <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Alturas por piso</p>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {(plants.find((plant) => plant.structuralSummary?.floors?.length)?.structuralSummary?.floors ?? []).map((floor) => (
+                  <div key={floor.id ?? floor.label} className="rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                    <strong className="text-slate-900">{floor.label}</strong>
+                    <span className="mt-0.5 block text-xs text-slate-500">
+                      {floor.floorToFloorHeightM ? `${Number(floor.floorToFloorHeightM).toFixed(2)} m` : "sem pé-direito"}
+                      {floor.elevationM != null ? ` · cota ${Number(floor.elevationM).toFixed(2)} m` : ""}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              {plants.find((plant) => plant.structuralSummary?.floors?.length) && (
+                <Link
+                  to={`/plantas/${plants.find((plant) => plant.structuralSummary?.floors?.length)!.id}`}
+                  className="mt-3 inline-flex text-xs font-semibold text-brand-700"
+                >
+                  Editar alturas
+                </Link>
+              )}
+            </div>
+          )}
         </section>
 
         {showPrepararObra && (
