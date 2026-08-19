@@ -17,6 +17,7 @@ import { sendEmail, emailLayout, escapeHtml, safeContentDispositionFilename } fr
 import { createTrialCompany } from "../services/companyOnboarding.js";
 import { syncSigoPricesForCompany } from "../services/sigoPrices.js";
 import { recordAuditEvent } from "../services/auditTrail.js";
+import { DEFAULT_APPROVAL_MATRIX } from "../services/approvalMatrix.js";
 import {
   buildCompanyBackup,
   getCompaniesUsageMap,
@@ -1147,6 +1148,10 @@ export async function companyRoutes(app: FastifyInstance) {
     return { company, subscription: await getLatestSubscription(companyId) };
   });
 
+  app.get("/api/companies/me/approval-matrix", { preHandler: requireCompanyUser }, async () => {
+    return { rules: DEFAULT_APPROVAL_MATRIX, source: "default" as const };
+  });
+
   app.put("/api/companies/me", { preHandler: requireRole("admin_empresa") }, async (request, reply) => {
     const companyId = request.currentUser!.companyId!;
     const parsed = z
@@ -1165,10 +1170,11 @@ export async function companyRoutes(app: FastifyInstance) {
         defaultCurrency: z.enum(CURRENCIES).optional(),
         workingDaysPerMonth: z.number().int().min(1).max(31).optional(),
         workingHoursPerDay: z.number().min(1).max(24).optional(),
+        emailNotificationPrefs: z.object({ workflow: z.boolean() }).optional(),
       })
       .safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
-    const { workingDaysPerMonth, workingHoursPerDay, email, ...rest } = parsed.data;
+    const { workingDaysPerMonth, workingHoursPerDay, email, emailNotificationPrefs, ...rest } = parsed.data;
 
     const [row] = await db
       .update(companies)
@@ -1177,6 +1183,7 @@ export async function companyRoutes(app: FastifyInstance) {
         ...(email !== undefined ? { email: email || null } : {}),
         ...(workingDaysPerMonth !== undefined ? { workingDaysPerMonth } : {}),
         ...(workingHoursPerDay !== undefined ? { workingHoursPerDay: workingHoursPerDay.toString() } : {}),
+        ...(emailNotificationPrefs !== undefined ? { emailNotificationPrefs } : {}),
       })
       .where(eq(companies.id, companyId))
       .returning();

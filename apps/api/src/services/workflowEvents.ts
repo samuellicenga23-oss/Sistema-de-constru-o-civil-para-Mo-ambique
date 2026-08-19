@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { isCompanyUserRole, resolveRoleTemplate } from "@sigo/shared";
 import { db } from "../db/index.js";
-import { users } from "../db/schema.js";
+import { companies, users } from "../db/schema.js";
 import { env } from "../env.js";
 import { emailLayout, escapeHtml, sendEmail } from "./mailer.js";
 import { notifyUsers } from "./notifications.js";
@@ -224,6 +224,7 @@ export type WorkflowEventDeps = {
   notify: (userIds: string[], title: string, body: string, link?: string) => Promise<void>;
   mail: (input: { to: string | string[]; subject: string; html: string }, logger?: WorkflowEventInput["logger"]) => Promise<boolean>;
   publicUrl: string;
+  emailWorkflowEnabled?: (companyId: string) => Promise<boolean>;
 };
 
 const defaultDeps: WorkflowEventDeps = {
@@ -232,6 +233,10 @@ const defaultDeps: WorkflowEventDeps = {
   notify: notifyUsers,
   mail: sendEmail,
   publicUrl: env.publicUrl,
+  emailWorkflowEnabled: async (companyId: string) => {
+    const [company] = await db.select({ prefs: companies.emailNotificationPrefs }).from(companies).where(eq(companies.id, companyId)).limit(1);
+    return company?.prefs?.workflow !== false;
+  },
 };
 
 async function loadCompanyUsers(companyId: string): Promise<WorkflowCompanyUser[]> {
@@ -292,6 +297,9 @@ export async function emitWorkflowEvent(input: WorkflowEventInput, deps: Workflo
 
     const copy = workflowEventCopy(input.event, input.title, input.reason);
     await deps.notify(recipients.map((user) => user.id), copy.title, copy.body, input.link);
+
+    const emailOn = await (deps.emailWorkflowEnabled ?? (async () => true))(input.companyId);
+    if (!emailOn) return;
 
     const emails = [...new Set(recipients.map((user) => user.email).filter(Boolean))];
     if (!emails.length) return;

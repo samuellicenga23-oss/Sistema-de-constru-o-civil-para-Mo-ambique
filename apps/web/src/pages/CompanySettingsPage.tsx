@@ -14,13 +14,15 @@ import { formatMzn } from "../commercialPlans";
 const STATUS_LABELS: Record<string, string> = { trial: "Trial", activo: "Activo", suspenso: "Suspenso" };
 const STATUS_BADGE: Record<string, string> = { trial: "badge-yellow", activo: "badge-green", suspenso: "badge-red" };
 
-type Tab = "geral" | "logotipo" | "calculo" | "subscricao" | "utilizadores";
+type Tab = "geral" | "logotipo" | "calculo" | "subscricao" | "utilizadores" | "aprovacoes" | "notificacoes";
 const TABS: Array<{ id: Tab; label: string; short: string }> = [
   { id: "geral", label: "Dados gerais", short: "Geral" },
   { id: "logotipo", label: "Logótipo", short: "Logo" },
   { id: "calculo", label: "Cálculo", short: "Cálculo" },
-  { id: "subscricao", label: "Subscrição", short: "Plano" },
   { id: "utilizadores", label: "Utilizadores", short: "Equipa" },
+  { id: "aprovacoes", label: "Aprovações", short: "Aprovações" },
+  { id: "notificacoes", label: "Notificações", short: "Notificações" },
+  { id: "subscricao", label: "Subscrição", short: "Plano" },
 ];
 
 const GENERAL_FIELDS: Array<{ key: keyof CompanyUpdateInput; label: string }> = [
@@ -441,7 +443,90 @@ export default function CompanySettingsPage() {
             <section className="card card-pad"><p className="muted">Só um administrador pode gerir a equipa.</p></section>
           )
         )}
+
+        {tab === "aprovacoes" && <ApprovalMatrixPanel />}
+
+        {tab === "notificacoes" && (
+          <NotificationPrefsPanel
+            company={company}
+            canEdit={canEdit}
+            onSaved={async (text) => {
+              flash(text);
+              await reload();
+            }}
+            onError={setError}
+          />
+        )}
       </div>
     </Layout>
+  );
+}
+
+const ENTITY_LABEL: Record<string, string> = {
+  medicao: "Medição / orçamento",
+  auto: "Auto",
+  requisicao: "Requisição",
+  payment_request: "Pedido de pagamento",
+};
+
+function ApprovalMatrixPanel() {
+  const [rules, setRules] = useState<Array<{ entityType: string; submitRoles: string[]; approveRoles: string[]; submitPermission: string | null; approvePermission: string | null; singleAdminException: boolean }>>([]);
+  useEffect(() => {
+    companiesApi.approvalMatrix().then((data) => setRules(data.rules)).catch(() => {});
+  }, []);
+  return (
+    <section className="card overflow-hidden">
+      <table className="w-full text-sm">
+        <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+          <tr>
+            <th className="px-4 py-3">Documento</th>
+            <th className="px-4 py-3">Submeter</th>
+            <th className="px-4 py-3">Aprovar</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {rules.map((rule) => (
+            <tr key={rule.entityType}>
+              <td className="px-4 py-3 font-medium text-slate-900">{ENTITY_LABEL[rule.entityType] ?? rule.entityType}</td>
+              <td className="px-4 py-3 text-slate-600">{rule.submitPermission ?? rule.submitRoles.join(", ")}</td>
+              <td className="px-4 py-3 text-slate-600">{rule.approvePermission ?? rule.approveRoles.join(", ")}{rule.singleAdminException ? " · admin único" : ""}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="border-t border-slate-100 px-4 py-3 text-xs text-slate-500">Validação no servidor. A auditoria não pode ser desligada.</p>
+    </section>
+  );
+}
+
+function NotificationPrefsPanel({
+  company,
+  canEdit,
+  onSaved,
+  onError,
+}: {
+  company: Company | null;
+  canEdit: boolean;
+  onSaved: (text: string) => Promise<void> | void;
+  onError: (text: string) => void;
+}) {
+  const workflowOn = company?.emailNotificationPrefs?.workflow !== false;
+  async function toggle(next: boolean) {
+    if (!canEdit) return;
+    try {
+      await companiesApi.updateMe({ emailNotificationPrefs: { workflow: next } });
+      await onSaved(next ? "Email de workflow ligado." : "Email de workflow desligado.");
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Erro ao guardar");
+    }
+  }
+  return (
+    <section className="card card-pad space-y-3 text-sm">
+      <label className="flex items-center justify-between gap-3">
+        <span>Email de workflow</span>
+        <input type="checkbox" checked={workflowOn} disabled={!canEdit} onChange={(event) => void toggle(event.target.checked)} />
+      </label>
+      <p className="text-xs text-slate-500">O sino in-app mantém-se para eventos críticos. A auditoria não pode ser desligada.</p>
+    </section>
   );
 }
