@@ -3,9 +3,8 @@ import { db } from "../db/index.js";
 import { budgetDocuments, financialEntries, invoiceCreditNotes, invoiceReceipts, materials, measurementCertificates, projectInvoices, purchaseOrders, siteDiaryEntries, stockMovements, supplierInvoiceCreditNotes, supplierInvoicePayments, supplierInvoices } from "../db/schema.js";
 import { getBudgetDocumentSummary } from "./boqEngine.js";
 import { getProjectSchedule } from "./scheduleEngine.js";
-
-type AlertLevel = "critical" | "warning" | "info";
-type ControlAlert = { code: string; level: AlertLevel; title: string; detail: string; href: string };
+import { pickNextAction, rankControlActions, type ControlAlert } from "./controlTower.js";
+import { computeEarnedValueForecast } from "./projectForecast.js";
 
 function today() {
   return new Date().toISOString().slice(0, 10);
@@ -188,11 +187,16 @@ export async function getProjectControl(projectId: string, currency: string) {
   }
   if (financial.certified > financial.received + 0.01) alerts.push({ code: "certified_unpaid", level: "info", title: "Autos por receber", detail: "Existem autos aprovados ainda não recebidos financeiramente.", href: `/projectos/${projectId}/financeiro` });
 
-  const alertRank: Record<AlertLevel, number> = { critical: 0, warning: 1, info: 2 };
-  alerts.sort((a, b) => alertRank[a.level] - alertRank[b.level]);
-  const nextAction = alerts[0] ?? (actualProgress < 100
+  const ranked = rankControlActions(alerts);
+  const nextAction = pickNextAction(ranked, actualProgress < 100
     ? { code: "diary_continue", level: "info" as const, title: "Registar andamento", detail: "Actualize os trabalhos, consumos e progresso do dia.", href: `/projectos/${projectId}/diario?fase=gestao` }
     : { code: "project_review", level: "info" as const, title: "Rever encerramento", detail: "Confirme saldos, facturas e documentos finais da obra.", href: `/projectos/${projectId}?fase=gestao` });
+  const forecast = computeEarnedValueForecast({
+    contractedValue,
+    actualCost: financial.paidCost,
+    committedCost: financial.committedCost,
+    forecastRevenue: contractedValue,
+  });
 
   return {
     currency,
@@ -208,7 +212,8 @@ export async function getProjectControl(projectId: string, currency: string) {
       })),
     },
     stock: stock.slice(0, 8),
-    alerts,
+    alerts: ranked,
+    forecast,
     operations: {
       nextAction,
       criticalCount: alerts.filter((alert) => alert.level === "critical").length,

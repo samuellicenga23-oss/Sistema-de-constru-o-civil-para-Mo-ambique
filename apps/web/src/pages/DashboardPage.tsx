@@ -8,13 +8,8 @@ import LoadingState from "../components/LoadingState";
 import ErrorState from "../components/ErrorState";
 import EmptyState from "../components/EmptyState";
 import AlertBanner from "../components/AlertBanner";
-import { IconFolder, IconDoc, IconClipboard, IconMap, IconPlus, IconAlertTriangle } from "../components/icons";
+import { IconFolder, IconDoc, IconClipboard, IconMap, IconPlus } from "../components/icons";
 
-const ALERT_LEVEL_STYLE: Record<string, string> = {
-  critical: "border-red-200 bg-red-50 text-red-800",
-  warning: "border-amber-200 bg-amber-50 text-amber-800",
-  info: "border-slate-200 bg-slate-50 text-slate-700",
-};
 const ALERT_LEVEL_WEIGHT: Record<string, number> = { critical: 0, warning: 1, info: 2 };
 
 function money(value: number, currency: string) {
@@ -38,14 +33,6 @@ function MoneyByCurrency({ totals }: { totals: CurrencyTotals }) {
 
 const CERT_STATUS_LABELS: Record<string, string> = { rascunho: "Rascunho", submetido: "Submetido", aprovado: "Aprovado" };
 const CERT_STATUS_TONE: Record<string, string> = { rascunho: "badge-gray", submetido: "badge-yellow", aprovado: "badge-green" };
-
-const OPERATION_FLOW = [
-  { step: "01", label: "Medir", detail: "Plantas e quantidades", to: "/medicoes" },
-  { step: "02", label: "Orçamentar", detail: "Composições e margem", to: "/orcamentos" },
-  { step: "03", label: "Planear", detail: "Cronograma", to: "/orcamentos" },
-  { step: "04", label: "Comprar", detail: "Stock e campo", to: "/gestao" },
-  { step: "05", label: "Certificar", detail: "Autos e financeiro", to: "/orcamentos" },
-];
 
 function StatCard({ label, value, icon, tint }: { label: string; value: string | number; icon: ReactNode; tint: string }) {
   return (
@@ -90,7 +77,7 @@ export default function DashboardPage() {
       .flatMap((o) => o.alerts.map((alert) => ({ ...alert, project: projectById.get(o.projectId) })))
       .filter((a) => a.project)
       .sort((a, b) => ALERT_LEVEL_WEIGHT[a.level] - ALERT_LEVEL_WEIGHT[b.level])
-      .slice(0, 4);
+      .slice(0, 8);
   }, [overview, data]);
 
   if (user?.role === "super_admin") {
@@ -128,76 +115,48 @@ export default function DashboardPage() {
         {error && <ErrorState message={error} onRetry={loadDashboard} />}
         {user?.mustChangePassword && (
           <AlertBanner tone="info">
-            Está a usar uma palavra-passe temporária. Pode continuar a trabalhar — altere-a em{" "}
-            <Link to="/perfil" className="font-semibold underline">Perfil</Link> quando quiser.
+            Palavra-passe temporária — altere em{" "}
+            <Link to="/perfil" className="font-semibold underline">Perfil</Link>.
           </AlertBanner>
         )}
-
-        <section className="card overflow-hidden">
-          <div className="border-b border-slate-200 bg-gradient-to-r from-brand-50/80 to-transparent px-4 py-3.5 sm:px-5">
-            <p className="eyebrow">Fluxo da obra</p>
-            <h2 className="mt-1 font-display text-sm font-bold text-slate-900">Do preço ao resultado</h2>
-          </div>
-          <div className="flex snap-x gap-px overflow-x-auto bg-slate-200 [scrollbar-width:thin] md:grid md:grid-cols-5 md:overflow-visible">
-            {OPERATION_FLOW.map((item) => (
-              <Link
-                key={item.step}
-                to={item.to}
-                className="group relative w-[170px] shrink-0 snap-start bg-white px-4 py-3.5 transition hover:bg-brand-50/60 md:w-auto"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[10px] font-black text-accent">{item.step}</span>
-                  <span className="grid h-6 w-6 place-items-center rounded-full border border-slate-200 text-xs text-brand-700 transition group-hover:border-brand-300 group-hover:bg-white">
-                    →
-                  </span>
-                </div>
-                <p className="mt-2 text-xs font-semibold text-slate-900">{item.label}</p>
-                <p className="mt-1 text-[10px] text-slate-500">{item.detail}</p>
-              </Link>
-            ))}
-          </div>
-        </section>
 
         {loading && !data && <LoadingState skeleton />}
 
         {data && (
           <>
-            {data.contasVencidas > 0 && (
-              <AlertBanner tone="warning">
-                <span className="font-semibold">{data.contasVencidas}</span> conta(s) vencida(s) — verifique o Financeiro de cada projecto.
-              </AlertBanner>
-            )}
-
-            {topAlerts.length > 0 && (
-              <section className="card overflow-hidden border-amber-200">
-                <div className="flex items-center gap-2 border-b border-amber-100 bg-amber-50/60 px-4 py-3 sm:px-5">
-                  <IconAlertTriangle className="h-4 w-4 text-amber-700" />
-                  <h2 className="section-title text-base text-amber-900">Precisa de atenção</h2>
-                  <Link to="/gestao" className="action-link ml-auto">Ver todos →</Link>
-                </div>
+            <section className="card overflow-hidden">
+              <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-3 sm:px-5">
+                <h2 className="section-title text-base">Pendências</h2>
+                <span className="badge badge-brand">{topAlerts.length + (data.contasVencidas > 0 ? 1 : 0) + (data.ordensCompraPendentes > 0 ? 1 : 0)}</span>
+              </div>
+              {topAlerts.length === 0 && data.contasVencidas === 0 && data.ordensCompraPendentes === 0 ? (
+                <p className="px-4 py-6 text-sm text-slate-500 sm:px-5">Sem acções pendentes.</p>
+              ) : (
                 <ul className="divide-y divide-slate-100">
+                  {data.contasVencidas > 0 && (
+                    <li className="flex items-center justify-between gap-4 px-4 py-3 sm:px-5">
+                      <div><p className="text-sm font-semibold text-amber-900">{data.contasVencidas} conta(s) vencida(s)</p><p className="text-xs text-slate-500">Pagamentos</p></div>
+                      <Link to="/gestao" className="btn btn-secondary btn-sm">Abrir</Link>
+                    </li>
+                  )}
+                  {data.ordensCompraPendentes > 0 && (
+                    <li className="flex items-center justify-between gap-4 px-4 py-3 sm:px-5">
+                      <div><p className="text-sm font-semibold text-slate-900">{data.ordensCompraPendentes} OC(s) por confirmar/receber</p><p className="text-xs text-slate-500">Compras</p></div>
+                      <Link to="/gestao" className="btn btn-secondary btn-sm">Abrir</Link>
+                    </li>
+                  )}
                   {topAlerts.map((alert, idx) => (
-                    <li key={`${alert.project!.id}-${alert.code}-${idx}`}>
-                      <Link
-                        to={alert.href}
-                        className="flex items-start justify-between gap-4 px-4 py-3 transition-colors hover:bg-slate-50 sm:px-5"
-                      >
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${ALERT_LEVEL_STYLE[alert.level]}`}>
-                              {alert.title}
-                            </span>
-                            <span className="truncate text-xs font-medium text-slate-600">{alert.project!.name}</span>
-                          </div>
-                          <p className="mt-1 text-xs text-slate-500">{alert.detail}</p>
-                        </div>
-                        <span className="shrink-0 text-xs font-semibold text-brand-700">Resolver →</span>
-                      </Link>
+                    <li key={`${alert.project!.id}-${alert.code}-${idx}`} className="flex items-center justify-between gap-4 px-4 py-3 sm:px-5">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-slate-900">{alert.title}</p>
+                        <p className="truncate text-xs text-slate-500">{alert.project!.name} · {alert.detail}</p>
+                      </div>
+                      <Link to={alert.href} className="btn btn-secondary btn-sm shrink-0">Abrir</Link>
                     </li>
                   ))}
                 </ul>
-              </section>
-            )}
+              )}
+            </section>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
               <StatCard label="Projectos" value={data.totalProjects} tint="bg-brand-50 text-brand-700" icon={<IconFolder className="w-5 h-5" />} />
