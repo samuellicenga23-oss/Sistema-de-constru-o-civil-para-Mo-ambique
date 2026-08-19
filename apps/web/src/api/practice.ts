@@ -161,6 +161,9 @@ export type PracticeQuote = {
   discountAmount?: string | null;
   discountPercent?: string | null;
   acceptanceNotes?: string | null;
+  expectedCloseDate?: string | null;
+  lossReason?: string | null;
+  ownerUserId?: string | null;
   approvedAt: string | null;
   createdAt: string;
 };
@@ -624,6 +627,7 @@ export const practiceApi = {
       discountAmount?: number;
       discountPercent?: number;
       acceptanceNotes?: string;
+      lossReason?: string;
     },
   ) =>
     request<PracticeQuote & { engagement?: PracticeEngagement | null }>(`/practice/quotes/${id}/status`, {

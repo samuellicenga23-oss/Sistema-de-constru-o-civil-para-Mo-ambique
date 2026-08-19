@@ -8,6 +8,7 @@ import PageSearch from "../components/PageSearch";
 import ProposalWizard from "../components/ProposalWizard";
 import { IconBuilding, IconPlus } from "../components/icons";
 import { getServiceType } from "../comercial/proposalTemplates";
+import { pipelineMetrics, quoteStatusToPipelineStage } from "../utils/commercialPipeline";
 import { useAuth } from "../auth/AuthContext";
 import { can } from "../permissions";
 import { boqApi, type Project } from "../api/boq";
@@ -33,14 +34,25 @@ function money(value: number | string, currency = "MZN") {
   return `${Number(value).toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`;
 }
 
+const PIPELINE_STAGE_LABEL: Record<string, string> = {
+  lead: "Lead",
+  qualificado: "Qualificado",
+  proposta: "Proposta",
+  negociacao: "Negociação",
+  ganho: "Ganho",
+  perdido: "Perdido",
+  contrato: "Contrato",
+  projecto: "Projecto",
+};
+
 const STATUS_PIPELINE: PracticeQuote["status"][] = ["rascunho", "enviada", "aprovada"];
 
 const QUOTE_STATUS: Record<PracticeQuote["status"], string> = {
   rascunho: "Rascunho",
-  enviada: "Enviada",
-  aprovada: "Aprovada",
-  rejeitada: "Rejeitada",
-  cancelada: "Cancelada",
+  enviada: "Submetido",
+  aprovada: "Aprovado",
+  rejeitada: "Perdido",
+  cancelada: "Cancelado",
 };
 
 const INVOICE_STATUS: Record<string, string> = {
@@ -248,6 +260,19 @@ export default function PracticeOfficePage() {
     );
   }, [query, invoices]);
 
+  const commercialStats = useMemo(
+    () =>
+      pipelineMetrics(
+        quotes.map((quote) => ({
+          status: quote.status,
+          totalAmount: Number(quote.totalAmount),
+          hasEngagement: engagements.some((row) => row.quoteId === quote.id),
+          hasProject: Boolean(quote.projectId),
+        })),
+      ),
+    [quotes, engagements],
+  );
+
   async function handleCreateClient(e: FormEvent) {
     e.preventDefault();
     setError(null);
@@ -301,7 +326,13 @@ export default function PracticeOfficePage() {
     }
     setError(null);
     try {
-      await practiceApi.setQuoteStatus(quote.id, status);
+      let options: { lossReason?: string } | undefined;
+      if (status === "rejeitada") {
+        const reason = window.prompt("Motivo da perda");
+        if (reason == null) return;
+        options = { lossReason: reason.trim() || undefined };
+      }
+      await practiceApi.setQuoteStatus(quote.id, status, options);
       setWatchQuoteId(quote.id);
       await reload();
       if (selectedClientId) await refreshDossier();
@@ -603,21 +634,14 @@ export default function PracticeOfficePage() {
 
               {summary?.atelier && (
                 <p className="mt-3 text-xs text-slate-500">
-                  Pipeline: {summary.atelier.comercial.rascunhos} rascunho(s) · {summary.atelier.comercial.enviadas} enviada(s) ·{" "}
-                  {summary.atelier.comercial.aprovadas} aceite(s)
+                  Pipeline {money(commercialStats.pipelineValue, currency)}
+                  {" · "}
+                  {commercialStats.pendingProposals} proposta(s) pendente(s)
+                  {commercialStats.winRate != null && <span> · win rate {(commercialStats.winRate * 100).toFixed(0)}%</span>}
+                  {" · "}
+                  {commercialStats.activeContracts} contrato(s)
                   {summary.atelier.producao.phasesOverdue > 0 && (
                     <span className="text-rose-600"> · {summary.atelier.producao.phasesOverdue} fase(s) atrasada(s)</span>
-                  )}
-                  {summary.atelier.equipa.honorariosPendentes > 0 && (
-                    <span>
-                      {" "}
-                      · honorários a pagar {money(summary.atelier.equipa.honorariosPendentes, currency)}
-                    </span>
-                  )}
-                  {(summary.payablesThirdParty ?? 0) > 0 && (
-                    <button type="button" className="ml-1 font-medium text-brand-700 hover:underline" onClick={() => setTab("terceiros")}>
-                      · a desembolsar {money(summary.payablesThirdParty, currency)}
-                    </button>
                   )}
                 </p>
               )}
@@ -861,7 +885,6 @@ export default function PracticeOfficePage() {
             <div className="card overflow-hidden">
               <div className="border-b border-slate-200 px-4 py-3 sm:px-5">
                 <h3 className="section-title text-base">Propostas deste cliente</h3>
-                <p className="mt-0.5 text-xs text-slate-500">Elabore, descarregue PDF e acompanhe Rascunho → Enviada → Aceite.</p>
               </div>
               <ul className="divide-y divide-slate-100">
                 {clientDossier.quotes.map((q) => {
@@ -895,14 +918,19 @@ export default function PracticeOfficePage() {
                         </button>
                         {canManage && live.status === "rascunho" && (
                           <button type="button" className="btn btn-secondary btn-sm" onClick={() => setStatus(live, "enviada")}>
-                            Marcar como enviada
+                            Submeter
                           </button>
                         )}
-                        {canManage && (live.status === "rascunho" || live.status === "enviada") && (
-                          <button type="button" className="btn btn-primary btn-sm" onClick={() => setStatus(live, "aprovada")}>
-                            Registar aceitação
-                          </button>
-                        )}
+                          {canManage && (live.status === "rascunho" || live.status === "enviada") && (
+                            <>
+                              <button type="button" className="btn btn-primary btn-sm" onClick={() => setStatus(live, "aprovada")}>
+                                Aprovar
+                              </button>
+                              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setStatus(live, "rejeitada")}>
+                                Perdido
+                              </button>
+                            </>
+                          )}
                       </div>
                     </li>
                   );
@@ -997,8 +1025,7 @@ export default function PracticeOfficePage() {
               <div className="flex items-center gap-2">
                 <IconBuilding className="h-4 w-4 text-brand-700" />
                 <div>
-                  <h2 className="section-title text-base">Propostas de honorários</h2>
-                  <p className="mt-0.5 text-xs text-slate-500">Rascunho → enviada → aprovada (cria plano de parcelas).</p>
+                  <h2 className="section-title text-base">Propostas</h2>
                 </div>
               </div>
             </div>
@@ -1047,6 +1074,10 @@ export default function PracticeOfficePage() {
                       </td>
                       <td className="px-4 py-3">
                         <QuoteStatusPipeline status={quote.status} />
+                        <div className="mt-1 text-[10px] uppercase tracking-wide text-slate-400">
+                          {PIPELINE_STAGE_LABEL[quoteStatusToPipelineStage(quote.status, engagements.some((row) => row.quoteId === quote.id), Boolean(quote.projectId))]}
+                        </div>
+                        {quote.lossReason && <div className="mt-1 text-xs text-rose-700">{quote.lossReason}</div>}
                       </td>
                       <td className="px-4 py-3 text-right tabular-nums font-medium">
                         <div>{money(quote.totalAmount, quote.currency)}</div>
@@ -1068,9 +1099,14 @@ export default function PracticeOfficePage() {
                             </button>
                           )}
                           {canManage && (quote.status === "rascunho" || quote.status === "enviada") && (
-                            <button type="button" className="btn btn-primary btn-sm" onClick={() => setStatus(quote, "aprovada")}>
-                              Registar aceitação
-                            </button>
+                            <>
+                              <button type="button" className="btn btn-primary btn-sm" onClick={() => setStatus(quote, "aprovada")}>
+                                Aprovar
+                              </button>
+                              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setStatus(quote, "rejeitada")}>
+                                Perdido
+                              </button>
+                            </>
                           )}
                         </div>
                       </td>

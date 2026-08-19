@@ -83,6 +83,8 @@ const quoteSchema = z.object({
   quoteNumber: z.string().max(80).optional(),
   issueDate: z.string().optional(),
   validUntil: z.string().optional(),
+  expectedCloseDate: z.string().optional().nullable(),
+  ownerUserId: z.string().uuid().optional().nullable(),
   currency: z.enum(CURRENCIES).default("MZN"),
   notes: z.string().optional(),
   serviceCategory: z.enum(["project", "technical", "construction"]).optional().nullable(),
@@ -111,6 +113,7 @@ const quoteStatusSchema = z.object({
   discountAmount: z.number().nonnegative().optional(),
   discountPercent: z.number().min(0).max(100).optional(),
   acceptanceNotes: z.string().max(4000).optional(),
+  lossReason: z.string().max(200).optional(),
 });
 
 const invoiceSchema = z.object({
@@ -786,6 +789,8 @@ function quoteAdvancedFields(data: z.infer<typeof quoteSchema>) {
     observations: data.observations ?? null,
     plannedStartDate: data.plannedStartDate || null,
     clientDeadline: data.clientDeadline ?? null,
+    expectedCloseDate: data.expectedCloseDate || data.validUntil || null,
+    ownerUserId: data.ownerUserId ?? null,
     conditions: data.conditions ?? {},
   };
 }
@@ -1423,6 +1428,10 @@ export async function practiceRoutes(app: FastifyInstance) {
           parsed.data.status === "aprovada"
             ? parsed.data.acceptanceNotes?.trim() || quote.acceptanceNotes
             : quote.acceptanceNotes,
+        lossReason:
+          parsed.data.status === "rejeitada"
+            ? parsed.data.lossReason?.trim() || parsed.data.acceptanceNotes?.trim() || quote.lossReason
+            : quote.lossReason,
         updatedAt: new Date(),
       })
       .where(eq(practiceQuotes.id, quote.id))
