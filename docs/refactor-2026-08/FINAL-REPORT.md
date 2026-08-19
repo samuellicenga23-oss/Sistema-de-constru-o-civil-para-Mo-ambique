@@ -24,9 +24,9 @@ Fila nocturna 00–18. Base de auditoria: `0ec2f18`. Branch local `main`. **Sem 
 | 15 | `635a8a6` | feat: decisões do cliente no portal e scorecard do fornecedor |
 | 16 | `1ec474a` | feat: matriz de aprovação e preferências de email da empresa |
 | 17 | `485da6d` | chore(ui): arquivo de cotações e labels de estado consistentes |
-| 18 | *(este commit)* | chore: integra refactor transversal SIGO e release gates |
+| 18 | `fc5a572` | chore: integra refactor transversal SIGO e release gates |
 
-HEAD após 17: `485da6d`. Working tree de código limpa (só artefactos locais: `tmp/`, auditorias, scripts de arranque, pptx).
+HEAD: `fc5a572`. Working tree de código limpa (só artefactos locais: `tmp/`, auditorias, scripts de arranque, pptx).
 
 ## Migrations (não destrutivas)
 
