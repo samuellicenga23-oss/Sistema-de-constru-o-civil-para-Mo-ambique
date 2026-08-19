@@ -8,10 +8,10 @@ import { ApiError } from "../api/http";
 import { IconClipboard, IconDownload } from "../components/icons";
 
 const STATUS_LABELS: Record<QuoteRequestStatus, string> = {
-  enviado: "Enviado — a aguardar resposta",
-  respondido: "Respondido — pronto a rever",
-  aceite: "Aceite",
-  recusado: "Recusado",
+  enviado: "Submetido",
+  respondido: "Respondido",
+  aceite: "Aprovado",
+  recusado: "Devolvido",
   expirado: "Expirado",
   cancelado: "Cancelado",
 };
@@ -117,7 +117,7 @@ export default function QuoteRequestsPage() {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <IconClipboard className="h-4 w-4 text-brand-700" />
-                <h2 className="section-title text-base">Cotações recebidas</h2>
+                <h2 className="section-title text-base">Arquivo de cotações</h2>
               </div>
               <Link to="/gestao" className="btn btn-secondary btn-sm">Abrir uma obra</Link>
             </div>
