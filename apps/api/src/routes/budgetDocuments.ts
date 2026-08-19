@@ -31,8 +31,7 @@ import {
 import { documentLockedMessage, evaluateDocumentReadiness } from "../services/documentRules.js";
 import { loadProjectPlantContext } from "../services/plantMeasurementLink.js";
 import { recordAuditEvent } from "../services/auditTrail.js";
-import { sendEmail, emailLayout } from "../services/mailer.js";
-import { env } from "../env.js";
+import { emitWorkflowEvent } from "../services/workflowEvents.js";
 import { CURRENCIES, DEFAULT_IVA_RATE, UNITS, LINE_ITEM_KINDS, fixedSigo, planUsesDirectDocumentApproval } from "@sigo/shared";
 import { getCompanySubscription } from "../services/subscriptionEntitlements.js";
 
@@ -254,6 +253,9 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
       submetido: ["rascunho", "aprovado"],
       aprovado: [],
     };
+    if (parsed.data.status === "rascunho" && document.status === "submetido" && !parsed.data.decisionNote?.trim()) {
+      return reply.code(400).send({ error: "Indique o motivo da devolução para correcção" });
+    }
     if (parsed.data.status === "aprovado") {
       if (request.currentUser!.role !== "admin_empresa") {
         return reply.code(403).send({ error: "A aprovação do documento exige um administrador da empresa" });
@@ -344,45 +346,40 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
       metadata: parsed.data.decisionNote ? { decisionNote: parsed.data.decisionNote } : null,
     });
 
-    const docLabel = document.documentType === "medicao" ? "medição" : "orçamento";
+    const actor = { id: request.currentUser!.id, name: request.currentUser!.name, email: request.currentUser!.email };
     if (parsed.data.status === "submetido") {
-      const admins = await db
-        .select({ email: users.email })
-        .from(users)
-        .where(and(eq(users.companyId, companyId), eq(users.role, "admin_empresa"), eq(users.isActive, true)));
-      const recipients = admins.map((a) => a.email).filter((e) => e !== request.currentUser!.email);
-      if (recipients.length) {
-        void sendEmail(
-          {
-            to: recipients,
-            subject: `SIGO — «${updated.title}» pendente de aprovação`,
-            html: emailLayout(
-              `Uma ${docLabel} aguarda a sua aprovação`,
-              `<p><strong>${updated.title}</strong> foi submetida por ${request.currentUser!.name} e precisa de ser aprovada.</p>`,
-              `${env.publicUrl}/documentos/${id}`,
-              "Rever documento",
-            ),
-          },
-          request.log,
-        );
-      }
-    } else if (parsed.data.status === "aprovado" && document.submittedByUserId) {
-      const [submitter] = await db.select({ email: users.email }).from(users).where(eq(users.id, document.submittedByUserId)).limit(1);
-      if (submitter?.email) {
-        void sendEmail(
-          {
-            to: submitter.email,
-            subject: `SIGO — «${updated.title}» aprovado`,
-            html: emailLayout(
-              `A sua ${docLabel} foi aprovada`,
-              `<p><strong>${updated.title}</strong> foi aprovada por ${request.currentUser!.name}.</p>`,
-              `${env.publicUrl}/documentos/${id}`,
-              "Ver documento",
-            ),
-          },
-          request.log,
-        );
-      }
+      await emitWorkflowEvent({
+        event: "document.submitted",
+        companyId,
+        entityId: id,
+        title: updated.title,
+        link: `/documentos/${id}`,
+        actor,
+        logger: request.log,
+      });
+    } else if (parsed.data.status === "aprovado") {
+      await emitWorkflowEvent({
+        event: "document.approved",
+        companyId,
+        entityId: id,
+        title: updated.title,
+        link: `/documentos/${id}`,
+        actor,
+        submitterUserId: document.submittedByUserId ?? (approvingFromDraft ? request.currentUser!.id : null),
+        logger: request.log,
+      });
+    } else if (parsed.data.status === "rascunho" && document.status === "submetido") {
+      await emitWorkflowEvent({
+        event: "document.returned",
+        companyId,
+        entityId: id,
+        title: updated.title,
+        link: `/documentos/${id}`,
+        actor,
+        submitterUserId: document.submittedByUserId,
+        reason: parsed.data.decisionNote,
+        logger: request.log,
+      });
     }
 
     return updated;

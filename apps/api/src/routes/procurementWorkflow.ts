@@ -29,6 +29,7 @@ import { assertApprovedOrcamentoForSite } from "../services/siteGate.js";
 import { assertSupplierMarketplaceAccess } from "../services/subscriptionEntitlements.js";
 import { notifySupplierAccount, notifyUsers } from "../services/notifications.js";
 import { recordAuditEvent } from "../services/auditTrail.js";
+import { emitWorkflowEvent } from "../services/workflowEvents.js";
 import {
   buildQuoteComparison,
   groupAllocationsBySupplier,
@@ -302,7 +303,15 @@ export async function procurementWorkflowRoutes(app: FastifyInstance) {
     if (!row) return reply.code(404).send({ error: "Requisição não encontrada" });
     if (row.status !== "rascunho") return reply.code(409).send({ error: "Só uma requisição em rascunho pode ser submetida" });
     const [updated] = await db.update(purchaseRequisitions).set({ status: "submetida", submittedAt: new Date(), submittedByUserId: request.currentUser!.id, updatedAt: new Date() }).where(eq(purchaseRequisitions.id, id)).returning();
-    await notifyCompanyUsers(companyId, "Requisição para aprovação", `${updated.reference} aguarda aprovação.`, `/projectos/${updated.projectId}/compras`);
+    await emitWorkflowEvent({
+      event: "requisition.submitted",
+      companyId,
+      entityId: id,
+      title: updated.reference,
+      link: `/projectos/${updated.projectId}/compras`,
+      actor: { id: request.currentUser!.id, name: request.currentUser!.name, email: request.currentUser!.email },
+      logger: request.log,
+    });
     return updated;
   });
 
@@ -318,6 +327,40 @@ export async function procurementWorkflowRoutes(app: FastifyInstance) {
     }
     const [updated] = await db.update(purchaseRequisitions).set({ status: "aprovada", approvedAt: new Date(), approvedByUserId: user.id, updatedAt: new Date() }).where(eq(purchaseRequisitions.id, id)).returning();
     await recordAuditEvent({ companyId, projectId: row.projectId, actorUserId: user.id, entityType: "purchase_requisition", entityId: id, action: "approved", before: { status: row.status }, after: { status: updated.status } });
+    await emitWorkflowEvent({
+      event: "requisition.approved",
+      companyId,
+      entityId: id,
+      title: updated.reference,
+      link: `/projectos/${updated.projectId}/compras`,
+      actor: { id: user.id, name: user.name, email: user.email },
+      submitterUserId: row.submittedByUserId ?? row.createdByUserId,
+      logger: request.log,
+    });
+    return updated;
+  });
+
+  app.post("/api/procurement/requisitions/:id/return", { preHandler: canApproveMaterials }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const companyId = companyIdOf(request);
+    const parsed = z.object({ reason: z.string().trim().min(3).max(1000) }).safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    const row = await requisitionOwned(id, companyId);
+    if (!row) return reply.code(404).send({ error: "Requisição não encontrada" });
+    if (row.status !== "submetida") return reply.code(409).send({ error: "Só uma requisição submetida pode ser devolvida" });
+    const [updated] = await db.update(purchaseRequisitions).set({ status: "rascunho", submittedAt: null, submittedByUserId: null, notes: parsed.data.reason, updatedAt: new Date() }).where(eq(purchaseRequisitions.id, id)).returning();
+    await recordAuditEvent({ companyId, projectId: row.projectId, actorUserId: request.currentUser!.id, entityType: "purchase_requisition", entityId: id, action: "returned", before: { status: row.status }, after: { status: updated.status }, metadata: { reason: parsed.data.reason } });
+    await emitWorkflowEvent({
+      event: "requisition.returned",
+      companyId,
+      entityId: id,
+      title: updated.reference,
+      link: `/projectos/${updated.projectId}/compras`,
+      actor: { id: request.currentUser!.id, name: request.currentUser!.name, email: request.currentUser!.email },
+      submitterUserId: row.submittedByUserId ?? row.createdByUserId,
+      reason: parsed.data.reason,
+      logger: request.log,
+    });
     return updated;
   });
 

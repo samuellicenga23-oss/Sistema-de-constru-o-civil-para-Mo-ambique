@@ -13,6 +13,7 @@ import { extractedSlabSchema, plantParseResultSchema, PLANT_DISCIPLINES, fixedSi
 import { loadWorkChapterLibrary } from "../services/boqTemplate.js";
 import { syncProjectPlantMeasurements } from "../services/plantMeasurementSync.js";
 import { recordAuditEvent } from "../services/auditTrail.js";
+import { emitWorkflowEvent } from "../services/workflowEvents.js";
 import {
   createPlantReviewRequest,
   maybeOpenPlantReviewAfterProcessing,
@@ -224,6 +225,24 @@ export async function processPlantFile(plantId: string, buffer: Buffer, filename
     processingStage: "Análise concluída",
     processingUpdatedAt: new Date(),
   }).where(eq(plants.id, plantId));
+  const [ready] = await db
+    .select({
+      companyId: projectTable.companyId,
+      fileName: plants.originalFileName,
+    })
+    .from(plants)
+    .innerJoin(projectTable, eq(plants.projectId, projectTable.id))
+    .where(eq(plants.id, plantId))
+    .limit(1);
+  if (ready) {
+    void emitWorkflowEvent({
+      event: "plant.processed",
+      companyId: ready.companyId,
+      entityId: plantId,
+      title: ready.fileName ?? "Planta",
+      link: `/plantas/${plantId}`,
+    });
+  }
   await maybeOpenPlantReviewAfterProcessing(plantId).catch(() => undefined);
 }
 

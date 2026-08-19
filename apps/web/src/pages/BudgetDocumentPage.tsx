@@ -578,11 +578,16 @@ export default function BudgetDocumentPage() {
     } as const;
     const ok = await confirm(prompts[status]);
     if (!ok) return;
+    let decisionNote: string | undefined;
+    if (status === "rascunho") {
+      decisionNote = window.prompt("Motivo da devolução:")?.trim();
+      if (!decisionNote) return;
+    }
     setChangingStatus(true);
     setError(null);
     setErrorBlockers([]);
     try {
-      await boqApi.updateBudgetDocumentStatus(documentId, status);
+      await boqApi.updateBudgetDocumentStatus(documentId, status, decisionNote);
       await reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao actualizar o estado do documento");

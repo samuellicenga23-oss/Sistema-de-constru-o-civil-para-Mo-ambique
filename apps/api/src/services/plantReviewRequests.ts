@@ -7,11 +7,8 @@ import {
   plantReviewRequests,
   plants,
   projects,
-  users,
 } from "../db/schema.js";
-import { notifyUsers } from "./notifications.js";
-import { emailLayout, escapeHtml, sendEmail } from "./mailer.js";
-import { env } from "../env.js";
+import { emitWorkflowEvent } from "./workflowEvents.js";
 
 export const PLANT_REVIEW_SLA_HOURS = 5;
 
@@ -95,56 +92,18 @@ export function plantNeedsEngineReview(gaps: string[], processingStatus: string)
   return gaps.length >= 2;
 }
 
-async function getSuperAdmins() {
-  return db
-    .select({ id: users.id, email: users.email })
-    .from(users)
-    .where(and(eq(users.role, "super_admin"), eq(users.isActive, true)));
-}
-
 async function notifySuperAdminsAboutPlantReview(row: typeof plantReviewRequests.$inferSelect, context: {
   companyName: string;
   projectName: string;
   fileName: string | null;
 }) {
-  const admins = await getSuperAdmins();
-  if (!admins.length) return;
-
-  const reasonLabel =
-    row.reason === "erro_processamento"
-      ? "falha a meio da análise"
-      : row.reason === "extraccao_incompleta"
-        ? "extracção incompleta"
-        : "pedido do utilizador";
-
-  const gapsHtml = row.gaps.length
-    ? `<ul>${row.gaps.map((gap) => `<li>${escapeHtml(gap)}</li>`).join("")}</ul>`
-    : "<p>Sem lacunas listadas.</p>";
-
-  void sendEmail(
-    {
-      to: admins.map((admin) => admin.email),
-      subject: `SIGO — Melhorar motor de plantas: ${context.projectName}`,
-      html: emailLayout(
-        "Revisão do motor de análise de plantas",
-        `<p>A planta <strong>${escapeHtml(context.fileName ?? row.plantId)}</strong> da obra <strong>${escapeHtml(context.projectName)}</strong> (${escapeHtml(context.companyName)}) precisa de revisão.</p>
-         <p>Motivo: <strong>${escapeHtml(reasonLabel)}</strong>${row.progressAtFailure != null ? ` · progresso ${row.progressAtFailure}%` : ""}.</p>
-         <p>SLA comunicado ao cliente: <strong>${row.slaHours} horas</strong>.</p>
-         ${row.errorMessage ? `<p>Erro: ${escapeHtml(row.errorMessage)}</p>` : ""}
-         ${gapsHtml}`,
-        `${env.publicUrl}/admin#plant-reviews`,
-        "Abrir painel admin",
-      ),
-    },
-    undefined,
-  );
-
-  await notifyUsers(
-    admins.map((admin) => admin.id),
-    "Planta para melhorar o motor",
-    `${context.projectName}: ${context.fileName ?? "PDF"} (${reasonLabel}). Responder em até ${row.slaHours}h.`,
-    "/admin#plant-reviews",
-  );
+  await emitWorkflowEvent({
+    event: "plant.review_required",
+    companyId: row.companyId,
+    entityId: row.plantId,
+    title: `${context.projectName}: ${context.fileName ?? row.plantId}`,
+    link: "/admin#plant-reviews",
+  });
 }
 
 export async function createPlantReviewRequest(input: {

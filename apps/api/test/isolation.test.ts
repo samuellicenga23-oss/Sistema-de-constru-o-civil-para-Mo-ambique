@@ -203,6 +203,18 @@ describe("Isolamento multi-tenant e catálogo global", () => {
     expect(submit.statusCode).toBe(200);
     expect(submit.json().submittedByUserId).toBeTruthy();
 
+    const adminInbox = await app.inject({ method: "GET", url: "/api/notifications", headers: { cookie: await loginCookie(app, "admin@test.local") } });
+    expect(adminInbox.statusCode).toBe(200);
+    expect(adminInbox.json()).toMatchObject({
+      unreadCount: 1,
+      items: [expect.objectContaining({ title: "Documento para aprovação", link: `/documentos/${document.id}` })],
+    });
+    const orcInboxAfterSubmit = await app.inject({ method: "GET", url: "/api/notifications", headers: { cookie: cookieOrc } });
+    expect((orcInboxAfterSubmit.json() as { unreadCount: number }).unreadCount).toBe(0);
+
+    const returnWithoutReason = await app.inject({ method: "PATCH", url: `/api/budget-documents/${document.id}/status`, headers: { cookie: await loginCookie(app, "admin@test.local") }, payload: { status: "rascunho" } });
+    expect(returnWithoutReason.statusCode).toBe(400);
+
     const selfApproval = await app.inject({ method: "PATCH", url: `/api/budget-documents/${document.id}/status`, headers: { cookie: cookieOrc }, payload: { status: "aprovado" } });
     expect(selfApproval.statusCode).toBe(403);
 
@@ -210,5 +222,11 @@ describe("Isolamento multi-tenant e catálogo global", () => {
     const approval = await app.inject({ method: "PATCH", url: `/api/budget-documents/${document.id}/status`, headers: { cookie: cookieAdmin }, payload: { status: "aprovado" } });
     expect(approval.statusCode).toBe(200);
     expect(approval.json()).toMatchObject({ status: "aprovado", approvedByUserId: expect.any(String) });
+
+    const orcInboxAfterApproval = await app.inject({ method: "GET", url: "/api/notifications", headers: { cookie: cookieOrc } });
+    expect(orcInboxAfterApproval.json()).toMatchObject({
+      unreadCount: 1,
+      items: [expect.objectContaining({ title: "Documento aprovado" })],
+    });
   });
 });

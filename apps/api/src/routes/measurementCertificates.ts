@@ -15,6 +15,7 @@ import { computeLabourByPhase } from "../services/labourByPhase.js";
 import { calculateBudgetTotals } from "../services/budgetTotals.js";
 import { createDraftInvoiceForCertificate } from "../services/invoicing.js";
 import { recordAuditEvent } from "../services/auditTrail.js";
+import { emitWorkflowEvent } from "../services/workflowEvents.js";
 import { buildCertificateFieldMeasurementPdf } from "../services/certificateFieldMeasurementPdf.js";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista", "engenheiro_fiscal"] as const;
@@ -209,6 +210,42 @@ export async function measurementCertificateRoutes(app: FastifyInstance) {
       after: { number: updated.number, status: updated.status, periodDate: updated.periodDate },
       metadata: parsed.data.decisionNote ? { decisionNote: parsed.data.decisionNote } : null,
     });
+    const actor = { id: request.currentUser!.id, name: request.currentUser!.name, email: request.currentUser!.email };
+    const autoTitle = `n.º ${updated.number}`;
+    if (parsed.data.status === "submetido") {
+      await emitWorkflowEvent({
+        event: "certificate.submitted",
+        companyId: request.currentUser!.companyId!,
+        entityId: id,
+        title: autoTitle,
+        link: `/autos/${id}`,
+        actor,
+        logger: request.log,
+      });
+    } else if (parsed.data.status === "aprovado") {
+      await emitWorkflowEvent({
+        event: "certificate.approved",
+        companyId: request.currentUser!.companyId!,
+        entityId: id,
+        title: autoTitle,
+        link: `/autos/${id}`,
+        actor,
+        submitterUserId: certificate.submittedByUserId,
+        logger: request.log,
+      });
+    } else if (parsed.data.status === "rascunho" && certificate.status === "submetido") {
+      await emitWorkflowEvent({
+        event: "certificate.returned",
+        companyId: request.currentUser!.companyId!,
+        entityId: id,
+        title: autoTitle,
+        link: `/autos/${id}`,
+        actor,
+        submitterUserId: certificate.submittedByUserId,
+        reason: parsed.data.decisionNote,
+        logger: request.log,
+      });
+    }
     return updated;
   });
 
