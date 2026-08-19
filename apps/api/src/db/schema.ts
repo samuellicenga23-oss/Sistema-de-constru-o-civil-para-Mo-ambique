@@ -24,6 +24,7 @@ export const userRoleEnum = pgEnum("user_role", [
   "engenheiro_fiscal",
   "visualizador",
 ]);
+export const vendorGovernanceStatusEnum = pgEnum("vendor_governance_status", ["qualificado", "preferencial", "observacao", "bloqueado"]);
 export const currencyEnum = pgEnum("currency", ["MZN", "USD"]);
 export const unitEnum = pgEnum("unit", ["m", "m2", "m3", "ml", "kg", "un", "vg", "h"]);
 export const lineItemKindEnum = pgEnum("line_item_kind", ["capitulo", "grupo", "item", "nota"]);
@@ -65,6 +66,7 @@ export const companies = pgTable("companies", {
   documentFooter: text("document_footer"),
   responsibleName: varchar("responsible_name", { length: 150 }),
   enabledModules: jsonb("enabled_modules").$type<CompanyModuleKey[]>().notNull().default([...COMPANY_MODULE_KEYS]),
+  emailNotificationPrefs: jsonb("email_notification_prefs").$type<{ workflow: boolean }>().notNull().default({ workflow: true }),
   /** Templates de permissões por função — se vazio/null usa SYSTEM_ROLE_PERMISSIONS. */
   rolePermissions: jsonb("role_permissions").$type<Partial<Record<"admin_empresa" | "orcamentista" | "engenheiro_fiscal" | "visualizador", string[]>>>(),
   brandName: varchar("brand_name", { length: 100 }),
@@ -1276,6 +1278,9 @@ export const practiceQuotes = pgTable("practice_quotes", {
   workType: varchar("work_type", { length: 120 }),
   location: varchar("location", { length: 240 }),
   ownerName: varchar("owner_name", { length: 200 }),
+  expectedCloseDate: date("expected_close_date"),
+  lossReason: varchar("loss_reason", { length: 200 }),
+  ownerUserId: uuid("owner_user_id").references(() => users.id, { onDelete: "set null" }),
   estimatedArea: varchar("estimated_area", { length: 80 }),
   floors: varchar("floors", { length: 40 }),
   projectDescription: text("project_description"),
@@ -1594,10 +1599,14 @@ export const contractVariations = pgTable("contract_variations", {
   title: varchar("title", { length: 200 }).notNull(),
   reason: text("reason").notNull(),
   amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
+  impactDays: integer("impact_days").notNull().default(0),
   status: contractVariationStatusEnum("status").notNull().default("rascunho"),
   submittedByUserId: uuid("submitted_by_user_id").references(() => users.id),
   approvedByUserId: uuid("approved_by_user_id").references(() => users.id),
   decisionNote: text("decision_note"),
+  clientDecision: varchar("client_decision", { length: 20 }),
+  clientDecidedAt: timestamp("client_decided_at"),
+  clientDecisionNote: text("client_decision_note"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -1725,6 +1734,10 @@ export const suppliers = pgTable("suppliers", {
   location: varchar("location", { length: 200 }),
   nuit: varchar("nuit", { length: 30 }),
   notes: text("notes"),
+  governanceStatus: vendorGovernanceStatusEnum("governance_status").notNull().default("qualificado"),
+  blockedReason: text("blocked_reason"),
+  blockedAt: timestamp("blocked_at"),
+  blockedByUserId: uuid("blocked_by_user_id").references(() => users.id, { onDelete: "set null" }),
   // Zona onde este fornecedor opera (indicada por ele próprio no registo) — só preenchida em
   // fornecedores do marketplace (companyId null). Substitui a antiga gestão de zonas por
   // empresa: a zona passou a ser uma característica do fornecedor, não do catálogo da empresa.
@@ -1739,6 +1752,18 @@ export const suppliers = pgTable("suppliers", {
   offersEquipment: boolean("offers_equipment").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
+
+export const supplierComplianceDocuments = pgTable("supplier_compliance_documents", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  supplierId: uuid("supplier_id").notNull().references(() => suppliers.id, { onDelete: "cascade" }),
+  companyId: uuid("company_id").references(() => companies.id, { onDelete: "cascade" }),
+  kind: varchar("kind", { length: 60 }).notNull(),
+  number: varchar("number", { length: 80 }),
+  expiresOn: date("expires_on"),
+  fileRef: varchar("file_ref", { length: 400 }),
+  status: varchar("status", { length: 20 }).notNull().default("valido"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [index("supplier_compliance_supplier_idx").on(table.supplierId)]);
 
 // Produtos do catálogo nacional (ou criados pelo próprio fornecedor) que esta ficha marketplace
 // seleccionou para vender — sem isto, «Meus preços» não lista o catálogo inteiro.

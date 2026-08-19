@@ -10,6 +10,7 @@ import { calculateVatTotals, CURRENCIES } from "@sigo/shared";
 import { computeProcurementPlan } from "../services/procurementEngine.js";
 import { recordAuditEvent } from "../services/auditTrail.js";
 import { assertSupplierMarketplaceAccess } from "../services/subscriptionEntitlements.js";
+import { assertVendorNotBlocked } from "../services/vendorGovernance.js";
 import { resolveBuyerContact } from "../services/buyerContact.js";
 import { notifySupplierAccount } from "../services/notifications.js";
 import { sendEmail, emailLayout, escapeHtml } from "../services/mailer.js";
@@ -280,6 +281,9 @@ export async function purchasingRoutes(app: FastifyInstance) {
       .where(and(eq(suppliers.id, parsed.data.supplierId), or(eq(suppliers.companyId, companyId), isNull(suppliers.companyId))))
       .limit(1);
     if (!supplier) return reply.code(404).send({ error: "Fornecedor não encontrado" });
+    try { assertVendorNotBlocked(supplier.governanceStatus, supplier.blockedReason); } catch (cause) {
+      return reply.code(409).send({ error: cause instanceof Error ? cause.message : "Fornecedor bloqueado" });
+    }
     if (supplier.companyId === null) {
       const blocked = await assertSupplierMarketplaceAccess(companyId);
       if (blocked) return reply.code(402).send(blocked);

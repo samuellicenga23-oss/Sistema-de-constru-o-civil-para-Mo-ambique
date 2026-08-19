@@ -561,6 +561,34 @@
       "when": 1786560000000,
       "tag": "0079_composition_ownership",
       "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1786646400000,
+      "tag": "0080_vendor_governance",
+      "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1786732800000,
+      "tag": "0081_commercial_pipeline",
+      "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1786819200000,
+      "tag": "0082_client_change_decisions",
+      "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1786905600000,
+      "tag": "0083_company_notification_prefs",
+      "breakpoints": true
     }
   ]
 }

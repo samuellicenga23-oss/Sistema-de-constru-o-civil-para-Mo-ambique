@@ -1,3 +1,5 @@
+import { supplierScorecard } from "./vendorGovernance.js";
+
 export type FulfillmentStatus =
   | "aguarda_confirmacao"
   | "confirmado"
@@ -205,6 +207,7 @@ export type SupplierPerformanceOrder = {
 
 export type SupplierPerformance = {
   score: number | null;
+  scorecard?: { status: "ok" | "insufficient"; label: string; score: number | null };
   scoreComponents: { otif: number | null; quality: number | null; confirmation: number | null };
   orderCount: number;
   completedOrderCount: number;
@@ -265,8 +268,19 @@ export function computeSupplierPerformance(orders: SupplierPerformanceOrder[]): 
   const totalWeight = scoreParts.reduce((sum, part) => sum + part.weight, 0);
   const score = totalWeight > 0 ? scoreParts.reduce((sum, part) => sum + part.value * part.weight, 0) / totalWeight : null;
 
+  const scorecard = supplierScorecard({
+    receiptCount: completed.length,
+    otifPct,
+    acceptanceRatePct,
+    rfqResponsePct: null,
+    ncrCount: 0,
+    spend: acceptedValue,
+    openAp: 0,
+  });
+
   return {
     score,
+    scorecard,
     scoreComponents: { otif: otifPct, quality: acceptanceRatePct, confirmation: confirmationScore },
     orderCount: orders.length,
     completedOrderCount: completed.length,

@@ -99,5 +99,6 @@ describe("procurement fulfillment", () => {
     expect(result.averageConfirmationHours).toBe(14);
     expect(result.score).not.toBeNull();
     expect(result.score!).toBeCloseTo(68.25);
+    expect(result.scorecard?.status).toBe("insufficient");
   });
 });

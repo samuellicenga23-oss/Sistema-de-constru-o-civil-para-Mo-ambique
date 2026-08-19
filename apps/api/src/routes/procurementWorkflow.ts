@@ -27,6 +27,7 @@ import { requireSupplierAuth } from "../auth/supplierMiddleware.js";
 import { assertProjectOwned } from "../services/accessControl.js";
 import { assertApprovedOrcamentoForSite } from "../services/siteGate.js";
 import { assertSupplierMarketplaceAccess } from "../services/subscriptionEntitlements.js";
+import { assertVendorNotBlocked } from "../services/vendorGovernance.js";
 import { notifySupplierAccount, notifyUsers } from "../services/notifications.js";
 import { recordAuditEvent } from "../services/auditTrail.js";
 import { emitWorkflowEvent } from "../services/workflowEvents.js";
@@ -388,6 +389,12 @@ export async function procurementWorkflowRoutes(app: FastifyInstance) {
       .where(and(inArray(suppliers.id, supplierIds), isNull(suppliers.companyId)));
     if (supplierRows.length !== supplierIds.length || supplierRows.some((supplier) => !supplier.supplierAccountId)) {
       return reply.code(409).send({ error: "Todas as RFQs formais devem ser enviadas a fornecedores reais com conta activa no Portal do Fornecedor" });
+    }
+    const blocked = supplierRows.find((supplier) => supplier.governanceStatus === "bloqueado");
+    if (blocked) {
+      try { assertVendorNotBlocked(blocked.governanceStatus, blocked.blockedReason); } catch (cause) {
+        return reply.code(409).send({ error: cause instanceof Error ? cause.message : "Fornecedor bloqueado" });
+      }
     }
     const requisitionLines = await db.select({ line: purchaseRequisitionLines, materialName: materials.name, unit: materials.unit })
       .from(purchaseRequisitionLines)
