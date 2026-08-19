@@ -1,4 +1,5 @@
 import { and, eq, inArray } from "drizzle-orm";
+import { createHash } from "node:crypto";
 import { db } from "../db/index.js";
 import { budgetDocuments, budgetSections, lineItems } from "../db/schema.js";
 import { calculateBudgetTotals } from "./budgetTotals.js";
@@ -38,6 +39,7 @@ export type SectionNode = {
 export type BudgetDocumentSummary = {
   document: typeof budgetDocuments.$inferSelect;
   sections: SectionNode[];
+  editFingerprint: string;
   subtotal1: number;
   siteCosts: number;
   indirectCosts: number;
@@ -144,6 +146,25 @@ function buildTree(flatItems: (typeof lineItems.$inferSelect)[], techSpecs: Map<
   return roots;
 }
 
+function fingerprintItem(item: LineItemNode): string {
+  return [
+    item.id,
+    item.kind,
+    item.code ?? "",
+    item.description,
+    item.technicalSpecification ?? "",
+    item.quantity ?? "",
+    item.unitPrice ?? "",
+    item.compositionId ?? "",
+    ...item.children.map(fingerprintItem),
+  ].join("|");
+}
+
+export function computeBoqEditFingerprint(sections: SectionNode[]): string {
+  const payload = sections.map((section) => `${section.id}:${section.name}:${section.items.map(fingerprintItem).join(";")}`).join("\n");
+  return createHash("sha256").update(payload).digest("hex");
+}
+
 export async function getBudgetDocumentSummary(documentId: string): Promise<BudgetDocumentSummary | null> {
   const [document] = await db.select().from(budgetDocuments).where(eq(budgetDocuments.id, documentId)).limit(1);
   if (!document) return null;
@@ -195,7 +216,7 @@ export async function getBudgetDocumentSummary(documentId: string): Promise<Budg
     section.sellingTotal = section.items.reduce((sum, item) => sum + applySellingPrices(item), 0);
   }
 
-  return { document, sections: sectionNodes, ...totals };
+  return { document, sections: sectionNodes, editFingerprint: computeBoqEditFingerprint(sectionNodes), ...totals };
 }
 
 /**

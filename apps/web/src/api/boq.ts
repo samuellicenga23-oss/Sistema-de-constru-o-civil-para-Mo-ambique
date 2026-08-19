@@ -134,6 +134,7 @@ export type SectionNode = {
 export type BudgetDocumentSummary = {
   document: BudgetDocument;
   sections: SectionNode[];
+  editFingerprint: string;
   subtotal1: number;
   siteCosts: number;
   indirectCosts: number;
@@ -279,6 +280,8 @@ export const boqApi = {
   measurementPdfUrl: (id: string) => `/api/budget-documents/${id}/export-measurements.pdf`,
 
   getBudgetDocumentSummary: (id: string) => request<BudgetDocumentSummary>(`/budget-documents/${id}`),
+  applyEditSession: (id: string, payload: { baseFingerprint: string; operations: unknown[] }) =>
+    request<BudgetDocumentSummary>(`/budget-documents/${id}/edit-session`, { method: "PATCH", body: JSON.stringify(payload) }),
   repriceBudgetDocument: (id: string) =>
     request<BudgetRepriceResult>(`/budget-documents/${id}/reprice`, { method: "POST" }),
   updateBudgetDocumentStatus: (id: string, status: "rascunho" | "submetido" | "aprovado", decisionNote?: string) =>

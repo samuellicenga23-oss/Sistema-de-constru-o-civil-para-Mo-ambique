@@ -32,7 +32,8 @@ import { documentLockedMessage, evaluateDocumentReadiness } from "../services/do
 import { loadProjectPlantContext } from "../services/plantMeasurementLink.js";
 import { recordAuditEvent } from "../services/auditTrail.js";
 import { emitWorkflowEvent } from "../services/workflowEvents.js";
-import { CURRENCIES, DEFAULT_IVA_RATE, UNITS, LINE_ITEM_KINDS, fixedSigo, planUsesDirectDocumentApproval } from "@sigo/shared";
+import { CURRENCIES, DEFAULT_IVA_RATE, UNITS, LINE_ITEM_KINDS, fixedSigo, planUsesDirectDocumentApproval, boqEditSessionSchema } from "@sigo/shared";
+import { applyBoqEditSession, BoqEditConflictError, BoqEditValidationError } from "../services/boqEditSession.js";
 import { getCompanySubscription } from "../services/subscriptionEntitlements.js";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista"] as const;
@@ -231,6 +232,32 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
     if (!document) return reply.code(404).send({ error: "Documento não encontrado" });
     const summary = await getBudgetDocumentSummary(id);
     return summary && request.currentUser!.role === "visualizador" ? hideInternalPricing(summary) : summary;
+  });
+
+  app.patch("/api/budget-documents/:id/edit-session", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const companyId = companyIdOf(request);
+    const document = await assertDocumentOwned(id, companyId);
+    if (!document) return reply.code(404).send({ error: "Documento não encontrado" });
+    if (document.status !== "rascunho") return reply.code(409).send({ error: documentLockedMessage(document.status) });
+    const parsed = boqEditSessionSchema.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    try {
+      const result = await applyBoqEditSession({
+        documentId: id,
+        companyId,
+        actorUserId: request.currentUser!.id,
+        projectId: document.projectId,
+        currency: document.currency,
+        baseFingerprint: parsed.data.baseFingerprint,
+        operations: parsed.data.operations,
+      });
+      return result.summary;
+    } catch (err) {
+      if (err instanceof BoqEditConflictError) return reply.code(409).send({ error: err.message, code: "DOCUMENT_CHANGED" });
+      if (err instanceof BoqEditValidationError) return reply.code(400).send({ error: err.message });
+      throw err;
+    }
   });
 
   // Fluxo de aprovação do orçamento — mesma máquina de estados dos Autos de Medição

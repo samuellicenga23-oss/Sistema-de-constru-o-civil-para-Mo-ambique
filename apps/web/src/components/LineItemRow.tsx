@@ -10,6 +10,42 @@ import ChapterSpecBulkEditor from "./ChapterSpecBulkEditor";
 import { IconPlus, IconPencil, IconRuler, IconTrash } from "./icons";
 import MoneyInput from "./MoneyInput";
 
+export type BoqLineMutations = {
+  createItem: (
+    sectionId: string,
+    parentId: string | null,
+    data: {
+      kind: LineItemKind;
+      code?: string | null;
+      description: string;
+      unit?: string | null;
+      quantity?: number | null;
+      unitPrice?: number | null;
+      compositionId?: string | null;
+    },
+  ) => void | Promise<unknown>;
+  updateItem: (
+    id: string,
+    data: Partial<{ description: string; technicalSpecification: string | null; quantity: number | null; compositionId: string | null }>,
+  ) => void | Promise<unknown>;
+  deleteItem: (id: string) => void | Promise<unknown>;
+};
+
+export const defaultBoqLineMutations: BoqLineMutations = {
+  createItem: async (sectionId, parentId, data) => {
+    await boqApi.createLineItem(sectionId, { ...data, parentId });
+  },
+  updateItem: async (id, data) => {
+    await boqApi.updateLineItem(id, {
+      ...data,
+      quantity: data.quantity === null ? undefined : data.quantity,
+    });
+  },
+  deleteItem: async (id) => {
+    await boqApi.deleteLineItem(id);
+  },
+};
+
 const KIND_LABELS: Record<LineItemKind, string> = {
   capitulo: "Capítulo",
   grupo: "Grupo",
@@ -62,12 +98,14 @@ function AddChildForm({
   parentId,
   compositions,
   measurementOnly,
+  mutations = defaultBoqLineMutations,
   onDone,
 }: {
   sectionId: string;
   parentId: string | null;
   compositions: CostComposition[];
   measurementOnly?: boolean;
+  mutations?: BoqLineMutations;
   onDone: () => void;
 }) {
   const [kind, setKind] = useState<LineItemKind>("item");
@@ -83,8 +121,7 @@ function AddChildForm({
     e.preventDefault();
     setSaving(true);
     try {
-      await boqApi.createLineItem(sectionId, {
-        parentId,
+      await mutations.createItem(sectionId, parentId, {
         kind,
         code: code || null,
         description,
@@ -156,6 +193,8 @@ export default function LineItemRow({
   readOnly = false,
   measurementOnly = false,
   hasPlantRooms = false,
+  allowLivePersistence = true,
+  mutations = defaultBoqLineMutations,
 }: {
   node: LineItemNode;
   depth: number;
@@ -165,6 +204,8 @@ export default function LineItemRow({
   readOnly?: boolean;
   measurementOnly?: boolean;
   hasPlantRooms?: boolean;
+  allowLivePersistence?: boolean;
+  mutations?: BoqLineMutations;
 }) {
   const { confirm, dialog } = useConfirmDialog();
   const [showAdd, setShowAdd] = useState(false);
@@ -180,12 +221,14 @@ export default function LineItemRow({
   const [linkingComposition, setLinkingComposition] = useState(false);
 
   const canEdit = !readOnly;
+  const [editingQty, setEditingQty] = useState(false);
+  const [qtyDraft, setQtyDraft] = useState(node.quantity != null ? String(node.quantity) : "");
 
   async function handleLinkComposition(compositionId: string) {
     if (!compositionId) return;
     setLinkingComposition(true);
     try {
-      await boqApi.updateLineItem(node.id, { compositionId });
+      await mutations.updateItem(node.id, { compositionId });
       onChange();
     } finally {
       setLinkingComposition(false);
@@ -199,7 +242,7 @@ export default function LineItemRow({
     }
     setSavingDesc(true);
     try {
-      await boqApi.updateLineItem(node.id, { description: descDraft.trim() });
+      await mutations.updateItem(node.id, { description: descDraft.trim() });
       setEditingDesc(false);
       onChange();
     } finally {
@@ -216,7 +259,7 @@ export default function LineItemRow({
     }
     setSavingSpec(true);
     try {
-      await boqApi.updateLineItem(node.id, { technicalSpecification: next || null });
+      await mutations.updateItem(node.id, { technicalSpecification: next || null });
       setEditingSpec(false);
       onChange();
     } finally {
@@ -247,7 +290,7 @@ export default function LineItemRow({
       details: node.children.length > 0 ? [`${node.children.length} sub-item(ns) também serão removidos`] : undefined,
     });
     if (!ok) return;
-    await boqApi.deleteLineItem(node.id);
+    await mutations.deleteItem(node.id);
     onChange();
   }
 
@@ -360,7 +403,35 @@ export default function LineItemRow({
           )}
         </td>
         <td className="hidden align-top text-xs text-gray-400 whitespace-nowrap sm:table-cell">{node.kind === "item" ? node.unit : ""}</td>
-        <td className="align-top text-right text-gray-600 tabular-nums whitespace-nowrap">{node.kind === "item" ? node.quantity : ""}</td>
+        <td className="align-top text-right text-gray-600 tabular-nums whitespace-nowrap">
+          {node.kind === "item" ? (
+            canEdit && editingQty ? (
+              <input
+                className="input input-sm w-20 text-right"
+                type="number"
+                min="0"
+                step="0.01"
+                value={qtyDraft}
+                autoFocus
+                onChange={(e) => setQtyDraft(e.target.value)}
+                onBlur={() => {
+                  const next = qtyDraft === "" ? null : Number(qtyDraft);
+                  setEditingQty(false);
+                  if (next === node.quantity || (next == null && node.quantity == null)) return;
+                  void Promise.resolve(mutations.updateItem(node.id, { quantity: Number.isFinite(next as number) ? next : null })).then(() => onChange());
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                  if (e.key === "Escape") { setEditingQty(false); setQtyDraft(node.quantity != null ? String(node.quantity) : ""); }
+                }}
+              />
+            ) : (
+              <button type="button" className={canEdit ? "tabular-nums hover:text-brand-800" : "tabular-nums"} onClick={() => { if (!canEdit) return; setQtyDraft(node.quantity != null ? String(node.quantity) : ""); setEditingQty(true); }}>
+                {node.quantity ?? "—"}
+              </button>
+            )
+          ) : null}
+        </td>
         {!measurementOnly && (
           <td className="hidden align-top text-right tabular-nums whitespace-nowrap sm:table-cell">
             {node.kind === "item" ? (
@@ -383,7 +454,7 @@ export default function LineItemRow({
         </td>}
         <td className="align-top text-right pr-2 whitespace-nowrap">
           <span className="inline-flex gap-1">
-            {!readOnly && node.kind === "item" && (
+            {!readOnly && allowLivePersistence && node.kind === "item" && (
               <button
                 onClick={() => setShowMeasurements((s) => !s)}
                 className={`icon-btn ${showMeasurements ? "icon-btn-active opacity-100" : ""}`}
@@ -401,7 +472,7 @@ export default function LineItemRow({
                 <span className="text-[9px] font-bold tracking-wide">APU</span>
               </button>
             )}
-            {!readOnly && isChapter && !measurementOnly && (
+            {!readOnly && allowLivePersistence && isChapter && !measurementOnly && (
               <button
                 onClick={() => setShowChapterSpecs(true)}
                 className="icon-btn"
@@ -456,6 +527,7 @@ export default function LineItemRow({
               parentId={node.id}
               compositions={compositions}
               measurementOnly={measurementOnly}
+              mutations={mutations}
               onDone={() => {
                 setShowAdd(false);
                 onChange();
@@ -476,6 +548,8 @@ export default function LineItemRow({
             readOnly={readOnly}
             measurementOnly={measurementOnly}
             hasPlantRooms={hasPlantRooms}
+            allowLivePersistence={allowLivePersistence}
+            mutations={mutations}
           />
       ))}
       {showChapterSpecs && isChapter && (

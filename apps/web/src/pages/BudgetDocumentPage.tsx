@@ -19,6 +19,7 @@ import LoadingState from "../components/LoadingState";
 import AlertBanner from "../components/AlertBanner";
 import ActionMenu from "../components/ActionMenu";
 import { useConfirmDialog } from "../hooks/useConfirmDialog";
+import { useBoqEditSession } from "../hooks/useBoqEditSession";
 import { SectionHeader } from "../components/WorkspaceUI";
 import { IconChart, IconClipboard, IconDoc, IconDownload, IconPencil, IconPlus, IconRefresh, IconRuler, IconTrash } from "../components/icons";
 import { useAuth } from "../auth/AuthContext";
@@ -288,6 +289,19 @@ export default function BudgetDocumentPage() {
     boqApi.listProjectMaterialSpecifications(s.document.projectId).then(setMaterialSpecs).catch(() => setMaterialSpecs([]));
   }
 
+  const canDraftEdit = Boolean(summary) && user?.role !== "visualizador" && summary?.document.status === "rascunho";
+  const editSession = useBoqEditSession({
+    documentId,
+    summary,
+    enabled: canDraftEdit,
+    onSaved: (next) => {
+      setSummary(next);
+      void reload();
+    },
+    onReload: reload,
+    onError: setError,
+  });
+
   useEffect(() => {
     if (!documentId) return;
     setPlantContextLoading(true);
@@ -373,6 +387,11 @@ export default function BudgetDocumentPage() {
     if (!documentId) return;
     setError(null);
     try {
+      if (editSession.editing) {
+        editSession.addSection(newSectionName, (editSession.sections ?? summary?.sections ?? []).length);
+        setNewSectionName("");
+        return;
+      }
       await boqApi.createSection(documentId, { name: newSectionName, sortOrder: summary?.sections.length ?? 0 });
       setNewSectionName("");
       await reload();
@@ -404,6 +423,11 @@ export default function BudgetDocumentPage() {
     if (!sectionNameDraft.trim()) return;
     setError(null);
     try {
+      if (editSession.editing) {
+        editSession.renameSection(sectionId, sectionNameDraft.trim());
+        setEditingSectionId(null);
+        return;
+      }
       await boqApi.updateSection(sectionId, { name: sectionNameDraft.trim() });
       setEditingSectionId(null);
       await reload();
@@ -422,6 +446,10 @@ export default function BudgetDocumentPage() {
     if (!ok) return;
     setError(null);
     try {
+      if (editSession.editing) {
+        editSession.deleteSection(sectionId);
+        return;
+      }
       await boqApi.deleteSection(sectionId);
       await reload();
     } catch (err) {
@@ -744,7 +772,7 @@ export default function BudgetDocumentPage() {
   }, [summary]);
 
   const visibleSections = useMemo(() => {
-    let sections = summary?.sections ?? [];
+    let sections = (editSession.editing && editSession.sections) ? editSession.sections : summary?.sections ?? [];
     const isMedicao = summary?.document.documentType === "medicao";
     if (showOnlyUnpriced && !isMedicao) {
       sections = sections
@@ -756,7 +784,7 @@ export default function BudgetDocumentPage() {
     return sections.filter((section) =>
       section.name.toLocaleLowerCase("pt").includes(needle) || containsBudgetMatch(section.items, needle),
     );
-  }, [summary?.sections, summary?.document.documentType, itemQuery, showOnlyUnpriced]);
+  }, [editSession.editing, editSession.sections, summary?.sections, summary?.document.documentType, itemQuery, showOnlyUnpriced]);
 
   if (!summary) {
     return <LoadingState fullScreen label="A carregar documento..." />;
@@ -767,12 +795,13 @@ export default function BudgetDocumentPage() {
   const isClientView = user?.role === "visualizador";
   const isMeasurementDocument = document.documentType === "medicao";
   const isReadOnly = isClientView || document.status !== "rascunho";
+  const mapReadOnly = isReadOnly || !editSession.editing;
   const compositionLinkedCount = sections.reduce((count, section) => count + countCompositionItems(section.items), 0);
   const technicalSpecCount = sections.reduce((count, section) => count + countTechnicalSpecs(section.items), 0);
   const hasBoqContent = documentHasBoqContent(sections);
   const showPrimaryImport = shouldShowPrimaryMeasurementImport({
     isMeasurementDocument,
-    isReadOnly,
+    isReadOnly: isReadOnly || editSession.editing,
     hasContent: hasBoqContent,
   });
   const importForm = (
@@ -815,7 +844,7 @@ export default function BudgetDocumentPage() {
             </button>
           )}
           {!isClientView && document.status === "rascunho" && !directApproval && (
-            <button onClick={() => handleStatusChange("submetido")} disabled={changingStatus} className="btn btn-secondary btn-sm">
+            <button onClick={() => handleStatusChange("submetido")} disabled={changingStatus || editSession.editing} className="btn btn-secondary btn-sm">
               <IconChart className="w-3.5 h-3.5" /> Submeter
             </button>
           )}
@@ -829,7 +858,12 @@ export default function BudgetDocumentPage() {
               )}
             </>
           )}
-          {!isReadOnly && (
+          {!isClientView && document.status === "rascunho" && !editSession.editing && (
+            <button type="button" onClick={editSession.begin} className="btn btn-primary btn-sm">
+              <IconPencil className="w-3.5 h-3.5" /> Editar
+            </button>
+          )}
+          {!isReadOnly && !editSession.editing && (
             <button
               onClick={() => compositionLinkedCount > 0 ? setShowWizard(true) : handlePrepareAutomaticDocument()}
               disabled={preparingAutomaticDocument}
@@ -915,7 +949,7 @@ export default function BudgetDocumentPage() {
                 label: "Importar mapa",
                 icon: <IconDownload className="w-3.5 h-3.5" />,
                 onClick: () => setShowImportPanel(true),
-                hidden: !isMeasurementDocument || isReadOnly || !hasBoqContent,
+                hidden: !isMeasurementDocument || isReadOnly || editSession.editing || !hasBoqContent,
               },
               {
                 id: "excel",
@@ -935,7 +969,7 @@ export default function BudgetDocumentPage() {
                 icon: <IconTrash className="w-3.5 h-3.5" />,
                 onClick: handleDeleteDocument,
                 danger: true,
-                hidden: isReadOnly,
+                hidden: isReadOnly || editSession.editing,
               },
             ]}
           />
@@ -1028,6 +1062,37 @@ export default function BudgetDocumentPage() {
 
         {/* Coluna principal: secções e itens */}
         <div className="min-w-0 space-y-5">
+          {editSession.editing && (
+            <div className="sticky top-0 z-20 flex flex-wrap items-center gap-2 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2">
+              <button type="button" className="btn btn-secondary btn-sm" disabled={!editSession.canUndo} onClick={editSession.undo}>Desfazer</button>
+              <button type="button" className="btn btn-secondary btn-sm" disabled={!editSession.canRedo} onClick={editSession.redo}>Refazer</button>
+              <span className="text-xs font-medium tabular-nums text-slate-700">{editSession.changeCount} alteração(ões)</span>
+              <span className="ml-auto flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  disabled={editSession.saving}
+                  onClick={async () => {
+                    if (editSession.changeCount > 0) {
+                      const ok = await confirm({
+                        title: "Descartar alterações?",
+                        message: "As edições não guardadas serão perdidas.",
+                        confirmLabel: "Descartar",
+                        danger: true,
+                      });
+                      if (!ok) return;
+                    }
+                    await editSession.discard();
+                  }}
+                >
+                  Descartar
+                </button>
+                <button type="button" className="btn btn-primary btn-sm" disabled={editSession.saving || editSession.changeCount === 0} onClick={() => void editSession.save()}>
+                  {editSession.saving ? "A guardar…" : "Guardar"}
+                </button>
+              </span>
+            </div>
+          )}
           {error && (
             <AlertBanner tone="error" onDismiss={() => { setError(null); setErrorBlockers([]); }}>
               <div>
@@ -1041,7 +1106,7 @@ export default function BudgetDocumentPage() {
             </AlertBanner>
           )}
 
-          {(showPrimaryImport || (showImportPanel && isMeasurementDocument && !isReadOnly)) && (
+          {(showPrimaryImport || (showImportPanel && isMeasurementDocument && !isReadOnly && !editSession.editing)) && (
             <section className="card overflow-hidden">
               <div className="flex items-center justify-between gap-3 px-4 py-3 sm:px-5">
                 <h2 className="text-sm font-semibold text-slate-900">Importar mapa</h2>
@@ -1214,7 +1279,7 @@ export default function BudgetDocumentPage() {
                       {!isMeasurementDocument && !isClientView && (
                         <span className="text-sm font-bold text-slate-900 tabular-nums">{money(section.sellingTotal, currency)}</span>
                       )}
-                      {!isReadOnly && (
+                      {!mapReadOnly && (
                         <>
                           <button
                             type="button"
@@ -1238,15 +1303,33 @@ export default function BudgetDocumentPage() {
                 {section.items.length === 0 ? (
                   <div className="py-8 text-center">
                     <p className="text-sm font-medium text-slate-700">Sem itens</p>
-                    {!isReadOnly && <div className="mt-4 flex flex-wrap justify-center gap-2">
-                      {isMeasurementDocument && <button type="button" onClick={() => setShowWizard(true)} className="btn btn-primary btn-sm"><IconRuler className="h-3.5 w-3.5" />Assistente</button>}
-                      <button type="button" onClick={() => setAddingIn(section.id)} className="btn btn-secondary btn-sm"><IconPlus className="h-3.5 w-3.5" />Adicionar</button>
-                    </div>}
+                    {!mapReadOnly && (
+                      addingIn === section.id ? (
+                        <div className="mt-4 text-left">
+                          <AddChildForm
+                            sectionId={section.id}
+                            parentId={null}
+                            compositions={compositions}
+                            measurementOnly={isMeasurementDocument}
+                            mutations={editSession.editing ? editSession.mutations : undefined}
+                            onDone={() => {
+                              setAddingIn(null);
+                              if (!editSession.editing) void reload();
+                            }}
+                          />
+                        </div>
+                      ) : (
+                        <div className="mt-4 flex flex-wrap justify-center gap-2">
+                          {isMeasurementDocument && !editSession.editing && <button type="button" onClick={() => setShowWizard(true)} className="btn btn-primary btn-sm"><IconRuler className="h-3.5 w-3.5" />Assistente</button>}
+                          <button type="button" onClick={() => setAddingIn(section.id)} className="btn btn-secondary btn-sm"><IconPlus className="h-3.5 w-3.5" />Adicionar</button>
+                        </div>
+                      )
+                    )}
                   </div>
                 ) : (
                   <table className="w-full min-w-[500px] border-collapse sm:min-w-[720px]">
                     <BoqHeaderRow measurementOnly={isMeasurementDocument} />
-                    <BoqTableHead readOnly={isReadOnly} measurementOnly={isMeasurementDocument} />
+                    <BoqTableHead readOnly={mapReadOnly} measurementOnly={isMeasurementDocument} />
                     <tbody>
                       {section.items.map((item) => (
                         <LineItemRow
@@ -1255,10 +1338,12 @@ export default function BudgetDocumentPage() {
                           depth={0}
                           sectionId={section.id}
                           compositions={compositions}
-                          onChange={reload}
-                          readOnly={isReadOnly}
+                          onChange={editSession.editing ? () => undefined : reload}
+                          readOnly={mapReadOnly}
                           measurementOnly={isMeasurementDocument}
                           hasPlantRooms={architectureRooms.length > 0}
+                          allowLivePersistence={!editSession.editing}
+                          mutations={editSession.editing ? editSession.mutations : undefined}
                         />
                       ))}
                     </tbody>
@@ -1266,16 +1351,17 @@ export default function BudgetDocumentPage() {
                 )}
               </div>
 
-              {!isReadOnly && section.items.length > 0 && <div className="px-3 pb-3">
+              {!mapReadOnly && section.items.length > 0 && <div className="px-3 pb-3">
                 {addingIn === section.id ? (
                   <AddChildForm
                     sectionId={section.id}
                     parentId={null}
                     compositions={compositions}
                     measurementOnly={isMeasurementDocument}
+                    mutations={editSession.editing ? editSession.mutations : undefined}
                     onDone={() => {
                       setAddingIn(null);
-                      reload();
+                      if (!editSession.editing) void reload();
                     }}
                   />
                 ) : (
@@ -1295,7 +1381,7 @@ export default function BudgetDocumentPage() {
             </div>
           )}
 
-          {!isReadOnly && (
+          {!mapReadOnly && (
             <details className="card overflow-hidden">
               <summary className="cursor-pointer px-5 py-4 hover:bg-slate-50">
                 <span className="text-sm font-semibold text-slate-900">Adicionar secção</span>
@@ -1403,7 +1489,7 @@ export default function BudgetDocumentPage() {
         </ModalPortal>
       )}
 
-      {!isReadOnly && showWizard && documentId && (
+      {!isReadOnly && !editSession.editing && showWizard && documentId && (
         <QuickEstimateWizard
           documentId={documentId}
           structuralSummary={structuralPlant?.structuralSummary}
