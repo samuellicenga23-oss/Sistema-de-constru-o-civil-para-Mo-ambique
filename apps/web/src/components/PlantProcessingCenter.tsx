@@ -4,6 +4,7 @@ import { plantsApi } from "../api/plants";
 import {
   dismissPlantProcessingTask,
   getPlantProcessingTasks,
+  pruneExpiredPlantProcessingTasks,
   subscribePlantProcessingTasks,
   updatePlantProcessingTask,
 } from "../services/plantProcessingTracker";
@@ -12,6 +13,11 @@ import { IconClose } from "./icons";
 export default function PlantProcessingCenter() {
   const navigate = useNavigate();
   const tasks = useSyncExternalStore(subscribePlantProcessingTasks, getPlantProcessingTasks, getPlantProcessingTasks);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => pruneExpiredPlantProcessingTasks(), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     const active = tasks.filter((task) => task.state === "uploading" || task.state === "processing");
@@ -37,7 +43,7 @@ export default function PlantProcessingCenter() {
   const task = tasks[tasks.length - 1];
   const finished = task.state === "completed";
   const failed = task.state === "error";
-  const target = finished ? `/plantas/${task.plantId}` : `/projectos/${task.projectId}#plantas-do-projecto`;
+  const target = `/plantas/${task.plantId}`;
 
   function openAndDismiss() {
     if (finished || failed) dismissPlantProcessingTask(task.plantId);
@@ -65,8 +71,8 @@ export default function PlantProcessingCenter() {
             {failed
               ? (task.progress.errorMessage ?? "Não foi possível analisar")
               : finished
-                ? "Leitura concluída — pronta para revisão"
-                : (task.progress.processingStage ?? "A processar em segundo plano")}
+                ? "Concluído"
+                : (task.progress.processingStage ?? "A processar")}
           </p>
         </div>
         <button
@@ -90,7 +96,7 @@ export default function PlantProcessingCenter() {
         </div>
       )}
       <span className="mt-3 inline-flex text-xs font-semibold text-brand-700">
-        {finished ? "Clique para rever →" : "Clique para ver estado →"}
+        {failed ? "Completar dados" : finished ? "Abrir revisão" : "Ver estado"}
       </span>
     </aside>
   );
