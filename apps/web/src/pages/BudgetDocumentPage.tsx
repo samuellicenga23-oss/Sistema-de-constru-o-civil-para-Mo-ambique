@@ -11,6 +11,7 @@ import MaterialsByPhaseModal from "../components/MaterialsByPhaseModal";
 import MeasurementImportReviewModal from "../components/MeasurementImportReviewModal";
 import ImportCompositionReviewWizard from "../components/ImportCompositionReviewWizard";
 import ConfirmDialog from "../components/ConfirmDialog";
+import BudgetRevisionDiffModal from "../components/BudgetRevisionDiffModal";
 import ModalPortal from "../components/ModalPortal";
 import Layout from "../components/Layout";
 import ProjectWorkspaceNav from "../components/ProjectWorkspaceNav";
@@ -251,6 +252,7 @@ export default function BudgetDocumentPage() {
   const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
   const [sectionNameDraft, setSectionNameDraft] = useState("");
   const [showCommercialProposal, setShowCommercialProposal] = useState(false);
+  const [showRevisionDiff, setShowRevisionDiff] = useState(false);
   const [proposalAttachMode, setProposalAttachMode] = useState<"nada" | "resumo" | "mapa">("resumo");
   const [creatingProposal, setCreatingProposal] = useState(false);
   const [directApproval, setDirectApproval] = useState(false);
@@ -931,6 +933,13 @@ export default function BudgetDocumentPage() {
                 hidden: !isMeasurementDocument || isClientView || document.status !== "aprovado",
               },
               {
+                id: "revision-diff",
+                label: "Comparar revisão",
+                icon: <IconChart className="w-3.5 h-3.5" />,
+                onClick: () => setShowRevisionDiff(true),
+                hidden: isMeasurementDocument || isClientView,
+              },
+              {
                 id: "materials",
                 label: "Materiais por fase",
                 icon: <IconClipboard className="w-3.5 h-3.5" />,
@@ -1584,6 +1593,10 @@ export default function BudgetDocumentPage() {
             </div>
           </div>
         </ModalPortal>
+      )}
+
+      {showRevisionDiff && documentId && (
+        <BudgetRevisionDiffModal documentId={documentId} onClose={() => setShowRevisionDiff(false)} />
       )}
 
       {importPreview && importJobId && (

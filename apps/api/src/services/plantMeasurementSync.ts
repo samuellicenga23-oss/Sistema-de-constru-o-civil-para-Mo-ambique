@@ -2,6 +2,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { budgetDocuments, budgetSections, lineItems, measurementLines } from "../db/schema.js";
 import { buildMeasurementLinesFromPlant, loadProjectPlantContext } from "./plantMeasurementLink.js";
+import { computePartial, quantityFromMeasurementPartials } from "./dimensionEngine.js";
 
 /**
  * Mantém rascunhos de medição ligados aos dados confirmados da planta.
@@ -61,23 +62,44 @@ export async function syncProjectPlantMeasurements(projectId: string): Promise<{
       context.hydroEquipment,
     );
     if (!built.ok) continue;
-    const total = built.lines.reduce((sum, line) => sum
-      + line.count * (line.length ?? 1) * (line.width ?? 1) * (line.height ?? 1), 0);
+    const drafts = built.lines.map((line) => ({
+      formulaType: line.width != null && line.height != null ? "volume" as const
+        : line.width != null ? "area" as const
+        : line.length != null ? "length" as const
+        : "count" as const,
+      count: line.count,
+      length: line.length,
+      width: line.width,
+      height: line.height,
+    }));
+    let total: number | null;
+    try {
+      total = quantityFromMeasurementPartials(drafts.map((line) => computePartial(line)));
+    } catch {
+      continue;
+    }
+    if (total == null) continue;
 
     await db.transaction(async (tx) => {
       await tx.delete(measurementLines).where(eq(measurementLines.lineItemId, item.id));
       if (built.lines.length) {
-        await tx.insert(measurementLines).values(built.lines.map((line) => ({
+        await tx.insert(measurementLines).values(built.lines.map((line, index) => ({
           lineItemId: item.id,
           description: line.description,
+          formulaType: drafts[index].formulaType,
           count: line.count.toFixed(2),
           length: line.length == null ? null : line.length.toFixed(3),
           width: line.width == null ? null : line.width.toFixed(3),
           height: line.height == null ? null : line.height.toFixed(3),
+          source: "plant" as const,
           sortOrder: line.sortOrder,
         })));
       }
-      await tx.update(lineItems).set({ quantity: total.toFixed(2), origin: "planta" }).where(eq(lineItems.id, item.id));
+      await tx.update(lineItems).set({
+        quantity: total.toFixed(4),
+        origin: "planta",
+        quantitySource: "plant",
+      }).where(eq(lineItems.id, item.id));
     });
     updatedItems++;
   }

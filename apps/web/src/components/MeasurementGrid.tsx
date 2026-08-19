@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { Fragment, useEffect, useMemo, useState, type FormEvent } from "react";
+import { groupMeasurementsByFloorZone } from "../utils/measurementLocationGroups";
 import {
   measurementLinesApi,
   type MeasurementFormulaType,
@@ -99,6 +100,7 @@ export default function MeasurementGrid({
     if (!editingId) setFormulaType(suggestedFormula);
   }, [suggestedFormula, lineItemId, editingId]);
 
+  const groupedLines = useMemo(() => groupMeasurementsByFloorZone(lines), [lines]);
   const total = useMemo(() => lines.reduce((sum, line) => sum + line.partial, 0), [lines]);
   const additions = useMemo(() => lines.filter((line) => line.partial >= 0).reduce((sum, line) => sum + line.partial, 0), [lines]);
   const deductions = useMemo(() => Math.abs(lines.filter((line) => line.partial < 0).reduce((sum, line) => sum + line.partial, 0)), [lines]);
@@ -178,30 +180,33 @@ export default function MeasurementGrid({
 
   return <div className="mt-2 space-y-3 rounded-xl border border-brand-100 bg-brand-50/40 p-3 text-xs sm:ml-14">
     <div className="flex flex-wrap items-start justify-between gap-3">
-      <div><p className="font-semibold text-brand-950">Memória de cálculo 2.0</p><p className="text-[11px] text-slate-500">Fórmulas tipadas · deduções · localização · rastreabilidade</p><button type="button" className="mt-1 text-[11px] font-semibold text-brand-700 hover:text-brand-900" onClick={() => void toggleHistory()}>{showHistory ? "Ocultar histórico" : "Ver histórico de revisões"}</button></div>
+      <div><p className="font-semibold text-brand-950">Memória</p><button type="button" className="mt-1 text-[11px] font-semibold text-brand-700 hover:text-brand-900" onClick={() => void toggleHistory()}>{showHistory ? "Ocultar histórico" : "Histórico"}</button></div>
       <div className="grid grid-cols-3 gap-2 text-right"><div><span className="text-slate-400">Adições</span><strong className="block text-emerald-700">{additions.toFixed(4)}</strong></div><div><span className="text-slate-400">Deduções</span><strong className="block text-rose-700">−{deductions.toFixed(4)}</strong></div><div><span className="text-slate-400">Líquido</span><strong className="block text-brand-900">{total.toFixed(4)}</strong></div></div>
     </div>
     {error && <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-red-700">{error}</div>}
 
     {lines.length > 0 && <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
       <table className="w-full min-w-[900px] text-xs"><thead><tr className="bg-slate-50 text-left text-slate-500"><th className="px-3 py-2">Tipo</th><th>Descrição / localização</th><th>N.º</th><th>C</th><th>L</th><th>H</th><th className="text-right">Parcial</th><th className="w-10"></th></tr></thead>
-      <tbody>{lines.map((line) => <tr key={line.id} className="border-t border-slate-100">
+      <tbody>{groupedLines.map((group) => <Fragment key={group.key || "__none"}>
+        {group.key ? <tr className="border-t border-slate-100 bg-slate-50/80"><td colSpan={8} className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">{group.key}</td></tr> : null}
+        {group.lines.map((line) => <tr key={line.id} className="border-t border-slate-100">
         <td className="px-3 py-2"><span className={`rounded px-1.5 py-0.5 font-semibold ${line.sign < 0 ? "bg-rose-100 text-rose-700" : "bg-slate-100 text-slate-700"}`}>{line.sign < 0 ? "Dedução · " : ""}{label(line.formulaType)}</span></td>
-        <td><strong className="text-slate-800">{line.description || "—"}</strong><p className="text-[10px] text-slate-400">{location(line)} · {line.source} · rev. {line.revisionNo}</p></td>
+        <td><strong className="text-slate-800">{line.description || "—"}</strong><p className="text-[10px] text-slate-400">{location(line)} · {line.source}{line.sourceRef ? ` · ${line.sourceRef}` : ""} · {label(line.formulaType)} · rev. {line.revisionNo}</p></td>
         <td>{n(line.count)}</td><td>{n(line.length)}</td><td>{n(line.width)}</td><td>{n(line.height)}</td>
         <td className={`text-right font-semibold tabular-nums ${line.partial < 0 ? "text-rose-700" : "text-slate-900"}`}>{line.partial.toFixed(6)}</td>
-        <td><div className="flex gap-1"><button type="button" disabled={working} onClick={() => startEdit(line)} className="icon-btn" title="Editar criando nova revisão">✎</button><button type="button" disabled={working} onClick={() => void remove(line.id)} className="icon-btn-danger">×</button></div></td>
-      </tr>)}</tbody></table>
+        <td><div className="flex gap-1"><button type="button" disabled={working} onClick={() => startEdit(line)} className="icon-btn" title="Editar">✎</button><button type="button" disabled={working} onClick={() => void remove(line.id)} className="icon-btn-danger">×</button></div></td>
+      </tr>)}
+      </Fragment>)}</tbody></table>
     </div>}
 
-    {showHistory && <div className="rounded-lg border border-slate-200 bg-white p-3"><div className="mb-2 flex items-center justify-between"><strong className="text-slate-800">Histórico de revisões</strong><span className="text-[10px] text-slate-400">append-only</span></div><div className="max-h-56 overflow-auto space-y-1">{history.map((row) => <div key={row.id} className={`grid grid-cols-[70px_1fr_100px] gap-2 rounded px-2 py-1.5 ${row.isActive ? "bg-emerald-50" : "bg-slate-50 text-slate-500"}`}><span>rev. {row.revisionNo}{row.isActive ? " · activa" : ""}</span><span className="truncate">{row.description || label(row.formulaType)} · {location(row)}</span><strong className="text-right tabular-nums">{row.partial.toFixed(6)}</strong></div>)}</div></div>}
+    {showHistory && <div className="rounded-lg border border-slate-200 bg-white p-3"><div className="mb-2"><strong className="text-slate-800">Histórico</strong></div><div className="max-h-56 overflow-auto space-y-1">{history.map((row) => <div key={row.id} className={`grid grid-cols-[70px_1fr_100px] gap-2 rounded px-2 py-1.5 ${row.isActive ? "bg-emerald-50" : "bg-slate-50 text-slate-500"}`}><span>rev. {row.revisionNo}{row.isActive ? " · activa" : ""}</span><span className="truncate">{row.description || label(row.formulaType)} · {location(row)}</span><strong className="text-right tabular-nums">{row.partial.toFixed(6)}</strong></div>)}</div></div>}
 
     <form onSubmit={handleAdd} className="space-y-3 rounded-lg border border-slate-200 bg-white p-3">
-      {editingId && <div className="flex items-center justify-between rounded-lg bg-amber-50 px-3 py-2 text-amber-800"><span><strong>A editar linha.</strong> Guardar cria uma nova revisão; a anterior permanece no histórico.</span><button type="button" className="btn btn-ghost btn-sm" onClick={resetForm}>Cancelar edição</button></div>}
+      {editingId && <div className="flex items-center justify-between rounded-lg bg-amber-50 px-3 py-2 text-amber-800"><span>A editar — guardar cria revisão nova</span><button type="button" className="btn btn-ghost btn-sm" onClick={resetForm}>Cancelar</button></div>}
       <div className="grid gap-2 md:grid-cols-[180px_110px_1fr]">
         <label><span className="label">Fórmula</span><select className="input input-sm w-full" value={formulaType} onChange={(e) => setFormulaType(e.target.value as MeasurementFormulaType)}>{FORMULAS.map((row) => <option key={row.value} value={row.value}>{row.label}</option>)}</select></label>
         <label><span className="label">Natureza</span><select className="input input-sm w-full" value={sign} onChange={(e) => setSign(Number(e.target.value) as 1 | -1)}><option value={1}>Adição (+)</option><option value={-1}>Dedução (−)</option></select></label>
-        <label><span className="label">Descrição</span><input className="input input-sm w-full" placeholder="Ex.: Parede eixo A/1–A/5, Porta P01" value={description} onChange={(e) => setDescription(e.target.value)} /></label>
+        <label><span className="label">Descrição</span><input className="input input-sm w-full" value={description} onChange={(e) => setDescription(e.target.value)} /></label>
       </div>
       <div className="flex flex-wrap gap-2 items-end">
         {needsCount && <label><span className="label">N.º</span><input className="input input-sm w-24" type="number" min="0.000001" step="0.000001" value={count} onChange={(e) => setCount(e.target.value)} /></label>}
@@ -222,8 +227,8 @@ export default function MeasurementGrid({
     </form>
 
     {hasPlantRooms && itemCode && <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2"><div><strong className="text-emerald-900">Medição a partir da planta</strong><p className="text-[11px] text-emerald-700">Nunca substitui a memória sem preview e confirmação.</p></div><button type="button" disabled={working} className="btn btn-secondary btn-sm" onClick={() => void openPlantPreview()}>Gerar preview</button></div>
-      {preview && <div className="mt-3 space-y-2"><div className="max-h-64 overflow-auto rounded border border-emerald-200 bg-white">{preview.lines.map((line, index) => <label key={index} className="flex cursor-pointer items-start gap-2 border-b border-slate-100 px-3 py-2 last:border-0"><input type="checkbox" checked={selectedPreview.includes(index)} onChange={(e) => setSelectedPreview((current) => e.target.checked ? [...current, index] : current.filter((value) => value !== index))} /><span className="flex-1"><strong>{line.description || `Linha ${index + 1}`}</strong><span className="ml-2 text-slate-500">{line.expression} = {line.partial.toFixed(6)}</span></span></label>)}</div><div className="flex flex-wrap justify-end gap-2"><button type="button" className="btn btn-ghost btn-sm" onClick={() => setPreview(null)}>Cancelar</button><button type="button" className="btn btn-secondary btn-sm" disabled={!selectedPreview.length || working} onClick={() => void applyPlant("merge")}>Adicionar às actuais</button><button type="button" className="btn btn-primary btn-sm" disabled={!selectedPreview.length || working} onClick={() => void applyPlant("replace")}>Substituir após confirmação</button></div></div>}
+      <div className="flex flex-wrap items-center justify-between gap-2"><strong className="text-emerald-900">Planta</strong><button type="button" disabled={working} className="btn btn-secondary btn-sm" onClick={() => void openPlantPreview()}>Preview</button></div>
+      {preview && <div className="mt-3 space-y-2"><div className="max-h-64 overflow-auto rounded border border-emerald-200 bg-white">{preview.lines.map((line, index) => <label key={index} className="flex cursor-pointer items-start gap-2 border-b border-slate-100 px-3 py-2 last:border-0"><input type="checkbox" checked={selectedPreview.includes(index)} onChange={(e) => setSelectedPreview((current) => e.target.checked ? [...current, index] : current.filter((value) => value !== index))} /><span className="flex-1"><strong>{line.description || `Linha ${index + 1}`}</strong><span className="ml-2 text-slate-500">{line.expression} = {line.partial.toFixed(6)}</span></span></label>)}</div><div className="flex flex-wrap justify-end gap-2"><button type="button" className="btn btn-ghost btn-sm" onClick={() => setPreview(null)}>Cancelar</button><button type="button" className="btn btn-secondary btn-sm" disabled={!selectedPreview.length || working} onClick={() => void applyPlant("merge")}>Fundir</button><button type="button" className="btn btn-primary btn-sm" disabled={!selectedPreview.length || working} onClick={() => void applyPlant("replace")}>Substituir</button></div></div>}
     </div>}
   </div>;
 }

@@ -65,7 +65,7 @@ async function getItemDocument(lineItemId: string) {
 }
 
 function effectiveFormulaType(data: LineInput): MeasurementFormulaType {
-  return data.formulaType ?? "legacy_product";
+  return data.formulaType ?? "direct";
 }
 
 async function resolveDefaultFormula(item: { unit: string | null; compositionId: string | null }): Promise<MeasurementFormulaType> {

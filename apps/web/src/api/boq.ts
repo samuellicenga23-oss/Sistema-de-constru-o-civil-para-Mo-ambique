@@ -115,6 +115,7 @@ export type LineItemNode = {
   sellingUnitPrice: number | null;
   compositionId: string | null;
   origin: string;
+  quantitySource?: string;
   sortOrder: number;
   totalPrice: number;
   sellingTotalPrice: number;
@@ -282,6 +283,29 @@ export const boqApi = {
   getBudgetDocumentSummary: (id: string) => request<BudgetDocumentSummary>(`/budget-documents/${id}`),
   applyEditSession: (id: string, payload: { baseFingerprint: string; operations: unknown[] }) =>
     request<BudgetDocumentSummary>(`/budget-documents/${id}/edit-session`, { method: "PATCH", body: JSON.stringify(payload) }),
+  revisionDiff: (id: string) =>
+    request<{
+      previous: { id: string; title: string; revision: string | null } | null;
+      current: { id: string; title: string; revision: string | null };
+      previousTotal: number;
+      currentTotal: number;
+      delta: number;
+      items: Array<{
+        key: string;
+        code: string | null;
+        description: string;
+        previousQuantity: number | null;
+        quantity: number | null;
+        previousUnitPrice: number | null;
+        unitPrice: number | null;
+        previousTotal: number;
+        total: number;
+        delta: number;
+        deltaPct: number | null;
+        quantityEffect: number;
+        priceEffect: number;
+      }>;
+    }>(`/budget-documents/${id}/revision-diff`),
   repriceBudgetDocument: (id: string) =>
     request<BudgetRepriceResult>(`/budget-documents/${id}/reprice`, { method: "POST" }),
   updateBudgetDocumentStatus: (id: string, status: "rascunho" | "submetido" | "aprovado", decisionNote?: string) =>

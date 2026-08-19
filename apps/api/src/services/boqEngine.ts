@@ -20,6 +20,7 @@ export type LineItemNode = {
   sellingUnitPrice: number | null;
   compositionId: string | null;
   origin: "manual" | "planta" | "composicao";
+  quantitySource?: string;
   sortOrder: number;
   totalPrice: number; // calculado on-the-fly: item = quantidade*preço; capítulo/grupo = soma dos filhos
   sellingTotalPrice: number;

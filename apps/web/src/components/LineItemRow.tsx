@@ -9,6 +9,7 @@ import LineItemCostSnapshotPanel from "./LineItemCostSnapshotPanel";
 import ChapterSpecBulkEditor from "./ChapterSpecBulkEditor";
 import { IconPlus, IconPencil, IconRuler, IconTrash } from "./icons";
 import MoneyInput from "./MoneyInput";
+import { boqProvenanceBadge } from "../utils/boqProvenance";
 
 export type BoqLineMutations = {
   createItem: (
@@ -426,9 +427,19 @@ export default function LineItemRow({
                 }}
               />
             ) : (
-              <button type="button" className={canEdit ? "tabular-nums hover:text-brand-800" : "tabular-nums"} onClick={() => { if (!canEdit) return; setQtyDraft(node.quantity != null ? String(node.quantity) : ""); setEditingQty(true); }}>
-                {node.quantity ?? "—"}
-              </button>
+              <span className="inline-flex flex-col items-end gap-0.5">
+                <button type="button" className={canEdit ? "tabular-nums hover:text-brand-800" : "tabular-nums"} onClick={() => { if (!canEdit) return; setQtyDraft(node.quantity != null ? String(node.quantity) : ""); setEditingQty(true); }}>
+                  {node.quantity ?? "—"}
+                </button>
+                {(() => {
+                  const badge = boqProvenanceBadge(node.origin, node.quantitySource);
+                  return badge ? (
+                    <span className="rounded bg-slate-100 px-1 py-px text-[9px] font-semibold uppercase tracking-wide text-slate-600" title={badge.title}>
+                      {badge.label}
+                    </span>
+                  ) : null;
+                })()}
+              </span>
             )
           ) : null}
         </td>

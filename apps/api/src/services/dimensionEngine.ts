@@ -50,13 +50,18 @@ export async function getMeasurementLines(lineItemId: string, dbOrTx: Tx | typeo
  * Quando a última linha é removida, o valor anterior NÃO permanece órfão — fica null.
  * Cálculo interno usa 6 casas; line_items guarda 4, coerente com o schema do BOQ.
  */
+export function quantityFromMeasurementPartials(partials: number[]): number | null {
+  if (partials.length === 0) return null;
+  return roundMeasurement(partials.reduce((sum, line) => sum + line, 0), 6);
+}
+
 export async function recomputeItemQuantity(lineItemId: string, dbOrTx: Tx | typeof db = db): Promise<number | null> {
   const lines = await getMeasurementLines(lineItemId, dbOrTx);
-  if (lines.length === 0) {
+  const total = quantityFromMeasurementPartials(lines.map((line) => line.partial));
+  if (total == null) {
     await dbOrTx.update(lineItems).set({ quantity: null, quantitySource: "manual" }).where(eq(lineItems.id, lineItemId));
     return null;
   }
-  const total = roundMeasurement(lines.reduce((sum, line) => sum + line.partial, 0), 6);
   const sources = new Set(lines.map((line) => line.source));
   const quantitySource = sources.size === 1
     ? ({ plant: "plant", import: "import", bim: "bim", manual: "measurement", field: "measurement" } as const)[lines[0].source]

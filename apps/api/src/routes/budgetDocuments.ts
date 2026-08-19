@@ -34,6 +34,7 @@ import { recordAuditEvent } from "../services/auditTrail.js";
 import { emitWorkflowEvent } from "../services/workflowEvents.js";
 import { CURRENCIES, DEFAULT_IVA_RATE, UNITS, LINE_ITEM_KINDS, fixedSigo, planUsesDirectDocumentApproval, boqEditSessionSchema } from "@sigo/shared";
 import { applyBoqEditSession, BoqEditConflictError, BoqEditValidationError } from "../services/boqEditSession.js";
+import { compareBudgetRevisions } from "../services/budgetRevisionDiff.js";
 import { getCompanySubscription } from "../services/subscriptionEntitlements.js";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista"] as const;
@@ -232,6 +233,16 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
     if (!document) return reply.code(404).send({ error: "Documento não encontrado" });
     const summary = await getBudgetDocumentSummary(id);
     return summary && request.currentUser!.role === "visualizador" ? hideInternalPricing(summary) : summary;
+  });
+
+  app.get("/api/budget-documents/:id/revision-diff", { preHandler: requireCompanyUser }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const companyId = companyIdOf(request);
+    const document = await assertDocumentOwned(id, companyId);
+    if (!document) return reply.code(404).send({ error: "Documento não encontrado" });
+    const diff = await compareBudgetRevisions(id);
+    if (!diff) return reply.code(404).send({ error: "Documento não encontrado" });
+    return diff;
   });
 
   app.patch("/api/budget-documents/:id/edit-session", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
