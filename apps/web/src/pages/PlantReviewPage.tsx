@@ -195,7 +195,7 @@ export default function PlantReviewPage() {
     setError(null);
     try {
       const { document } = await boqApi.prepareMeasurementWorkspace(plant.projectId);
-      navigate(`/documentos/${document.id}?assistente=1&fromPlant=${plant.id}`);
+      navigate(`/documentos/${document.id}?assistente=1`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Não foi possível preparar as medições");
     } finally {

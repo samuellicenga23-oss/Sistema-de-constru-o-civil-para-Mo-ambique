@@ -27,6 +27,7 @@ import { practiceApi } from "../api/practice";
 import { companiesApi } from "../api/companies";
 import { planUsesDirectDocumentApproval } from "@sigo/shared";
 import { collectUnpricedItems, filterTreeToUnpricedOnly } from "../utils/boqHelpers";
+import { consumeAssistantSearchParams, documentHasBoqContent, shouldShowPrimaryMeasurementImport } from "../utils/measurementWorkspace";
 import { ApiError } from "../api/http";
 
 function money(value: number, currency: string) {
@@ -120,6 +121,48 @@ function countCompositionItems(items: LineItemNode[]): number {
   );
 }
 
+function MeasurementImportForm({
+  importing,
+  result,
+  onSubmit,
+  onDismissResult,
+  onReviewInsumos,
+}: {
+  importing: boolean;
+  result: MeasurementImportResult | null;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onDismissResult: () => void;
+  onReviewInsumos?: () => void;
+}) {
+  return (
+    <div className="px-4 py-4 sm:px-5">
+      <form onSubmit={onSubmit} className="flex flex-col gap-3 sm:flex-row sm:items-end">
+        <div className="min-w-0 flex-1">
+          <label className="label">Mapa (Excel ou PDF)</label>
+          <input
+            type="file"
+            name="measurementsFile"
+            accept=".xlsx,.xls,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            required
+            className="input py-1.5 file:mr-3 file:rounded-md file:border-0 file:bg-brand-50 file:px-2.5 file:py-1 file:text-xs file:font-medium file:text-brand-800"
+          />
+        </div>
+        <button type="submit" disabled={importing} className="btn btn-primary shrink-0">
+          <IconDownload className="h-3.5 w-3.5" />
+          {importing ? "A enviar…" : "Importar mapa"}
+        </button>
+      </form>
+      {result && (
+        <MeasurementImportResultCard
+          result={result}
+          onDismiss={onDismissResult}
+          onReviewInsumos={onReviewInsumos}
+        />
+      )}
+    </div>
+  );
+}
+
 function countTechnicalSpecs(items: LineItemNode[]): number {
   return items.reduce(
     (total, item) => total + (item.technicalSpecification ? 1 : 0) + countTechnicalSpecs(item.children),
@@ -176,7 +219,7 @@ export default function BudgetDocumentPage() {
   const [error, setError] = useState<string | null>(null);
   const [errorBlockers, setErrorBlockers] = useState<string[]>([]);
   const [showWizard, setShowWizard] = useState(false);
-  const [wizardReturnPlantId, setWizardReturnPlantId] = useState<string | null>(null);
+  const [showImportPanel, setShowImportPanel] = useState(false);
   const [showReport, setShowReport] = useState(false);
   const [showMaterialsByPhase, setShowMaterialsByPhase] = useState(false);
   const [structuralPlant, setStructuralPlant] = useState<Plant | null>(null);
@@ -310,24 +353,19 @@ export default function BudgetDocumentPage() {
   }, [summary, searchParams]);
 
   useEffect(() => {
-    if (searchParams.get("assistente") !== "1" || !summary || plantContextLoading) return;
-    const fromPlant = searchParams.get("fromPlant");
-    if (fromPlant) setWizardReturnPlantId(fromPlant);
+    if (!summary || plantContextLoading) return;
+    const { openWizard, next } = consumeAssistantSearchParams(searchParams);
+    if (!openWizard) return;
     setShowWizard(true);
-    const next = new URLSearchParams(searchParams);
-    next.delete("assistente");
-    next.delete("fromPlant");
     setSearchParams(next, { replace: true });
   }, [searchParams, setSearchParams, summary, plantContextLoading]);
 
   function closeWizard() {
     setShowWizard(false);
     reload();
-    if (wizardReturnPlantId) {
-      const plantId = wizardReturnPlantId;
-      setWizardReturnPlantId(null);
-      navigate(`/plantas/${plantId}`);
-    }
+    requestAnimationFrame(() => {
+      globalThis.document.getElementById("mapa-quantidades")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
   }
 
   async function handleAddSection(e: FormEvent) {
@@ -731,6 +769,25 @@ export default function BudgetDocumentPage() {
   const isReadOnly = isClientView || document.status !== "rascunho";
   const compositionLinkedCount = sections.reduce((count, section) => count + countCompositionItems(section.items), 0);
   const technicalSpecCount = sections.reduce((count, section) => count + countTechnicalSpecs(section.items), 0);
+  const hasBoqContent = documentHasBoqContent(sections);
+  const showPrimaryImport = shouldShowPrimaryMeasurementImport({
+    isMeasurementDocument,
+    isReadOnly,
+    hasContent: hasBoqContent,
+  });
+  const importForm = (
+    <MeasurementImportForm
+      importing={importingMeasurements}
+      result={importResult}
+      onSubmit={handleImportMeasurements}
+      onDismissResult={() => setImportResult(null)}
+      onReviewInsumos={
+        (importResult?.createdCompositions?.length ?? 0) > 0
+          ? () => setShowImportInsumosWizard(true)
+          : undefined
+      }
+    />
+  );
   const pendingOpenings = architectureOpenings.filter((opening) => opening.needsConfirmation || !opening.widthM || !opening.heightM || opening.location === "desconhecida");
   const openingsMissingDimensions = pendingOpenings.filter((opening) => !opening.widthM || !opening.heightM).length;
   const openingsMissingLocation = pendingOpenings.filter((opening) => opening.location === "desconhecida").length;
@@ -854,6 +911,13 @@ export default function BudgetDocumentPage() {
                 hidden: isMeasurementDocument || !document.lastEstimateReport,
               },
               {
+                id: "import-map",
+                label: "Importar mapa",
+                icon: <IconDownload className="w-3.5 h-3.5" />,
+                onClick: () => setShowImportPanel(true),
+                hidden: !isMeasurementDocument || isReadOnly || !hasBoqContent,
+              },
+              {
                 id: "excel",
                 label: isMeasurementDocument ? "Exportar Excel" : "Excel",
                 icon: <IconDownload className="w-3.5 h-3.5" />,
@@ -939,19 +1003,14 @@ export default function BudgetDocumentPage() {
             Resumo financeiro
           </button>
         </section>}
-        {isMeasurementDocument && <section className="card flex flex-col gap-3 border-l-4 border-l-blue-600 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-          <div>
-            <strong className="text-sm text-slate-950">Documento técnico de medição</strong>
-            <p className="mt-1 text-xs text-slate-500">
-              {sections.some((section) => section.templateKey?.startsWith("sigo_adaptativo"))
-                ? "Capítulos seleccionados pelas disciplinas detectadas. Pode acrescentar ou remover trabalhos antes de medir."
-                : "Aqui trabalham-se quantidades e memória de cálculo. Os preços entram depois, no orçamento."}
-            </p>
+        {isMeasurementDocument && (
+          <div className="flex items-center justify-between gap-3 text-sm">
+            <span className="font-medium text-slate-700">Medição técnica</span>
+            <span className="badge badge-brand">
+              {sections.some((section) => section.templateKey?.startsWith("sigo_adaptativo")) ? "Adaptado às plantas" : "Sem preços"}
+            </span>
           </div>
-          <span className="badge badge-brand shrink-0">
-            {sections.some((section) => section.templateKey?.startsWith("sigo_adaptativo")) ? "Adaptado às plantas" : "Sem preços"}
-          </span>
-        </section>}
+        )}
         {isMeasurementDocument && architecturePlant && pendingOpenings.length > 0 && (
           <section className="card flex flex-col gap-3 border-l-4 border-l-amber-500 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
             <div className="min-w-0">
@@ -982,53 +1041,15 @@ export default function BudgetDocumentPage() {
             </AlertBanner>
           )}
 
-          {isMeasurementDocument && !isReadOnly && (
-            <section className="card overflow-hidden border-l-4 border-l-brand-500">
-              <div className="flex flex-col gap-4 px-4 py-4 sm:flex-row sm:items-start sm:justify-between sm:px-5">
-                <div className="flex min-w-0 items-start gap-3">
-                  <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-700">
-                    <IconDownload className="h-4 w-4" />
-                  </span>
-                  <div className="min-w-0">
-                    <h2 className="text-sm font-semibold text-slate-900">Importar medições</h2>
-                    <p className="mt-1 max-w-2xl text-xs text-slate-500">
-                      Excel/PDF — colunas Item/Código e Quant.
-                    </p>
-                  </div>
-                </div>
-              </div>
-              <div className="border-t border-slate-100 px-4 py-4 sm:px-5">
-                <form onSubmit={handleImportMeasurements} className="flex flex-col gap-3 sm:flex-row sm:items-end">
-                  <div className="min-w-0 flex-1">
-                    <label className="label">Mapa de quantidades (Excel ou PDF)</label>
-                    <input
-                      type="file"
-                      name="measurementsFile"
-                      accept=".xlsx,.xls,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                      required
-                      className="input py-1.5 file:mr-3 file:rounded-md file:border-0 file:bg-brand-50 file:px-2.5 file:py-1 file:text-xs file:font-medium file:text-brand-800"
-                    />
-                    <p className="mt-2 text-xs leading-5 text-slate-500">
-                      O ficheiro é analisado em segundo plano. Depois reveja o mapeamento antes de aplicar. Modelo: «Exportar Excel» no menu ⋮.
-                    </p>
-                  </div>
-                  <button type="submit" disabled={importingMeasurements} className="btn btn-primary shrink-0">
-                    <IconDownload className="h-3.5 w-3.5" />
-                    {importingMeasurements ? "A enviar…" : "Importar mapa"}
-                  </button>
-                </form>
-                {importResult && (
-                  <MeasurementImportResultCard
-                    result={importResult}
-                    onDismiss={() => setImportResult(null)}
-                    onReviewInsumos={
-                      (importResult.createdCompositions?.length ?? 0) > 0
-                        ? () => setShowImportInsumosWizard(true)
-                        : undefined
-                    }
-                  />
+          {(showPrimaryImport || (showImportPanel && isMeasurementDocument && !isReadOnly)) && (
+            <section className="card overflow-hidden">
+              <div className="flex items-center justify-between gap-3 px-4 py-3 sm:px-5">
+                <h2 className="text-sm font-semibold text-slate-900">Importar mapa</h2>
+                {!showPrimaryImport && (
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowImportPanel(false)}>Fechar</button>
                 )}
               </div>
+              <div className="border-t border-slate-100">{importForm}</div>
             </section>
           )}
 
@@ -1140,7 +1161,7 @@ export default function BudgetDocumentPage() {
             </section>
           )}
 
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div id="mapa-quantidades" className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <PageSearch
               value={itemQuery}
               onChange={setItemQuery}
@@ -1187,7 +1208,7 @@ export default function BudgetDocumentPage() {
                   <>
                     <div className="min-w-0">
                       <h3 className="text-sm font-semibold text-slate-950">{section.name}</h3>
-                      <p className="text-xs text-slate-500">{section.items.length} capítulo(s) ou item(ns) — clique no lápis para editar descrições e especificações</p>
+                      <p className="text-xs text-slate-500">{section.items.length} item(ns)</p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       {!isMeasurementDocument && !isClientView && (
@@ -1274,60 +1295,28 @@ export default function BudgetDocumentPage() {
             </div>
           )}
 
-          {!isReadOnly && <details className="card overflow-hidden">
-            <summary className="cursor-pointer px-5 py-4 hover:bg-slate-50">
-              <span className="text-sm font-semibold text-slate-900">Opções manuais e importações</span>
-            </summary>
-          <section className="border-t border-slate-200">
-            <SectionHeader title="Estrutura do orçamento" />
-            <form onSubmit={handleAddSection} className="flex gap-2 items-end p-5">
-              <input
-                required
-                placeholder="ex: Edifício Principal, Preliminares e Gerais, Arranjos Exteriores"
-                value={newSectionName}
-                onChange={(e) => setNewSectionName(e.target.value)}
-                className="input flex-1"
-              />
-              <button type="submit" className="btn btn-primary">
-                <IconPlus className="w-4 h-4" />
-                Adicionar
-              </button>
-            </form>
-          </section>
-
-          <section className="border-t border-slate-200">
-            <SectionHeader title="Importar medições" />
-            <div className="px-4 py-4 sm:px-5">
-              <form onSubmit={handleImportMeasurements} className="flex flex-col gap-3 sm:flex-row sm:items-end">
-                <div className="min-w-0 flex-1">
-                  <label className="label">Mapa de quantidades (Excel ou PDF)</label>
+          {!isReadOnly && (
+            <details className="card overflow-hidden">
+              <summary className="cursor-pointer px-5 py-4 hover:bg-slate-50">
+                <span className="text-sm font-semibold text-slate-900">Adicionar secção</span>
+              </summary>
+              <section className="border-t border-slate-200">
+                <form onSubmit={handleAddSection} className="flex gap-2 items-end p-5">
                   <input
-                    type="file"
-                    name="measurementsFile"
-                    accept=".xlsx,.xls,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     required
-                    className="input py-1.5 file:mr-3 file:rounded-md file:border-0 file:bg-brand-50 file:px-2.5 file:py-1 file:text-xs file:font-medium file:text-brand-800"
+                    placeholder="Nome da secção"
+                    value={newSectionName}
+                    onChange={(e) => setNewSectionName(e.target.value)}
+                    className="input flex-1"
                   />
-                </div>
-                <button type="submit" disabled={importingMeasurements} className="btn btn-primary shrink-0">
-                  <IconDownload className="h-3.5 w-3.5" />
-                  {importingMeasurements ? "A enviar…" : "Importar mapa"}
-                </button>
-              </form>
-              {importResult && (
-                <MeasurementImportResultCard
-                  result={importResult}
-                  onDismiss={() => setImportResult(null)}
-                  onReviewInsumos={
-                    (importResult.createdCompositions?.length ?? 0) > 0
-                      ? () => setShowImportInsumosWizard(true)
-                      : undefined
-                  }
-                />
-              )}
-            </div>
-          </section>
-          </details>}
+                  <button type="submit" className="btn btn-primary">
+                    <IconPlus className="w-4 h-4" />
+                    Adicionar
+                  </button>
+                </form>
+              </section>
+            </details>
+          )}
         </div>
 
       </div>
