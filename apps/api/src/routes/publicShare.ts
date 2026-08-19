@@ -7,6 +7,7 @@ import { db } from "../db/index.js";
 import { projects, siteDiaryEntries } from "../db/schema.js";
 import { env } from "../env.js";
 import { getPublicProjectSummary } from "../services/publicShare.js";
+import { recordPublicClientDecision } from "../services/clientChangeDecisions.js";
 
 const IMAGE_MIME: Record<string, string> = {
   ".png": "image/png",
@@ -62,6 +63,29 @@ export async function publicShareRoutes(app: FastifyInstance) {
       const buffer = await readFile(path.join(env.uploadsDir, "site-diary", safeName));
       reply.header("Content-Type", mime);
       return reply.send(buffer);
+    },
+  );
+
+  app.post(
+    "/api/public/obra/:token/decisoes/:id",
+    { config: { rateLimit: { max: 20, timeWindow: "1 minute" } } },
+    async (request, reply) => {
+      const { token, id } = request.params as { token: string; id: string };
+      const body = (request.body ?? {}) as { decision?: string; note?: string };
+      if (body.decision !== "aprovado" && body.decision !== "rejeitado") {
+        return reply.code(400).send({ error: "Decisão inválida" });
+      }
+      try {
+        return await recordPublicClientDecision({
+          token,
+          variationId: id,
+          decision: body.decision,
+          note: body.note ?? null,
+        });
+      } catch (error) {
+        const status = typeof error === "object" && error && "statusCode" in error ? Number((error as { statusCode: number }).statusCode) : 400;
+        return reply.code(status || 400).send({ error: error instanceof Error ? error.message : "Não foi possível registar a decisão" });
+      }
     },
   );
 }

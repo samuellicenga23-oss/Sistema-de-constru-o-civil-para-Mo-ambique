@@ -13,6 +13,7 @@ import {
   contractVariations,
 } from "../db/schema.js";
 import { getMeasurementDashboard } from "./measurementEngine.js";
+import { listClientDecisions } from "./clientChangeDecisions.js";
 import { calendarDaysUntil, localTodayIso } from "../lib/calendarDate.js";
 
 export type ShareSettings = {
@@ -188,6 +189,17 @@ export type PublicProjectSummary = {
   nextPayment: { title: string; dueDate: string; amount: number; daysUntil: number; status: InstallmentPublic["status"] } | null;
   paymentSchedule: { mode: "total" | "parcelado"; totalAmount: number; currency: string; installments: InstallmentPublic[] } | null;
   diary: Array<{ date: string; workDone: string; photoUrls: string[] }>;
+  decisoes: Array<{
+    id: string;
+    title: string;
+    description: string;
+    valueImpact: number;
+    scheduleDaysImpact: number;
+    status: "pendente" | "aprovado" | "rejeitado";
+    requestedAt: string;
+    decisionAt: string | null;
+    decisionNote: string | null;
+  }>;
 };
 
 /** Só é chamada depois de confirmar que o token existe — nunca expõe custos internos. */
@@ -334,5 +346,6 @@ export async function getPublicProjectSummary(token: string): Promise<PublicProj
           }
         : null,
     diary,
+    decisoes: await listClientDecisions(project.id),
   };
 }

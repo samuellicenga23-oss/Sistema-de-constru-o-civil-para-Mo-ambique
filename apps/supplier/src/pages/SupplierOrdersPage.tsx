@@ -57,7 +57,7 @@ export default function SupplierOrdersPage() {
 
         <div className="stat-grid">
           <div className="stat-tile"><span className="text-muted-sm">Por confirmar</span><strong>{pending}</strong></div>
-          <div className="stat-tile"><span className="text-muted-sm">Score</span><strong>{performance?.score == null ? "—" : `${performance.score.toFixed(0)}/100`}</strong></div>
+          <div className="stat-tile"><span className="text-muted-sm">Score</span><strong>{performance?.scorecard?.status === "insufficient" ? "Sem dados suficientes" : performance?.score == null ? "—" : `${performance.score.toFixed(0)}/100`}</strong></div>
           <div className="stat-tile"><span className="text-muted-sm">OTIF</span><strong>{pct(performance?.otifPct ?? null)}</strong></div>
           <div className="stat-tile"><span className="text-muted-sm">Aceitação</span><strong>{pct(performance?.acceptanceRatePct ?? null)}</strong></div>
           <div className="stat-tile"><span className="text-muted-sm">Atraso vs promessa</span><strong>{performance?.averageDelayDays == null ? "—" : `${performance.averageDelayDays.toFixed(1)} d`}</strong></div>

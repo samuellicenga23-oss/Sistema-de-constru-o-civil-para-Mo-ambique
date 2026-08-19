@@ -58,6 +58,17 @@ type PublicSummary = {
     installments: Installment[];
   } | null;
   diary: Array<{ date: string; workDone: string; photoUrls: string[] }>;
+  decisoes?: Array<{
+    id: string;
+    title: string;
+    description: string;
+    valueImpact: number;
+    scheduleDaysImpact: number;
+    status: "pendente" | "aprovado" | "rejeitado";
+    requestedAt: string;
+    decisionAt: string | null;
+    decisionNote: string | null;
+  }>;
 };
 
 function money(value: number, currency: string) {
@@ -92,16 +103,33 @@ export default function PublicProjectPage() {
   const [summary, setSummary] = useState<PublicSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<string | null>(null);
+  const [view, setView] = useState<"progresso" | "pagamentos" | "fotos" | "decisoes">("progresso");
 
-  useEffect(() => {
-    document.title = "Progresso da obra — SIGO";
-    fetch(`/api/public/obra/${token}`)
+  function loadSummary() {
+    return fetch(`/api/public/obra/${token}`)
       .then(async (res) => {
         if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? "Link inválido");
         return res.json();
       })
-      .then(setSummary)
-      .catch((err) => setError(err instanceof Error ? err.message : "Não foi possível carregar"));
+      .then(setSummary);
+  }
+
+  async function decide(id: string, decision: "aprovado" | "rejeitado") {
+    const res = await fetch(`/api/public/obra/${token}/decisoes/${id}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decision }),
+    });
+    if (!res.ok) {
+      setError((await res.json().catch(() => ({}))).error ?? "Não foi possível registar");
+      return;
+    }
+    await loadSummary().catch((err) => setError(err instanceof Error ? err.message : "Não foi possível carregar"));
+  }
+
+  useEffect(() => {
+    document.title = "Progresso da obra — SIGO";
+    loadSummary().catch((err) => setError(err instanceof Error ? err.message : "Não foi possível carregar"));
   }, [token]);
 
   if (error) {
@@ -140,8 +168,15 @@ export default function PublicProjectPage() {
 
       <main className="mx-auto max-w-2xl space-y-4 px-5 py-6">
         <h1 className="font-display text-2xl font-bold text-ink">{summary.projectName}</h1>
+        <div className="flex flex-wrap gap-1 rounded-xl border border-slate-200 bg-white p-1">
+          {(["progresso", "pagamentos", "fotos", "decisoes"] as const).map((item) => (
+            <button key={item} type="button" className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${view === item ? "bg-teal-50 text-teal-800" : "text-slate-500"}`} onClick={() => setView(item)}>
+              {item === "progresso" ? "Progresso" : item === "pagamentos" ? "Pagamentos" : item === "fotos" ? "Fotos" : "Decisões"}
+            </button>
+          ))}
+        </div>
 
-        {settings.showCurrentPhase && summary.currentPhase && (
+        {view === "progresso" && settings.showCurrentPhase && summary.currentPhase && (
           <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <p className="text-sm font-semibold text-slate-700">Fase actual</p>
             <p className="mt-2 font-display text-xl font-bold text-ink">{summary.currentPhase.name}</p>
@@ -149,7 +184,7 @@ export default function PublicProjectPage() {
           </section>
         )}
 
-        {progress && (settings.showProgress || settings.showCertifiedValue || settings.showContractValue) && (
+        {view === "progresso" && progress && (settings.showProgress || settings.showCertifiedValue || settings.showContractValue) && (
           progress.hasCertificates || progress.valorContrato != null ? (
             <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <div className="flex items-baseline justify-between">
@@ -188,7 +223,7 @@ export default function PublicProjectPage() {
           )
         )}
 
-        {settings.showNextPayment && summary.nextPayment && (
+        {view === "pagamentos" && settings.showNextPayment && summary.nextPayment && (
           <section className="rounded-2xl border border-teal-100 bg-teal-50/60 p-5 shadow-sm">
             <p className="text-sm font-semibold text-teal-900">Próximo pagamento</p>
             <p className="mt-2 font-display text-2xl font-bold text-ink">{money(summary.nextPayment.amount, summary.currency)}</p>
@@ -204,7 +239,7 @@ export default function PublicProjectPage() {
           </section>
         )}
 
-        {schedule?.hasSchedule && (
+        {view === "progresso" && schedule?.hasSchedule && (
           <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <p className="text-sm font-semibold text-slate-700">Prazo</p>
             <p className="mt-3 font-display text-3xl font-black text-ink">
@@ -220,7 +255,7 @@ export default function PublicProjectPage() {
           </section>
         )}
 
-        {summary.paymentSchedule && summary.paymentSchedule.installments.length > 0 && (
+        {view === "pagamentos" && summary.paymentSchedule && summary.paymentSchedule.installments.length > 0 && (
           <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <p className="text-sm font-semibold text-slate-700">Plano de pagamentos</p>
             <p className="mt-1 text-xs text-slate-500">
@@ -268,7 +303,7 @@ export default function PublicProjectPage() {
           </section>
         )}
 
-        {settings.showDiaryEvidences && summary.diary.length > 0 && (
+        {view === "fotos" && settings.showDiaryEvidences && summary.diary.length > 0 && (
           <section className="space-y-3">
             <p className="text-sm font-semibold text-slate-700">Diário de obra</p>
             {summary.diary.map((entry, i) => (
@@ -283,6 +318,34 @@ export default function PublicProjectPage() {
                       </button>
                     ))}
                   </div>
+                )}
+              </div>
+            ))}
+          </section>
+        )}
+
+        {view === "decisoes" && (
+          <section className="space-y-3">
+            {(summary.decisoes ?? []).length === 0 && (
+              <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <p className="text-sm text-slate-600">Sem alterações pendentes.</p>
+              </div>
+            )}
+            {(summary.decisoes ?? []).map((item) => (
+              <div key={item.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <p className="text-sm font-semibold text-slate-900">{item.title}</p>
+                <p className="mt-1 text-sm text-slate-600">{item.description}</p>
+                <p className="mt-2 text-xs text-slate-500">
+                  Valor {money(item.valueImpact, summary.currency)}
+                  {item.scheduleDaysImpact ? ` · prazo ${item.scheduleDaysImpact} d` : ""}
+                </p>
+                {item.status === "pendente" ? (
+                  <div className="mt-3 flex gap-2">
+                    <button type="button" className="btn btn-primary btn-sm" onClick={() => void decide(item.id, "aprovado")}>Aprovar</button>
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => void decide(item.id, "rejeitado")}>Rejeitar</button>
+                  </div>
+                ) : (
+                  <p className="mt-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{item.status === "aprovado" ? "Aprovado" : "Rejeitado"}</p>
                 )}
               </div>
             ))}

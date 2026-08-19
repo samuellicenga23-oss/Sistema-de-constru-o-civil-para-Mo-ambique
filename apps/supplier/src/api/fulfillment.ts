@@ -43,6 +43,7 @@ export type SupplierOrder = {
 
 export type SupplierPerformance = {
   score: number | null;
+  scorecard?: { status: "ok" | "insufficient"; label: string; score: number | null };
   scoreComponents: { otif: number | null; quality: number | null; confirmation: number | null };
   orderCount: number;
   completedOrderCount: number;
