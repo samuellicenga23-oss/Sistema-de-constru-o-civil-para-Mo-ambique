@@ -56,6 +56,8 @@ export default function ProjectSchedulePage() {
   const [timelineZoom, setTimelineZoom] = useState<"compacto" | "normal" | "detalhe">("normal");
   const [taskQuery, setTaskQuery] = useState("");
   const [editorOpen, setEditorOpen] = useState(false);
+  const [scheduleView, setScheduleView] = useState<"gantt" | "lookahead" | "s-curve">("gantt");
+  const [lookaheadWeeks, setLookaheadWeeks] = useState<2 | 4 | 6>(2);
 
   async function reload() {
     if (!projectId) return;
@@ -398,6 +400,21 @@ export default function ProjectSchedulePage() {
             </div>
 
             <div className="hidden md:block">
+              <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 px-3 py-2">
+                {(["gantt", "lookahead", "s-curve"] as const).map((view) => (
+                  <button key={view} type="button" className={`btn btn-sm ${scheduleView === view ? "btn-primary" : "btn-ghost"}`} onClick={() => setScheduleView(view)}>
+                    {view === "gantt" ? "Gantt" : view === "lookahead" ? "Lookahead" : "Curva S"}
+                  </button>
+                ))}
+                {scheduleView === "lookahead" && (
+                  <select className="input py-1 text-xs" value={lookaheadWeeks} onChange={(e) => setLookaheadWeeks(Number(e.target.value) as 2 | 4 | 6)}>
+                    <option value={2}>2 semanas</option>
+                    <option value={4}>4 semanas</option>
+                    <option value={6}>6 semanas</option>
+                  </select>
+                )}
+              </div>
+              {scheduleView === "gantt" && (
               <ScheduleWorkspace
                 tasks={schedule.tasks}
                 visibleTasks={visibleTasks}
@@ -416,6 +433,42 @@ export default function ProjectSchedulePage() {
                 onChanged={reload}
                 onError={setError}
               />
+              )}
+              {scheduleView === "lookahead" && (
+                <div className="overflow-x-auto p-3">
+                  <table className="w-full min-w-[640px] text-xs">
+                    <thead><tr className="text-left text-slate-500"><th className="py-2">Actividade</th><th>Período</th><th>Estado</th><th>Crítico</th></tr></thead>
+                    <tbody>
+                      {schedule.tasks.filter((task) => !task.isSummary && task.status !== "concluido").filter((task) => {
+                        const end = new Date();
+                        end.setUTCDate(end.getUTCDate() + lookaheadWeeks * 7);
+                        const horizon = end.toISOString().slice(0, 10);
+                        const asOf = new Date().toISOString().slice(0, 10);
+                        return task.startDate <= horizon && task.endDate >= asOf;
+                      }).map((task) => (
+                        <tr key={task.id} className="border-t border-slate-100">
+                          <td className="py-2">{task.name}</td>
+                          <td>{fmtDate(task.startDate)} — {fmtDate(task.endDate)}</td>
+                          <td>{STATUS_LABELS[task.status]}</td>
+                          <td>{task.isCritical ? "Sim" : "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {scheduleView === "s-curve" && (
+                <div className="space-y-2 p-4">
+                  <p className="text-[11px] text-slate-500">Base: valor da WBS (plannedValue vs executedValue), sem misturar moedas.</p>
+                  {(schedule.sCurve ?? []).map((point) => (
+                    <div key={point.weekIndex} className="grid grid-cols-[140px_1fr_auto] items-center gap-2 text-xs">
+                      <span>{fmtDate(point.startDate)}</span>
+                      <div className="h-2 rounded bg-slate-100"><div className="h-2 rounded bg-slate-800" style={{ width: `${Math.min(100, schedule.plannedValue ? (point.plannedCumulative / schedule.plannedValue) * 100 : 0)}%` }} /></div>
+                      <span className="tabular-nums">{fmtMoney(point.actualCumulative, project.currency)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {selected && editorOpen && (
@@ -444,10 +497,8 @@ export default function ProjectSchedulePage() {
             <div className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-2xl bg-blue-50 text-blue-600">
               <IconChart className="h-7 w-7" />
             </div>
-            <h3 className="text-lg font-semibold text-slate-950">Do orçamento ao plano de obra</h3>
-            <p className="mx-auto mt-2 max-w-lg text-sm text-slate-500">
-              Gere a WBS a partir do mapa, edite na folha tipo MS Project e acompanhe no Gantt com linha de base e progresso real.
-            </p>
+            <h3 className="text-lg font-semibold text-slate-950">Sem cronograma</h3>
+            <p className="mx-auto mt-2 max-w-lg text-sm text-slate-500">Configure o plano desta obra.</p>
             <button type="button" onClick={() => setSetupOpen(true)} className="btn btn-primary mt-6">
               Configurar cronograma
             </button>

@@ -45,6 +45,7 @@ import {
   type SchedulePlanningProfile,
 } from "./schedulePlanningProfile.js";
 import { resolveProjectFloors } from "./scheduleFloorDetection.js";
+import { buildValueSCurve, computeCpmNetwork, inLookahead, lookaheadWindow } from "./scheduleCpm.js";
 
 export { addWorkingDays, computeSuccessorDates, isWorkingDay, shiftWorkingDays, workingDaysInclusive } from "./schedulePlanning.js";
 
@@ -745,6 +746,8 @@ export async function getProjectSchedule(projectId: string) {
       executedValue: 0,
       weightBasis: "manual" as const,
       validation: { valueSharesValid: true, checkedBudgetItems: 0, valueShareIssues: [], longActivities: [] },
+      lookahead: { weeks: 2, start: null, end: null, tasks: [] },
+      sCurve: [],
     };
   }
 
@@ -954,11 +957,45 @@ export async function getProjectSchedule(projectId: string) {
     .filter((task) => task.durationDays > 20)
     .map((task) => ({ id: task.id, code: task.code, name: task.name, durationDays: task.durationDays }));
 
+  const leavesForCpm = orderedEnriched.filter((task) => !task.isSummary);
+  const cpm = computeCpmNetwork(
+    leavesForCpm.map((task) => ({ id: task.id, durationDays: task.durationDays })),
+    dependencies.map((dep) => ({
+      predecessorId: dep.predecessorTaskId,
+      successorId: dep.successorTaskId,
+      type: dep.type,
+      lagDays: dep.lagDays,
+    })),
+    orderedEnriched.reduce((min, task) => task.startDate < min ? task.startDate : min, orderedEnriched[0].startDate),
+  );
+  const asOf = new Date().toISOString().slice(0, 10);
+  const window2 = lookaheadWindow(asOf, 2);
+  const window4 = lookaheadWindow(asOf, 4);
+  const window6 = lookaheadWindow(asOf, 6);
+  const withCpm = orderedEnriched.map((task) => {
+    const row = cpm.get(task.id);
+    return {
+      ...task,
+      isMilestone: task.durationDays <= 0,
+      earlyStart: row?.earlyStart ?? task.startDate,
+      earlyFinish: row?.earlyFinish ?? task.endDate,
+      lateStart: row?.lateStart ?? task.startDate,
+      lateFinish: row?.lateFinish ?? task.endDate,
+      totalFloatDays: row?.totalFloatDays ?? 0,
+      isCritical: row?.isCritical ?? false,
+      dateVarianceDays: task.baselineEndDate ? workingDaysInclusive(task.baselineEndDate, task.endDate) - 1 : 0,
+      durationVarianceDays: task.baselineStartDate && task.baselineEndDate
+        ? task.durationDays - workingDaysInclusive(task.baselineStartDate, task.baselineEndDate)
+        : 0,
+      progressVariance: task.progress,
+    };
+  });
+
   return {
-    tasks: orderedEnriched,
+    tasks: withCpm,
     dependencies,
-    startDate: orderedEnriched.reduce((min, task) => task.startDate < min ? task.startDate : min, orderedEnriched[0].startDate),
-    endDate: orderedEnriched.reduce((max, task) => task.endDate > max ? task.endDate : max, orderedEnriched[0].endDate),
+    startDate: withCpm.reduce((min, task) => task.startDate < min ? task.startDate : min, withCpm[0].startDate),
+    endDate: withCpm.reduce((max, task) => task.endDate > max ? task.endDate : max, withCpm[0].endDate),
     overallProgress: plannedValue > 0
       ? Math.min(100, topLevelTasks.reduce((sum, task) => sum + task.plannedValue * task.progress / 100, 0) / plannedValue * 100)
       : topLevelTasks.length ? topLevelTasks.reduce((sum, task) => sum + task.progress, 0) / topLevelTasks.length : 0,
@@ -971,6 +1008,25 @@ export async function getProjectSchedule(projectId: string) {
       valueShareIssues,
       longActivities,
     },
+    lookahead: {
+      weeks: 2,
+      start: window2.start,
+      end: window2.end,
+      tasks: withCpm.filter((task) => !task.isSummary && inLookahead(task, window2)).map((task) => ({
+        id: task.id,
+        name: task.name,
+        startDate: task.startDate,
+        endDate: task.endDate,
+        status: task.status,
+        isCritical: task.isCritical,
+      })),
+      windows: {
+        2: withCpm.filter((task) => !task.isSummary && inLookahead(task, window2)).length,
+        4: withCpm.filter((task) => !task.isSummary && inLookahead(task, window4)).length,
+        6: withCpm.filter((task) => !task.isSummary && inLookahead(task, window6)).length,
+      },
+    },
+    sCurve: buildValueSCurve(withCpm, asOf, 16),
   };
 }
 

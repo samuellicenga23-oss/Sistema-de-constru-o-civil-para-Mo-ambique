@@ -155,6 +155,12 @@ export type ScheduleTask = {
   progressSource: "autos" | "diario" | "manual" | "planeamento" | "subactividades";
   isSummary: boolean;
   isMilestone?: boolean;
+  isCritical?: boolean;
+  totalFloatDays?: number;
+  earlyStart?: string;
+  earlyFinish?: string;
+  lateStart?: string;
+  lateFinish?: string;
   wbsDepth?: number;
   predecessorTaskId: string | null;
   predecessorTaskIds?: string[];
@@ -190,6 +196,14 @@ export type ProjectSchedule = {
   planningAssumptions?: string[];
   planningProfile?: SchedulePlanningProfile;
   validation: ScheduleValidation;
+  lookahead?: {
+    weeks: number;
+    start: string | null;
+    end: string | null;
+    tasks: Array<{ id: string; name: string; startDate: string; endDate: string; status: ScheduleTaskStatus; isCritical?: boolean }>;
+    windows?: Record<number, number>;
+  };
+  sCurve?: Array<{ weekIndex: number; startDate: string; endDate: string; plannedCumulative: number; actualCumulative: number }>;
 };
 
 export type ScheduleTaskInput = Partial<{
