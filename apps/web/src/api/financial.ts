@@ -49,6 +49,24 @@ export type ProjectControl = {
   schedule: { expectedProgress: number; actualProgress: number; progressGap: number; plannedValue: number; executedValue: number };
   stock: Array<{ materialName: string; unit: string; balance: number; consumedQty: number; consumedValue: number; estimatedCost: boolean }>;
   alerts: Array<{ code: string; level: "critical" | "warning" | "info"; title: string; detail: string; href: string }>;
+  forecast?: {
+    available: boolean;
+    reason: string | null;
+    etc: number | null;
+    eac: number | null;
+    forecastRevenue: number | null;
+    forecastMargin: number | null;
+    forecastMarginPct: number | null;
+  };
+  operations?: {
+    nextAction: { code: string; level: "critical" | "warning" | "info"; title: string; detail: string; href: string };
+    criticalCount: number;
+    warningCount: number;
+    lastDiaryDate: string | null;
+    openPurchaseOrders: number;
+    pendingClientInvoices: number;
+    pendingSupplierInvoices: number;
+  };
 };
 
 export type ProjectInvoice = {

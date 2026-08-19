@@ -361,13 +361,18 @@ export default function ProjectFinancialPage() {
         </section>
 
         {control && <section className="card overflow-hidden">
-          <SectionHeader title="Controlo da obra" description={`Previsto vs. realizado · referência em ${control.basis.referenceDate}`} />
-          <div className="grid gap-px bg-slate-100 sm:grid-cols-3">
-            <div className="bg-white px-5 py-4"><span className="text-xs text-slate-500">Execução física</span><strong className="mt-1 block text-xl tabular-nums text-slate-950">{control.schedule.actualProgress.toFixed(2)}%</strong><p className={`mt-1 text-xs ${control.schedule.progressGap < -10 ? "text-amber-700" : "text-slate-500"}`}>Previsto {control.schedule.expectedProgress.toFixed(2)}% · {control.schedule.progressGap >= 0 ? "+" : ""}{control.schedule.progressGap.toFixed(2)} p.p.</p></div>
-            <div className="bg-white px-5 py-4"><span className="text-xs text-slate-500">Autos certificados</span><strong className="mt-1 block text-xl tabular-nums text-slate-950">{fmt(control.commercial.certifiedValue, currency)}</strong><p className="mt-1 text-xs text-slate-500">Recebido {fmt(control.commercial.receivedValue, currency)}</p></div>
-            <div className="bg-white px-5 py-4"><span className="text-xs text-slate-500">Consumo de stock</span><strong className="mt-1 block text-xl tabular-nums text-slate-950">{fmt(control.cost.consumedStockValue, currency)}</strong><p className="mt-1 text-xs text-slate-500">{control.basis.stockConsumptionEstimated ? "Inclui custo médio de entrada" : "Valorizado por custo de movimento"}</p></div>
+          <SectionHeader title="Controlo da obra" />
+          <div className="grid gap-px bg-slate-100 sm:grid-cols-2">
+            <div className="bg-white px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Actual</div>
+            <div className="bg-white px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Forecast</div>
           </div>
-          {control.alerts.length > 0 && <div className="divide-y divide-slate-100 border-t border-slate-100">{control.alerts.map((alert) => <Link key={alert.code} to={alert.href} className="flex items-center justify-between gap-4 px-5 py-3 hover:bg-slate-50"><div><strong className={`text-sm ${alert.level === "critical" ? "text-red-700" : alert.level === "warning" ? "text-amber-800" : "text-blue-700"}`}>{alert.title}</strong><p className="mt-0.5 text-xs text-slate-500">{alert.detail}</p></div><span className="text-xs font-semibold text-blue-700">Ver →</span></Link>)}</div>}
+          <div className="grid gap-px bg-slate-100 sm:grid-cols-4">
+            <div className="bg-white px-5 py-4"><span className="text-xs text-slate-500">Execução</span><strong className="mt-1 block text-xl tabular-nums">{control.schedule.actualProgress.toFixed(1)}%</strong></div>
+            <div className="bg-white px-5 py-4"><span className="text-xs text-slate-500">Custo pago</span><strong className="mt-1 block text-xl tabular-nums">{fmt(control.cost.paidValue, currency)}</strong></div>
+            <div className="bg-white px-5 py-4"><span className="text-xs text-slate-500">EAC</span><strong className="mt-1 block text-xl tabular-nums">{control.forecast?.available && control.forecast.eac != null ? fmt(control.forecast.eac, currency) : "Indisponível"}</strong></div>
+            <div className="bg-white px-5 py-4"><span className="text-xs text-slate-500">Margem prevista</span><strong className="mt-1 block text-xl tabular-nums">{control.forecast?.available && control.forecast.forecastMargin != null ? fmt(control.forecast.forecastMargin, currency) : "Indisponível"}</strong></div>
+          </div>
+          {control.alerts.length > 0 && <div className="divide-y divide-slate-100 border-t border-slate-100">{control.alerts.map((alert) => <Link key={alert.code} to={alert.href} className="flex items-center justify-between gap-4 px-5 py-3 hover:bg-slate-50"><div><strong className={`text-sm ${alert.level === "critical" ? "text-red-700" : alert.level === "warning" ? "text-amber-800" : "text-blue-700"}`}>{alert.title}</strong><p className="mt-0.5 text-xs text-slate-500">{alert.detail}</p></div><span className="text-xs font-semibold text-blue-700">Abrir</span></Link>)}</div>}
         </section>}
 
         <section className="card overflow-hidden">
