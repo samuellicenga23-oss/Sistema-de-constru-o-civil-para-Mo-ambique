@@ -26,7 +26,7 @@ Fila nocturna 00–18. Base de auditoria: `0ec2f18`. Branch local `main`. **Sem 
 | 17 | `485da6d` | chore(ui): arquivo de cotações e labels de estado consistentes |
 | 18 | `fc5a572` | chore: integra refactor transversal SIGO e release gates |
 
-HEAD: `fc5a572`. Working tree de código limpa (só artefactos locais: `tmp/`, auditorias, scripts de arranque, pptx).
+HEAD: `dbda07c` (fecho de gaps matriz / governação marketplace / decisões portal). Working tree de código limpa (só artefactos locais: `tmp/`, auditorias, scripts de arranque, pptx).
 
 ## Migrations (não destrutivas)
 
