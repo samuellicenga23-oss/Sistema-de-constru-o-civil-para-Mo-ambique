@@ -508,10 +508,12 @@ export default function LineItemRow({
                 title="Abrir memória de cálculo"
                 onClick={() => void openMeasurements()}
               >
-                {node.quantity ?? "—"}
+                {node.quantity == null ? "—" : Number(node.quantity).toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </button>
             ) : (
-              <span className="tabular-nums">{node.quantity ?? "—"}</span>
+              <span className="tabular-nums">
+                {node.quantity == null ? "—" : Number(node.quantity).toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </span>
             )
           ) : null}
         </td>

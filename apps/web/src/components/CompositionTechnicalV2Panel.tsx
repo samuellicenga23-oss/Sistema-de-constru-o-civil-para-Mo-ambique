@@ -114,7 +114,7 @@ export default function CompositionTechnicalV2Panel({
         <div className="mt-2 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
           <label><span className="label">Equipa (pessoas)</span><input className="input" type="number" min="1" step="1" value={crew} onChange={(e) => setCrew(e.target.value)} placeholder="ex: 4" /></label>
           <label><span className="label">Horas produtivas/dia</span><input className="input" type="number" min="0.1" max="24" step="0.1" value={hours} onChange={(e) => setHours(e.target.value)} /></label>
-          <label><span className="label">Produção/dia</span><input className="input" type="number" min="0" step="0.001" value={output} onChange={(e) => setOutput(e.target.value)} placeholder={detail.derivedOutputPerDay ? `derivado: ${detail.derivedOutputPerDay.toFixed(3)}` : "opcional"} /></label>
+          <label><span className="label">Produção/dia</span><input className="input" type="number" min="0" step="0.01" value={output} onChange={(e) => setOutput(e.target.value)} placeholder={detail.derivedOutputPerDay ? `derivado: ${detail.derivedOutputPerDay.toFixed(2)}` : "opcional"} /></label>
           <label><span className="label">Fórmula de medição</span><select className="input" value={formula} onChange={(e) => setFormula(e.target.value as MeasurementFormulaType | "")}><option value="">Automática pela unidade</option>{FORMULAS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           <label><span className="label">Fonte produtividade</span><input className="input" value={source} onChange={(e) => setSource(e.target.value)} placeholder="obra, ficha técnica, histórico…" /></label>
         </div>

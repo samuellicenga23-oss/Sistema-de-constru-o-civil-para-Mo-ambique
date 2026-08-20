@@ -7,7 +7,7 @@ function money(value: number) {
 }
 
 function qty(value: number | null) {
-  return value == null ? "—" : value.toLocaleString("pt-MZ", { maximumFractionDigits: 4 });
+  return value == null ? "—" : value.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 export default function BudgetRevisionDiffModal({ documentId, onClose }: { documentId: string; onClose: () => void }) {

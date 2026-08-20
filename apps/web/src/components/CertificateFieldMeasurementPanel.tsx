@@ -113,7 +113,7 @@ export default function CertificateFieldMeasurementPanel({
   return (
     <span className="mt-2 block">
       <button type="button" className="text-[11px] font-semibold text-brand-700 hover:text-brand-900" onClick={() => setOpen((v) => !v)}>
-        {open ? "Fechar memória de campo" : `Memória de campo${activeCount ? ` · ${total.toFixed(4)}` : ""}`}
+        {open ? "Fechar memória de campo" : `Memória de campo${activeCount ? ` · ${total.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : ""}`}
       </button>
       {activeCount > 0 && !open && (
         <span className="mt-1 block text-[10px] font-medium text-amber-800">
@@ -135,7 +135,7 @@ export default function CertificateFieldMeasurementPanel({
                 <span key={r.id} className={`grid grid-cols-[55px_1fr_82px_24px] gap-2 border-b border-slate-100 px-2 py-1.5 text-[10px] ${r.isActive ? "" : "bg-slate-50 text-slate-400"}`}>
                   <span>rev.{r.revisionNo}{r.sign < 0 ? " · −" : ""}</span>
                   <span className="truncate"><strong>{r.description || r.formulaType}</strong> · {loc(r)}{r.evidenceUrls?.length ? ` · ${r.evidenceUrls.length} evid.` : ""}</span>
-                  <strong className="text-right tabular-nums">{r.partial.toFixed(4)}</strong>
+                  <strong className="text-right tabular-nums">{r.partial.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
                   {!locked && r.isActive ? <button type="button" disabled={busy} onClick={() => void remove(r.id)} className="text-red-600">×</button> : <span />}
                 </span>
               ))}
@@ -154,17 +154,17 @@ export default function CertificateFieldMeasurementPanel({
                 <input className="input input-sm" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Local/trabalho medido" />
               </span>
               <span className="flex flex-wrap items-end gap-1">
-                {needCount && <input className="input input-sm w-16" type="number" min="0.000001" step="0.000001" value={count} onChange={(e) => setCount(e.target.value)} placeholder="Nº" />}
-                {needL && <input className="input input-sm w-20" type="number" min="0" step="0.000001" value={length} onChange={(e) => setLength(e.target.value)} placeholder="Comp." />}
-                {needW && <input className="input input-sm w-20" type="number" min="0" step="0.000001" value={width} onChange={(e) => setWidth(e.target.value)} placeholder="Larg." />}
-                {needH && <input className="input input-sm w-20" type="number" min="0" step="0.000001" value={height} onChange={(e) => setHeight(e.target.value)} placeholder="Alt." />}
-                {formula === "direct" && <input className="input input-sm w-24" type="number" min="0" step="0.000001" value={direct} onChange={(e) => setDirect(e.target.value)} placeholder="Qtd." />}
-                {formula === "weight" && <input className="input input-sm w-20" type="number" min="0" value={unitWeight} onChange={(e) => setUnitWeight(e.target.value)} placeholder="kg/m" />}
-                {formula === "reinforcement" && <input className="input input-sm w-20" type="number" min="0" value={diameter} onChange={(e) => setDiameter(e.target.value)} placeholder="Ø mm" />}
+                {needCount && <input className="input input-sm w-16" type="number" min="0.000001" step="0.01" value={count} onChange={(e) => setCount(e.target.value)} placeholder="Nº" />}
+                {needL && <input className="input input-sm w-20" type="number" min="0" step="0.01" value={length} onChange={(e) => setLength(e.target.value)} placeholder="Comp." />}
+                {needW && <input className="input input-sm w-20" type="number" min="0" step="0.01" value={width} onChange={(e) => setWidth(e.target.value)} placeholder="Larg." />}
+                {needH && <input className="input input-sm w-20" type="number" min="0" step="0.01" value={height} onChange={(e) => setHeight(e.target.value)} placeholder="Alt." />}
+                {formula === "direct" && <input className="input input-sm w-24" type="number" min="0" step="0.01" value={direct} onChange={(e) => setDirect(e.target.value)} placeholder="Qtd." />}
+                {formula === "weight" && <input className="input input-sm w-20" type="number" min="0" step="0.01" value={unitWeight} onChange={(e) => setUnitWeight(e.target.value)} placeholder="kg/m" />}
+                {formula === "reinforcement" && <input className="input input-sm w-20" type="number" min="0" step="0.01" value={diameter} onChange={(e) => setDiameter(e.target.value)} placeholder="Ø mm" />}
                 {formula === "percentage" && (
                   <>
-                    <input className="input input-sm w-20" type="number" min="0" value={base} onChange={(e) => setBase(e.target.value)} placeholder="Base" />
-                    <input className="input input-sm w-20" type="number" min="0" value={pct} onChange={(e) => setPct(e.target.value)} placeholder="%" />
+                    <input className="input input-sm w-20" type="number" min="0" step="0.01" value={base} onChange={(e) => setBase(e.target.value)} placeholder="Base" />
+                    <input className="input input-sm w-20" type="number" min="0" step="0.01" value={pct} onChange={(e) => setPct(e.target.value)} placeholder="%" />
                   </>
                 )}
                 <button type="button" disabled={busy} className="btn btn-primary btn-sm" onClick={() => void add()}>Registar</button>
@@ -182,7 +182,7 @@ export default function CertificateFieldMeasurementPanel({
           )}
           <span className="flex justify-end text-[10px]">
             <span className="text-slate-500">Total líquido do período:</span>
-            <strong className="ml-2 tabular-nums text-brand-900">{total.toFixed(4)} {unit ?? ""}</strong>
+            <strong className="ml-2 tabular-nums text-brand-900">{total.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {unit ?? ""}</strong>
           </span>
         </span>
       )}

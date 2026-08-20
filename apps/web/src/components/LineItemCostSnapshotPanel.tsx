@@ -10,7 +10,7 @@ const REASON_LABEL: Record<string, string> = {
 };
 
 function money(value: number, currency?: string) {
-  const formatted = value.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+  const formatted = value.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   return currency ? `${formatted} ${currency}` : formatted;
 }
 
@@ -93,7 +93,7 @@ export default function LineItemCostSnapshotPanel({ lineItemId }: { lineItemId: 
             {snap!.materials!.map((row, index) => (
               <div key={`${row.name}-${index}`} className="grid grid-cols-[1fr_70px_90px_1fr] gap-2 border-b border-slate-50 px-2.5 py-1.5 text-[11px]">
                 <span className="truncate font-medium text-slate-800">{row.name}</span>
-                <span className="tabular-nums text-right">{row.qtyPerUnit.toLocaleString("pt-MZ", { maximumFractionDigits: 4 })} {row.unit}</span>
+                <span className="tabular-nums text-right">{row.qtyPerUnit.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {row.unit}</span>
                 <span className="tabular-nums text-right">{money(row.unitCost)}</span>
                 <span className="truncate text-slate-500">{sourceLabel(row.priceSourceName, row.priceDate, row.priceOrigin)}</span>
               </div>
@@ -109,7 +109,7 @@ export default function LineItemCostSnapshotPanel({ lineItemId }: { lineItemId: 
             {snap!.labour!.map((row, index) => (
               <div key={`${row.name}-${index}`} className="grid grid-cols-[1fr_70px_90px_1fr] gap-2 border-b border-slate-50 px-2.5 py-1.5 text-[11px]">
                 <span className="truncate font-medium text-slate-800">{row.name}</span>
-                <span className="tabular-nums text-right">{row.hoursPerUnit.toLocaleString("pt-MZ", { maximumFractionDigits: 3 })} h</span>
+                <span className="tabular-nums text-right">{row.hoursPerUnit.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} h</span>
                 <span className="tabular-nums text-right">{money(row.hourlyRate)}/h</span>
                 <span className="truncate text-slate-500">{sourceLabel(row.priceSourceName, row.priceDate)}</span>
               </div>
@@ -125,7 +125,7 @@ export default function LineItemCostSnapshotPanel({ lineItemId }: { lineItemId: 
             {snap!.equipment!.map((row, index) => (
               <div key={`${row.name}-${index}`} className="grid grid-cols-[1fr_70px_90px] gap-2 border-b border-slate-50 px-2.5 py-1.5 text-[11px]">
                 <span className="truncate font-medium text-slate-800">{row.name}</span>
-                <span className="tabular-nums text-right">{row.hoursPerUnit.toLocaleString("pt-MZ", { maximumFractionDigits: 3 })} h</span>
+                <span className="tabular-nums text-right">{row.hoursPerUnit.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} h</span>
                 <span className="tabular-nums text-right">{money(row.hourlyCost)}/h</span>
               </div>
             ))}

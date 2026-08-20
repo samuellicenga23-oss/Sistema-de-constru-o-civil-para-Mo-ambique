@@ -34,7 +34,12 @@ function recommended(unit?: string | null): MeasurementFormulaType {
 function label(type: MeasurementFormulaType) {
   return FORMULAS.find((row) => row.value === type)?.label ?? "Legado";
 }
-function n(value: string | null | undefined) { return value == null ? "—" : Number(value).toLocaleString("pt-MZ", { maximumFractionDigits: 6 }); }
+function n(value: string | null | undefined) {
+  return value == null ? "—" : Number(value).toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function qty(value: number) {
+  return value.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
 function location(line: MeasurementLine) {
   return [line.block, line.floor, line.zone, line.room, line.axis, line.element].filter(Boolean).join(" / ") || "—";
 }
@@ -209,7 +214,7 @@ export default function MeasurementGrid({
   return <div className="mt-2 space-y-3 rounded-xl border border-brand-100 bg-brand-50/40 p-3 text-xs sm:ml-14">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div><p className="font-semibold text-brand-950">Memória</p><button type="button" className="mt-1 text-[11px] font-semibold text-brand-700 hover:text-brand-900" onClick={() => void toggleHistory()}>{showHistory ? "Ocultar histórico" : "Histórico"}</button></div>
-      <div className="grid grid-cols-3 gap-2 text-right"><div><span className="text-slate-400">Adições</span><strong className="block text-emerald-700">{additions.toFixed(4)}</strong></div><div><span className="text-slate-400">Deduções</span><strong className="block text-rose-700">−{deductions.toFixed(4)}</strong></div><div><span className="text-slate-400">Líquido</span><strong className="block text-brand-900">{total.toFixed(4)}</strong></div></div>
+      <div className="grid grid-cols-3 gap-2 text-right"><div><span className="text-slate-400">Adições</span><strong className="block text-emerald-700">{qty(additions)}</strong></div><div><span className="text-slate-400">Deduções</span><strong className="block text-rose-700">−{qty(deductions)}</strong></div><div><span className="text-slate-400">Líquido</span><strong className="block text-brand-900">{qty(total)}</strong></div></div>
     </div>
     {error && <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-red-700">{error}</div>}
 
@@ -221,13 +226,13 @@ export default function MeasurementGrid({
         <td className="px-3 py-2"><span className={`rounded px-1.5 py-0.5 font-semibold ${line.sign < 0 ? "bg-rose-100 text-rose-700" : "bg-slate-100 text-slate-700"}`}>{line.sign < 0 ? "Dedução · " : ""}{label(line.formulaType)}</span></td>
         <td><strong className="text-slate-800">{line.description || "—"}</strong><p className="text-[10px] text-slate-400">{location(line)} · {line.source}{line.sourceRef ? ` · ${line.sourceRef}` : ""} · {label(line.formulaType)} · rev. {line.revisionNo}</p></td>
         <td>{n(line.count)}</td><td>{n(line.length)}</td><td>{n(line.width)}</td><td>{n(line.height)}</td>
-        <td className={`text-right font-semibold tabular-nums ${line.partial < 0 ? "text-rose-700" : "text-slate-900"}`}>{line.partial.toFixed(6)}</td>
+        <td className={`text-right font-semibold tabular-nums ${line.partial < 0 ? "text-rose-700" : "text-slate-900"}`}>{qty(line.partial)}</td>
         <td><div className="flex gap-1"><button type="button" disabled={working} onClick={() => startEdit(line)} className="icon-btn" title="Editar">✎</button><button type="button" disabled={working} onClick={() => void remove(line.id)} className="icon-btn-danger">×</button></div></td>
       </tr>)}
       </Fragment>)}</tbody></table>
     </div>}
 
-    {showHistory && <div className="rounded-lg border border-slate-200 bg-white p-3"><div className="mb-2"><strong className="text-slate-800">Histórico</strong></div><div className="max-h-56 overflow-auto space-y-1">{history.map((row) => <div key={row.id} className={`grid grid-cols-[70px_1fr_100px] gap-2 rounded px-2 py-1.5 ${row.isActive ? "bg-emerald-50" : "bg-slate-50 text-slate-500"}`}><span>rev. {row.revisionNo}{row.isActive ? " · activa" : ""}</span><span className="truncate">{row.description || label(row.formulaType)} · {location(row)}</span><strong className="text-right tabular-nums">{row.partial.toFixed(6)}</strong></div>)}</div></div>}
+    {showHistory && <div className="rounded-lg border border-slate-200 bg-white p-3"><div className="mb-2"><strong className="text-slate-800">Histórico</strong></div><div className="max-h-56 overflow-auto space-y-1">{history.map((row) => <div key={row.id} className={`grid grid-cols-[70px_1fr_100px] gap-2 rounded px-2 py-1.5 ${row.isActive ? "bg-emerald-50" : "bg-slate-50 text-slate-500"}`}><span>rev. {row.revisionNo}{row.isActive ? " · activa" : ""}</span><span className="truncate">{row.description || label(row.formulaType)} · {location(row)}</span><strong className="text-right tabular-nums">{qty(row.partial)}</strong></div>)}</div></div>}
 
     <form ref={formRef} onSubmit={handleAdd} className="space-y-3 rounded-lg border border-slate-200 bg-white p-3">
       {editingId && <div className="flex items-center justify-between rounded-lg bg-amber-50 px-3 py-2 text-amber-800"><span>A editar — guardar cria revisão nova</span><button type="button" className="btn btn-ghost btn-sm" onClick={resetForm}>Cancelar</button></div>}
@@ -237,15 +242,15 @@ export default function MeasurementGrid({
         <label><span className="label">Descrição</span><input className="input input-sm w-full" value={description} onChange={(e) => setDescription(e.target.value)} /></label>
       </div>
       <div className="flex flex-wrap gap-2 items-end">
-        {needsCount && <label><span className="label">N.º</span><input className="input input-sm w-24" type="number" min="0.000001" step="0.000001" value={count} onChange={(e) => setCount(e.target.value)} /></label>}
-        {needsLength && <label><span className="label">Comp. (m)</span><input className="input input-sm w-28" type="number" min="0" step="0.000001" value={length} onChange={(e) => setLength(e.target.value)} /></label>}
-        {needsWidth && <label><span className="label">Larg. (m)</span><input className="input input-sm w-28" type="number" min="0" step="0.000001" value={width} onChange={(e) => setWidth(e.target.value)} /></label>}
-        {needsHeight && <label><span className="label">Alt. (m)</span><input className="input input-sm w-28" type="number" min="0" step="0.000001" value={height} onChange={(e) => setHeight(e.target.value)} /></label>}
-        {formulaType === "direct" && <label><span className="label">Quantidade</span><input className="input input-sm w-32" type="number" min="0" step="0.000001" value={directQuantity} onChange={(e) => setDirectQuantity(e.target.value)} /></label>}
-        {formulaType === "weight" && <label><span className="label">kg/m</span><input className="input input-sm w-28" type="number" min="0" step="0.000001" value={unitWeight} onChange={(e) => setUnitWeight(e.target.value)} /></label>}
+        {needsCount && <label><span className="label">N.º</span><input className="input input-sm w-24" type="number" min="0.01" step="0.01" value={count} onChange={(e) => setCount(e.target.value)} /></label>}
+        {needsLength && <label><span className="label">Comp. (m)</span><input className="input input-sm w-28" type="number" min="0" step="0.01" value={length} onChange={(e) => setLength(e.target.value)} /></label>}
+        {needsWidth && <label><span className="label">Larg. (m)</span><input className="input input-sm w-28" type="number" min="0" step="0.01" value={width} onChange={(e) => setWidth(e.target.value)} /></label>}
+        {needsHeight && <label><span className="label">Alt. (m)</span><input className="input input-sm w-28" type="number" min="0" step="0.01" value={height} onChange={(e) => setHeight(e.target.value)} /></label>}
+        {formulaType === "direct" && <label><span className="label">Quantidade</span><input className="input input-sm w-32" type="number" min="0" step="0.01" value={directQuantity} onChange={(e) => setDirectQuantity(e.target.value)} /></label>}
+        {formulaType === "weight" && <label><span className="label">kg/m</span><input className="input input-sm w-28" type="number" min="0" step="0.01" value={unitWeight} onChange={(e) => setUnitWeight(e.target.value)} /></label>}
         {formulaType === "reinforcement" && <label><span className="label">Ø (mm)</span><input className="input input-sm w-28" type="number" min="0" step="0.1" value={diameterMm} onChange={(e) => setDiameterMm(e.target.value)} /></label>}
-        {formulaType === "percentage" && <><label><span className="label">Base</span><input className="input input-sm w-28" type="number" min="0" step="0.000001" value={baseQuantity} onChange={(e) => setBaseQuantity(e.target.value)} /></label><label><span className="label">%</span><input className="input input-sm w-24" type="number" min="0" step="0.001" value={percentage} onChange={(e) => setPercentage(e.target.value)} /></label></>}
-        <label><span className="label">Coef.</span><input className="input input-sm w-24" type="number" min="0" step="0.000001" value={coefficient} onChange={(e) => setCoefficient(e.target.value)} /></label>
+        {formulaType === "percentage" && <><label><span className="label">Base</span><input className="input input-sm w-28" type="number" min="0" step="0.01" value={baseQuantity} onChange={(e) => setBaseQuantity(e.target.value)} /></label><label><span className="label">%</span><input className="input input-sm w-24" type="number" min="0" step="0.01" value={percentage} onChange={(e) => setPercentage(e.target.value)} /></label></>}
+        <label><span className="label">Coef.</span><input className="input input-sm w-24" type="number" min="0" step="0.01" value={coefficient} onChange={(e) => setCoefficient(e.target.value)} /></label>
         <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowLocation((value) => !value)}>{showLocation ? "Ocultar localização" : "+ Localização"}</button>
         <button type="submit" disabled={working} className="btn btn-primary btn-sm">{editingId ? "Guardar nova revisão" : "Adicionar medição"}</button>
       </div>
@@ -256,7 +261,7 @@ export default function MeasurementGrid({
 
     {hasPlantRooms && itemCode && <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
       <div className="flex flex-wrap items-center justify-between gap-2"><strong className="text-emerald-900">Planta</strong><button type="button" disabled={working} className="btn btn-secondary btn-sm" onClick={() => void openPlantPreview()}>{working ? "A calcular…" : "Pré-visualizar"}</button></div>
-      {preview && <div className="mt-3 space-y-2"><div className="max-h-64 overflow-auto rounded border border-emerald-200 bg-white">{preview.lines.map((line, index) => <label key={index} className="flex cursor-pointer items-start gap-2 border-b border-slate-100 px-3 py-2 last:border-0"><input type="checkbox" checked={selectedPreview.includes(index)} onChange={(e) => setSelectedPreview((current) => e.target.checked ? [...current, index] : current.filter((value) => value !== index))} /><span className="flex-1"><strong>{line.description || `Linha ${index + 1}`}</strong><span className="ml-2 text-slate-500">{line.expression} = {line.partial.toFixed(6)}</span></span></label>)}</div><div className="flex flex-wrap justify-end gap-2"><button type="button" className="btn btn-ghost btn-sm" onClick={() => setPreview(null)}>Cancelar</button><button type="button" className="btn btn-secondary btn-sm" disabled={!selectedPreview.length || working} onClick={() => void applyPlant("merge")}>Fundir</button><button type="button" className="btn btn-primary btn-sm" disabled={!selectedPreview.length || working} onClick={() => void applyPlant("replace")}>Substituir</button></div></div>}
+      {preview && <div className="mt-3 space-y-2"><div className="max-h-64 overflow-auto rounded border border-emerald-200 bg-white">{preview.lines.map((line, index) => <label key={index} className="flex cursor-pointer items-start gap-2 border-b border-slate-100 px-3 py-2 last:border-0"><input type="checkbox" checked={selectedPreview.includes(index)} onChange={(e) => setSelectedPreview((current) => e.target.checked ? [...current, index] : current.filter((value) => value !== index))} /><span className="flex-1"><strong>{line.description || `Linha ${index + 1}`}</strong><span className="ml-2 text-slate-500">{line.expression} = {qty(line.partial)}</span></span></label>)}</div><div className="flex flex-wrap justify-end gap-2"><button type="button" className="btn btn-ghost btn-sm" onClick={() => setPreview(null)}>Cancelar</button><button type="button" className="btn btn-secondary btn-sm" disabled={!selectedPreview.length || working} onClick={() => void applyPlant("merge")}>Fundir</button><button type="button" className="btn btn-primary btn-sm" disabled={!selectedPreview.length || working} onClick={() => void applyPlant("replace")}>Substituir</button></div></div>}
     </div>}
   </div>;
 }
