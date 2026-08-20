@@ -306,7 +306,15 @@ export async function emitWorkflowEvent(input: WorkflowEventInput, deps: Workflo
       input.event === "document.submitted" ||
       input.event === "certificate.submitted" ||
       input.event === "requisition.submitted" ||
-      input.event === "payment_request.submitted";
+      input.event === "payment_request.submitted" ||
+      input.event === "document.approved" ||
+      input.event === "document.returned" ||
+      input.event === "certificate.approved" ||
+      input.event === "certificate.returned" ||
+      input.event === "requisition.approved" ||
+      input.event === "requisition.returned" ||
+      input.event === "payment_request.approved" ||
+      input.event === "payment_request.rejected";
     await deps.notify(recipients.map((user) => user.id), copy.title, copy.body, input.link, {
       priority: highPriority ? "high" : "normal",
     });

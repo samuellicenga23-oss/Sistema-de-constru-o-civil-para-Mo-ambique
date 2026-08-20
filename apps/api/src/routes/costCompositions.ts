@@ -19,7 +19,7 @@ import { requireRole } from "../auth/middleware.js";
 import { companyScope } from "../services/costEngine.js";
 import { computeCompositionUnitCostV2 } from "../services/costEngineV2.js";
 import { assertAcyclicCompositionGraph, resolveResourcesByIdentity } from "../services/compositionV2Engine.js";
-import { cloneCompositionForCompany, forkCompositionToUser } from "../services/catalogClone.js";
+import { ensurePersonalEditableCopy, forkCompositionToUser } from "../services/catalogClone.js";
 import { costCompositionInputSchema } from "@sigo/shared";
 import { z } from "zod";
 import { canEditComposition, compositionVisibleCondition, getVisibleComposition, listSharedCompositionIds, matchesCompositionScope, type CompositionActor } from "../services/compositionAccess.js";
@@ -103,7 +103,11 @@ export async function costCompositionRoutes(app: FastifyInstance) {
     const sharedIds = new Set(await listSharedCompositionIds(actor.id));
     const filtered = rows.filter((row) => matchesCompositionScope(row, scope, actor, sharedIds, row.id));
     const personal = filtered.filter((row) => row.visibility === "private" || row.visibility === "shared");
-    const library = dedupeByName(filtered.filter((row) => row.companyId == null || row.visibility === "company"));
+    const personalNames = new Set(personal.map((row) => row.name));
+    // Biblioteca SIGO/empresa: esconder nomes que o utilizador já tem em cópia pessoal.
+    const library = dedupeByName(filtered.filter((row) => row.companyId == null || row.visibility === "company")).filter(
+      (row) => !personalNames.has(row.name),
+    );
     const catalog = scope === "mine" || scope === "shared" ? filtered : [...personal, ...library];
     const sorted = catalog.sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
     return Promise.all(sorted.map(async (row) => ({ ...row, ...(await computeCompositionUnitCostV2(row.id, companyId, zoneId)) })));
@@ -231,14 +235,21 @@ export async function costCompositionRoutes(app: FastifyInstance) {
     const actor = actorOf(request);
     let target = await getVisibleComposition(id, actor);
     if (!target) return reply.code(404).send({ error: "Composição não encontrada" });
-    if (!(await canEditComposition(target, actor))) {
-      if (target.companyId == null && companyId) {
-        const cloned = await cloneCompositionForCompany(id, companyId);
-        if (!cloned) return reply.code(404).send({ error: "Composição não encontrada" });
-        target = cloned;
-      } else {
-        return reply.code(403).send({ error: "Sem permissão para editar esta composição" });
-      }
+    if (!companyId && actor.role !== "super_admin") {
+      return reply.code(403).send({ error: "Sem permissão para editar esta composição" });
+    }
+    if (companyId) {
+      // Qualquer edição em composição que não seja pessoal → cópia privada do utilizador.
+      const personal = await ensurePersonalEditableCopy({
+        source: target,
+        companyId,
+        ownerUserId: actor.id,
+        allowGlobalEdit: false,
+      });
+      if (!personal) return reply.code(404).send({ error: "Composição não encontrada" });
+      target = personal;
+    } else if (!(await canEditComposition(target, actor))) {
+      return reply.code(403).send({ error: "Sem permissão para editar esta composição" });
     }
     const parsed = costCompositionInputSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
@@ -302,14 +313,20 @@ export async function costCompositionRoutes(app: FastifyInstance) {
     const actor = actorOf(request);
     let target = await getVisibleComposition(id, actor);
     if (!target) return reply.code(404).send({ error: "Composição não encontrada" });
-    if (!(await canEditComposition(target, actor))) {
-      if (target.companyId == null && companyId) {
-        const cloned = await cloneCompositionForCompany(id, companyId);
-        if (!cloned) return reply.code(404).send({ error: "Composição não encontrada" });
-        target = cloned;
-      } else {
-        return reply.code(403).send({ error: "Sem permissão para editar esta composição" });
-      }
+    if (!companyId && actor.role !== "super_admin") {
+      return reply.code(403).send({ error: "Sem permissão para editar esta composição" });
+    }
+    if (companyId) {
+      const personal = await ensurePersonalEditableCopy({
+        source: target,
+        companyId,
+        ownerUserId: actor.id,
+        allowGlobalEdit: false,
+      });
+      if (!personal) return reply.code(404).send({ error: "Composição não encontrada" });
+      target = personal;
+    } else if (!(await canEditComposition(target, actor))) {
+      return reply.code(403).send({ error: "Sem permissão para editar esta composição" });
     }
     const parsed = technicalV2Schema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });

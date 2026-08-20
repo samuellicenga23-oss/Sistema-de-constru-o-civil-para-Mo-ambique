@@ -340,7 +340,11 @@ export default function CompositionDetailPage() {
         materialLines,
         equipmentLines,
       });
-      setMessage("Composição gravada — o novo preço unitário já está em uso para novos itens do orçamento.");
+      setMessage(
+        result.id !== id
+          ? "Composição guardada na sua cópia pessoal — passa a ser a sua versão prioritária."
+          : "Composição gravada — o novo preço unitário já está em uso para novos itens do orçamento.",
+      );
       if (result.id !== id) {
         navigate(`/catalogo/composicoes/${result.id}`, { replace: true });
       } else {
@@ -484,7 +488,13 @@ export default function CompositionDetailPage() {
 
           <details className="card overflow-hidden">
             <summary className="cursor-pointer px-5 py-4 text-sm font-semibold text-slate-800">Cálculo avançado e subcomposições</summary>
-            <div className="border-t border-slate-200"><CompositionTechnicalV2Panel compositionId={detail.id} onChanged={() => void reload(detail.id)} /></div>
+            <div className="border-t border-slate-200">
+              <CompositionTechnicalV2Panel
+                compositionId={detail.id}
+                onChanged={() => void reload(detail.id)}
+                onCompositionIdChange={(nextId) => navigate(`/catalogo/composicoes/${nextId}`, { replace: true })}
+              />
+            </div>
           </details>
           <div className="flex justify-end">
             <button onClick={handleDelete} className="btn btn-ghost btn-sm text-red-600 hover:bg-red-50"><IconTrash className="h-3.5 w-3.5" /> Eliminar composição</button>

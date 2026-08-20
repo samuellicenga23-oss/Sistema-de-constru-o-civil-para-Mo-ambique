@@ -21,7 +21,16 @@ const BASIS: Array<[DerivedCostLineV2["basis"], string]> = [
 function numberOrNull(value: string) { const n = Number(value); return value.trim() && Number.isFinite(n) && n > 0 ? n : null; }
 function money(value: number) { return value.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 
-export default function CompositionTechnicalV2Panel({ compositionId, onChanged }: { compositionId: string; onChanged?: () => void }) {
+export default function CompositionTechnicalV2Panel({
+  compositionId,
+  onChanged,
+  onCompositionIdChange,
+}: {
+  compositionId: string;
+  onChanged?: () => void;
+  /** Quando o backend cria cópia pessoal, o id muda. */
+  onCompositionIdChange?: (nextId: string) => void;
+}) {
   const [detail, setDetail] = useState<CompositionTechnicalV2Detail | null>(null);
   const [options, setOptions] = useState<CostComposition[]>([]);
   const [crew, setCrew] = useState("");
@@ -75,6 +84,12 @@ export default function CompositionTechnicalV2Panel({ compositionId, onChanged }
         subcompositionLines: subs.map((row) => ({ refId: row.refId, qtyPerUnit: Number(row.qtyPerUnit), notes: row.notes ?? null })),
         derivedCostLines: derived.map((row) => ({ name: row.name.trim(), basis: row.basis, percentage: Number(row.percentage), notes: row.notes ?? null })),
       });
+      if (updated.id && updated.id !== compositionId) {
+        setMessage("Guardado na sua cópia pessoal da composição.");
+        onCompositionIdChange?.(updated.id);
+        onChanged?.();
+        return;
+      }
       setDetail(updated); setMessage("Parâmetros técnicos guardados e APU recalculada.");
       await reload(); onChanged?.();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Não foi possível guardar APU 2.0"); }

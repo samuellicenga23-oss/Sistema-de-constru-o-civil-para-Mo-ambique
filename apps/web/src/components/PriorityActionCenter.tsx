@@ -1,70 +1,115 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { workflowTasksApi, type WorkflowTask } from "../api/projectTeam";
+import { notificationsApi, type AppNotification } from "../api/notifications";
+
+type AttentionItem =
+  | { kind: "task"; task: WorkflowTask }
+  | { kind: "notification"; notification: AppNotification };
 
 /**
- * Modal central só para tarefas de acção (aprovação / correcção).
- * Uma vez por task via notificationPresentedAt — não para comentários informativos.
+ * Atenção a ecrã cheio — aprovações pendentes e resultados (aprovado/devolvido).
+ * Uma vez por evento via presentedAt. O menu «Acções» continua para o resto.
  */
 export default function PriorityActionCenter() {
   const navigate = useNavigate();
-  const [task, setTask] = useState<WorkflowTask | null>(null);
+  const [item, setItem] = useState<AttentionItem | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      try {
-        const res = await workflowTasksApi.listMine();
-        if (!cancelled) setTask(res.priorityTask);
-      } catch {
-        /* ignore */
+  const load = useCallback(async () => {
+    try {
+      const [tasks, notes] = await Promise.all([workflowTasksApi.listMine(), notificationsApi.list()]);
+      if (tasks.priorityTask) {
+        setItem({ kind: "task", task: tasks.priorityTask });
+        return;
       }
+      const high = notes.items.find((n) => n.priority === "high" && !n.presentedAt);
+      setItem(high ? { kind: "notification", notification: high } : null);
+    } catch {
+      /* ignore */
     }
-    void load();
-    const id = window.setInterval(load, 45_000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(id);
-    };
   }, []);
 
-  if (!task) return null;
+  useEffect(() => {
+    void load();
+    const id = window.setInterval(load, 12_000);
+    function onFocus() {
+      void load();
+    }
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    return () => {
+      window.clearInterval(id);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+    };
+  }, [load]);
+
+  if (!item) return null;
+
+  const isTask = item.kind === "task";
+  const task = isTask ? item.task : null;
+  const note = !isTask ? item.notification : null;
+  const isCorrection = task?.kind === "correction";
+  const title = task?.title ?? note?.title ?? "";
+  const body = task?.body ?? note?.body ?? "";
+  const projectName = task?.projectNameSnapshot;
+  const link = task?.link ?? note?.link;
+  const eyebrow = isCorrection
+    ? "Correcção necessária"
+    : task
+      ? "Aprovação necessária"
+      : note?.title?.toLowerCase().includes("aprovad")
+        ? "Aprovado"
+        : note?.title?.toLowerCase().includes("devolv")
+          ? "Devolvido"
+          : "Atenção";
 
   async function dismiss(openLink: boolean) {
-    const current = task;
-    setTask(null);
+    const current = item;
+    setItem(null);
     if (!current) return;
-    await workflowTasksApi.markPresented(current.id).catch(() => {});
-    if (openLink && current.link) {
-      const href =
-        current.targetType === "line_item" && current.targetId
-          ? `${current.link}#line-item-${current.targetId}`
-          : current.link;
-      navigate(href);
+    if (current.kind === "task") {
+      await workflowTasksApi.markPresented(current.task.id).catch(() => {});
+      if (openLink && current.task.link) {
+        const href =
+          current.task.targetType === "line_item" && current.task.targetId
+            ? `${current.task.link}#line-item-${current.task.targetId}`
+            : current.task.link;
+        navigate(href);
+      }
+    } else {
+      await notificationsApi.markPresented(current.notification.id).catch(() => {});
+      if (openLink && current.notification.link) {
+        await notificationsApi.markRead(current.notification.id).catch(() => {});
+        navigate(current.notification.link);
+      }
     }
+    // Carregar o próximo imediatamente
+    window.setTimeout(() => void load(), 400);
   }
 
-  const isCorrection = task.kind === "correction";
-
   return (
-    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-slate-950/45 p-4 sm:items-center">
-      <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-5 shadow-2xl" role="alertdialog">
-        <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-brand-700">
-          {isCorrection ? "Correcção necessária" : "Aprovação necessária"}
-        </p>
-        <h2 className="mt-1 text-base font-semibold text-slate-950">{task.title}</h2>
-        {task.projectNameSnapshot && <p className="mt-0.5 text-sm text-slate-500">{task.projectNameSnapshot}</p>}
-        {task.requesterName && !isCorrection && (
-          <p className="mt-2 text-xs text-slate-500">{task.requesterName} submeteu.</p>
-        )}
-        {task.body && <p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">{task.body}</p>}
-        <div className="mt-5 flex justify-end gap-2">
-          <button type="button" className="btn btn-secondary btn-sm" onClick={() => void dismiss(false)}>
+    <div className="fixed inset-0 z-[70] flex items-stretch justify-center bg-slate-950/70 p-0 sm:items-center sm:p-6" role="alertdialog">
+      <div className="flex h-full w-full max-w-lg flex-col bg-white shadow-2xl sm:h-auto sm:max-h-[90vh] sm:rounded-2xl">
+        <div className="flex-1 overflow-y-auto px-6 py-8 sm:px-8 sm:py-10">
+          <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-brand-700">{eyebrow}</p>
+          <h2 className="mt-3 text-2xl font-semibold leading-snug text-slate-950">{title}</h2>
+          {projectName && <p className="mt-2 text-base text-slate-500">{projectName}</p>}
+          {task?.requesterName && !isCorrection && (
+            <p className="mt-4 text-sm text-slate-600">{task.requesterName} submeteu e aguarda a sua decisão.</p>
+          )}
+          {body && <p className="mt-5 whitespace-pre-wrap text-base leading-relaxed text-slate-700">{body}</p>}
+          <p className="mt-8 text-xs text-slate-400">
+            Continua disponível em «Acções» se fechar agora.
+          </p>
+        </div>
+        <div className="flex flex-col gap-2 border-t border-slate-200 px-6 py-4 sm:flex-row sm:justify-end sm:px-8">
+          <button type="button" className="btn btn-secondary order-2 sm:order-1" onClick={() => void dismiss(false)}>
             Mais tarde
           </button>
-          {task.link && (
-            <button type="button" className="btn btn-primary btn-sm" onClick={() => void dismiss(true)}>
-              {isCorrection ? "Corrigir" : "Rever"}
+          {link && (
+            <button type="button" className="btn btn-primary order-1 sm:order-2" onClick={() => void dismiss(true)}>
+              {isCorrection ? "Corrigir agora" : task ? "Rever agora" : "Abrir"}
             </button>
           )}
         </div>

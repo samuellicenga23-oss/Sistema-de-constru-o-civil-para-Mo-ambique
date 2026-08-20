@@ -1,4 +1,4 @@
-import { eq, isNull, and } from "drizzle-orm";
+import { eq, isNull, and, or } from "drizzle-orm";
 import { db } from "../db/index.js";
 import {
   labourCategories,
@@ -134,4 +134,44 @@ export async function forkCompositionToUser(sourceId: string, companyId: string,
   }).returning();
   await copyCompositionLines(sourceId, copy.id);
   return copy;
+}
+
+/**
+ * Garante uma cópia PRIVADA do utilizador antes de gravar.
+ * - Se já é dele → devolve a mesma.
+ * - Se já tem fork pessoal do mesmo ancestral → reutiliza.
+ * - Caso contrário → cria fork privado e prioriza essa daí em diante.
+ */
+export async function ensurePersonalEditableCopy(input: {
+  source: typeof costCompositions.$inferSelect;
+  companyId: string;
+  ownerUserId: string;
+  /** Super-admin a editar catálogo SIGO global sem clonar. */
+  allowGlobalEdit?: boolean;
+}) {
+  const { source, companyId, ownerUserId } = input;
+  if (source.companyId == null && input.allowGlobalEdit) return source;
+  if (source.companyId === companyId && source.ownerUserId === ownerUserId) return source;
+
+  const ancestry = [source.id, source.parentCompositionId].filter(Boolean) as string[];
+  const [existing] = await db
+    .select()
+    .from(costCompositions)
+    .where(
+      and(
+        eq(costCompositions.companyId, companyId),
+        eq(costCompositions.ownerUserId, ownerUserId),
+        eq(costCompositions.visibility, "private"),
+        or(
+          eq(costCompositions.parentCompositionId, source.id),
+          ...(source.parentCompositionId ? [eq(costCompositions.parentCompositionId, source.parentCompositionId)] : []),
+          ...(ancestry.length ? ancestry.map((id) => eq(costCompositions.id, id)) : []),
+        ),
+      ),
+    )
+    .limit(1);
+  if (existing) return existing;
+
+  const forked = await forkCompositionToUser(source.id, companyId, ownerUserId);
+  return forked ?? source;
 }
