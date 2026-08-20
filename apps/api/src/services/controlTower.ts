@@ -27,6 +27,7 @@ const CODE_CATEGORY: Record<string, ControlActionCategory> = {
   schedule_missing: "schedule_critical",
   schedule_delay: "schedule_critical",
   purchase_overdue: "material_risk",
+  purchase_start_late: "material_risk",
   stock_exhausted: "material_risk",
   schedule_unlinked: "documentation",
   diary_stale: "documentation",

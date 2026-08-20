@@ -1,10 +1,11 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { budgetDocuments, financialEntries, invoiceCreditNotes, invoiceReceipts, materials, measurementCertificates, projectInvoices, purchaseOrders, siteDiaryEntries, stockMovements, supplierInvoiceCreditNotes, supplierInvoicePayments, supplierInvoices } from "../db/schema.js";
+import { budgetDocuments, financialEntries, invoiceCreditNotes, invoiceReceipts, materials, measurementCertificates, projectInvoices, purchaseOrders, purchaseRequisitions, siteDiaryEntries, stockMovements, supplierInvoiceCreditNotes, supplierInvoicePayments, supplierInvoices } from "../db/schema.js";
 import { getBudgetDocumentSummary } from "./boqEngine.js";
 import { getProjectSchedule } from "./scheduleEngine.js";
 import { pickNextAction, rankControlActions, type ControlAlert } from "./controlTower.js";
 import { computeEarnedValueForecast } from "./projectForecast.js";
+import { procurementStartOverdue } from "./vendorGovernance.js";
 
 function today() {
   return new Date().toISOString().slice(0, 10);
@@ -27,7 +28,7 @@ function plannedPercent(start: string, end: string, referenceDate: string) {
 // diário não traz custo próprio, valoriza-a pelo custo médio das entradas efectivamente registadas
 // para aquele material na mesma obra e identifica-a como estimativa no consumidor da API.
 export async function getProjectControl(projectId: string, currency: string) {
-  const [documents, entries, movements, orders, supplierBills, clientInvoices, certificates, diaryEntries, schedule] = await Promise.all([
+  const [documents, entries, movements, orders, supplierBills, clientInvoices, certificates, diaryEntries, schedule, requisitions] = await Promise.all([
     db.select().from(budgetDocuments).where(eq(budgetDocuments.projectId, projectId)),
     db.select().from(financialEntries).where(eq(financialEntries.projectId, projectId)),
     db.select({ movement: stockMovements, materialName: materials.name, unit: materials.unit })
@@ -40,6 +41,7 @@ export async function getProjectControl(projectId: string, currency: string) {
     db.select().from(measurementCertificates).where(eq(measurementCertificates.projectId, projectId)),
     db.select().from(siteDiaryEntries).where(eq(siteDiaryEntries.projectId, projectId)),
     getProjectSchedule(projectId),
+    db.select().from(purchaseRequisitions).where(eq(purchaseRequisitions.projectId, projectId)),
   ]);
 
   const supplierBillIds = supplierBills.map((invoice) => invoice.id);
@@ -166,6 +168,19 @@ export async function getProjectControl(projectId: string, currency: string) {
   if (contractedValue > 0 && financial.paidCost > contractedValue) alerts.push({ code: "cost_over_contract", level: "critical", title: "Custo pago acima do contrato", detail: "Os pagamentos de despesa já ultrapassaram o valor contratado.", href: `/projectos/${projectId}/financeiro` });
   const overdueOrders = orders.filter((order) => order.status === "aprovado" && order.requiredByDate && order.requiredByDate < date);
   if (overdueOrders.length) alerts.push({ code: "purchase_overdue", level: "warning", title: "Compras em atraso", detail: `${overdueOrders.length} ordem(ns) aprovada(s) ultrapassou(aram) a data necessária.`, href: `/projectos/${projectId}/compras` });
+  const openRequisitions = requisitions.filter((row) => !["comprada", "fechada", "cancelada"].includes(row.status) && row.requiredByDate);
+  const lateStarts = openRequisitions.filter((row) =>
+    procurementStartOverdue(row.requiredByDate!, date, { leadTimeDays: 7, rfqDays: 3, approvalDays: 1, bufferDays: 2 }),
+  );
+  if (lateStarts.length) {
+    alerts.push({
+      code: "purchase_start_late",
+      level: "warning",
+      title: "Compra fora do prazo seguro",
+      detail: `${lateStarts.length} requisição(ões) já ultrapassaram a data limite para iniciar RFQ/OC.`,
+      href: `/projectos/${projectId}/compras`,
+    });
+  }
   const exhausted = stock.filter((item) => item.consumedQty > 0 && item.balance <= 0);
   if (exhausted.length) alerts.push({ code: "stock_exhausted", level: "warning", title: "Material sem saldo", detail: `${exhausted.slice(0, 2).map((item) => item.materialName).join(", ")}${exhausted.length > 2 ? " e outros" : ""}.`, href: `/projectos/${projectId}/compras` });
   const negativeStock = stock.filter((item) => item.balance < -0.0001);

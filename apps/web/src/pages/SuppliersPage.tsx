@@ -179,6 +179,27 @@ export default function SuppliersPage() {
                         <p className="mt-3 text-xs text-slate-500">
                           {supplier.referenceMaterialCount ?? 0} materiais · preços por zona no livro de preços
                         </p>
+                        <label className="mt-3 block text-xs text-slate-500">
+                          Governação
+                          <select
+                            className="input mt-1 py-1 text-xs"
+                            value={supplier.governanceStatus ?? "qualificado"}
+                            onChange={(event) => {
+                              const governanceStatus = event.target.value as NonNullable<Supplier["governanceStatus"]>;
+                              const blockedReason = governanceStatus === "bloqueado" ? window.prompt("Motivo do bloqueio") : null;
+                              if (governanceStatus === "bloqueado" && blockedReason == null) return;
+                              void suppliersApi
+                                .setGovernance(supplier.id, { governanceStatus, blockedReason: blockedReason?.trim() || null })
+                                .then(reload)
+                                .catch((err) => setError(err instanceof Error ? err.message : "Erro ao actualizar"));
+                            }}
+                          >
+                            <option value="qualificado">Qualificado</option>
+                            <option value="preferencial">Preferencial</option>
+                            <option value="observacao">Observação</option>
+                            <option value="bloqueado">Bloqueado</option>
+                          </select>
+                        </label>
                         <div className="mt-auto flex items-center gap-2 pt-5">
                           <button type="button" onClick={() => setMaterialsModalSupplier(supplier)} className="btn btn-primary btn-sm flex-1">
                             Ver preços

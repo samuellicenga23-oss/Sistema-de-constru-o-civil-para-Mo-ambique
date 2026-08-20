@@ -10,6 +10,8 @@ export type Supplier = {
   notes: string | null;
   zoneId: string | null;
   supplierAccountId: string | null;
+  governanceStatus?: "qualificado" | "preferencial" | "observacao" | "bloqueado";
+  blockedReason?: string | null;
   createdAt: string;
   isReference: boolean;
   referenceMaterialCount: number | null;
@@ -78,6 +80,8 @@ export const suppliersApi = {
   // A empresa deixou de gerir fornecedores próprios — "list" só devolve a ficha SIGO Preços. Para
   // o marketplace nacional de fornecedores reais, ver api/marketplace.ts.
   list: () => request<Supplier[]>("/suppliers"),
+  setGovernance: (id: string, data: { governanceStatus: NonNullable<Supplier["governanceStatus"]>; blockedReason?: string | null }) =>
+    request<Supplier>(`/suppliers/${id}/governance`, { method: "PATCH", body: JSON.stringify(data) }),
 
   listMaterialPrices: (supplierId: string) => request<SupplierMaterialPrice[]>(`/suppliers/${supplierId}/materials`),
   setMaterialPrice: (supplierId: string, data: SupplierMaterialPriceInput) =>

@@ -317,7 +317,9 @@ export const companiesApi = {
     }>("/admin/trash/run-cleanup", { method: "POST" }),
 
   me: () => request<{ company: Company; subscription: Subscription | null }>("/companies/me"),
-  approvalMatrix: () => request<{ rules: Array<{ entityType: string; submitRoles: string[]; approveRoles: string[]; submitPermission: string | null; approvePermission: string | null; singleAdminException: boolean }>; source: string }>("/companies/me/approval-matrix"),
+  approvalMatrix: () => request<{ rules: Array<{ entityType: string; submitRoles: string[]; approveRoles: string[]; submitPermission: string | null; approvePermission: string | null; singleAdminException: boolean; currency: string | null; thresholdMin: number | null; thresholdMax: number | null; sequence: number }>; source: string }>("/companies/me/approval-matrix"),
+  saveApprovalMatrix: (rules: Array<{ entityType: string; submitRoles: string[]; approveRoles: string[]; submitPermission: string | null; approvePermission: string | null; singleAdminException: boolean; currency: string | null; thresholdMin: number | null; thresholdMax: number | null; sequence: number }>) =>
+    request<{ rules: unknown; source: string }>("/companies/me/approval-matrix", { method: "PUT", body: JSON.stringify({ rules }) }),
   updateMe: (data: CompanyUpdateInput) => request<Company>("/companies/me", { method: "PUT", body: JSON.stringify(data) }),
   enterCompany: (companyId: string) => request<CurrentUser>(`/admin/companies/${companyId}/enter`, { method: "POST" }),
   exitImpersonation: () => request<CurrentUser>("/admin/impersonation/exit", { method: "POST" }),

@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { budgetDocuments, measurementCertificateFieldLines, measurementCertificateLines, measurementCertificates, users } from "../db/schema.js";
+import { budgetDocuments, companies, measurementCertificateFieldLines, measurementCertificateLines, measurementCertificates, users } from "../db/schema.js";
 import { requireCompanyUser, requireRole } from "../auth/middleware.js";
 import { assertCertificateOwned, assertDocumentOwned, assertProjectOwned } from "../services/accessControl.js";
 import {
@@ -17,6 +17,7 @@ import { createDraftInvoiceForCertificate } from "../services/invoicing.js";
 import { recordAuditEvent } from "../services/auditTrail.js";
 import { emitWorkflowEvent } from "../services/workflowEvents.js";
 import { buildCertificateFieldMeasurementPdf } from "../services/certificateFieldMeasurementPdf.js";
+import { canApproveWithMatrix, DEFAULT_APPROVAL_MATRIX } from "../services/approvalMatrix.js";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista", "engenheiro_fiscal"] as const;
 const createSchema = z.object({
@@ -139,23 +140,22 @@ export async function measurementCertificateRoutes(app: FastifyInstance) {
       aprovado: [],
     };
     if (parsed.data.status === "aprovado") {
-      if (request.currentUser!.role !== "admin_empresa") {
-        return reply.code(403).send({ error: "A aprovação do Auto exige um administrador da empresa" });
-      }
-      if (certificate.submittedByUserId === request.currentUser!.id) {
-        const admins = await db
-          .select({ id: users.id })
-          .from(users)
-          .where(
-            and(
-              eq(users.companyId, request.currentUser!.companyId!),
-              eq(users.role, "admin_empresa"),
-              eq(users.isActive, true),
-            ),
-          );
-        if (admins.length > 1) {
-          return reply.code(409).send({ error: "Quem submeteu o Auto não pode aprová-lo" });
-        }
+      const companyId = request.currentUser!.companyId!;
+      const [company] = await db.select({ approvalMatrix: companies.approvalMatrix }).from(companies).where(eq(companies.id, companyId)).limit(1);
+      const admins = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(and(eq(users.companyId, companyId), eq(users.role, "admin_empresa"), eq(users.isActive, true)));
+      const decision = canApproveWithMatrix({
+        entityType: "auto",
+        role: request.currentUser!.role,
+        permissions: request.currentUser!.permissions ?? [],
+        isSubmitter: certificate.submittedByUserId === request.currentUser!.id,
+        adminCount: admins.length,
+        rules: (company?.approvalMatrix?.length ? company.approvalMatrix : DEFAULT_APPROVAL_MATRIX),
+      });
+      if (!decision.allowed) {
+        return reply.code(decision.reason?.includes("submeteu") ? 409 : 403).send({ error: decision.reason ?? "Sem autoridade de aprovação" });
       }
     }
     if (parsed.data.status !== certificate.status && !transitions[certificate.status].includes(parsed.data.status)) {

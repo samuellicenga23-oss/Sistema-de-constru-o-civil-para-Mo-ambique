@@ -470,10 +470,27 @@ const ENTITY_LABEL: Record<string, string> = {
 };
 
 function ApprovalMatrixPanel() {
-  const [rules, setRules] = useState<Array<{ entityType: string; submitRoles: string[]; approveRoles: string[]; submitPermission: string | null; approvePermission: string | null; singleAdminException: boolean }>>([]);
+  const [rules, setRules] = useState<Array<{ entityType: string; submitRoles: string[]; approveRoles: string[]; submitPermission: string | null; approvePermission: string | null; singleAdminException: boolean; currency: string | null; thresholdMin: number | null; thresholdMax: number | null; sequence: number }>>([]);
+  const [source, setSource] = useState("default");
+  const [message, setMessage] = useState<string | null>(null);
   useEffect(() => {
-    companiesApi.approvalMatrix().then((data) => setRules(data.rules)).catch(() => {});
+    companiesApi.approvalMatrix().then((data) => {
+      setRules(data.rules);
+      setSource(data.source);
+    }).catch(() => {});
   }, []);
+  async function restoreDefaults() {
+    const defaults = [
+      { entityType: "medicao", submitRoles: ["admin_empresa", "orcamentista"], approveRoles: ["admin_empresa"], submitPermission: null, approvePermission: null, singleAdminException: true, currency: null, thresholdMin: null, thresholdMax: null, sequence: 1 },
+      { entityType: "auto", submitRoles: ["admin_empresa", "engenheiro_fiscal"], approveRoles: ["admin_empresa"], submitPermission: null, approvePermission: null, singleAdminException: true, currency: null, thresholdMin: null, thresholdMax: null, sequence: 1 },
+      { entityType: "requisicao", submitRoles: ["admin_empresa", "orcamentista", "engenheiro_fiscal"], approveRoles: ["admin_empresa"], submitPermission: "materiais.requisitar", approvePermission: "materiais.aprovar", singleAdminException: false, currency: null, thresholdMin: null, thresholdMax: null, sequence: 1 },
+      { entityType: "payment_request", submitRoles: ["admin_empresa"], approveRoles: ["admin_empresa"], submitPermission: null, approvePermission: null, singleAdminException: true, currency: null, thresholdMin: null, thresholdMax: null, sequence: 1 },
+    ];
+    const saved = await companiesApi.saveApprovalMatrix(defaults);
+    setRules(saved.rules as typeof rules);
+    setSource(saved.source);
+    setMessage("Matriz reposta aos defaults.");
+  }
   return (
     <section className="card overflow-hidden">
       <table className="w-full text-sm">
@@ -494,7 +511,11 @@ function ApprovalMatrixPanel() {
           ))}
         </tbody>
       </table>
-      <p className="border-t border-slate-100 px-4 py-3 text-xs text-slate-500">Validação no servidor. A auditoria não pode ser desligada.</p>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 px-4 py-3">
+        <p className="text-xs text-slate-500">Fonte: {source === "company" ? "empresa" : "default"} · validação no servidor</p>
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => void restoreDefaults().catch(() => setMessage("Erro ao guardar"))}>Repor defaults</button>
+      </div>
+      {message && <p className="px-4 pb-3 text-xs text-emerald-700">{message}</p>}
     </section>
   );
 }

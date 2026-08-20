@@ -86,6 +86,28 @@ export async function supplierRoutes(app: FastifyInstance) {
     }));
   });
 
+  app.patch("/api/suppliers/:id/governance", { preHandler: requireRole("admin_empresa") }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const companyId = companyIdOf(request);
+    const supplier = await assertSupplierOwned(id, companyId);
+    if (!supplier) return reply.code(404).send({ error: "Fornecedor não encontrado" });
+    const parsed = z.object({
+      governanceStatus: z.enum(["qualificado", "preferencial", "observacao", "bloqueado"]),
+      blockedReason: z.string().trim().max(500).optional().nullable(),
+    }).safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    if (parsed.data.governanceStatus === "bloqueado" && !parsed.data.blockedReason?.trim()) {
+      return reply.code(400).send({ error: "Indique o motivo do bloqueio" });
+    }
+    const [updated] = await db.update(suppliers).set({
+      governanceStatus: parsed.data.governanceStatus,
+      blockedReason: parsed.data.governanceStatus === "bloqueado" ? parsed.data.blockedReason!.trim() : null,
+      blockedAt: parsed.data.governanceStatus === "bloqueado" ? new Date() : null,
+      blockedByUserId: parsed.data.governanceStatus === "bloqueado" ? request.currentUser!.id : null,
+    }).where(eq(suppliers.id, id)).returning();
+    return updated;
+  });
+
   // ---------- Preços de materiais por fornecedor (e opcionalmente por zona) ----------
   // Isto é o que faz aparecer "materiais" dentro de um fornecedor — ver também
   // GET /api/catalog/materials/:id/suppliers em catalog.ts para o lado inverso (fornecedores

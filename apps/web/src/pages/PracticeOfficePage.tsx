@@ -1056,6 +1056,9 @@ export default function PracticeOfficePage() {
                           )}
                         </div>
                         <div className="text-xs text-slate-500">{quote.quoteNumber ?? "Sem número"}</div>
+                        {(quote.expectedCloseDate || quote.validUntil) && (
+                          <div className="mt-1 text-xs text-slate-500">Fecho previsto {quote.expectedCloseDate ?? quote.validUntil}</div>
+                        )}
                         {quote.acceptanceNotes && (
                           <div className="mt-1 max-w-xs text-xs text-emerald-700 line-clamp-2">{quote.acceptanceNotes}</div>
                         )}

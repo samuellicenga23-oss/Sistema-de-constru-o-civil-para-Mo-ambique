@@ -15,11 +15,13 @@ describe("control tower — prioridade de acções", () => {
       { code: "schedule_delay", level: "warning", title: "Atraso", detail: "", href: "/s" },
       { code: "stock_negative", level: "critical", title: "Stock", detail: "", href: "/c" },
       { code: "client_invoice_overdue", level: "warning", title: "Vencido", detail: "", href: "/f" },
+      { code: "purchase_start_late", level: "warning", title: "Compra", detail: "", href: "/p" },
     ]);
     expect(ranked.map((row) => row.code)).toEqual([
       "stock_negative",
       "client_invoice_overdue",
       "schedule_delay",
+      "purchase_start_late",
       "diary_stale",
     ]);
   });

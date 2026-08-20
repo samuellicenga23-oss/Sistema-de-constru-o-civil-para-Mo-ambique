@@ -16,8 +16,8 @@ import { detectImageExtension, detectProofFileExtension } from "../services/imag
 import { sendEmail, emailLayout, escapeHtml, safeContentDispositionFilename } from "../services/mailer.js";
 import { createTrialCompany } from "../services/companyOnboarding.js";
 import { syncSigoPricesForCompany } from "../services/sigoPrices.js";
+import { DEFAULT_APPROVAL_MATRIX, type ApprovalRule } from "../services/approvalMatrix.js";
 import { recordAuditEvent } from "../services/auditTrail.js";
-import { DEFAULT_APPROVAL_MATRIX } from "../services/approvalMatrix.js";
 import {
   buildCompanyBackup,
   getCompaniesUsageMap,
@@ -1148,8 +1148,43 @@ export async function companyRoutes(app: FastifyInstance) {
     return { company, subscription: await getLatestSubscription(companyId) };
   });
 
-  app.get("/api/companies/me/approval-matrix", { preHandler: requireCompanyUser }, async () => {
-    return { rules: DEFAULT_APPROVAL_MATRIX, source: "default" as const };
+  app.get("/api/companies/me/approval-matrix", { preHandler: requireCompanyUser }, async (request) => {
+    const companyId = request.currentUser!.companyId!;
+    const [company] = await db.select({ approvalMatrix: companies.approvalMatrix }).from(companies).where(eq(companies.id, companyId)).limit(1);
+    const rules = (company?.approvalMatrix?.length ? company.approvalMatrix : DEFAULT_APPROVAL_MATRIX) as ApprovalRule[];
+    return { rules, source: company?.approvalMatrix?.length ? ("company" as const) : ("default" as const) };
+  });
+
+  app.put("/api/companies/me/approval-matrix", { preHandler: requireRole("admin_empresa") }, async (request, reply) => {
+    const companyId = request.currentUser!.companyId!;
+    const ruleSchema = z.object({
+      entityType: z.enum(["medicao", "auto", "requisicao", "payment_request"]),
+      submitRoles: z.array(z.string()).min(1),
+      approveRoles: z.array(z.string()).min(1),
+      submitPermission: z.string().nullable(),
+      approvePermission: z.string().nullable(),
+      singleAdminException: z.boolean(),
+      currency: z.enum(["MZN", "USD"]).nullable(),
+      thresholdMin: z.number().nullable(),
+      thresholdMax: z.number().nullable(),
+      sequence: z.number().int().positive(),
+    });
+    const parsed = z.object({ rules: z.array(ruleSchema).min(1).max(20) }).safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    const entityTypes = new Set(parsed.data.rules.map((rule) => rule.entityType));
+    for (const required of ["medicao", "auto", "requisicao", "payment_request"] as const) {
+      if (!entityTypes.has(required)) return reply.code(400).send({ error: `Falta regra para ${required}` });
+    }
+    const [row] = await db.update(companies).set({ approvalMatrix: parsed.data.rules }).where(eq(companies.id, companyId)).returning();
+    await recordAuditEvent({
+      companyId,
+      actorUserId: request.currentUser!.id,
+      entityType: "company",
+      entityId: companyId,
+      action: "approval_matrix.updated",
+      after: { ruleCount: parsed.data.rules.length },
+    });
+    return { rules: row.approvalMatrix, source: "company" as const };
   });
 
   app.put("/api/companies/me", { preHandler: requireRole("admin_empresa") }, async (request, reply) => {

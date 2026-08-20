@@ -67,6 +67,18 @@ export const companies = pgTable("companies", {
   responsibleName: varchar("responsible_name", { length: 150 }),
   enabledModules: jsonb("enabled_modules").$type<CompanyModuleKey[]>().notNull().default([...COMPANY_MODULE_KEYS]),
   emailNotificationPrefs: jsonb("email_notification_prefs").$type<{ workflow: boolean }>().notNull().default({ workflow: true }),
+  approvalMatrix: jsonb("approval_matrix").$type<Array<{
+    entityType: "medicao" | "auto" | "requisicao" | "payment_request";
+    submitRoles: string[];
+    approveRoles: string[];
+    submitPermission: string | null;
+    approvePermission: string | null;
+    singleAdminException: boolean;
+    currency: "MZN" | "USD" | null;
+    thresholdMin: number | null;
+    thresholdMax: number | null;
+    sequence: number;
+  }>>(),
   /** Templates de permissões por função — se vazio/null usa SYSTEM_ROLE_PERMISSIONS. */
   rolePermissions: jsonb("role_permissions").$type<Partial<Record<"admin_empresa" | "orcamentista" | "engenheiro_fiscal" | "visualizador", string[]>>>(),
   brandName: varchar("brand_name", { length: 100 }),

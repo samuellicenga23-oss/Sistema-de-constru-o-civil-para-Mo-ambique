@@ -37,8 +37,9 @@ HEAD: `fc5a572`. Working tree de código limpa (só artefactos locais: `tmp/`, a
 | `0081_commercial_pipeline` | 14 | `practice_quotes.expected_close_date`, `loss_reason`, `owner_user_id` |
 | `0082_client_change_decisions` | 15 | decisão do cliente em `contract_variations` (não altera BOQ) |
 | `0083_company_notification_prefs` | 16 | `companies.email_notification_prefs` |
+| `0084_company_approval_matrix` | pós-18 | `companies.approval_matrix` (jsonb) |
 
-Última no journal: **0083**. Sem `down`. SQL 0081–0083 foram commitados juntamente com 0080 (journal único). Snapshot Drizzle JSON não regenerado — o migrator usa o journal.
+Última no journal: **0084**. Sem `down`.
 
 ## Testes e gates (fase 18)
 
@@ -71,19 +72,30 @@ Testes novos relevantes: `controlTower`, `scheduleCpm`, `vendorGovernance`, `pro
 
 ## Gaps e riscos (revisão humana)
 
-1. **Matriz de aprovação** documenta e testa defaults; as rotas existentes continuam a ser a autoridade. Ainda não há tabela persistida de limiares configuráveis.
-2. **CPM** é calculado em leitura (durações + precedências + calendário Mon–Sáb), não grava ES/LF na BD.
+1. **Matriz de aprovação** agora é persistível em `companies.approval_matrix` (migration `0084`); as rotas de Auto já consultam a matriz. Domínios medição/requisição/pagamento ainda usam regras inline históricas além da matriz.
+2. **CPM** continua calculado em leitura (durações + precedências + calendário Mon–Sáb), sem gravar ES/LF na BD.
 3. **Decisões do portal** só aparecem para adendas `submetida`. Sem contrato/adenda, o tab fica vazio.
-4. **Forecast de caixa semanal** reutiliza Procurement Intelligence; EAC/ETC no Control Tower não inventa FX.
-5. **0080–0083** sem snapshot Drizzle regenerado — `drizzle-kit generate` futuro deve partir do schema actual.
+4. **Forecast de caixa** (4 semanas) no Financeiro reutiliza Procurement Intelligence; ETC/EAC no Control Tower sem FX implícito.
+5. **0080–0084** sem snapshot Drizzle regenerado — `drizzle-kit generate` futuro deve partir do schema actual.
 6. **SMTP/Sentry** opcionais; email pode estar desligado em produção.
 7. Parser de plantas e PWA `CACHE_EPOCH` inalterados nesta cauda da fila.
 8. `steelSource: "map"` não deve ser substituído por aço calculado (fase 05/08).
+9. Governação de fornecedor editável na ficha SIGO Preços da empresa; bloqueio de marketplace global continua a exigir acção na ficha do fornecedor (campo `governance_status`).
+
+## Fecho de gaps (pós 18)
+
+| Item | Notas |
+|---|---|
+| Control Tower `purchase_start_late` | Requisições abertas com `requiredByDate` fora do prazo seguro (lead+RFQ+aprovação+buffer) |
+| Financeiro | KPIs ETC + caixa 4 semanas + margem / AR·AP |
+| Comercial | Fecho previsto (`expectedCloseDate` / `validUntil`) na lista |
+| Empresa | Matriz persistida + «Repor defaults»; Auto usa `canApproveWithMatrix` |
+| Fornecedores | Select de governação na ficha SIGO Preços |
 
 ## Deploy / migration (não executar agora)
 
 1. Backup da BD.
-2. `npm run db:migrate` em `apps/api` (aplica 0079–0083 se ainda não estiverem).
+2. `npm run db:migrate` em `apps/api` (aplica 0079–0084 se ainda não estiverem).
 3. Build/restart API + web + supplier.
 4. Só depois: `npm run smoke:production`.
 5. Não fazer `git reset` / force-push sobre `0ec2f18` nem sobre estes commits.

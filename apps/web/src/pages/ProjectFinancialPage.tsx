@@ -3,6 +3,7 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import { boqApi, type Project } from "../api/boq";
 import { financialApi, type ClientStatement, type FinancialEntry, type FinancialSummary, type ProjectControl, type ProjectContract, type ProjectInvoice } from "../api/financial";
 import { clientPaymentsApi, type ClientPaymentPlan } from "../api/clientPayments";
+import { procurementIntelligenceApi } from "../api/procurementIntelligence";
 import Layout from "../components/Layout";
 import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { MetricCard, SectionHeader } from "../components/WorkspaceUI";
@@ -39,6 +40,7 @@ export default function ProjectFinancialPage() {
   const [entries, setEntries] = useState<FinancialEntry[]>([]);
   const [summary, setSummary] = useState<FinancialSummary | null>(null);
   const [control, setControl] = useState<ProjectControl | null>(null);
+  const [cash4w, setCash4w] = useState<number | null>(null);
   const [invoices, setInvoices] = useState<ProjectInvoice[]>([]);
   const [contract, setContract] = useState<ProjectContract | null>(null);
   const [statement, setStatement] = useState<ClientStatement | null>(null);
@@ -70,19 +72,21 @@ export default function ProjectFinancialPage() {
 
   async function reload() {
     if (!projectId) return;
-    const [proj, list, sum, controlData, invoiceData, paymentData] = await Promise.all([
+    const [proj, list, sum, controlData, invoiceData, paymentData, intel] = await Promise.all([
       boqApi.getProject(projectId),
       financialApi.list(projectId),
       financialApi.summary(projectId),
       financialApi.control(projectId),
       financialApi.listInvoices(projectId),
       clientPaymentsApi.get(projectId).catch(() => ({ plan: null, suggestion: null })),
+      procurementIntelligenceApi.dashboard(projectId, 4).catch(() => null),
     ]);
     setProject(proj);
     setEntries(list);
     setSummary(sum);
     setControl(controlData);
     setInvoices(invoiceData);
+    setCash4w(intel?.executive.forecastInHorizon ?? null);
     setClientPlan(paymentData.plan);
     setPlanSuggestion(paymentData.suggestion);
     const contractData = await financialApi.getContract(projectId).catch(() => null);
@@ -366,11 +370,16 @@ export default function ProjectFinancialPage() {
             <div className="bg-white px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Actual</div>
             <div className="bg-white px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Forecast</div>
           </div>
-          <div className="grid gap-px bg-slate-100 sm:grid-cols-4">
+          <div className="grid gap-px bg-slate-100 sm:grid-cols-2 lg:grid-cols-5">
             <div className="bg-white px-5 py-4"><span className="text-xs text-slate-500">Execução</span><strong className="mt-1 block text-xl tabular-nums">{control.schedule.actualProgress.toFixed(1)}%</strong></div>
             <div className="bg-white px-5 py-4"><span className="text-xs text-slate-500">Custo pago</span><strong className="mt-1 block text-xl tabular-nums">{fmt(control.cost.paidValue, currency)}</strong></div>
+            <div className="bg-white px-5 py-4"><span className="text-xs text-slate-500">ETC</span><strong className="mt-1 block text-xl tabular-nums">{control.forecast?.available && control.forecast.etc != null ? fmt(control.forecast.etc, currency) : "Indisponível"}</strong></div>
             <div className="bg-white px-5 py-4"><span className="text-xs text-slate-500">EAC</span><strong className="mt-1 block text-xl tabular-nums">{control.forecast?.available && control.forecast.eac != null ? fmt(control.forecast.eac, currency) : "Indisponível"}</strong></div>
+            <div className="bg-white px-5 py-4"><span className="text-xs text-slate-500">Caixa 4 semanas</span><strong className="mt-1 block text-xl tabular-nums">{cash4w != null ? fmt(cash4w, currency) : "Indisponível"}</strong></div>
+          </div>
+          <div className="grid gap-px border-t border-slate-100 bg-slate-100 sm:grid-cols-2">
             <div className="bg-white px-5 py-4"><span className="text-xs text-slate-500">Margem prevista</span><strong className="mt-1 block text-xl tabular-nums">{control.forecast?.available && control.forecast.forecastMargin != null ? fmt(control.forecast.forecastMargin, currency) : "Indisponível"}</strong></div>
+            <div className="bg-white px-5 py-4"><span className="text-xs text-slate-500">A receber / a pagar</span><strong className="mt-1 block text-xl tabular-nums">{fmt(control.commercial.receivableValue, currency)} · {fmt(summary?.contasAPagar ?? 0, currency)}</strong></div>
           </div>
           {control.alerts.length > 0 && <div className="divide-y divide-slate-100 border-t border-slate-100">{control.alerts.map((alert) => <Link key={alert.code} to={alert.href} className="flex items-center justify-between gap-4 px-5 py-3 hover:bg-slate-50"><div><strong className={`text-sm ${alert.level === "critical" ? "text-red-700" : alert.level === "warning" ? "text-amber-800" : "text-blue-700"}`}>{alert.title}</strong><p className="mt-0.5 text-xs text-slate-500">{alert.detail}</p></div><span className="text-xs font-semibold text-blue-700">Abrir</span></Link>)}</div>}
         </section>}

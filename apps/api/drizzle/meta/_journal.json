@@ -589,6 +589,13 @@
       "when": 1786905600000,
       "tag": "0083_company_notification_prefs",
       "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1786992000000,
+      "tag": "0084_company_approval_matrix",
+      "breakpoints": true
     }
   ]
 }
