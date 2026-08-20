@@ -131,7 +131,7 @@ export default function ProjectsPage() {
       return;
     }
     setCreating(true);
-    setCreateProgress(workspace === "medicoes" ? "A Criar medi��o..." : "A criar orçamento...");
+    setCreateProgress(workspace === "medicoes" ? "A Criar medição..." : "A criar orçamento...");
     const technicalFiles: { file: File; discipline: PlantUploadDiscipline; label: string }[] = completeFile
       ? [{ file: completeFile, discipline: "auto", label: "projecto completo" }]
       : [
@@ -220,14 +220,14 @@ export default function ProjectsPage() {
 
   return (
     <Layout
-      title={workspace === "medicoes" ? "Medi��es" : "Orçamentos"}
+      title={workspace === "medicoes" ? "Medições" : "Orçamentos"}
       subtitle={workspace === "medicoes"
         ? `${workspaceProjects.length} obra(s) · quantidades e plantas`
         : `${workspaceProjects.length} obra(s) · preços e composições`}
       actions={
         <button onClick={() => setShowForm((s) => !s)} className="btn btn-primary btn-sm">
           <IconPlus className="w-3.5 h-3.5" />
-          {workspace === "medicoes" ? "Nova medi��o" : "Novo orçamento"}
+          {workspace === "medicoes" ? "Nova medição" : "Novo orçamento"}
         </button>
       }
     >
@@ -237,7 +237,7 @@ export default function ProjectsPage() {
 
         {showForm && (
           <Modal
-            title={workspace === "medicoes" ? "Nova medi��o" : "Novo orçamento"}
+            title={workspace === "medicoes" ? "Nova medição" : "Novo orçamento"}
             onClose={() => !creating && setShowForm(false)}
             maxWidth="max-w-2xl"
           >
@@ -308,7 +308,7 @@ export default function ProjectsPage() {
               {workspace === "orcamentos" && (
                 <div className="sm:col-span-2 flex flex-col gap-2 rounded-lg border border-brand-200 bg-brand-50 px-4 py-3 text-sm text-ink sm:flex-row sm:items-center sm:justify-between">
                   <span>Medição existente?</span>
-                  <Link to="/medicoes" onClick={() => setShowForm(false)} className="font-semibold text-brand-800 hover:underline">Abrir Medi��es →</Link>
+                  <Link to="/medicoes" onClick={() => setShowForm(false)} className="font-semibold text-brand-800 hover:underline">Abrir Medições →</Link>
                 </div>
               )}
               {workspace === "medicoes" && startMode === "plantas" && <div className="sm:col-span-2 rounded-xl border border-slate-200 bg-slate-50 p-4">
@@ -378,7 +378,7 @@ export default function ProjectsPage() {
               <div className="sm:col-span-2 flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-4">
               <button type="button" onClick={() => setShowForm(false)} disabled={creating} className="btn btn-secondary">Cancelar</button>
               <button type="submit" disabled={creating} className="btn btn-primary min-w-44">
-                {creating ? analysisProgress ? `${analysisProgress.percent}% concluído` : createProgress : workspace === "medicoes" ? "Criar medi��o" : "Criar orçamento"}
+                {creating ? analysisProgress ? `${analysisProgress.percent}% concluído` : createProgress : workspace === "medicoes" ? "Criar medição" : "Criar orçamento"}
               </button>
               </div>
             </form>
@@ -418,7 +418,7 @@ export default function ProjectsPage() {
               action={
                 <button onClick={() => setShowForm(true)} className="btn btn-primary">
                   <IconPlus className="w-4 h-4" />
-                  {workspace === "medicoes" ? "Criar medi��o" : "Criar orçamento"}
+                  {workspace === "medicoes" ? "Criar medição" : "Criar orçamento"}
                 </button>
               }
             />
@@ -442,7 +442,7 @@ export default function ProjectsPage() {
                       <p className="truncate font-semibold text-slate-900 group-hover:text-brand-700">{p.name}</p>
                       <p className="mt-0.5 truncate text-xs text-slate-500 sm:hidden">{[p.client, zoneName(p.zoneId)].filter(Boolean).join(" · ") || "Sem cliente ou zona"}</p>
                       <span className="click-hint mt-1 sm:hidden">
-                        {openingId === p.id ? "A abrir…" : workspace === "medicoes" ? "Abrir medi��o →" : "Abrir orçamento →"}
+                        {openingId === p.id ? "A abrir…" : workspace === "medicoes" ? "Abrir medição →" : "Abrir orçamento →"}
                       </span>
                     </div>
                   </div>
