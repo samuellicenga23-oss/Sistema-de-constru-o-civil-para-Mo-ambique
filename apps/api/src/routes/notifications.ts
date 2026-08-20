@@ -1,6 +1,11 @@
 import type { FastifyInstance } from "fastify";
 import { requireAuth } from "../auth/middleware.js";
-import { listNotificationsForUser, markAllNotificationsRead, markNotificationRead } from "../services/notifications.js";
+import {
+  listNotificationsForUser,
+  markAllNotificationsRead,
+  markNotificationPresented,
+  markNotificationRead,
+} from "../services/notifications.js";
 
 export async function notificationRoutes(app: FastifyInstance) {
   app.get("/api/notifications", { preHandler: requireAuth }, async (request) => {
@@ -10,6 +15,12 @@ export async function notificationRoutes(app: FastifyInstance) {
   app.post("/api/notifications/:id/read", { preHandler: requireAuth }, async (request) => {
     const { id } = request.params as { id: string };
     await markNotificationRead(id, { userId: request.currentUser!.id });
+    return { ok: true };
+  });
+
+  app.post("/api/notifications/:id/presented", { preHandler: requireAuth }, async (request) => {
+    const { id } = request.params as { id: string };
+    await markNotificationPresented(id, request.currentUser!.id);
     return { ok: true };
   });
 

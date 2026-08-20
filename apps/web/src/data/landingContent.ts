@@ -11,7 +11,7 @@ export type LandingPricingPlan = {
 export const features = [
   {
     icon: "Ruler",
-    title: "Levantamentos sobre plantas",
+    title: "Medições sobre plantas",
     description:
       "Levante quantidades directamente das plantas e mantenha a rastreabilidade até ao item do mapa.",
   },

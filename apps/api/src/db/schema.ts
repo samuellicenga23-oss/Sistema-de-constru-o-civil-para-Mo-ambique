@@ -2550,6 +2550,8 @@ export const notifications = pgTable(
     // Caminho relativo dentro da respectiva app (painel SIGO ou Portal do Fornecedor) — nunca uma
     // URL absoluta, para nunca ficar desactualizado se o domínio mudar.
     link: text("link"),
+    priority: varchar("priority", { length: 20 }).notNull().default("normal"),
+    presentedAt: timestamp("presented_at"),
     readAt: timestamp("read_at"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
@@ -2559,6 +2561,26 @@ export const notifications = pgTable(
     index("notifications_user_created_idx").on(table.userId, table.createdAt),
     index("notifications_supplier_created_idx").on(table.supplierAccountId, table.createdAt),
   ],
+);
+
+export const documentReviewComments = pgTable(
+  "document_review_comments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+    documentId: uuid("document_id").notNull().references(() => budgetDocuments.id, { onDelete: "cascade" }),
+    targetType: varchar("target_type", { length: 40 }).notNull(),
+    targetId: uuid("target_id"),
+    targetLabelSnapshot: varchar("target_label_snapshot", { length: 300 }),
+    authorUserId: uuid("author_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    comment: text("comment").notNull(),
+    parentCommentId: uuid("parent_comment_id"),
+    resolvedAt: timestamp("resolved_at"),
+    resolvedByUserId: uuid("resolved_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [index("document_review_comments_document_idx").on(table.documentId)],
 );
 
 // ---------- Relations ----------

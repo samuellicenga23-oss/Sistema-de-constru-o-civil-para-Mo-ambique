@@ -387,6 +387,7 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
         title: updated.title,
         link: `/documentos/${id}`,
         actor,
+        reason: parsed.data.decisionNote,
         logger: request.log,
       });
     } else if (parsed.data.status === "aprovado") {
@@ -398,6 +399,7 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
         link: `/documentos/${id}`,
         actor,
         submitterUserId: document.submittedByUserId ?? (approvingFromDraft ? request.currentUser!.id : null),
+        reason: parsed.data.decisionNote,
         logger: request.log,
       });
     } else if (parsed.data.status === "rascunho" && document.status === "submetido") {

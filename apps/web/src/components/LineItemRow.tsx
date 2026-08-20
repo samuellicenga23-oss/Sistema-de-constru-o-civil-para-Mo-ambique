@@ -1,12 +1,13 @@
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import type { LineItemNode, LineItemKind } from "../api/boq";
 import type { CostComposition } from "../api/catalog";
 import { boqApi } from "../api/boq";
 import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { isItemMissingPrice } from "../utils/boqHelpers";
 import MeasurementGrid from "./MeasurementGrid";
-import LineItemCostSnapshotPanel from "./LineItemCostSnapshotPanel";
 import ChapterSpecBulkEditor from "./ChapterSpecBulkEditor";
+import LineItemSidePanel from "./LineItemSidePanel";
+import DocumentReviewCommentsPanel from "./DocumentReviewCommentsPanel";
 import { IconPlus, IconPencil, IconRuler, IconTrash } from "./icons";
 import MoneyInput from "./MoneyInput";
 import { boqProvenanceBadge } from "../utils/boqProvenance";
@@ -27,7 +28,13 @@ export type BoqLineMutations = {
   ) => void | Promise<unknown>;
   updateItem: (
     id: string,
-    data: Partial<{ description: string; technicalSpecification: string | null; quantity: number | null; compositionId: string | null }>,
+    data: Partial<{
+      description: string;
+      technicalSpecification: string | null;
+      quantity: number | null;
+      unitPrice: number | null;
+      compositionId: string | null;
+    }>,
   ) => void | Promise<unknown>;
   deleteItem: (id: string) => void | Promise<unknown>;
 };
@@ -40,6 +47,7 @@ export const defaultBoqLineMutations: BoqLineMutations = {
     await boqApi.updateLineItem(id, {
       ...data,
       quantity: data.quantity === null ? undefined : data.quantity,
+      unitPrice: data.unitPrice === null ? undefined : data.unitPrice,
     });
   },
   deleteItem: async (id) => {
@@ -63,7 +71,7 @@ function money(value: number, currency = "") {
 // quebra dentro da sua própria coluna, nunca "empurrando" as colunas seguintes.
 export function BoqHeaderRow({ measurementOnly = false }: { measurementOnly?: boolean }) {
   if (measurementOnly) {
-    return <colgroup><col className="w-16" /><col /><col className="w-14" /><col className="w-28" /><col className="w-24" /></colgroup>;
+    return <colgroup><col className="w-16" /><col /><col className="w-14" /><col className="w-28" /><col className="w-20" /><col className="w-28" /></colgroup>;
   }
   return (
     <colgroup>
@@ -85,7 +93,8 @@ export function BoqTableHead({ readOnly = false, measurementOnly = false }: { re
         <th className="py-2 px-2 font-medium">Item</th>
         <th className="font-medium">Descrição</th>
         <th className="hidden font-medium sm:table-cell">Un</th>
-        <th className="text-right font-medium">Quant.</th>
+        <th className="text-right font-medium">Quantidade</th>
+        {measurementOnly && <th className="hidden text-right font-medium sm:table-cell">Origem</th>}
         {!measurementOnly && <th className="hidden text-right font-medium sm:table-cell">P. Unit.</th>}
         {!measurementOnly && <th className="text-right font-medium">Total</th>}
         <th className="text-right font-medium pr-2">{readOnly ? "" : "Acções"}</th>
@@ -196,6 +205,9 @@ export default function LineItemRow({
   hasPlantRooms = false,
   allowLivePersistence = true,
   mutations = defaultBoqLineMutations,
+  activeEditId = null,
+  onRequestEdit,
+  documentId = null,
 }: {
   node: LineItemNode;
   depth: number;
@@ -207,23 +219,140 @@ export default function LineItemRow({
   hasPlantRooms?: boolean;
   allowLivePersistence?: boolean;
   mutations?: BoqLineMutations;
+  /** Only one line may be in edit mode at a time (lifted state). */
+  activeEditId?: string | null;
+  onRequestEdit?: (id: string | null, dirty: boolean) => Promise<boolean> | boolean;
+  documentId?: string | null;
 }) {
   const { confirm, dialog } = useConfirmDialog();
   const [showAdd, setShowAdd] = useState(false);
   const [showMeasurements, setShowMeasurements] = useState(false);
-  const [showSnapshot, setShowSnapshot] = useState(false);
   const [showChapterSpecs, setShowChapterSpecs] = useState(false);
-  const [editingDesc, setEditingDesc] = useState(false);
-  const [editingSpec, setEditingSpec] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [panel, setPanel] = useState<"spec" | "apu" | "comments" | null>(null);
   const [descDraft, setDescDraft] = useState(node.description);
+  const [qtyDraft, setQtyDraft] = useState(node.quantity != null ? String(node.quantity) : "");
+  const [unitPriceDraft, setUnitPriceDraft] = useState(
+    node.sellingUnitPrice != null ? String(node.sellingUnitPrice) : node.unitPrice != null ? String(node.unitPrice) : "",
+  );
   const [specDraft, setSpecDraft] = useState(node.technicalSpecification ?? "");
-  const [savingDesc, setSavingDesc] = useState(false);
-  const [savingSpec, setSavingSpec] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [linkingComposition, setLinkingComposition] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   const canEdit = !readOnly;
-  const [editingQty, setEditingQty] = useState(false);
-  const [qtyDraft, setQtyDraft] = useState(node.quantity != null ? String(node.quantity) : "");
+  const isEditing = activeEditId === node.id;
+  const isChapter = node.kind === "capitulo";
+  const isGroup = node.kind === "grupo";
+  const isNote = node.kind === "nota";
+  const missingPrice = !measurementOnly && isItemMissingPrice(node);
+  const provenance = boqProvenanceBadge(node.origin, node.quantitySource);
+  const hasSpec = Boolean(node.technicalSpecification?.trim());
+
+  const dirty =
+    isEditing &&
+    (descDraft.trim() !== node.description ||
+      (node.kind === "item" && (qtyDraft === "" ? null : Number(qtyDraft)) !== node.quantity) ||
+      (!measurementOnly && node.kind === "item" && !node.compositionId && unitPriceDraft !== String(node.unitPrice ?? "")));
+
+  useEffect(() => {
+    if (!isEditing) {
+      setDescDraft(node.description);
+      setQtyDraft(node.quantity != null ? String(node.quantity) : "");
+      setUnitPriceDraft(node.sellingUnitPrice != null ? String(node.sellingUnitPrice) : node.unitPrice != null ? String(node.unitPrice) : "");
+    }
+  }, [node.description, node.quantity, node.unitPrice, node.sellingUnitPrice, isEditing]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    function onDoc(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [menuOpen]);
+
+  const editHistoryRef = useRef<{ desc: string[]; qty: string[]; idx: number }>({
+    desc: [],
+    qty: [],
+    idx: -1,
+  });
+
+  useEffect(() => {
+    if (!isEditing) {
+      editHistoryRef.current = { desc: [], qty: [], idx: -1 };
+      return;
+    }
+    if (editHistoryRef.current.idx < 0) {
+      editHistoryRef.current = {
+        desc: [node.description],
+        qty: [node.quantity != null ? String(node.quantity) : ""],
+        idx: 0,
+      };
+    }
+    function onKey(e: KeyboardEvent) {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "z") return;
+      const hist = editHistoryRef.current;
+      e.preventDefault();
+      if (e.shiftKey) {
+        if (hist.idx >= hist.desc.length - 1) return;
+        hist.idx += 1;
+      } else {
+        if (hist.idx <= 0) return;
+        hist.idx -= 1;
+      }
+      setDescDraft(hist.desc[hist.idx] ?? "");
+      setQtyDraft(hist.qty[hist.idx] ?? "");
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [isEditing, node.description, node.quantity]);
+
+  function pushEditHistory(nextDesc: string, nextQty: string) {
+    const hist = editHistoryRef.current;
+    if (hist.desc[hist.idx] === nextDesc && hist.qty[hist.idx] === nextQty) return;
+    hist.desc = hist.desc.slice(0, hist.idx + 1);
+    hist.qty = hist.qty.slice(0, hist.idx + 1);
+    hist.desc.push(nextDesc);
+    hist.qty.push(nextQty);
+    hist.idx = hist.desc.length - 1;
+  }
+
+  async function beginEdit() {
+    if (!canEdit || node.kind === "nota") return;
+    if (onRequestEdit) {
+      const ok = await onRequestEdit(node.id, dirty);
+      if (!ok) return;
+    }
+    setDescDraft(node.description);
+    setQtyDraft(node.quantity != null ? String(node.quantity) : "");
+    setUnitPriceDraft(node.unitPrice != null ? String(node.unitPrice) : "");
+  }
+
+  async function cancelEdit() {
+    if (onRequestEdit) await onRequestEdit(null, false);
+    setDescDraft(node.description);
+    setQtyDraft(node.quantity != null ? String(node.quantity) : "");
+  }
+
+  async function saveEdit() {
+    setSaving(true);
+    try {
+      const payload: Parameters<BoqLineMutations["updateItem"]>[1] = { description: descDraft.trim() };
+      if (node.kind === "item") {
+        const nextQty = qtyDraft === "" ? null : Number(qtyDraft);
+        payload.quantity = Number.isFinite(nextQty as number) ? nextQty : null;
+      }
+      if (!measurementOnly && node.kind === "item" && !node.compositionId && unitPriceDraft !== "") {
+        payload.unitPrice = Number(unitPriceDraft);
+      }
+      await mutations.updateItem(node.id, payload);
+      if (onRequestEdit) await onRequestEdit(null, false);
+      onChange();
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function handleLinkComposition(compositionId: string) {
     if (!compositionId) return;
@@ -236,50 +365,10 @@ export default function LineItemRow({
     }
   }
 
-  async function handleSaveDescription() {
-    if (descDraft.trim() === node.description) {
-      setEditingDesc(false);
-      return;
-    }
-    setSavingDesc(true);
-    try {
-      await mutations.updateItem(node.id, { description: descDraft.trim() });
-      setEditingDesc(false);
-      onChange();
-    } finally {
-      setSavingDesc(false);
-    }
-  }
-
   async function handleSaveSpecification() {
-    const next = specDraft.trim();
-    const current = node.technicalSpecification?.trim() ?? "";
-    if (next === current) {
-      setEditingSpec(false);
-      return;
-    }
-    setSavingSpec(true);
-    try {
-      await mutations.updateItem(node.id, { technicalSpecification: next || null });
-      setEditingSpec(false);
-      onChange();
-    } finally {
-      setSavingSpec(false);
-    }
-  }
-
-  function startEditDescription() {
-    if (!canEdit) return;
-    setDescDraft(node.description);
-    setEditingDesc(true);
-    setEditingSpec(false);
-  }
-
-  function startEditSpecification() {
-    if (!canEdit || node.kind !== "item") return;
-    setSpecDraft(node.technicalSpecification ?? "");
-    setEditingSpec(true);
-    setEditingDesc(false);
+    await mutations.updateItem(node.id, { technicalSpecification: specDraft.trim() || null });
+    setPanel(null);
+    onChange();
   }
 
   async function handleDelete() {
@@ -295,274 +384,244 @@ export default function LineItemRow({
     onChange();
   }
 
-  const isChapter = node.kind === "capitulo";
-  const isGroup = node.kind === "grupo";
-  const isNote = node.kind === "nota";
-  const missingPrice = !measurementOnly && isItemMissingPrice(node);
-
   const rowBg = missingPrice
     ? "bg-amber-50 ring-1 ring-inset ring-amber-300"
     : isChapter
       ? "bg-brand-50/80 font-semibold text-brand-950"
       : isGroup
         ? "font-medium text-gray-800"
-        : "";
+        : isEditing
+          ? "bg-sky-50/80 ring-1 ring-inset ring-sky-200"
+          : "";
+
+  const colSpan = measurementOnly ? 6 : 7;
 
   return (
     <Fragment>
       <tr id={node.kind === "item" ? `line-item-${node.id}` : undefined} className={`${rowBg} table-row text-sm group scroll-mt-24`}>
-        <td className={`py-1.5 px-2 text-xs align-top ${isChapter ? "text-brand-700 font-bold" : missingPrice ? "text-amber-800 font-bold" : "text-gray-400"}`}>
-          <span className="inline-flex flex-col gap-0.5">
-            <span>{node.code}</span>
-            {missingPrice && (
-              <span className="rounded bg-amber-200 px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-950">
-                Sem preço
-              </span>
-            )}
-          </span>
+        <td className={`py-2 px-2 text-xs align-top ${isChapter ? "text-brand-700 font-bold" : missingPrice ? "text-amber-800 font-bold" : "text-gray-400"}`}>
+          {node.code}
         </td>
         <td className={`break-words align-top ${isNote ? "italic text-gray-400 text-xs" : "text-gray-800"}`} style={{ paddingLeft: 8 + depth * 12 }}>
-          {!readOnly && editingDesc ? (
-            <div className="space-y-1">
-              <textarea value={descDraft} onChange={(e) => setDescDraft(e.target.value)} rows={isNote ? 2 : 3} className="input input-sm w-full text-sm" />
-              <div className="flex gap-1">
-                <button type="button" onClick={handleSaveDescription} disabled={savingDesc} className="btn btn-primary btn-sm">{savingDesc ? "..." : "Guardar"}</button>
-                <button type="button" onClick={() => { setEditingDesc(false); setDescDraft(node.description); }} className="btn btn-ghost btn-sm">Cancelar</button>
-              </div>
-            </div>
+          {isEditing ? (
+            <textarea
+              value={descDraft}
+              onChange={(e) => {
+                setDescDraft(e.target.value);
+                pushEditHistory(e.target.value, qtyDraft);
+              }}
+              rows={2}
+              className="input input-sm w-full text-sm"
+            />
           ) : (
-            <>
-              <div className="flex items-start gap-1.5">
-                <span
-                  className={canEdit ? "cursor-pointer hover:text-brand-800 flex-1 min-w-0" : "flex-1 min-w-0"}
-                  onClick={startEditDescription}
-                  title={canEdit ? "Clique para editar" : undefined}
+            <div className="flex items-start gap-1.5">
+              <span className="min-w-0 flex-1">{node.description}</span>
+              {node.kind === "item" && hasSpec && (
+                <button
+                  type="button"
+                  className="shrink-0 rounded px-1 text-[10px] font-bold uppercase tracking-wide text-brand-700 hover:bg-brand-50"
+                  title="Ver especificação"
+                  onClick={() => { setSpecDraft(node.technicalSpecification ?? ""); setPanel("spec"); }}
                 >
-                  {node.description}
+                  ESP
+                </button>
+              )}
+              {missingPrice && (
+                <span className="shrink-0 rounded bg-amber-200 px-1 py-0.5 text-[9px] font-bold uppercase text-amber-950" title="Sem preço / APU">
+                  !
                 </span>
-                {canEdit && (
-                  <button type="button" onClick={startEditDescription} className="icon-btn shrink-0 opacity-0 group-hover:opacity-100 pointer-coarse:opacity-100" title="Editar descrição">
-                    <IconPencil className="w-3.5 h-3.5" />
-                  </button>
-                )}
-              </div>
-              {node.kind === "item" && !editingSpec && (
-                node.technicalSpecification ? (
-                  <div className="mt-1 text-[11px] leading-relaxed text-slate-500 border-l-2 border-brand-200 pl-2">
-                    <div className="flex items-start gap-1">
-                      <p className="flex-1 min-w-0">
-                        <span className="font-semibold text-brand-700">Especificação: </span>
-                        {node.technicalSpecification}
-                      </p>
-                      {canEdit && (
-                        <button type="button" onClick={startEditSpecification} className="icon-btn shrink-0 !h-6 !w-6" title="Editar especificação">
-                          <IconPencil className="w-3 h-3" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ) : canEdit ? (
-                  <button type="button" onClick={startEditSpecification} className="mt-1 text-[11px] font-medium text-brand-700 hover:text-brand-900">
-                    + Adicionar especificação técnica
-                  </button>
-                ) : null
               )}
-              {node.kind === "item" && missingPrice && canEdit && !measurementOnly && (
-                <div className="mt-2 rounded-md border border-amber-300 bg-amber-100/60 p-2">
-                  <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-amber-900">
-                    Ligar composição do catálogo
-                  </label>
-                  <select
-                    defaultValue=""
-                    disabled={linkingComposition}
-                    onChange={(e) => {
-                      const id = e.target.value;
-                      if (id) void handleLinkComposition(id);
-                    }}
-                    className="input input-sm w-full max-w-md text-xs"
-                  >
-                    <option value="">Escolher composição…</option>
-                    {compositions.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name} ({money(c.unitCost ?? 0)}/{c.outputUnit})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-              {node.kind === "item" && editingSpec && (
-                <div className="mt-1 space-y-1 border-l-2 border-brand-200 pl-2">
-                  <label className="text-[10px] font-semibold uppercase tracking-wide text-brand-700">Especificação técnica</label>
-                  <textarea value={specDraft} onChange={(e) => setSpecDraft(e.target.value)} rows={3} className="input input-sm w-full text-xs" placeholder="Marca, norma, acabamento, cor, dimensões do equipamento..." />
-                  <div className="flex gap-1">
-                    <button type="button" onClick={handleSaveSpecification} disabled={savingSpec} className="btn btn-primary btn-sm">{savingSpec ? "..." : "Guardar"}</button>
-                    <button type="button" onClick={() => { setEditingSpec(false); setSpecDraft(node.technicalSpecification ?? ""); }} className="btn btn-ghost btn-sm">Cancelar</button>
-                  </div>
-                </div>
-              )}
-            </>
+            </div>
           )}
         </td>
         <td className="hidden align-top text-xs text-gray-400 whitespace-nowrap sm:table-cell">{node.kind === "item" ? node.unit : ""}</td>
         <td className="align-top text-right text-gray-600 tabular-nums whitespace-nowrap">
           {node.kind === "item" ? (
-            canEdit && editingQty ? (
+            isEditing ? (
               <input
-                className="input input-sm w-20 text-right"
+                className="input input-sm w-24 text-right"
                 type="number"
                 min="0"
-                step="0.01"
+                step="any"
                 value={qtyDraft}
-                autoFocus
-                onChange={(e) => setQtyDraft(e.target.value)}
-                onBlur={() => {
-                  const next = qtyDraft === "" ? null : Number(qtyDraft);
-                  setEditingQty(false);
-                  if (next === node.quantity || (next == null && node.quantity == null)) return;
-                  void Promise.resolve(mutations.updateItem(node.id, { quantity: Number.isFinite(next as number) ? next : null })).then(() => onChange());
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                  if (e.key === "Escape") { setEditingQty(false); setQtyDraft(node.quantity != null ? String(node.quantity) : ""); }
+                onChange={(e) => {
+                  setQtyDraft(e.target.value);
+                  pushEditHistory(descDraft, e.target.value);
                 }}
               />
             ) : (
-              <span className="inline-flex flex-col items-end gap-0.5">
-                <button type="button" className={canEdit ? "tabular-nums hover:text-brand-800" : "tabular-nums"} onClick={() => { if (!canEdit) return; setQtyDraft(node.quantity != null ? String(node.quantity) : ""); setEditingQty(true); }}>
-                  {node.quantity ?? "—"}
-                </button>
-                {(() => {
-                  const badge = boqProvenanceBadge(node.origin, node.quantitySource);
-                  return badge ? (
-                    <span className="rounded bg-slate-100 px-1 py-px text-[9px] font-semibold uppercase tracking-wide text-slate-600" title={badge.title}>
-                      {badge.label}
-                    </span>
-                  ) : null;
-                })()}
-              </span>
+              <span className="tabular-nums">{node.quantity ?? "—"}</span>
             )
           ) : null}
         </td>
+        {measurementOnly && (
+          <td className="hidden align-top text-right sm:table-cell">
+            {node.kind === "item" && provenance ? (
+              <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600" title={provenance.title}>
+                {provenance.label}
+              </span>
+            ) : null}
+          </td>
+        )}
         {!measurementOnly && (
           <td className="hidden align-top text-right tabular-nums whitespace-nowrap sm:table-cell">
             {node.kind === "item" ? (
-              missingPrice ? (
-                <span className="text-xs font-semibold text-amber-700">— sem preço</span>
+              isEditing && !node.compositionId ? (
+                <MoneyInput className="input input-sm w-28 text-right" value={unitPriceDraft} onValueChange={setUnitPriceDraft} />
+              ) : missingPrice ? (
+                <button type="button" className="text-xs font-semibold text-amber-700" onClick={() => setPanel("apu")} title="Associar APU">
+                  —
+                </button>
               ) : (
-                <span className="text-gray-600">{money(node.sellingUnitPrice ?? node.unitPrice ?? 0)}</span>
+                <button
+                  type="button"
+                  className="text-gray-600 hover:text-brand-800 hover:underline"
+                  title="Ver APU"
+                  onClick={() => setPanel("apu")}
+                >
+                  {money(node.sellingUnitPrice ?? node.unitPrice ?? 0)}
+                </button>
               )
             ) : (
               ""
             )}
           </td>
         )}
-        {!measurementOnly && <td className={`align-top text-right tabular-nums whitespace-nowrap ${isChapter ? "font-bold" : "font-medium"} ${isNote ? "text-transparent" : missingPrice ? "text-amber-700" : "text-gray-900"}`}>
-          {isNote ? "" : missingPrice && node.kind === "item" ? (
-            <span className="text-xs font-semibold">—</span>
-          ) : (
-            money(node.sellingTotalPrice ?? node.totalPrice)
-          )}
-        </td>}
+        {!measurementOnly && (
+          <td className={`align-top text-right tabular-nums whitespace-nowrap ${isChapter ? "font-bold" : "font-medium"} ${isNote ? "text-transparent" : missingPrice ? "text-amber-700" : "text-gray-900"}`}>
+            {isNote ? "" : missingPrice && node.kind === "item" ? <span className="text-xs font-semibold">—</span> : money(node.sellingTotalPrice ?? node.totalPrice)}
+          </td>
+        )}
         <td className="align-top text-right pr-2 whitespace-nowrap">
-          <span className="inline-flex gap-1">
-            {!readOnly && allowLivePersistence && node.kind === "item" && (
-              <button
-                onClick={() => setShowMeasurements((s) => !s)}
-                className={`icon-btn ${showMeasurements ? "icon-btn-active opacity-100" : ""}`}
-                title="Medições dimensionais (Nº × Comp. × Larg. × Alt.)"
-              >
-                <IconRuler className="w-4 h-4" />
+          {isEditing ? (
+            <span className="inline-flex gap-1">
+              <button type="button" className="btn btn-primary btn-sm" disabled={saving} onClick={() => void saveEdit()}>
+                {saving ? "…" : "Guardar"}
               </button>
-            )}
-            {node.kind === "item" && node.compositionId && (
-              <button
-                onClick={() => { setShowSnapshot((s) => !s); setShowMeasurements(false); }}
-                className={`icon-btn ${showSnapshot ? "icon-btn-active opacity-100" : ""}`}
-                title="Snapshot APU — custo unitário e fontes de preço capturados"
-              >
-                <span className="text-[9px] font-bold tracking-wide">APU</span>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => void cancelEdit()}>
+                Cancelar
               </button>
-            )}
-            {!readOnly && allowLivePersistence && isChapter && !measurementOnly && (
-              <button
-                onClick={() => setShowChapterSpecs(true)}
-                className="icon-btn"
-                title="Editar especificações de todos os itens deste capítulo"
-              >
-                <IconPencil className="w-4 h-4" />
-              </button>
-            )}
-            {!readOnly && (isChapter || isGroup) && (
-              <button onClick={() => setShowAdd((s) => !s)} className="icon-btn" title="Adicionar sub-item">
-                <IconPlus className="w-4 h-4" />
-              </button>
-            )}
-            {!readOnly && <button onClick={handleDelete} className="icon-btn-danger" title="Eliminar">
-              <IconTrash className="w-4 h-4" />
-            </button>}
-          </span>
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1">
+              {canEdit && node.kind !== "nota" && (
+                <button type="button" className="btn btn-secondary btn-sm" onClick={() => void beginEdit()}>
+                  <IconPencil className="h-3.5 w-3.5" /> Editar
+                </button>
+              )}
+              <div className="relative" ref={menuRef}>
+                <button type="button" className="icon-btn" title="Mais acções" onClick={() => setMenuOpen((v) => !v)}>
+                  ⋯
+                </button>
+                {menuOpen && (
+                  <div className="absolute right-0 z-20 mt-1 min-w-[11rem] rounded-lg border border-slate-200 bg-white py-1 text-left shadow-lg">
+                    {node.kind === "item" && (
+                      <button type="button" className="block w-full px-3 py-2 text-left text-xs font-medium text-slate-700 hover:bg-slate-50" onClick={() => { setMenuOpen(false); setSpecDraft(node.technicalSpecification ?? ""); setPanel("spec"); }}>
+                        Especificação
+                      </button>
+                    )}
+                    {!measurementOnly && node.kind === "item" && (
+                      <button type="button" className="block w-full px-3 py-2 text-left text-xs font-medium text-slate-700 hover:bg-slate-50" onClick={() => { setMenuOpen(false); setPanel("apu"); }}>
+                        {node.compositionId ? "Ver APU" : "Associar APU"}
+                      </button>
+                    )}
+                    {canEdit && allowLivePersistence && node.kind === "item" && (
+                      <button type="button" className="block w-full px-3 py-2 text-left text-xs font-medium text-slate-700 hover:bg-slate-50" onClick={() => { setMenuOpen(false); setShowMeasurements((s) => !s); }}>
+                        <span className="inline-flex items-center gap-1"><IconRuler className="h-3.5 w-3.5" /> Memória de cálculo</span>
+                      </button>
+                    )}
+                    {canEdit && allowLivePersistence && isChapter && !measurementOnly && (
+                      <button type="button" className="block w-full px-3 py-2 text-left text-xs font-medium text-slate-700 hover:bg-slate-50" onClick={() => { setMenuOpen(false); setShowChapterSpecs(true); }}>
+                        Specs do capítulo
+                      </button>
+                    )}
+                    {canEdit && (isChapter || isGroup) && (
+                      <button type="button" className="block w-full px-3 py-2 text-left text-xs font-medium text-slate-700 hover:bg-slate-50" onClick={() => { setMenuOpen(false); setShowAdd(true); }}>
+                        <span className="inline-flex items-center gap-1"><IconPlus className="h-3.5 w-3.5" /> Adicionar</span>
+                      </button>
+                    )}
+                    <button type="button" className="block w-full px-3 py-2 text-left text-xs font-medium text-slate-700 hover:bg-slate-50" onClick={() => { setMenuOpen(false); setPanel("comments"); }}>
+                      Comentários
+                    </button>
+                    {canEdit && (
+                      <button type="button" className="block w-full px-3 py-2 text-left text-xs font-medium text-red-700 hover:bg-red-50" onClick={() => { setMenuOpen(false); void handleDelete(); }}>
+                        <span className="inline-flex items-center gap-1"><IconTrash className="h-3.5 w-3.5" /> Eliminar</span>
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            </span>
+          )}
         </td>
       </tr>
 
-      {showSnapshot && node.kind === "item" && (
+      {isEditing && !measurementOnly && node.kind === "item" && missingPrice && (
         <tr>
-          <td colSpan={measurementOnly ? 5 : 7} className="bg-white pb-2">
-            <div className="sm:ml-14">
-              <LineItemCostSnapshotPanel lineItemId={node.id} />
-            </div>
+          <td colSpan={colSpan} className="bg-amber-50/80 px-4 pb-3">
+            <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-amber-900">Ligar composição (APU)</label>
+            <select defaultValue="" disabled={linkingComposition} onChange={(e) => { if (e.target.value) void handleLinkComposition(e.target.value); }} className="input input-sm w-full max-w-md text-xs">
+              <option value="">Escolher composição…</option>
+              {compositions.map((c) => (
+                <option key={c.id} value={c.id}>{c.name} ({money(c.unitCost ?? 0)}/{c.outputUnit})</option>
+              ))}
+            </select>
           </td>
         </tr>
       )}
 
       {showMeasurements && node.kind === "item" && (
         <tr>
-          <td colSpan={measurementOnly ? 5 : 7} className="bg-white pb-2">
-            <MeasurementGrid
-              lineItemId={node.id}
-              itemCode={node.code}
-              itemUnit={node.unit}
-              compositionId={node.compositionId}
-              compositions={compositions}
-              hasPlantRooms={hasPlantRooms}
-              onQuantityChange={onChange}
-            />
+          <td colSpan={colSpan} className="bg-white pb-2">
+            <div className="sm:ml-14">
+              <MeasurementGrid
+                lineItemId={node.id}
+                itemCode={node.code}
+                itemUnit={node.unit}
+                compositionId={node.compositionId}
+                compositions={compositions}
+                hasPlantRooms={hasPlantRooms}
+                onQuantityChange={onChange}
+              />
+            </div>
           </td>
         </tr>
       )}
 
       {showAdd && (
         <tr>
-          <td colSpan={measurementOnly ? 5 : 7} className="pb-2" style={{ paddingLeft: depth * 16 }}>
+          <td colSpan={colSpan} className="pb-2" style={{ paddingLeft: depth * 16 }}>
             <AddChildForm
               sectionId={sectionId}
               parentId={node.id}
               compositions={compositions}
               measurementOnly={measurementOnly}
               mutations={mutations}
-              onDone={() => {
-                setShowAdd(false);
-                onChange();
-              }}
+              onDone={() => { setShowAdd(false); onChange(); }}
             />
           </td>
         </tr>
       )}
 
       {node.children.map((child) => (
-          <LineItemRow
-            key={child.id}
-            node={child}
-            depth={depth + 1}
-            sectionId={sectionId}
-            compositions={compositions}
-            onChange={onChange}
-            readOnly={readOnly}
-            measurementOnly={measurementOnly}
-            hasPlantRooms={hasPlantRooms}
-            allowLivePersistence={allowLivePersistence}
-            mutations={mutations}
-          />
+        <LineItemRow
+          key={child.id}
+          node={child}
+          depth={depth + 1}
+          sectionId={sectionId}
+          compositions={compositions}
+          onChange={onChange}
+          readOnly={readOnly}
+          measurementOnly={measurementOnly}
+          hasPlantRooms={hasPlantRooms}
+          allowLivePersistence={allowLivePersistence}
+          mutations={mutations}
+          activeEditId={activeEditId}
+          onRequestEdit={onRequestEdit}
+          documentId={documentId}
+        />
       ))}
+
       {showChapterSpecs && isChapter && (
         <ChapterSpecBulkEditor
           chapter={node}
@@ -571,6 +630,30 @@ export default function LineItemRow({
           onSaved={onChange}
         />
       )}
+
+      <LineItemSidePanel
+        open={panel != null}
+        kind={panel}
+        title={`${node.code ?? ""} ${node.description}`.trim()}
+        subtitle={node.unit ? `${node.unit}` : undefined}
+        specification={node.technicalSpecification}
+        lineItemId={node.id}
+        allowEditSpec={canEdit && panel === "spec"}
+        specDraft={specDraft}
+        onSpecDraftChange={setSpecDraft}
+        onSaveSpec={() => void handleSaveSpecification()}
+        onClose={() => setPanel(null)}
+      >
+        {panel === "comments" && documentId ? (
+          <DocumentReviewCommentsPanel
+            documentId={documentId}
+            targetType="line_item"
+            targetId={node.id}
+            targetLabel={`${node.code ?? ""} ${node.description}`.trim()}
+            canWrite
+          />
+        ) : null}
+      </LineItemSidePanel>
       {dialog}
     </Fragment>
   );

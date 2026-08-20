@@ -13,6 +13,9 @@ import ImportCompositionReviewWizard from "../components/ImportCompositionReview
 import ConfirmDialog from "../components/ConfirmDialog";
 import BudgetRevisionDiffModal from "../components/BudgetRevisionDiffModal";
 import ModalPortal from "../components/ModalPortal";
+import DocumentReviewModal from "../components/DocumentReviewModal";
+import DocumentReviewCommentsPanel from "../components/DocumentReviewCommentsPanel";
+import LineItemSidePanel from "../components/LineItemSidePanel";
 import Layout from "../components/Layout";
 import ProjectWorkspaceNav from "../components/ProjectWorkspaceNav";
 import PageSearch from "../components/PageSearch";
@@ -624,38 +627,34 @@ export default function BudgetDocumentPage() {
   }
 
   const [changingStatus, setChangingStatus] = useState(false);
+  const [reviewAction, setReviewAction] = useState<"submit" | "approve" | "return" | null>(null);
+  const [activeLineEditId, setActiveLineEditId] = useState<string | null>(null);
+  const [showDocumentComments, setShowDocumentComments] = useState(false);
 
-  async function handleStatusChange(status: "rascunho" | "submetido" | "aprovado") {
-    if (!documentId || !summary) return;
-    const isMed = summary.document.documentType === "medicao";
-    const prompts = {
-      aprovado: {
-        title: isMed ? "Aprovar medição?" : "Aprovar orçamento?",
-        message: directApproval
-          ? (isMed
-            ? "Confirma a medição. Fica protegida e pode criar o orçamento de seguida."
-            : "Confirma o orçamento. Passa a ser a referência do cronograma e dos autos.")
-          : (isMed
-            ? "A medição fica protegida e pode ser enviada para Orçamentos."
-            : "Passa a ser a referência do cronograma e dos autos."),
-        confirmLabel: "Aprovar",
-        danger: false,
-      },
-      submetido: { title: "Submeter para aprovação?", message: "O documento fica pendente de validação.", confirmLabel: "Submeter", danger: false },
-      rascunho: { title: "Devolver a rascunho?", message: "Volta a permitir edição livre.", confirmLabel: "Devolver", danger: true },
-    } as const;
-    const ok = await confirm(prompts[status]);
-    if (!ok) return;
-    let decisionNote: string | undefined;
-    if (status === "rascunho") {
-      decisionNote = window.prompt("Motivo da devolução:")?.trim();
-      if (!decisionNote) return;
+  async function handleRequestLineEdit(id: string | null, _dirty: boolean) {
+    if (id === activeLineEditId) return true;
+    if (activeLineEditId && id !== null && id !== activeLineEditId) {
+      const ok = await confirm({
+        title: "Trocar de linha?",
+        message: "Guarde ou cancele a linha que está a editar antes de abrir outra.",
+        confirmLabel: "Descartar e continuar",
+        danger: true,
+      });
+      if (!ok) return false;
     }
+    setActiveLineEditId(id);
+    return true;
+  }
+
+  async function handleStatusChange(status: "rascunho" | "submetido" | "aprovado", decisionNote?: string) {
+    if (!documentId || !summary) return;
+    if (status === "rascunho" && !decisionNote?.trim()) return;
     setChangingStatus(true);
     setError(null);
     setErrorBlockers([]);
     try {
       await boqApi.updateBudgetDocumentStatus(documentId, status, decisionNote);
+      setReviewAction(null);
       await reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao actualizar o estado do documento");
@@ -797,7 +796,8 @@ export default function BudgetDocumentPage() {
   const isClientView = user?.role === "visualizador";
   const isMeasurementDocument = document.documentType === "medicao";
   const isReadOnly = isClientView || document.status !== "rascunho";
-  const mapReadOnly = isReadOnly || !editSession.editing;
+  // Edição por linha no rascunho — a sessão «Lote» continua opcional para undo/redo em massa.
+  const mapReadOnly = isReadOnly;
   const compositionLinkedCount = sections.reduce((count, section) => count + countCompositionItems(section.items), 0);
   const technicalSpecCount = sections.reduce((count, section) => count + countTechnicalSpecs(section.items), 0);
   const hasBoqContent = documentHasBoqContent(sections);
@@ -836,43 +836,36 @@ export default function BudgetDocumentPage() {
       title={document.title}
       back={{ label: "Projecto", fallbackTo: projectBackTo }}
       subtitle={isMeasurementDocument
-        ? `Medição técnica · revisão ${document.revision ?? "-"} · ${document.status}`
-        : `Orçamento · revisão ${document.revision ?? "-"} · ${currency} · ${document.status}`}
+        ? `Medição · rev. ${document.revision ?? "-"} · ${document.status}`
+        : `Orçamento · rev. ${document.revision ?? "-"} · ${currency} · ${document.status}`}
       actions={
         <>
+          {!isClientView && (
+            <button type="button" onClick={() => setShowDocumentComments(true)} className="btn btn-ghost btn-sm">
+              Comentários
+            </button>
+          )}
           {!isClientView && document.status === "rascunho" && directApproval && user?.role === "admin_empresa" && (
-            <button onClick={() => handleStatusChange("aprovado")} disabled={changingStatus} className="btn btn-success btn-sm">
-              <IconChart className="w-3.5 h-3.5" /> Aprovar
+            <button onClick={() => setReviewAction("approve")} disabled={changingStatus} className="btn btn-success btn-sm">
+              Aprovar
             </button>
           )}
           {!isClientView && document.status === "rascunho" && !directApproval && (
-            <button onClick={() => handleStatusChange("submetido")} disabled={changingStatus || editSession.editing} className="btn btn-secondary btn-sm">
-              <IconChart className="w-3.5 h-3.5" /> Submeter
+            <button onClick={() => setReviewAction("submit")} disabled={changingStatus || editSession.editing} className="btn btn-primary btn-sm">
+              Submeter
             </button>
-          )}
-          {!isClientView && document.status === "submetido" && (
-            <>
-              <button onClick={() => handleStatusChange("rascunho")} disabled={changingStatus} className="btn btn-secondary btn-sm">Devolver</button>
-              {user?.role === "admin_empresa" && (
-                <button onClick={() => handleStatusChange("aprovado")} disabled={changingStatus} className="btn btn-success btn-sm">
-                  <IconChart className="w-3.5 h-3.5" /> Aprovar
-                </button>
-              )}
-            </>
           )}
           {!isClientView && document.status === "rascunho" && !editSession.editing && (
-            <button type="button" onClick={editSession.begin} className="btn btn-primary btn-sm">
-              <IconPencil className="w-3.5 h-3.5" /> Editar
+            <button type="button" onClick={editSession.begin} className="btn btn-ghost btn-sm" title="Sessão com undo/redo em lote">
+              <IconPencil className="w-3.5 h-3.5" /> Lote
             </button>
           )}
-          {!isReadOnly && !editSession.editing && (
+          {!isReadOnly && !editSession.editing && compositionLinkedCount > 0 && (
             <button
-              onClick={() => compositionLinkedCount > 0 ? setShowWizard(true) : handlePrepareAutomaticDocument()}
-              disabled={preparingAutomaticDocument}
-              className="btn btn-primary btn-sm"
+              onClick={() => setShowWizard(true)}
+              className="btn btn-secondary btn-sm"
             >
-              <IconRuler className="w-3.5 h-3.5" />
-              {compositionLinkedCount > 0 ? "Medições" : preparingAutomaticDocument ? "A preparar..." : "Medir"}
+              <IconRuler className="w-3.5 h-3.5" /> Memória
             </button>
           )}
           {isMeasurementDocument && !isClientView && document.status === "aprovado" && (
@@ -887,16 +880,10 @@ export default function BudgetDocumentPage() {
               onClick={() => handleDuplicateMeasurement()}
               disabled={duplicatingMeasurement}
               className="btn btn-secondary btn-sm"
-              title="Cria uma cópia editável desta medição para quantidades diferentes"
             >
               <IconRefresh className="w-3.5 h-3.5" />
               {duplicatingMeasurement ? "A duplicar..." : "Duplicar"}
             </button>
-          )}
-          {isMeasurementDocument && !isClientView && document.status !== "aprovado" && (
-            <span className="hidden text-xs text-slate-500 sm:inline">
-              {directApproval ? "Aprove a medição para criar o orçamento" : "Submeta e aprove a medição para criar o orçamento"}
-            </span>
           )}
           {!isMeasurementDocument && document.status !== "rascunho" && !isClientView && (
             <button
@@ -996,12 +983,28 @@ export default function BudgetDocumentPage() {
                 : "budget"
           }
         />
-        {!isClientView && document.status !== "rascunho" && (
-          <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm">
-            <span className="font-medium text-slate-700">
-              {document.status === "aprovado" ? "Documento aprovado e protegido" : "Em aprovação — edição bloqueada"}
+        {!isClientView && document.status === "submetido" && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-brand-200 bg-brand-50 px-4 py-3 text-sm">
+            <span className="font-medium text-brand-950">Aguarda a sua revisão</span>
+            <span className="flex flex-wrap gap-2">
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowDocumentComments(true)}>Comentários</button>
+              <button type="button" className="btn btn-secondary btn-sm" disabled={changingStatus} onClick={() => setReviewAction("return")}>Devolver</button>
+              {user?.role === "admin_empresa" && (
+                <button type="button" className="btn btn-success btn-sm" disabled={changingStatus} onClick={() => setReviewAction("approve")}>Aprovar</button>
+              )}
             </span>
-            <span className={`badge ${document.status === "aprovado" ? "badge-green" : "badge-brand"}`}>{document.status}</span>
+          </div>
+        )}
+        {!isClientView && document.status === "rascunho" && document.approvalNote && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+            <p className="font-semibold">Devolvido</p>
+            <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed">{document.approvalNote}</p>
+          </div>
+        )}
+        {!isClientView && document.status === "aprovado" && (
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm">
+            <span className="font-medium text-slate-700">Documento aprovado e protegido</span>
+            <span className="badge badge-green">aprovado</span>
           </div>
         )}
         {!isMeasurementDocument && document.status === "rascunho" && !isClientView && (
@@ -1353,6 +1356,9 @@ export default function BudgetDocumentPage() {
                           hasPlantRooms={architectureRooms.length > 0}
                           allowLivePersistence={!editSession.editing}
                           mutations={editSession.editing ? editSession.mutations : undefined}
+                          activeEditId={editSession.editing ? null : activeLineEditId}
+                          onRequestEdit={editSession.editing ? undefined : handleRequestLineEdit}
+                          documentId={documentId}
                         />
                       ))}
                     </tbody>
@@ -1617,6 +1623,32 @@ export default function BudgetDocumentPage() {
           compositions={importResult!.createdCompositions!}
           onClose={() => setShowImportInsumosWizard(false)}
         />
+      )}
+
+      {reviewAction && (
+        <DocumentReviewModal
+          action={reviewAction}
+          documentLabel={isMeasurementDocument ? "medição" : "orçamento"}
+          busy={changingStatus}
+          onClose={() => setReviewAction(null)}
+          onConfirm={async (note) => {
+            if (reviewAction === "submit") await handleStatusChange("submetido", note || undefined);
+            else if (reviewAction === "approve") await handleStatusChange("aprovado", note || undefined);
+            else await handleStatusChange("rascunho", note);
+          }}
+        />
+      )}
+
+      {showDocumentComments && documentId && (
+        <LineItemSidePanel
+          open
+          kind="comments"
+          title={document.title}
+          subtitle={isMeasurementDocument ? "Medição" : "Orçamento"}
+          onClose={() => setShowDocumentComments(false)}
+        >
+          <DocumentReviewCommentsPanel documentId={documentId} targetType="document" canWrite={!isClientView} />
+        </LineItemSidePanel>
       )}
 
       {dialog}

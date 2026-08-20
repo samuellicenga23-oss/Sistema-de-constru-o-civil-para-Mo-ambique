@@ -2,11 +2,12 @@ const ORIGIN_LABELS: Record<string, string> = {
   planta: "Planta",
   plant: "Planta",
   composicao: "Comp.",
-  measurement: "Memória",
-  import: "Import.",
+  measurement: "Medido",
+  import: "Importado",
   bim: "BIM",
-  estimate: "Est.",
-  estimativa: "Est.",
+  estimate: "Estimado",
+  estimativa: "Estimado",
+  manual: "Manual",
 };
 
 export function boqProvenanceBadge(origin?: string | null, quantitySource?: string | null): { label: string; title: string } | null {

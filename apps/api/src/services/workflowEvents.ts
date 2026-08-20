@@ -82,8 +82,8 @@ export function workflowEventCopy(event: WorkflowEvent, title: string, reason?: 
   const catalog: Record<WorkflowEvent, WorkflowEventCopy> = {
     "document.submitted": {
       title: "Documento para aprovação",
-      body: `«${label}» foi submetido.`,
-      emailSubject: `SIGO — «${label}» pendente de aprovação`,
+      body: `«${label}» foi submetido.${reason?.trim() ? ` Observação: ${reason.trim()}` : ""}`,
+      emailSubject: `SIGO — «${label}» para aprovação`,
       ctaLabel: "Rever documento",
     },
     "document.approved": {
@@ -221,7 +221,13 @@ export function selectWorkflowRecipients(input: {
 export type WorkflowEventDeps = {
   listCompanyUsers: (companyId: string) => Promise<WorkflowCompanyUser[]>;
   listSuperAdmins: () => Promise<WorkflowCompanyUser[]>;
-  notify: (userIds: string[], title: string, body: string, link?: string) => Promise<void>;
+  notify: (
+    userIds: string[],
+    title: string,
+    body: string,
+    link?: string,
+    options?: { priority?: "normal" | "high" },
+  ) => Promise<void>;
   mail: (input: { to: string | string[]; subject: string; html: string }, logger?: WorkflowEventInput["logger"]) => Promise<boolean>;
   publicUrl: string;
   emailWorkflowEnabled?: (companyId: string) => Promise<boolean>;
@@ -296,7 +302,14 @@ export async function emitWorkflowEvent(input: WorkflowEventInput, deps: Workflo
     if (!recipients.length) return;
 
     const copy = workflowEventCopy(input.event, input.title, input.reason);
-    await deps.notify(recipients.map((user) => user.id), copy.title, copy.body, input.link);
+    const highPriority =
+      input.event === "document.submitted" ||
+      input.event === "certificate.submitted" ||
+      input.event === "requisition.submitted" ||
+      input.event === "payment_request.submitted";
+    await deps.notify(recipients.map((user) => user.id), copy.title, copy.body, input.link, {
+      priority: highPriority ? "high" : "normal",
+    });
 
     const emailOn = await (deps.emailWorkflowEnabled ?? (async () => true))(input.companyId);
     if (!emailOn) return;

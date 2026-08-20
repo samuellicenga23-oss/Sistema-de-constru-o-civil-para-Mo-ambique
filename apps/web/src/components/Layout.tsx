@@ -10,6 +10,7 @@ import OfflineBanner from "./OfflineBanner";
 import PlantProcessingCenter from "./PlantProcessingCenter";
 import ImportProcessingCenter from "./ImportProcessingCenter";
 import ReadyForReviewBanner from "./ReadyForReviewBanner";
+import PriorityNotificationModal from "./PriorityNotificationModal";
 import SubscriptionBanner from "./SubscriptionBanner";
 import { IconHome, IconFolder, IconTag, IconBuilding, IconLogout, IconSettings, IconRuler, IconMenu, IconClose, IconClipboard } from "./icons";
 import { LogoFull, LogoIcon } from "./Logo";
@@ -106,7 +107,7 @@ export default function Layout({
       ? [{ to: "/admin", label: t("platformPanel"), icon: IconSettings, section: "admin" as const }]
       : ([
           { to: "/painel", label: t("dashboard"), shortLabel: "Painel", icon: IconHome, exact: true, module: "dashboard" as const, section: "fases" as const },
-          { to: "/medicoes", label: t("measurements"), shortLabel: "Levantamentos", icon: IconRuler, module: "measurements" as const, permission: "medicoes.ver", section: "fases" as const },
+          { to: "/medicoes", label: t("measurements"), shortLabel: "Medições", icon: IconRuler, module: "measurements" as const, permission: "medicoes.ver", section: "fases" as const },
           { to: "/orcamentos", label: t("budgets"), shortLabel: "Orçamentos", icon: IconFolder, module: "budgets" as const, permission: "orcamentos.ver", section: "fases" as const },
           {
             to: "/gestao",
@@ -369,6 +370,7 @@ export default function Layout({
 
         <SubscriptionBanner />
         <ReadyForReviewBanner />
+        <PriorityNotificationModal />
         <OfflineBanner />
         <PlantProcessingCenter />
         <ImportProcessingCenter />

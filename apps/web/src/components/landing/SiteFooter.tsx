@@ -6,7 +6,7 @@ const columns = [
   {
     title: 'Plataforma',
     links: [
-      ['Levantamentos', '/#produto'], ['Orçamentos', '/#produto'], ['Gestão da obra', '/#plataforma'], ['Planos', '/#planos'],
+      ['Medições', '/#produto'], ['Orçamentos', '/#produto'], ['Gestão da obra', '/#plataforma'], ['Planos', '/#planos'],
     ],
   },
   {

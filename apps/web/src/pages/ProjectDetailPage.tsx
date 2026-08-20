@@ -327,7 +327,7 @@ export default function ProjectDetailPage() {
       ]
     : [
         { label: "Projecto", done: true },
-        { label: "Levantamento", done: project.measurementMode === "importar" || hasMeasuredBudget },
+        { label: "Medição", done: project.measurementMode === "importar" || hasMeasuredBudget },
         { label: "Enviar a orçamentos", done: budgetDocuments.length > 0 },
       ];
   const completedPrepSteps = measurementPrepSteps.filter((step) => step.done).length;
@@ -336,7 +336,7 @@ export default function ProjectDetailPage() {
   const backTo =
     fase === "gestao" ? "/gestao" : fase === "medicao" ? "/medicoes" : fase === "orcamento" ? "/orcamentos" : "/orcamentos";
   const backLabel =
-    fase === "gestao" ? "Gestão" : fase === "medicao" ? "Levantamentos" : fase === "orcamento" ? "Orçamentos" : "Obras";
+    fase === "gestao" ? "Gestão" : fase === "medicao" ? "Medições" : fase === "orcamento" ? "Orçamentos" : "Obras";
   const navMode = fase === "gestao" ? "site" : fase === "medicao" ? "measurement" : "budget";
   const faseQuery = faseQueryFor(fase === "visao" ? "orcamento" : fase);
 
@@ -377,7 +377,7 @@ export default function ProjectDetailPage() {
 
         {showControlBanner && <ProjectWorkflowBanner status={workflowStatus} projectId={projectId!} />}
 
-        {/* ——— Workspace Levantamentos ——— */}
+        {/* ——— Workspace Medi��es ——— */}
         {fase === "medicao" && (
           <>
             {prepIncomplete && (
@@ -411,7 +411,7 @@ export default function ProjectDetailPage() {
             )}
             <section className="card overflow-hidden">
               <SectionHeader
-                title="Levantamentos"
+                title="Medi��es"
                 actions={
                   <button
                     type="button"
@@ -420,7 +420,7 @@ export default function ProjectDetailPage() {
                     className="btn btn-primary btn-sm"
                   >
                     <IconPlus className="h-4 w-4" />
-                    {preparingMeasurements ? "A abrir..." : "Novo levantamento"}
+                    {preparingMeasurements ? "A abrir..." : "Nova medi��o"}
                   </button>
                 }
               />
@@ -446,9 +446,9 @@ export default function ProjectDetailPage() {
                 ))}
                 {measurementDocuments.length === 0 && (
                   <li className="px-5 py-10 text-center">
-                    <p className="text-sm text-slate-500">Sem levantamentos</p>
+                    <p className="text-sm text-slate-500">Sem Medi��es</p>
                     <button type="button" onClick={handlePrepareMeasurements} disabled={preparingMeasurements} className="btn btn-primary btn-sm mt-4">
-                      <IconPlus className="h-4 w-4" /> Novo levantamento
+                      <IconPlus className="h-4 w-4" /> Nova medi��o
                     </button>
                   </li>
                 )}
@@ -559,7 +559,7 @@ export default function ProjectDetailPage() {
               <section className="card overflow-hidden">
                 <div className="grid gap-px bg-slate-200 sm:grid-cols-3">
                   {[
-                    ["Levantamentos", measurementDocuments.length],
+                    ["Medi��es", measurementDocuments.length],
                     ["Orçamentos", budgetDocuments.length],
                     ["Plantas", plants.length],
                   ].map(([label, value]) => (
@@ -575,7 +575,7 @@ export default function ProjectDetailPage() {
             {showMedicao && (
               <section className="card">
                 <SectionHeader
-                  title="Levantamentos"
+                  title="Medi��es"
                   actions={
                     <Link to={`/projectos/${projectId}?fase=medicao`} className="btn btn-ghost btn-sm">
                       Abrir →
@@ -591,7 +591,7 @@ export default function ProjectDetailPage() {
                       </Link>
                     </li>
                   ))}
-                  {measurementDocuments.length === 0 && <li className="px-5 py-4 text-sm text-slate-400">Sem levantamentos</li>}
+                  {measurementDocuments.length === 0 && <li className="px-5 py-4 text-sm text-slate-400">Sem Medi��es</li>}
                 </ul>
               </section>
             )}

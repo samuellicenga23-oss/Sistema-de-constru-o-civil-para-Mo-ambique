@@ -127,6 +127,7 @@ describe("workflowEvents — emissão", () => {
       title: "Orçamento T3",
       link: "/documentos/doc-1",
       actor: { id: "admin-a", name: "Ana", email: "admin-a@sigo.test" },
+      reason: "Rever pilares do P1",
     }, runtime);
     expect(runtime.notified).toEqual([["admin-b"]]);
     expect(runtime.mailed).toHaveLength(1);
@@ -134,6 +135,26 @@ describe("workflowEvents — emissão", () => {
     expect(mail.to).toEqual(["admin-b@sigo.test"]);
     expect(mail.subject).toContain("Orçamento T3");
     expect(mail.html).toContain("https://sud30s.org/documentos/doc-1");
+    expect(workflowEventCopy("document.submitted", "Orçamento T3", "Rever pilares do P1").body).toContain("Rever pilares do P1");
+  });
+
+  it("submissão marca notificação com prioridade alta", async () => {
+    const priorities: Array<"normal" | "high" | undefined> = [];
+    const runtime = deps({
+      notify: async (ids, _t, _b, _l, options) => {
+        runtime.notified.push(ids);
+        priorities.push(options?.priority);
+      },
+    });
+    await emitWorkflowEvent({
+      event: "document.submitted",
+      companyId: "co-1",
+      entityId: "doc-1",
+      title: "Medição Rev. 02",
+      link: "/documentos/doc-1",
+      actor: { id: "orc", name: "Samuel", email: "orc@sigo.test" },
+    }, runtime);
+    expect(priorities).toEqual(["high"]);
   });
 
   it("devolução inclui o motivo e avisa o submissor", async () => {

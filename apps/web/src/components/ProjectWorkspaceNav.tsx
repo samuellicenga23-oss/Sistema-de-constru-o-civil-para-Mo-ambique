@@ -23,7 +23,7 @@ export function faseQueryFor(fase: ProjectWorkspaceFase): string {
 
 const CONTEXT_TABS: Array<{ fase: ProjectWorkspaceFase; label: string; to: (id: string) => string }> = [
   { fase: "visao", label: "Visão geral", to: (id) => `/projectos/${id}` },
-  { fase: "medicao", label: "Levantamentos", to: (id) => `/projectos/${id}?fase=medicao` },
+  { fase: "medicao", label: "Medições", to: (id) => `/projectos/${id}?fase=medicao` },
   { fase: "orcamento", label: "Orçamentos", to: (id) => `/projectos/${id}?fase=orcamento` },
   { fase: "gestao", label: "Gestão", to: (id) => `/projectos/${id}?fase=gestao` },
 ];
