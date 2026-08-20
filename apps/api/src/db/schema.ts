@@ -1777,6 +1777,22 @@ export const supplierComplianceDocuments = pgTable("supplier_compliance_document
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (table) => [index("supplier_compliance_supplier_idx").on(table.supplierId)]);
 
+/** Override de governação marketplace por empresa — não altera o `governance_status` global do fornecedor. */
+export const companyVendorGovernance = pgTable("company_vendor_governance", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+  supplierId: uuid("supplier_id").notNull().references(() => suppliers.id, { onDelete: "cascade" }),
+  governanceStatus: vendorGovernanceStatusEnum("governance_status").notNull().default("qualificado"),
+  blockedReason: text("blocked_reason"),
+  blockedAt: timestamp("blocked_at"),
+  blockedByUserId: uuid("blocked_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [
+  unique("company_vendor_governance_unique").on(table.companyId, table.supplierId),
+  index("company_vendor_governance_company_idx").on(table.companyId),
+]);
+
 // Produtos do catálogo nacional (ou criados pelo próprio fornecedor) que esta ficha marketplace
 // seleccionou para vender — sem isto, «Meus preços» não lista o catálogo inteiro.
 export const supplierCatalogItems = pgTable(

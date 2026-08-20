@@ -223,6 +223,18 @@ export default function ProjectFinancialPage() {
     finally { setSaving(false); }
   }
 
+  async function handleApplyClientDecision(variationId: string) {
+    setSaving(true); setError(null);
+    try {
+      await financialApi.applyClientDecision(variationId);
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível aplicar a decisão do cliente");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function handleDelete(entry: FinancialEntry) {
     const ok = await confirm({
       title: "Eliminar lançamento?",
@@ -387,6 +399,43 @@ export default function ProjectFinancialPage() {
         <section className="card overflow-hidden">
           <SectionHeader title="Contrato e conta-corrente" description={contract ? `${contract.contractNumber} · ${contract.clientName}` : undefined} actions={<button type="button" className="btn btn-secondary btn-sm" onClick={() => { setContractNumber(contract?.contractNumber ?? ""); setContractClient(contract?.clientName ?? project.client ?? ""); setContractAmount(contract?.originalAmount ?? ""); setShowContractForm(true); }}>{contract ? "Ver contrato" : "Criar contrato"}</button>} />
           {statement ? <div className="grid gap-px bg-slate-100 sm:grid-cols-2 lg:grid-cols-5"><div className="bg-white px-5 py-3 text-sm"><span className="text-xs text-slate-500">Valor revisto</span><strong className="mt-1 block">{fmt(statement.contract.revisedAmount, statement.currency)}</strong></div><div className="bg-white px-5 py-3 text-sm"><span className="text-xs text-slate-500">Facturado</span><strong className="mt-1 block">{fmt(statement.totals.invoiced, statement.currency)}</strong></div><div className="bg-white px-5 py-3 text-sm"><span className="text-xs text-slate-500">Notas de crédito</span><strong className="mt-1 block text-red-600">−{fmt(statement.totals.credited, statement.currency)}</strong></div><div className="bg-white px-5 py-3 text-sm"><span className="text-xs text-slate-500">Recebido</span><strong className="mt-1 block text-green-700">{fmt(statement.totals.received, statement.currency)}</strong></div><div className="bg-white px-5 py-3 text-sm"><span className="text-xs text-slate-500">Por receber</span><strong className="mt-1 block text-amber-700">{fmt(statement.totals.outstanding, statement.currency)}</strong></div></div> : <p className="px-5 py-4 text-sm text-slate-500">Sem contrato configurado.</p>}
+          {contract && contract.variations.length > 0 && (
+            <div className="divide-y divide-slate-100 border-t border-slate-100">
+              {contract.variations.map((variation) => {
+                const pendingApply =
+                  variation.status === "submetida" &&
+                  (variation.clientDecision === "aprovado" || variation.clientDecision === "rejeitado");
+                return (
+                  <div key={variation.id} className="flex flex-col gap-2 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <strong className="text-sm text-slate-900">{variation.title}</strong>
+                      <p className="mt-0.5 text-xs text-slate-500">
+                        {fmt(Number(variation.amount), contract.currency)} · estado {variation.status}
+                        {variation.clientDecision
+                          ? ` · portal: ${variation.clientDecision}`
+                          : variation.status === "submetida"
+                            ? " · à espera do cliente"
+                            : ""}
+                      </p>
+                      {variation.clientDecisionNote && (
+                        <p className="mt-1 text-xs text-slate-500">Nota do cliente: {variation.clientDecisionNote}</p>
+                      )}
+                    </div>
+                    {pendingApply && (
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm shrink-0"
+                        disabled={saving}
+                        onClick={() => void handleApplyClientDecision(variation.id)}
+                      >
+                        Aplicar decisão do portal
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </section>
         {showContractForm && <Modal title="Contrato da obra" subtitle="O valor original fica protegido após activação; alterações seguem como adendas." onClose={() => !saving && setShowContractForm(false)} maxWidth="max-w-2xl"><form onSubmit={handleSaveContract} className="space-y-4"><div className="grid gap-3 sm:grid-cols-2"><div><label className="label">Número do contrato</label><input required className="input" value={contractNumber} onChange={(e) => setContractNumber(e.target.value)} /></div><div><label className="label">Cliente</label><input required className="input" value={contractClient} onChange={(e) => setContractClient(e.target.value)} /></div><div><label className="label">Valor original ({project.currency})</label><MoneyInput required className="input" value={contractAmount} onValueChange={setContractAmount} /></div></div><div className="flex justify-end gap-2"><button type="button" className="btn btn-secondary" onClick={() => setShowContractForm(false)}>Cancelar</button><button disabled={saving} className="btn btn-primary">Guardar contrato</button></div></form></Modal>}
 

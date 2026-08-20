@@ -10,6 +10,7 @@ export type MarketplaceSupplier = Supplier & {
   offersMaterials?: boolean;
   offersLabour?: boolean;
   offersEquipment?: boolean;
+  companyGovernance?: boolean;
 };
 
 export type MarketplaceResponse =

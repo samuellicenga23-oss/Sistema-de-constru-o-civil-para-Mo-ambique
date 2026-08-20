@@ -77,7 +77,29 @@ export type ProjectInvoice = {
   receipts: Array<{ id: string; amount: string; receivedDate: string; reference: string | null; proofOriginalName: string | null; proofUrl: string | null }>;
   creditNotes: Array<{ id: string; creditNumber: string; issueDate: string; amount: string; reason: string; status: "rascunho" | "emitida" | "cancelada" }>;
 };
-export type ProjectContract = { id: string; projectId: string; contractNumber: string; clientName: string; originalAmount: string; advanceAmount: string; retentionRate: string; currency: string; status: "rascunho" | "activo" | "concluido" | "cancelado"; approvedVariations: number; revisedAmount: number; variations: Array<{ id: string; title: string; amount: string; status: string }> };
+export type ProjectContract = {
+  id: string;
+  projectId: string;
+  contractNumber: string;
+  clientName: string;
+  originalAmount: string;
+  advanceAmount: string;
+  retentionRate: string;
+  currency: string;
+  status: "rascunho" | "activo" | "concluido" | "cancelado";
+  approvedVariations: number;
+  revisedAmount: number;
+  variations: Array<{
+    id: string;
+    title: string;
+    amount: string;
+    status: string;
+    clientDecision?: string | null;
+    clientDecisionNote?: string | null;
+    clientDecidedAt?: string | null;
+    decisionNote?: string | null;
+  }>;
+};
 export type ClientStatement = { currency: string; contract: { originalAmount: number; approvedVariations: number; revisedAmount: number; advanceAmount: number; retentionRate: number }; totals: { invoiced: number; credited: number; received: number; outstanding: number } };
 
 export const financialApi = {
@@ -98,5 +120,7 @@ export const financialApi = {
   invoicePdfUrl: (id: string) => `/api/invoices/${id}/export.pdf`,
   getContract: (projectId: string) => request<ProjectContract | null>(`/projects/${projectId}/contract`),
   saveContract: (projectId: string, data: { contractNumber: string; clientName: string; originalAmount: number; advanceAmount?: number; retentionRate?: number }) => request<ProjectContract>(`/projects/${projectId}/contract`, { method: "PUT", body: JSON.stringify(data) }),
+  applyClientDecision: (variationId: string, data?: { decisionNote?: string }) =>
+    request(`/contract-variations/${variationId}/apply-client-decision`, { method: "POST", body: JSON.stringify(data ?? {}) }),
   clientStatement: (projectId: string) => request<ClientStatement>(`/projects/${projectId}/client-statement`),
 };

@@ -85,3 +85,46 @@ export async function recordPublicClientDecision(args: {
   });
   return toView(updated);
 }
+
+/** Backoffice: reflecte a decisão do portal no status interno (aprovada/rejeitada). Não toca no BOQ. */
+export async function applyClientDecisionInternally(args: {
+  variationId: string;
+  companyId: string;
+  actorUserId: string;
+  decisionNote?: string | null;
+}) {
+  const [variation] = await db.select().from(contractVariations).where(eq(contractVariations.id, args.variationId)).limit(1);
+  if (!variation) throw Object.assign(new Error("Adenda não encontrada"), { statusCode: 404 });
+  const [contract] = await db.select().from(projectContracts).where(eq(projectContracts.id, variation.contractId)).limit(1);
+  if (!contract) throw Object.assign(new Error("Adenda não encontrada"), { statusCode: 404 });
+  const [project] = await db.select().from(projects).where(and(eq(projects.id, contract.projectId), eq(projects.companyId, args.companyId))).limit(1);
+  if (!project || project.trashedAt) throw Object.assign(new Error("Adenda não encontrada"), { statusCode: 404 });
+  if (variation.status !== "submetida") {
+    throw Object.assign(new Error("Só adendas submetidas podem receber a decisão do cliente"), { statusCode: 409 });
+  }
+  if (variation.clientDecision !== "aprovado" && variation.clientDecision !== "rejeitado") {
+    throw Object.assign(new Error("Aguarde a decisão do cliente no portal"), { statusCode: 409 });
+  }
+  const nextStatus = variation.clientDecision === "aprovado" ? "aprovada" : "rejeitada";
+  const note = args.decisionNote?.trim() || variation.decisionNote || variation.clientDecisionNote;
+  const [updated] = await db
+    .update(contractVariations)
+    .set({
+      status: nextStatus,
+      approvedByUserId: nextStatus === "aprovada" ? args.actorUserId : variation.approvedByUserId,
+      decisionNote: note,
+    })
+    .where(eq(contractVariations.id, variation.id))
+    .returning();
+  await recordAuditEvent({
+    companyId: args.companyId,
+    projectId: project.id,
+    actorUserId: args.actorUserId,
+    entityType: "contract_variation",
+    entityId: updated.id,
+    action: `apply_client.${updated.clientDecision}`,
+    before: { status: variation.status },
+    after: { status: updated.status, clientDecision: updated.clientDecision },
+  });
+  return updated;
+}

@@ -28,6 +28,8 @@ import { assertProjectOwned } from "../services/accessControl.js";
 import { assertApprovedOrcamentoForSite } from "../services/siteGate.js";
 import { assertSupplierMarketplaceAccess } from "../services/subscriptionEntitlements.js";
 import { assertVendorNotBlocked } from "../services/vendorGovernance.js";
+import { assertMatrixApproval } from "../services/companyApproval.js";
+import { resolveEffectiveVendorGovernance } from "../services/companyVendorGovernance.js";
 import { notifySupplierAccount, notifyUsers } from "../services/notifications.js";
 import { recordAuditEvent } from "../services/auditTrail.js";
 import { emitWorkflowEvent } from "../services/workflowEvents.js";
@@ -323,9 +325,14 @@ export async function procurementWorkflowRoutes(app: FastifyInstance) {
     if (!row) return reply.code(404).send({ error: "Requisição não encontrada" });
     if (row.status !== "submetida") return reply.code(409).send({ error: "Só uma requisição submetida pode ser aprovada" });
     const user = request.currentUser!;
-    if (row.createdByUserId === user.id && user.role !== "admin_empresa" && user.role !== "super_admin") {
-      return reply.code(409).send({ error: "Quem criou a requisição não pode aprová-la" });
-    }
+    const decision = await assertMatrixApproval({
+      companyId,
+      entityType: "requisicao",
+      role: user.role,
+      permissions: user.permissions ?? [],
+      isSubmitter: (row.submittedByUserId ?? row.createdByUserId) === user.id,
+    });
+    if (!decision.ok) return reply.code(decision.status).send({ error: decision.error });
     const [updated] = await db.update(purchaseRequisitions).set({ status: "aprovada", approvedAt: new Date(), approvedByUserId: user.id, updatedAt: new Date() }).where(eq(purchaseRequisitions.id, id)).returning();
     await recordAuditEvent({ companyId, projectId: row.projectId, actorUserId: user.id, entityType: "purchase_requisition", entityId: id, action: "approved", before: { status: row.status }, after: { status: updated.status } });
     await emitWorkflowEvent({
@@ -390,9 +397,9 @@ export async function procurementWorkflowRoutes(app: FastifyInstance) {
     if (supplierRows.length !== supplierIds.length || supplierRows.some((supplier) => !supplier.supplierAccountId)) {
       return reply.code(409).send({ error: "Todas as RFQs formais devem ser enviadas a fornecedores reais com conta activa no Portal do Fornecedor" });
     }
-    const blocked = supplierRows.find((supplier) => supplier.governanceStatus === "bloqueado");
-    if (blocked) {
-      try { assertVendorNotBlocked(blocked.governanceStatus, blocked.blockedReason); } catch (cause) {
+    for (const supplier of supplierRows) {
+      const governance = await resolveEffectiveVendorGovernance(companyId, supplier);
+      try { assertVendorNotBlocked(governance.governanceStatus, governance.blockedReason); } catch (cause) {
         return reply.code(409).send({ error: cause instanceof Error ? cause.message : "Fornecedor bloqueado" });
       }
     }

@@ -6,6 +6,7 @@ import { requireCompanyUser } from "../auth/middleware.js";
 import { assertSupplierMarketplaceAccess } from "../services/subscriptionEntitlements.js";
 import { SIGO_PRICES_SUPPLIER_NAME } from "../services/sigoPrices.js";
 import { selectedResourceIds } from "../services/supplierOfferings.js";
+import { loadCompanyVendorGovernanceMap } from "../services/companyVendorGovernance.js";
 
 function companyIdOf(request: FastifyRequest): string {
   return request.currentUser!.companyId!;
@@ -65,15 +66,22 @@ export async function marketplaceRoutes(app: FastifyInstance) {
     const materialBySupplier = new Map(materialTotals.map((r) => [r.supplierId, r.total]));
     const labourBySupplier = new Map(labourTotals.map((r) => [r.supplierId, r.total]));
     const equipmentBySupplier = new Map(equipmentTotals.map((r) => [r.supplierId, r.total]));
+    const companyGovernance = await loadCompanyVendorGovernanceMap(companyId, supplierIds);
 
-    let suppliersOut = rows.map((r) => ({
-      ...r.supplier,
-      zoneName: r.zoneName,
-      materialCount: materialBySupplier.get(r.supplier.id) ?? 0,
-      labourCount: labourBySupplier.get(r.supplier.id) ?? 0,
-      equipmentCount: equipmentBySupplier.get(r.supplier.id) ?? 0,
-      matchedMaterials: [] as string[],
-    }));
+    let suppliersOut = rows.map((r) => {
+      const override = companyGovernance.get(r.supplier.id);
+      return {
+        ...r.supplier,
+        governanceStatus: override?.governanceStatus ?? r.supplier.governanceStatus,
+        blockedReason: override ? override.blockedReason : r.supplier.blockedReason,
+        companyGovernance: Boolean(override),
+        zoneName: r.zoneName,
+        materialCount: materialBySupplier.get(r.supplier.id) ?? 0,
+        labourCount: labourBySupplier.get(r.supplier.id) ?? 0,
+        equipmentCount: equipmentBySupplier.get(r.supplier.id) ?? 0,
+        matchedMaterials: [] as string[],
+      };
+    });
 
     let materialMatches: Awaited<ReturnType<typeof searchSuppliersByMaterial>> = [];
     if (needle) {

@@ -22,6 +22,7 @@ import {
 } from "../services/sigoPrices.js";
 import { syncSupplierPriceFeed } from "../services/supplierPriceFeed.js";
 import { assertSupplierMarketplaceAccess } from "../services/subscriptionEntitlements.js";
+import { upsertCompanyVendorGovernance } from "../services/companyVendorGovernance.js";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista"] as const;
 
@@ -89,8 +90,6 @@ export async function supplierRoutes(app: FastifyInstance) {
   app.patch("/api/suppliers/:id/governance", { preHandler: requireRole("admin_empresa") }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const companyId = companyIdOf(request);
-    const supplier = await assertSupplierOwned(id, companyId);
-    if (!supplier) return reply.code(404).send({ error: "Fornecedor não encontrado" });
     const parsed = z.object({
       governanceStatus: z.enum(["qualificado", "preferencial", "observacao", "bloqueado"]),
       blockedReason: z.string().trim().max(500).optional().nullable(),
@@ -99,13 +98,42 @@ export async function supplierRoutes(app: FastifyInstance) {
     if (parsed.data.governanceStatus === "bloqueado" && !parsed.data.blockedReason?.trim()) {
       return reply.code(400).send({ error: "Indique o motivo do bloqueio" });
     }
-    const [updated] = await db.update(suppliers).set({
-      governanceStatus: parsed.data.governanceStatus,
-      blockedReason: parsed.data.governanceStatus === "bloqueado" ? parsed.data.blockedReason!.trim() : null,
-      blockedAt: parsed.data.governanceStatus === "bloqueado" ? new Date() : null,
-      blockedByUserId: parsed.data.governanceStatus === "bloqueado" ? request.currentUser!.id : null,
-    }).where(eq(suppliers.id, id)).returning();
-    return updated;
+
+    const owned = await assertSupplierOwned(id, companyId);
+    if (owned) {
+      const [updated] = await db.update(suppliers).set({
+        governanceStatus: parsed.data.governanceStatus,
+        blockedReason: parsed.data.governanceStatus === "bloqueado" ? parsed.data.blockedReason!.trim() : null,
+        blockedAt: parsed.data.governanceStatus === "bloqueado" ? new Date() : null,
+        blockedByUserId: parsed.data.governanceStatus === "bloqueado" ? request.currentUser!.id : null,
+      }).where(eq(suppliers.id, id)).returning();
+      return updated;
+    }
+
+    const readable = await assertSupplierReadable(id, companyId);
+    if (!readable || readable.companyId !== null) return reply.code(404).send({ error: "Fornecedor não encontrado" });
+    const marketplaceBlocked = await assertSupplierMarketplaceAccess(companyId);
+    if (marketplaceBlocked) return reply.code(402).send(marketplaceBlocked);
+    try {
+      const override = await upsertCompanyVendorGovernance({
+        companyId,
+        supplierId: id,
+        governanceStatus: parsed.data.governanceStatus,
+        blockedReason: parsed.data.blockedReason?.trim() || null,
+        actorUserId: request.currentUser!.id,
+      });
+      return {
+        ...readable,
+        governanceStatus: override.governanceStatus,
+        blockedReason: override.blockedReason,
+        blockedAt: override.blockedAt,
+        blockedByUserId: override.blockedByUserId,
+        companyGovernance: true,
+      };
+    } catch (cause) {
+      const status = cause && typeof cause === "object" && "statusCode" in cause ? Number((cause as { statusCode: number }).statusCode) : 409;
+      return reply.code(status).send({ error: cause instanceof Error ? cause.message : "Não foi possível actualizar a governação" });
+    }
   });
 
   // ---------- Preços de materiais por fornecedor (e opcionalmente por zona) ----------

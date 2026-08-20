@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { budgetDocuments, companies, measurementCertificateFieldLines, measurementCertificateLines, measurementCertificates, users } from "../db/schema.js";
+import { budgetDocuments, measurementCertificateFieldLines, measurementCertificateLines, measurementCertificates } from "../db/schema.js";
 import { requireCompanyUser, requireRole } from "../auth/middleware.js";
 import { assertCertificateOwned, assertDocumentOwned, assertProjectOwned } from "../services/accessControl.js";
 import {
@@ -17,7 +17,7 @@ import { createDraftInvoiceForCertificate } from "../services/invoicing.js";
 import { recordAuditEvent } from "../services/auditTrail.js";
 import { emitWorkflowEvent } from "../services/workflowEvents.js";
 import { buildCertificateFieldMeasurementPdf } from "../services/certificateFieldMeasurementPdf.js";
-import { canApproveWithMatrix, DEFAULT_APPROVAL_MATRIX } from "../services/approvalMatrix.js";
+import { assertMatrixApproval } from "../services/companyApproval.js";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista", "engenheiro_fiscal"] as const;
 const createSchema = z.object({
@@ -141,22 +141,14 @@ export async function measurementCertificateRoutes(app: FastifyInstance) {
     };
     if (parsed.data.status === "aprovado") {
       const companyId = request.currentUser!.companyId!;
-      const [company] = await db.select({ approvalMatrix: companies.approvalMatrix }).from(companies).where(eq(companies.id, companyId)).limit(1);
-      const admins = await db
-        .select({ id: users.id })
-        .from(users)
-        .where(and(eq(users.companyId, companyId), eq(users.role, "admin_empresa"), eq(users.isActive, true)));
-      const decision = canApproveWithMatrix({
+      const decision = await assertMatrixApproval({
+        companyId,
         entityType: "auto",
         role: request.currentUser!.role,
         permissions: request.currentUser!.permissions ?? [],
         isSubmitter: certificate.submittedByUserId === request.currentUser!.id,
-        adminCount: admins.length,
-        rules: (company?.approvalMatrix?.length ? company.approvalMatrix : DEFAULT_APPROVAL_MATRIX),
       });
-      if (!decision.allowed) {
-        return reply.code(decision.reason?.includes("submeteu") ? 409 : 403).send({ error: decision.reason ?? "Sem autoridade de aprovação" });
-      }
+      if (!decision.ok) return reply.code(decision.status).send({ error: decision.error });
     }
     if (parsed.data.status !== certificate.status && !transitions[certificate.status].includes(parsed.data.status)) {
       return reply.code(409).send({ error: `O auto ${certificate.status} não pode passar para ${parsed.data.status}` });

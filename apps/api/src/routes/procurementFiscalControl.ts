@@ -40,6 +40,7 @@ import {
 } from "../services/procurementFiscalControl.js";
 import { extractFiscalDocument } from "../services/fiscalDocumentExtractor.js";
 import { parseBankStatement } from "../services/procurementBankImport.js";
+import { assertMatrixApproval } from "../services/companyApproval.js";
 
 const financePermission = requirePermission("materiais.aprovar");
 const PAYABLE_STATUSES = new Set(["aprovada", "parcialmente_paga", "paga"]);
@@ -331,12 +332,48 @@ export async function procurementFiscalControlRoutes(app: FastifyInstance) {
     return updated;
   });
   app.post("/api/payment-requests/:id/approve", { preHandler: financePermission }, async (request, reply) => {
-    if (!isAdmin(request)) return reply.code(403).send({ error: "A aprovação de pagamento exige administrador da empresa" }); const { id } = request.params as { id: string }; const parsed = approvalInput.safeParse(request.body ?? {}); if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
-    const row = await paymentRequestOwned(id, companyIdOf(request)); if (!row || row.request.status !== "submetido") return reply.code(404).send({ error: "Pedido não disponível para aprovação" });
-    try { const updated = await db.transaction(async (tx) => { await tx.execute(sql`select id from procurement_payment_requests where id=${id} for update`); await tx.execute(sql`select id from supplier_invoices where id=${row.invoice.id} for update`); const [locked] = await tx.select().from(procurementPaymentRequests).where(eq(procurementPaymentRequests.id, id)).limit(1); if (!locked || locked.status !== "submetido") throw new Error("Pedido já processado"); const admins = await tx.select({ id: users.id }).from(users).where(and(eq(users.companyId, locked.companyId), eq(users.role, "admin_empresa"), eq(users.isActive, true))); const separation = validatePaymentSeparation({ requesterId: locked.requestedByUserId, approverId: request.currentUser!.id, activeAdminCount: admins.length, overrideReason: parsed.data.overrideReason }); if (!separation.ok) throw new Error(separation.error); const balance = await invoiceBalance(tx, row.invoice); const reserved = await approvedReservationAmount(tx, row.invoice.id, id); const amountValidation = validatePaymentRequestAmount({ outstanding: balance.outstanding, activeApprovedReservations: reserved, requestedAmount: Number(locked.amount) }); if (!amountValidation.ok) throw new Error(amountValidation.error); const [item] = await tx.update(procurementPaymentRequests).set({ status: "aprovado", approvedByUserId: request.currentUser!.id, approvedAt: new Date(), approvalOverrideReason: separation.overrideUsed ? parsed.data.overrideReason ?? null : null, updatedAt: new Date() }).where(eq(procurementPaymentRequests.id, id)).returning(); return item; });
-      await emitWorkflowEvent({ event: "payment_request.approved", companyId: companyIdOf(request), entityId: id, title: updated.reference, link: `/projectos/${updated.projectId}/compras`, actor: { id: request.currentUser!.id, name: request.currentUser!.name, email: request.currentUser!.email }, submitterUserId: row.request.requestedByUserId, logger: request.log });
-      return updated; }
-    catch (cause) { return reply.code(409).send({ error: cause instanceof Error ? cause.message : "Não foi possível aprovar o pedido" }); }
+    const { id } = request.params as { id: string };
+    const parsed = approvalInput.safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    const companyId = companyIdOf(request);
+    const row = await paymentRequestOwned(id, companyId);
+    if (!row || row.request.status !== "submetido") return reply.code(404).send({ error: "Pedido não disponível para aprovação" });
+    const matrix = await assertMatrixApproval({
+      companyId,
+      entityType: "payment_request",
+      role: request.currentUser!.role,
+      permissions: request.currentUser!.permissions ?? [],
+      isSubmitter: row.request.requestedByUserId === request.currentUser!.id,
+      amount: Number(row.request.amount),
+    });
+    if (!matrix.ok) return reply.code(matrix.status).send({ error: matrix.error });
+    try {
+      const updated = await db.transaction(async (tx) => {
+        await tx.execute(sql`select id from procurement_payment_requests where id=${id} for update`);
+        await tx.execute(sql`select id from supplier_invoices where id=${row.invoice.id} for update`);
+        const [locked] = await tx.select().from(procurementPaymentRequests).where(eq(procurementPaymentRequests.id, id)).limit(1);
+        if (!locked || locked.status !== "submetido") throw new Error("Pedido já processado");
+        const admins = await tx.select({ id: users.id }).from(users).where(and(eq(users.companyId, locked.companyId), eq(users.role, "admin_empresa"), eq(users.isActive, true)));
+        const separation = validatePaymentSeparation({ requesterId: locked.requestedByUserId, approverId: request.currentUser!.id, activeAdminCount: admins.length, overrideReason: parsed.data.overrideReason });
+        if (!separation.ok) throw new Error(separation.error);
+        const balance = await invoiceBalance(tx, row.invoice);
+        const reserved = await approvedReservationAmount(tx, row.invoice.id, id);
+        const amountValidation = validatePaymentRequestAmount({ outstanding: balance.outstanding, activeApprovedReservations: reserved, requestedAmount: Number(locked.amount) });
+        if (!amountValidation.ok) throw new Error(amountValidation.error);
+        const [item] = await tx.update(procurementPaymentRequests).set({
+          status: "aprovado",
+          approvedByUserId: request.currentUser!.id,
+          approvedAt: new Date(),
+          approvalOverrideReason: separation.overrideUsed ? parsed.data.overrideReason ?? null : null,
+          updatedAt: new Date(),
+        }).where(eq(procurementPaymentRequests.id, id)).returning();
+        return item;
+      });
+      await emitWorkflowEvent({ event: "payment_request.approved", companyId, entityId: id, title: updated.reference, link: `/projectos/${updated.projectId}/compras`, actor: { id: request.currentUser!.id, name: request.currentUser!.name, email: request.currentUser!.email }, submitterUserId: row.request.requestedByUserId, logger: request.log });
+      return updated;
+    } catch (cause) {
+      return reply.code(409).send({ error: cause instanceof Error ? cause.message : "Não foi possível aprovar o pedido" });
+    }
   });
   app.post("/api/payment-requests/:id/reject", { preHandler: financePermission }, async (request, reply) => {
     if (!isAdmin(request)) return reply.code(403).send({ error: "A rejeição exige administrador da empresa" }); const { id } = request.params as { id: string }; const parsed = rejectInput.safeParse(request.body); if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() }); const row = await paymentRequestOwned(id, companyIdOf(request)); if (!row || !["submetido", "aprovado"].includes(row.request.status)) return reply.code(404).send({ error: "Pedido não disponível" }); const [updated] = await db.update(procurementPaymentRequests).set({ status: "rejeitado", rejectedByUserId: request.currentUser!.id, rejectedAt: new Date(), rejectionReason: parsed.data.reason, updatedAt: new Date() }).where(eq(procurementPaymentRequests.id, id)).returning();

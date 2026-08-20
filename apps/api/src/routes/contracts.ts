@@ -6,6 +6,7 @@ import { contractVariations, invoiceCreditNotes, invoiceReceipts, projectContrac
 import { requireCompanyUser, requireRole } from "../auth/middleware.js";
 import { assertProjectOwned } from "../services/accessControl.js";
 import { recordAuditEvent } from "../services/auditTrail.js";
+import { applyClientDecisionInternally } from "../services/clientChangeDecisions.js";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista"] as const;
 const contractInput = z.object({ contractNumber: z.string().trim().min(1).max(100), clientName: z.string().trim().min(1).max(200), awardDate: z.string().optional(), startDate: z.string().optional(), endDate: z.string().optional(), originalAmount: z.number().positive(), advanceAmount: z.number().min(0).default(0), retentionRate: z.number().min(0).max(1).default(0), notes: z.string().max(3000).optional() });
@@ -76,6 +77,25 @@ export async function contractRoutes(app: FastifyInstance) {
     const [updated] = await db.update(contractVariations).set({ status: parsed.data.status, submittedByUserId: parsed.data.status === "submetida" ? request.currentUser!.id : variation.submittedByUserId, approvedByUserId: parsed.data.status === "aprovada" ? request.currentUser!.id : variation.approvedByUserId, decisionNote: parsed.data.decisionNote }).where(eq(contractVariations.id, id)).returning();
     await recordAuditEvent({ companyId: request.currentUser!.companyId!, projectId: contract.projectId, actorUserId: request.currentUser!.id, entityType: "contract_variation", entityId: id, action: `status.${updated.status}` });
     return updated;
+  });
+
+  /** Aplica a decisão do portal ao estado interno da adenda — não escreve no BOQ. */
+  app.post("/api/contract-variations/:id/apply-client-decision", { preHandler: requireRole("admin_empresa") }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const parsed = z.object({ decisionNote: z.string().trim().max(1000).optional() }).safeParse(request.body ?? {});
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    try {
+      const updated = await applyClientDecisionInternally({
+        variationId: id,
+        companyId: request.currentUser!.companyId!,
+        actorUserId: request.currentUser!.id,
+        decisionNote: parsed.data.decisionNote,
+      });
+      return updated;
+    } catch (cause) {
+      const status = cause && typeof cause === "object" && "statusCode" in cause ? Number((cause as { statusCode: number }).statusCode) : 409;
+      return reply.code(status).send({ error: cause instanceof Error ? cause.message : "Não foi possível aplicar a decisão" });
+    }
   });
 
   app.get("/api/projects/:projectId/client-statement", { preHandler: requireCompanyUser }, async (request, reply) => {

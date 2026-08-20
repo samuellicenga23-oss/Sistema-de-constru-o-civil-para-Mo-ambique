@@ -38,8 +38,9 @@ HEAD: `fc5a572`. Working tree de código limpa (só artefactos locais: `tmp/`, a
 | `0082_client_change_decisions` | 15 | decisão do cliente em `contract_variations` (não altera BOQ) |
 | `0083_company_notification_prefs` | 16 | `companies.email_notification_prefs` |
 | `0084_company_approval_matrix` | pós-18 | `companies.approval_matrix` (jsonb) |
+| `0085_company_vendor_governance` | pós-18 | override de governação marketplace por empresa |
 
-Última no journal: **0084**. Sem `down`.
+Última no journal: **0085**. Sem `down`.
 
 ## Testes e gates (fase 18)
 
@@ -72,15 +73,14 @@ Testes novos relevantes: `controlTower`, `scheduleCpm`, `vendorGovernance`, `pro
 
 ## Gaps e riscos (revisão humana)
 
-1. **Matriz de aprovação** agora é persistível em `companies.approval_matrix` (migration `0084`); as rotas de Auto já consultam a matriz. Domínios medição/requisição/pagamento ainda usam regras inline históricas além da matriz.
-2. **CPM** continua calculado em leitura (durações + precedências + calendário Mon–Sáb), sem gravar ES/LF na BD.
-3. **Decisões do portal** só aparecem para adendas `submetida`. Sem contrato/adenda, o tab fica vazio.
-4. **Forecast de caixa** (4 semanas) no Financeiro reutiliza Procurement Intelligence; ETC/EAC no Control Tower sem FX implícito.
-5. **0080–0084** sem snapshot Drizzle regenerado — `drizzle-kit generate` futuro deve partir do schema actual.
-6. **SMTP/Sentry** opcionais; email pode estar desligado em produção.
-7. Parser de plantas e PWA `CACHE_EPOCH` inalterados nesta cauda da fila.
-8. `steelSource: "map"` não deve ser substituído por aço calculado (fase 05/08).
-9. Governação de fornecedor editável na ficha SIGO Preços da empresa; bloqueio de marketplace global continua a exigir acção na ficha do fornecedor (campo `governance_status`).
+1. **CPM** continua calculado em leitura (durações + precedências + calendário Mon–Sáb), sem gravar ES/LF na BD.
+2. **Decisões do portal** só aparecem para adendas `submetida`. Sem contrato/adenda, o tab fica vazio. Backoffice aplica via `POST .../apply-client-decision` (não escreve BOQ).
+3. **Forecast de caixa** (4 semanas) no Financeiro reutiliza Procurement Intelligence; ETC/EAC no Control Tower sem FX implícito.
+4. **0080–0085** sem snapshot Drizzle regenerado — `drizzle-kit generate` futuro deve partir do schema actual.
+5. **SMTP/Sentry** opcionais; email pode estar desligado em produção.
+6. Parser de plantas e PWA `CACHE_EPOCH` inalterados nesta cauda da fila.
+7. `steelSource: "map"` não deve ser substituído por aço calculado (fase 05/08).
+8. Bloqueio **global** de fornecedor marketplace (campo em `suppliers`) continua a afectar todos os tenants; o override por empresa (`company_vendor_governance`) só define a governação efectiva dessa empresa.
 
 ## Fecho de gaps (pós 18)
 
@@ -89,13 +89,14 @@ Testes novos relevantes: `controlTower`, `scheduleCpm`, `vendorGovernance`, `pro
 | Control Tower `purchase_start_late` | Requisições abertas com `requiredByDate` fora do prazo seguro (lead+RFQ+aprovação+buffer) |
 | Financeiro | KPIs ETC + caixa 4 semanas + margem / AR·AP |
 | Comercial | Fecho previsto (`expectedCloseDate` / `validUntil`) na lista |
-| Empresa | Matriz persistida + «Repor defaults»; Auto usa `canApproveWithMatrix` |
-| Fornecedores | Select de governação na ficha SIGO Preços |
+| Empresa | Matriz persistida + «Repor defaults»; Auto / medição / requisição / payment_request via `assertMatrixApproval` |
+| Fornecedores | SIGO Preços: governação na ficha; marketplace: override por empresa (`0085`) em RFQ/PO |
+| Portal → BO | «Aplicar decisão do portal» nas adendas do Financeiro |
 
 ## Deploy / migration (não executar agora)
 
 1. Backup da BD.
-2. `npm run db:migrate` em `apps/api` (aplica 0079–0084 se ainda não estiverem).
+2. `npm run db:migrate` em `apps/api` (aplica 0079–0085 se ainda não estiverem).
 3. Build/restart API + web + supplier.
 4. Só depois: `npm run smoke:production`.
 5. Não fazer `git reset` / force-push sobre `0ec2f18` nem sobre estes commits.

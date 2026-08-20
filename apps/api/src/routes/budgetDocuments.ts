@@ -3,7 +3,7 @@ import { z } from "zod";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { createHash } from "node:crypto";
 import { db } from "../db/index.js";
-import { budgetDocuments, budgetSections, lineItems, measurementLines, measurementCertificates, plants, projects, users } from "../db/schema.js";
+import { budgetDocuments, budgetSections, lineItems, measurementLines, measurementCertificates, plants, projects } from "../db/schema.js";
 import { requireCompanyUser, requireRole } from "../auth/middleware.js";
 import { getBudgetDocumentSummary, hideInternalPricing } from "../services/boqEngine.js";
 import { computeCompositionUnitCostV2 } from "../services/costEngineV2.js";
@@ -36,6 +36,7 @@ import { CURRENCIES, DEFAULT_IVA_RATE, UNITS, LINE_ITEM_KINDS, fixedSigo, planUs
 import { applyBoqEditSession, BoqEditConflictError, BoqEditValidationError } from "../services/boqEditSession.js";
 import { compareBudgetRevisions } from "../services/budgetRevisionDiff.js";
 import { getCompanySubscription } from "../services/subscriptionEntitlements.js";
+import { assertMatrixApproval } from "../services/companyApproval.js";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista"] as const;
 
@@ -295,26 +296,19 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: "Indique o motivo da devolução para correcção" });
     }
     if (parsed.data.status === "aprovado") {
-      if (request.currentUser!.role !== "admin_empresa") {
-        return reply.code(403).send({ error: "A aprovação do documento exige um administrador da empresa" });
-      }
       // Plano Individual: o único utilizador aprova directamente a partir do rascunho.
-      // Nos outros planos, quem submeteu não pode auto-aprovar salvo se for o único admin.
-      if (!directApproval && document.submittedByUserId === request.currentUser!.id) {
-        const otherAdmins = await db
-          .select({ id: users.id })
-          .from(users)
-          .where(
-            and(
-              eq(users.companyId, companyId),
-              eq(users.role, "admin_empresa"),
-              eq(users.isActive, true),
-            ),
-          );
-        const soleAdmin = otherAdmins.length <= 1;
-        if (!soleAdmin) {
-          return reply.code(409).send({ error: "Quem submeteu o documento não pode aprová-lo" });
-        }
+      // Nos outros planos, a matriz + excepção de admin único controlam a auto-aprovação.
+      if (!directApproval) {
+        const decision = await assertMatrixApproval({
+          companyId,
+          entityType: "medicao",
+          role: request.currentUser!.role,
+          permissions: request.currentUser!.permissions ?? [],
+          isSubmitter: document.submittedByUserId === request.currentUser!.id,
+        });
+        if (!decision.ok) return reply.code(decision.status).send({ error: decision.error });
+      } else if (request.currentUser!.role !== "admin_empresa" && request.currentUser!.role !== "orcamentista") {
+        return reply.code(403).send({ error: "A aprovação do documento exige um administrador da empresa" });
       }
     }
     if (parsed.data.status !== document.status && !transitions[document.status].includes(parsed.data.status)) {
