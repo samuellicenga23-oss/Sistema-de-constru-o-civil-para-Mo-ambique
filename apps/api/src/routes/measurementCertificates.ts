@@ -18,6 +18,13 @@ import { recordAuditEvent } from "../services/auditTrail.js";
 import { emitWorkflowEvent } from "../services/workflowEvents.js";
 import { buildCertificateFieldMeasurementPdf } from "../services/certificateFieldMeasurementPdf.js";
 import { assertMatrixApproval } from "../services/companyApproval.js";
+import { assertApproversAvailable } from "../services/resolveProjectApproval.js";
+import {
+  assertUserCanActOnEntity,
+  dispatchEntityApproved,
+  dispatchEntityReturned,
+  dispatchEntitySubmitted,
+} from "../services/dispatchWorkflowApproval.js";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista", "engenheiro_fiscal"] as const;
 const createSchema = z.object({
@@ -149,6 +156,22 @@ export async function measurementCertificateRoutes(app: FastifyInstance) {
         isSubmitter: certificate.submittedByUserId === request.currentUser!.id,
       });
       if (!decision.ok) return reply.code(decision.status).send({ error: decision.error });
+      const assignment = await assertUserCanActOnEntity({
+        companyId,
+        entityType: "measurement_certificate",
+        entityId: id,
+        userId: request.currentUser!.id,
+      });
+      if (!assignment.ok) return reply.code(403).send({ error: assignment.error });
+    }
+    if (parsed.data.status === "submetido") {
+      const check = await assertApproversAvailable({
+        companyId: request.currentUser!.companyId!,
+        projectId: certificate.projectId,
+        workflowType: "measurement_certificate",
+        excludeUserId: request.currentUser!.id,
+      });
+      if (!check.ok) return reply.code(409).send({ code: check.code, error: check.error });
     }
     if (parsed.data.status !== certificate.status && !transitions[certificate.status].includes(parsed.data.status)) {
       return reply.code(409).send({ error: `O auto ${certificate.status} não pode passar para ${parsed.data.status}` });
@@ -204,20 +227,30 @@ export async function measurementCertificateRoutes(app: FastifyInstance) {
     });
     const actor = { id: request.currentUser!.id, name: request.currentUser!.name, email: request.currentUser!.email };
     const autoTitle = `n.º ${updated.number}`;
+    const companyId = request.currentUser!.companyId!;
     if (parsed.data.status === "submetido") {
-      await emitWorkflowEvent({
-        event: "certificate.submitted",
-        companyId: request.currentUser!.companyId!,
+      await dispatchEntitySubmitted({
+        companyId,
+        projectId: certificate.projectId,
+        workflowType: "measurement_certificate",
+        entityType: "measurement_certificate",
         entityId: id,
-        title: autoTitle,
+        title: `Auto ${autoTitle}`,
         link: `/autos/${id}`,
-        actor,
-        logger: request.log,
+        actorUserId: request.currentUser!.id,
       });
     } else if (parsed.data.status === "aprovado") {
+      await dispatchEntityApproved({
+        companyId,
+        projectId: certificate.projectId,
+        workflowType: "measurement_certificate",
+        entityType: "measurement_certificate",
+        entityId: id,
+        actorUserId: request.currentUser!.id,
+      });
       await emitWorkflowEvent({
         event: "certificate.approved",
-        companyId: request.currentUser!.companyId!,
+        companyId,
         entityId: id,
         title: autoTitle,
         link: `/autos/${id}`,
@@ -226,16 +259,17 @@ export async function measurementCertificateRoutes(app: FastifyInstance) {
         logger: request.log,
       });
     } else if (parsed.data.status === "rascunho" && certificate.status === "submetido") {
-      await emitWorkflowEvent({
-        event: "certificate.returned",
-        companyId: request.currentUser!.companyId!,
+      await dispatchEntityReturned({
+        companyId,
+        projectId: certificate.projectId,
+        workflowType: "measurement_certificate",
+        entityType: "measurement_certificate",
         entityId: id,
-        title: autoTitle,
-        link: `/autos/${id}`,
-        actor,
+        actorUserId: request.currentUser!.id,
         submitterUserId: certificate.submittedByUserId,
-        reason: parsed.data.decisionNote,
-        logger: request.log,
+        title: `Auto ${autoTitle}`,
+        reason: parsed.data.decisionNote ?? "Devolvido",
+        link: `/autos/${id}`,
       });
     }
     return updated;

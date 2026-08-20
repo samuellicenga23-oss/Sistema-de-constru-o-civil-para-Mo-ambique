@@ -4,13 +4,14 @@ import { useAuth } from "../auth/AuthContext";
 import { companiesApi } from "../api/companies";
 import UserMenu from "./UserMenu";
 import NotificationBell from "./NotificationBell";
+import MyActionsMenu from "./MyActionsMenu";
 import PageBackButton from "./PageBackButton";
 import InstallAppButton from "./InstallAppButton";
 import OfflineBanner from "./OfflineBanner";
 import PlantProcessingCenter from "./PlantProcessingCenter";
 import ImportProcessingCenter from "./ImportProcessingCenter";
 import ReadyForReviewBanner from "./ReadyForReviewBanner";
-import PriorityNotificationModal from "./PriorityNotificationModal";
+import PriorityActionCenter from "./PriorityActionCenter";
 import SubscriptionBanner from "./SubscriptionBanner";
 import { IconHome, IconFolder, IconTag, IconBuilding, IconLogout, IconSettings, IconRuler, IconMenu, IconClose, IconClipboard } from "./icons";
 import { LogoFull, LogoIcon } from "./Logo";
@@ -281,6 +282,7 @@ export default function Layout({
           </button>
           <LogoFull dark tagline={false} />
           <div className="flex items-center gap-1.5 text-white [&_.icon-btn]:border-white/10 [&_.icon-btn]:bg-transparent [&_.icon-btn]:text-brand-200 [&_.icon-btn]:hover:bg-white/10 [&_.icon-btn]:hover:text-white">
+            <MyActionsMenu />
             <NotificationBell />
             <UserMenu compact />
           </div>
@@ -360,6 +362,7 @@ export default function Layout({
             <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2.5 sm:justify-end">
               <InstallAppButton />
               {actions && <div className="flex max-w-full flex-wrap items-center gap-2 sm:justify-end">{actions}</div>}
+              <MyActionsMenu />
               <NotificationBell />
               <div className="hidden md:block">
                 <UserMenu />
@@ -370,7 +373,7 @@ export default function Layout({
 
         <SubscriptionBanner />
         <ReadyForReviewBanner />
-        <PriorityNotificationModal />
+        <PriorityActionCenter />
         <OfflineBanner />
         <PlantProcessingCenter />
         <ImportProcessingCenter />

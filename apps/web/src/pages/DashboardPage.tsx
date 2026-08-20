@@ -9,6 +9,7 @@ import ErrorState from "../components/ErrorState";
 import EmptyState from "../components/EmptyState";
 import AlertBanner from "../components/AlertBanner";
 import { IconFolder, IconDoc, IconClipboard, IconMap, IconPlus } from "../components/icons";
+import { workflowTasksApi, type WorkflowTask } from "../api/projectTeam";
 
 const ALERT_LEVEL_WEIGHT: Record<string, number> = { critical: 0, warning: 1, info: 2 };
 
@@ -54,6 +55,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [overview, setOverview] = useState<SiteManagementOverview[]>([]);
+  const [myActions, setMyActions] = useState<WorkflowTask[]>([]);
 
   function loadDashboard() {
     setLoading(true);
@@ -69,6 +71,7 @@ export default function DashboardPage() {
     if (user?.role === "super_admin") return;
     loadDashboard();
     boqApi.siteManagementOverview().then(setOverview).catch(() => {});
+    workflowTasksApi.listMine().then((res) => setMyActions(res.items.slice(0, 8))).catch(() => {});
   }, [user?.role]);
 
   const topAlerts = useMemo(() => {
@@ -124,6 +127,32 @@ export default function DashboardPage() {
 
         {data && (
           <>
+            {myActions.length > 0 && (
+              <section className="card overflow-hidden">
+                <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-3 sm:px-5">
+                  <h2 className="section-title text-base">Minhas acções</h2>
+                  <span className="badge badge-brand">{myActions.length}</span>
+                </div>
+                <ul className="divide-y divide-slate-100">
+                  {myActions.map((task) => (
+                    <li key={task.id} className="flex items-center justify-between gap-4 px-4 py-3 sm:px-5">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-slate-900">{task.title}</p>
+                        <p className="truncate text-xs text-slate-500">
+                          {task.projectNameSnapshot ?? "Obra"} · {task.kind === "correction" ? "Correcção" : "Aprovação"}
+                        </p>
+                      </div>
+                      {task.link && (
+                        <Link to={task.link} className="btn btn-secondary btn-sm shrink-0">
+                          {task.kind === "correction" ? "Corrigir" : "Rever"}
+                        </Link>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+
             <section className="card overflow-hidden">
               <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-3 sm:px-5">
                 <h2 className="section-title text-base">Pendências</h2>

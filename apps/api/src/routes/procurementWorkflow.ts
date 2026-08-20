@@ -33,6 +33,13 @@ import { resolveEffectiveVendorGovernance } from "../services/companyVendorGover
 import { notifySupplierAccount, notifyUsers } from "../services/notifications.js";
 import { recordAuditEvent } from "../services/auditTrail.js";
 import { emitWorkflowEvent } from "../services/workflowEvents.js";
+import { assertApproversAvailable } from "../services/resolveProjectApproval.js";
+import {
+  assertUserCanActOnEntity,
+  dispatchEntityApproved,
+  dispatchEntityReturned,
+  dispatchEntitySubmitted,
+} from "../services/dispatchWorkflowApproval.js";
 import {
   buildQuoteComparison,
   groupAllocationsBySupplier,
@@ -305,15 +312,23 @@ export async function procurementWorkflowRoutes(app: FastifyInstance) {
     const row = await requisitionOwned(id, companyId);
     if (!row) return reply.code(404).send({ error: "Requisição não encontrada" });
     if (row.status !== "rascunho") return reply.code(409).send({ error: "Só uma requisição em rascunho pode ser submetida" });
-    const [updated] = await db.update(purchaseRequisitions).set({ status: "submetida", submittedAt: new Date(), submittedByUserId: request.currentUser!.id, updatedAt: new Date() }).where(eq(purchaseRequisitions.id, id)).returning();
-    await emitWorkflowEvent({
-      event: "requisition.submitted",
+    const check = await assertApproversAvailable({
       companyId,
+      projectId: row.projectId,
+      workflowType: "purchase_requisition",
+      excludeUserId: request.currentUser!.id,
+    });
+    if (!check.ok) return reply.code(409).send({ code: check.code, error: check.error });
+    const [updated] = await db.update(purchaseRequisitions).set({ status: "submetida", submittedAt: new Date(), submittedByUserId: request.currentUser!.id, updatedAt: new Date() }).where(eq(purchaseRequisitions.id, id)).returning();
+    await dispatchEntitySubmitted({
+      companyId,
+      projectId: updated.projectId,
+      workflowType: "purchase_requisition",
+      entityType: "purchase_requisition",
       entityId: id,
       title: updated.reference,
       link: `/projectos/${updated.projectId}/compras`,
-      actor: { id: request.currentUser!.id, name: request.currentUser!.name, email: request.currentUser!.email },
-      logger: request.log,
+      actorUserId: request.currentUser!.id,
     });
     return updated;
   });
@@ -333,8 +348,23 @@ export async function procurementWorkflowRoutes(app: FastifyInstance) {
       isSubmitter: (row.submittedByUserId ?? row.createdByUserId) === user.id,
     });
     if (!decision.ok) return reply.code(decision.status).send({ error: decision.error });
+    const assignment = await assertUserCanActOnEntity({
+      companyId,
+      entityType: "purchase_requisition",
+      entityId: id,
+      userId: user.id,
+    });
+    if (!assignment.ok) return reply.code(403).send({ error: assignment.error });
     const [updated] = await db.update(purchaseRequisitions).set({ status: "aprovada", approvedAt: new Date(), approvedByUserId: user.id, updatedAt: new Date() }).where(eq(purchaseRequisitions.id, id)).returning();
     await recordAuditEvent({ companyId, projectId: row.projectId, actorUserId: user.id, entityType: "purchase_requisition", entityId: id, action: "approved", before: { status: row.status }, after: { status: updated.status } });
+    await dispatchEntityApproved({
+      companyId,
+      projectId: row.projectId,
+      workflowType: "purchase_requisition",
+      entityType: "purchase_requisition",
+      entityId: id,
+      actorUserId: user.id,
+    });
     await emitWorkflowEvent({
       event: "requisition.approved",
       companyId,
@@ -358,16 +388,17 @@ export async function procurementWorkflowRoutes(app: FastifyInstance) {
     if (row.status !== "submetida") return reply.code(409).send({ error: "Só uma requisição submetida pode ser devolvida" });
     const [updated] = await db.update(purchaseRequisitions).set({ status: "rascunho", submittedAt: null, submittedByUserId: null, notes: parsed.data.reason, updatedAt: new Date() }).where(eq(purchaseRequisitions.id, id)).returning();
     await recordAuditEvent({ companyId, projectId: row.projectId, actorUserId: request.currentUser!.id, entityType: "purchase_requisition", entityId: id, action: "returned", before: { status: row.status }, after: { status: updated.status }, metadata: { reason: parsed.data.reason } });
-    await emitWorkflowEvent({
-      event: "requisition.returned",
+    await dispatchEntityReturned({
       companyId,
+      projectId: row.projectId,
+      workflowType: "purchase_requisition",
+      entityType: "purchase_requisition",
       entityId: id,
-      title: updated.reference,
-      link: `/projectos/${updated.projectId}/compras`,
-      actor: { id: request.currentUser!.id, name: request.currentUser!.name, email: request.currentUser!.email },
+      actorUserId: request.currentUser!.id,
       submitterUserId: row.submittedByUserId ?? row.createdByUserId,
+      title: updated.reference,
       reason: parsed.data.reason,
-      logger: request.log,
+      link: `/projectos/${updated.projectId}/compras`,
     });
     return updated;
   });

@@ -27,6 +27,12 @@ import { requireSupplierAuth } from "../auth/supplierMiddleware.js";
 import { assertProjectOwned } from "../services/accessControl.js";
 import { recordAuditEvent } from "../services/auditTrail.js";
 import { emitWorkflowEvent } from "../services/workflowEvents.js";
+import { assertApproversAvailable } from "../services/resolveProjectApproval.js";
+import {
+  assertUserCanActOnEntity,
+  dispatchEntityApproved,
+  dispatchEntitySubmitted,
+} from "../services/dispatchWorkflowApproval.js";
 import { detectImageExtension } from "../services/imageValidation.js";
 import { env } from "../env.js";
 import { computePayableBalance } from "../services/procurementAccountsPayable.js";
@@ -327,8 +333,11 @@ export async function procurementFiscalControlRoutes(app: FastifyInstance) {
   });
   app.post("/api/payment-requests/:id/submit", { preHandler: financePermission }, async (request, reply) => {
     const { id } = request.params as { id: string }; const row = await paymentRequestOwned(id, companyIdOf(request)); if (!row) return reply.code(404).send({ error: "Pedido não encontrado" }); if (row.request.status !== "rascunho") return reply.code(409).send({ error: "Só pedidos em rascunho podem ser submetidos" });
+    const companyId = companyIdOf(request);
+    const check = await assertApproversAvailable({ companyId, projectId: row.request.projectId, workflowType: "payment_request", excludeUserId: request.currentUser!.id });
+    if (!check.ok) return reply.code(409).send({ code: check.code, error: check.error });
     const [updated] = await db.update(procurementPaymentRequests).set({ status: "submetido", submittedAt: new Date(), updatedAt: new Date() }).where(eq(procurementPaymentRequests.id, id)).returning();
-    await emitWorkflowEvent({ event: "payment_request.submitted", companyId: companyIdOf(request), entityId: id, title: updated.reference, link: `/projectos/${updated.projectId}/compras`, actor: { id: request.currentUser!.id, name: request.currentUser!.name, email: request.currentUser!.email }, logger: request.log });
+    await dispatchEntitySubmitted({ companyId, projectId: updated.projectId, workflowType: "payment_request", entityType: "payment_request", entityId: id, title: updated.reference, link: `/projectos/${updated.projectId}/compras`, actorUserId: request.currentUser!.id });
     return updated;
   });
   app.post("/api/payment-requests/:id/approve", { preHandler: financePermission }, async (request, reply) => {
@@ -347,6 +356,8 @@ export async function procurementFiscalControlRoutes(app: FastifyInstance) {
       amount: Number(row.request.amount),
     });
     if (!matrix.ok) return reply.code(matrix.status).send({ error: matrix.error });
+    const assignment = await assertUserCanActOnEntity({ companyId, entityType: "payment_request", entityId: id, userId: request.currentUser!.id });
+    if (!assignment.ok) return reply.code(403).send({ error: assignment.error });
     try {
       const updated = await db.transaction(async (tx) => {
         await tx.execute(sql`select id from procurement_payment_requests where id=${id} for update`);
@@ -369,6 +380,7 @@ export async function procurementFiscalControlRoutes(app: FastifyInstance) {
         }).where(eq(procurementPaymentRequests.id, id)).returning();
         return item;
       });
+      await dispatchEntityApproved({ companyId, projectId: updated.projectId, workflowType: "payment_request", entityType: "payment_request", entityId: id, actorUserId: request.currentUser!.id });
       await emitWorkflowEvent({ event: "payment_request.approved", companyId, entityId: id, title: updated.reference, link: `/projectos/${updated.projectId}/compras`, actor: { id: request.currentUser!.id, name: request.currentUser!.name, email: request.currentUser!.email }, submitterUserId: row.request.requestedByUserId, logger: request.log });
       return updated;
     } catch (cause) {

@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent, type MouseEvent } from "react";
+﻿import { useEffect, useState, type FormEvent, type MouseEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { boqApi, type BudgetDocument, type Project, type ProjectMaterialSpecification, type ProjectWorkflowStatus } from "../api/boq";
 import { measurementApi, type MeasurementCertificate } from "../api/measurement";
@@ -16,11 +16,12 @@ import PublicShareModal from "../components/PublicShareModal";
 import { IconClipboard, IconPlus, IconTrash, IconUpload } from "../components/icons";
 import { useAuth } from "../auth/AuthContext";
 import { UNITS, type Unit } from "@sigo/shared";
+import ProjectTeamApprovalsPanel from "../components/ProjectTeamApprovalsPanel";
 
 const PLANT_STATUS_BADGE: Record<Plant["processingStatus"], { label: string; cls: string }> = {
   pendente: { label: "Pendente", cls: "badge-gray" },
   processando: { label: "A processar...", cls: "badge-yellow" },
-  concluido: { label: "Concluído", cls: "badge-green" },
+  concluido: { label: "ConcluÃ­do", cls: "badge-green" },
   erro: { label: "Erro", cls: "badge-red" },
 };
 
@@ -31,11 +32,11 @@ const DOC_STATUS_BADGE: Record<string, string> = {
 };
 
 function sectionPages(startPage: number, endPage: number) {
-  return startPage === endPage ? `p. ${startPage}` : `pp. ${startPage}–${endPage}`;
+  return startPage === endPage ? `p. ${startPage}` : `pp. ${startPage}â${endPage}`;
 }
 
-// Nunca usar toISOString().slice(0,10) para a data de hoje — converte para UTC e "recua"
-// um dia à noite em fusos horários positivos como Moçambique (UTC+2).
+// Nunca usar toISOString().slice(0,10) para a data de hoje â converte para UTC e "recua"
+// um dia Ã  noite em fusos horÃ¡rios positivos como MoÃ§ambique (UTC+2).
 function todayStr() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -47,6 +48,7 @@ export default function ProjectDetailPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [showPublicShare, setShowPublicShare] = useState(false);
+  const [showTeamSettings, setShowTeamSettings] = useState(false);
   const [searchParams] = useSearchParams();
   const [project, setProject] = useState<Project | null>(null);
   const [documents, setDocuments] = useState<BudgetDocument[]>([]);
@@ -131,7 +133,7 @@ export default function ProjectDetailPage() {
       setNewMaterial({ name: "", unit: "un", specification: "" });
       await reload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Não foi possível adicionar o material");
+      setError(err instanceof Error ? err.message : "NÃ£o foi possÃ­vel adicionar o material");
     } finally {
       setAddingMaterial(false);
     }
@@ -148,7 +150,7 @@ export default function ProjectDetailPage() {
       });
       navigate(`/documentos/${created.id}?fase=orcamento`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro ao criar orçamento");
+      setError(err instanceof Error ? err.message : "Erro ao criar orÃ§amento");
     }
   }
 
@@ -194,7 +196,7 @@ export default function ProjectDetailPage() {
         : `/documentos/${document.id}?fase=medicao&assistente=1`;
       navigate(dest);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Não foi possível preparar as medições");
+      setError(err instanceof Error ? err.message : "NÃ£o foi possÃ­vel preparar as mediÃ§Ãµes");
     } finally {
       setPreparingMeasurements(false);
     }
@@ -205,10 +207,10 @@ export default function ProjectDetailPage() {
     e.stopPropagation();
     const ok = await confirm({
       title: "Eliminar documento?",
-      message: `Eliminar “${title}”?`,
+      message: `Eliminar â${title}â?`,
       confirmLabel: "Eliminar",
       danger: true,
-      details: ["Autos de medição associados serão removidos"],
+      details: ["Autos de mediÃ§Ã£o associados serÃ£o removidos"],
     });
     if (!ok) return;
     setError(null);
@@ -225,10 +227,10 @@ export default function ProjectDetailPage() {
     e.stopPropagation();
     const ok = await confirm({
       title: "Eliminar planta?",
-      message: `Eliminar “${name ?? "sem nome"}”?`,
+      message: `Eliminar â${name ?? "sem nome"}â?`,
       confirmLabel: "Eliminar",
       danger: true,
-      details: ["Dados extraídos deixam de estar disponíveis no Assistente"],
+      details: ["Dados extraÃ­dos deixam de estar disponÃ­veis no Assistente"],
     });
     if (!ok) return;
     setError(null);
@@ -253,7 +255,7 @@ export default function ProjectDetailPage() {
       await reload();
       navigate(`/plantas/${id}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Não foi possível reprocessar a planta");
+      setError(err instanceof Error ? err.message : "NÃ£o foi possÃ­vel reprocessar a planta");
     } finally {
       setReprocessingPlantId(null);
       setReprocessProgress(null);
@@ -265,7 +267,7 @@ export default function ProjectDetailPage() {
     e.stopPropagation();
     const ok = await confirm({
       title: "Eliminar auto?",
-      message: `Eliminar Auto Nº ${number}?`,
+      message: `Eliminar Auto NÂº ${number}?`,
       confirmLabel: "Eliminar",
       danger: true,
     });
@@ -275,7 +277,7 @@ export default function ProjectDetailPage() {
       await measurementApi.delete(id);
       await reload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro ao eliminar auto de medição");
+      setError(err instanceof Error ? err.message : "Erro ao eliminar auto de mediÃ§Ã£o");
     }
   }
 
@@ -287,7 +289,7 @@ export default function ProjectDetailPage() {
       await measurementApi.create(projectId, { budgetDocumentId: selectedDocId, periodDate });
       await reload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro ao criar auto de medição");
+      setError(err instanceof Error ? err.message : "Erro ao criar auto de mediÃ§Ã£o");
     }
   }
 
@@ -304,7 +306,7 @@ export default function ProjectDetailPage() {
   const latestCompletedPlant = completedPlants[completedPlants.length - 1];
   const usesPlants = project.measurementMode === "plantas";
 
-  // O URL define o workspace. Sem `fase` → visão geral. Híbrido NÃO misture módulos.
+  // O URL define o workspace. Sem `fase` â visÃ£o geral. HÃ­brido NÃO misture mÃ³dulos.
   const fase = resolveProjectFase(searchParams.get("fase"));
   const isVisao = fase === "visao";
   const showMedicao = fase === "medicao" || isVisao;
@@ -323,12 +325,12 @@ export default function ProjectDetailPage() {
         { label: "Carregar projectos", done: plants.length > 0 },
         { label: "Confirmar dados", done: completedPlants.length > 0 && failedPlants.length === 0 },
         { label: "Quantificar", done: hasMeasuredBudget },
-        { label: "Enviar a orçamentos", done: budgetDocuments.length > 0 },
+        { label: "Enviar a orÃ§amentos", done: budgetDocuments.length > 0 },
       ]
     : [
         { label: "Projecto", done: true },
-        { label: "Medição", done: project.measurementMode === "importar" || hasMeasuredBudget },
-        { label: "Enviar a orçamentos", done: budgetDocuments.length > 0 },
+        { label: "MediÃ§Ã£o", done: project.measurementMode === "importar" || hasMeasuredBudget },
+        { label: "Enviar a orÃ§amentos", done: budgetDocuments.length > 0 },
       ];
   const completedPrepSteps = measurementPrepSteps.filter((step) => step.done).length;
   const prepIncomplete = fase === "medicao" && completedPrepSteps < measurementPrepSteps.length;
@@ -336,7 +338,7 @@ export default function ProjectDetailPage() {
   const backTo =
     fase === "gestao" ? "/gestao" : fase === "medicao" ? "/medicoes" : fase === "orcamento" ? "/orcamentos" : "/orcamentos";
   const backLabel =
-    fase === "gestao" ? "Gestão" : fase === "medicao" ? "Medições" : fase === "orcamento" ? "Orçamentos" : "Obras";
+    fase === "gestao" ? "GestÃ£o" : fase === "medicao" ? "MediÃ§Ãµes" : fase === "orcamento" ? "OrÃ§amentos" : "Obras";
   const navMode = fase === "gestao" ? "site" : fase === "medicao" ? "measurement" : "budget";
   const faseQuery = faseQueryFor(fase === "visao" ? "orcamento" : fase);
 
@@ -346,6 +348,11 @@ export default function ProjectDetailPage() {
       back={{ label: backLabel, fallbackTo: backTo }}
       actions={
         <div className="flex flex-wrap items-center gap-2">
+          {(user?.role === "admin_empresa" || user?.role === "orcamentista") && (
+            <button type="button" onClick={() => setShowTeamSettings((v) => !v)} className="btn btn-ghost btn-sm">
+              {showTeamSettings ? "Fechar definições" : "Definições da obra"}
+            </button>
+          )}
           {(user?.role === "admin_empresa" || user?.role === "orcamentista") && fase === "visao" && (
             <button type="button" onClick={() => setShowPublicShare(true)} className="btn btn-secondary btn-sm">
               Partilhar
@@ -363,27 +370,28 @@ export default function ProjectDetailPage() {
         <div>
           <ProjectWorkspaceNav projectId={projectId!} mode={navMode} />
         </div>
+        {showTeamSettings && projectId && <ProjectTeamApprovalsPanel projectId={projectId} />}
         {error && <p className="text-sm text-red-600">{error}</p>}
         {uploadNotice && <p className="text-sm text-emerald-700">{uploadNotice}</p>}
         {searchParams.get("uploadErro") === "1" && (
           <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
             {searchParams.get("motivo") === "excel"
-              ? "O projecto foi criado, mas a importação Excel falhou. Abra o mapa de quantidades e importe novamente."
+              ? "O projecto foi criado, mas a importaÃ§Ã£o Excel falhou. Abra o mapa de quantidades e importe novamente."
               : searchParams.get("motivo") === "planta"
-                ? "O projecto foi criado, mas um PDF não pôde ser analisado. Continue com medição manual ou Excel."
+                ? "O projecto foi criado, mas um PDF nÃ£o pÃ´de ser analisado. Continue com mediÃ§Ã£o manual ou Excel."
                 : "O projecto foi criado, mas um passo falhou."}
           </div>
         )}
 
         {showControlBanner && <ProjectWorkflowBanner status={workflowStatus} projectId={projectId!} />}
 
-        {/* ——— Workspace Medi��es ——— */}
+        {/* âââ Workspace Mediï¿½ï¿½es âââ */}
         {fase === "medicao" && (
           <>
             {prepIncomplete && (
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
                 <span className="text-sm font-semibold text-slate-800">
-                  Preparação {completedPrepSteps}/{measurementPrepSteps.length}
+                  PreparaÃ§Ã£o {completedPrepSteps}/{measurementPrepSteps.length}
                 </span>
                 <button
                   type="button"
@@ -411,7 +419,7 @@ export default function ProjectDetailPage() {
             )}
             <section className="card overflow-hidden">
               <SectionHeader
-                title="Medi��es"
+                title="Mediï¿½ï¿½es"
                 actions={
                   <button
                     type="button"
@@ -420,7 +428,7 @@ export default function ProjectDetailPage() {
                     className="btn btn-primary btn-sm"
                   >
                     <IconPlus className="h-4 w-4" />
-                    {preparingMeasurements ? "A abrir..." : "Nova medi��o"}
+                    {preparingMeasurements ? "A abrir..." : "Nova mediï¿½ï¿½o"}
                   </button>
                 }
               />
@@ -431,7 +439,7 @@ export default function ProjectDetailPage() {
                       <span className="min-w-0">
                         <span className="block break-words font-medium text-gray-900">
                           {d.title}
-                          {d.revision ? <span className="font-normal text-gray-400"> · rev. {d.revision}</span> : null}
+                          {d.revision ? <span className="font-normal text-gray-400"> Â· rev. {d.revision}</span> : null}
                         </span>
                       </span>
                       <span className="flex shrink-0 flex-wrap items-center gap-2">
@@ -446,9 +454,9 @@ export default function ProjectDetailPage() {
                 ))}
                 {measurementDocuments.length === 0 && (
                   <li className="px-5 py-10 text-center">
-                    <p className="text-sm text-slate-500">Sem Medi��es</p>
+                    <p className="text-sm text-slate-500">Sem Mediï¿½ï¿½es</p>
                     <button type="button" onClick={handlePrepareMeasurements} disabled={preparingMeasurements} className="btn btn-primary btn-sm mt-4">
-                      <IconPlus className="h-4 w-4" /> Nova medi��o
+                      <IconPlus className="h-4 w-4" /> Nova mediï¿½ï¿½o
                     </button>
                   </li>
                 )}
@@ -487,12 +495,12 @@ export default function ProjectDetailPage() {
           </>
         )}
 
-        {/* ——— Workspace Orçamentos ——— */}
+        {/* âââ Workspace OrÃ§amentos âââ */}
         {fase === "orcamento" && (
           <>
             {showPrepararObra && !project.zoneId && (
               <label className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm">
-                <span className="font-semibold text-slate-700">Zona de preços</span>
+                <span className="font-semibold text-slate-700">Zona de preÃ§os</span>
                 <select value={project.zoneId ?? ""} disabled={savingZone} onChange={(e) => handleZoneChange(e.target.value)} className="input max-w-xs">
                   <option value="">Definir zona</option>
                   {zones.map((z) => (
@@ -503,10 +511,10 @@ export default function ProjectDetailPage() {
             )}
             <section className="card overflow-hidden">
               <SectionHeader
-                title="Orçamentos"
+                title="OrÃ§amentos"
                 actions={
                   <button type="button" onClick={() => void handleCreateQuickBudget()} className="btn btn-primary btn-sm">
-                    <IconPlus className="h-4 w-4" /> Novo orçamento
+                    <IconPlus className="h-4 w-4" /> Novo orÃ§amento
                   </button>
                 }
               />
@@ -521,7 +529,7 @@ export default function ProjectDetailPage() {
                         <span className="min-w-0">
                           <span className="block break-words font-medium text-gray-900">
                             {d.title}
-                            {d.revision ? <span className="font-normal text-gray-400"> · rev. {d.revision}</span> : null}
+                            {d.revision ? <span className="font-normal text-gray-400"> Â· rev. {d.revision}</span> : null}
                           </span>
                           {sourceMeasurement && (
                             <span className="mt-0.5 block text-xs text-slate-500">Origem: {sourceMeasurement.title}</span>
@@ -541,9 +549,9 @@ export default function ProjectDetailPage() {
                 })}
                 {budgetDocuments.length === 0 && (
                   <li className="px-5 py-10 text-center">
-                    <p className="text-sm text-slate-500">Sem orçamentos</p>
+                    <p className="text-sm text-slate-500">Sem orÃ§amentos</p>
                     <button type="button" onClick={() => void handleCreateQuickBudget()} className="btn btn-primary btn-sm mt-4">
-                      <IconPlus className="h-4 w-4" /> Novo orçamento
+                      <IconPlus className="h-4 w-4" /> Novo orÃ§amento
                     </button>
                   </li>
                 )}
@@ -552,15 +560,15 @@ export default function ProjectDetailPage() {
           </>
         )}
 
-        {/* ——— Visão geral ——— */}
+        {/* âââ VisÃ£o geral âââ */}
         {isVisao && (
           <>
             {showMetricCards && (
               <section className="card overflow-hidden">
                 <div className="grid gap-px bg-slate-200 sm:grid-cols-3">
                   {[
-                    ["Medi��es", measurementDocuments.length],
-                    ["Orçamentos", budgetDocuments.length],
+                    ["Mediï¿½ï¿½es", measurementDocuments.length],
+                    ["OrÃ§amentos", budgetDocuments.length],
                     ["Plantas", plants.length],
                   ].map(([label, value]) => (
                     <div key={String(label)} className="bg-white px-5 py-4">
@@ -575,10 +583,10 @@ export default function ProjectDetailPage() {
             {showMedicao && (
               <section className="card">
                 <SectionHeader
-                  title="Medi��es"
+                  title="Mediï¿½ï¿½es"
                   actions={
                     <Link to={`/projectos/${projectId}?fase=medicao`} className="btn btn-ghost btn-sm">
-                      Abrir →
+                      Abrir â
                     </Link>
                   }
                 />
@@ -591,7 +599,7 @@ export default function ProjectDetailPage() {
                       </Link>
                     </li>
                   ))}
-                  {measurementDocuments.length === 0 && <li className="px-5 py-4 text-sm text-slate-400">Sem Medi��es</li>}
+                  {measurementDocuments.length === 0 && <li className="px-5 py-4 text-sm text-slate-400">Sem Mediï¿½ï¿½es</li>}
                 </ul>
               </section>
             )}
@@ -599,10 +607,10 @@ export default function ProjectDetailPage() {
             {showOrcamento && (
               <section className="card">
                 <SectionHeader
-                  title="Orçamentos"
+                  title="OrÃ§amentos"
                   actions={
                     <Link to={`/projectos/${projectId}?fase=orcamento`} className="btn btn-ghost btn-sm">
-                      Abrir →
+                      Abrir â
                     </Link>
                   }
                 />
@@ -615,7 +623,7 @@ export default function ProjectDetailPage() {
                       </Link>
                     </li>
                   ))}
-                  {budgetDocuments.length === 0 && <li className="px-5 py-4 text-sm text-slate-400">Sem orçamentos</li>}
+                  {budgetDocuments.length === 0 && <li className="px-5 py-4 text-sm text-slate-400">Sem orÃ§amentos</li>}
                 </ul>
               </section>
             )}
@@ -652,7 +660,7 @@ export default function ProjectDetailPage() {
                   </span>
                 </summary>
                 <div className="flex justify-end border-t border-slate-100 px-4 py-3">
-                  <Link to="/catalogo" className="btn btn-secondary btn-sm">Catálogo</Link>
+                  <Link to="/catalogo" className="btn btn-secondary btn-sm">CatÃ¡logo</Link>
                 </div>
                 {materialSpecifications.length > 0 && (
                   <div className="divide-y divide-slate-100 border-t border-slate-100">
@@ -664,7 +672,7 @@ export default function ProjectDetailPage() {
                         </div>
                         <span className="text-sm text-slate-500">{material.unit}</span>
                         <span className={`badge w-fit ${material.pricePending ? "badge-yellow" : "badge-green"}`}>
-                          {material.pricePending ? "Preço pendente" : "Com preço"}
+                          {material.pricePending ? "PreÃ§o pendente" : "Com preÃ§o"}
                         </span>
                       </div>
                     ))}
@@ -675,7 +683,7 @@ export default function ProjectDetailPage() {
                   <select value={newMaterial.unit} onChange={(event) => setNewMaterial({ ...newMaterial, unit: event.target.value as Unit })} className="input">
                     {UNITS.map((unit) => <option key={unit} value={unit}>{unit}</option>)}
                   </select>
-                  <input value={newMaterial.specification} onChange={(event) => setNewMaterial({ ...newMaterial, specification: event.target.value })} className="input" placeholder="Especificação" />
+                  <input value={newMaterial.specification} onChange={(event) => setNewMaterial({ ...newMaterial, specification: event.target.value })} className="input" placeholder="EspecificaÃ§Ã£o" />
                   <button type="submit" disabled={addingMaterial} className="btn btn-secondary"><IconPlus className="h-4 w-4" /> Adicionar</button>
                 </form>
               </details>
@@ -683,14 +691,14 @@ export default function ProjectDetailPage() {
           </>
         )}
 
-        {/* ——— Gestão ——— */}
+        {/* âââ GestÃ£o âââ */}
         {fase === "gestao" && showCertificados && (
         <section id="certificados-obra" className="card scroll-mt-24">
-          <SectionHeader title="Autos de medição" actions={<IconClipboard className="h-4 w-4 text-blue-700" />} />
+          <SectionHeader title="Autos de mediÃ§Ã£o" actions={<IconClipboard className="h-4 w-4 text-blue-700" />} />
           {approvedBudgetDocuments.length === 0 ? (
             <div className="border-t border-gray-100 px-5 py-4 text-sm text-slate-600">
-              <p>Aprove um orçamento para abrir o primeiro Auto de Medição.</p>
-              <Link to={`/projectos/${projectId}?fase=orcamento`} className="action-link mt-2 inline-block">Ir a orçamentos →</Link>
+              <p>Aprove um orÃ§amento para abrir o primeiro Auto de MediÃ§Ã£o.</p>
+              <Link to={`/projectos/${projectId}?fase=orcamento`} className="action-link mt-2 inline-block">Ir a orÃ§amentos â</Link>
             </div>
           ) : (
           <div className="grid md:grid-cols-2">
@@ -699,7 +707,7 @@ export default function ProjectDetailPage() {
                 <li key={c.id} className="table-row group">
                   <Link to={`/autos/${c.id}`} className="flex items-center justify-between px-5 py-3">
                     <span className="font-medium text-gray-900">
-                      Auto n.º {c.number} <span className="font-normal text-gray-400">— {c.periodDate}</span>
+                      Auto n.Âº {c.number} <span className="font-normal text-gray-400">â {c.periodDate}</span>
                     </span>
                     <span className="flex items-center gap-2">
                       <span className={`badge ${DOC_STATUS_BADGE[c.status] ?? "badge-gray"}`}>{c.status}</span>
@@ -710,11 +718,11 @@ export default function ProjectDetailPage() {
                   </Link>
                 </li>
               ))}
-              {certificates.length === 0 && <li className="px-5 py-4 text-sm text-gray-400">Ainda não há autos de medição.</li>}
+              {certificates.length === 0 && <li className="px-5 py-4 text-sm text-gray-400">Ainda nÃ£o hÃ¡ autos de mediÃ§Ã£o.</li>}
             </ul>
             <form onSubmit={handleCreateCertificate} className="flex flex-wrap items-end gap-2 px-5 py-4">
               <div className="min-w-[160px] flex-1">
-                <label className="label">Orçamento base</label>
+                <label className="label">OrÃ§amento base</label>
                 <select value={selectedDocId} onChange={(e) => setSelectedDocId(e.target.value)} className="input">
                   {approvedBudgetDocuments.map((d) => (
                     <option key={d.id} value={d.id}>{d.title}</option>
@@ -722,7 +730,7 @@ export default function ProjectDetailPage() {
                 </select>
               </div>
               <div>
-                <label className="label">Data do período</label>
+                <label className="label">Data do perÃ­odo</label>
                 <input type="date" value={periodDate} onChange={(e) => setPeriodDate(e.target.value)} className="input" />
               </div>
               <button type="submit" className="btn btn-primary" disabled={!selectedDocId}>
@@ -736,10 +744,10 @@ export default function ProjectDetailPage() {
       </div>
       {(uploading || reprocessingPlantId) && (
         <BlockingProcessingOverlay
-          title={reprocessingPlantId ? "A repetir a análise" : "A analisar o projecto"}
+          title={reprocessingPlantId ? "A repetir a anÃ¡lise" : "A analisar o projecto"}
           stage={(reprocessProgress ?? uploadProgress)?.processingStage}
           detail={(reprocessProgress ?? uploadProgress)?.processingCurrentPage && (reprocessProgress ?? uploadProgress)?.processingTotalPages
-            ? `Página ${(reprocessProgress ?? uploadProgress)!.processingCurrentPage} de ${(reprocessProgress ?? uploadProgress)!.processingTotalPages}`
+            ? `PÃ¡gina ${(reprocessProgress ?? uploadProgress)!.processingCurrentPage} de ${(reprocessProgress ?? uploadProgress)!.processingTotalPages}`
             : project?.name}
           percent={(reprocessProgress ?? uploadProgress)?.processingProgress ?? 1}
         />

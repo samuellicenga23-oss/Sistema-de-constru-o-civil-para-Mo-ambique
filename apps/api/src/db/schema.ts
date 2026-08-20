@@ -12,6 +12,7 @@ import {
   jsonb,
   unique,
   index,
+  primaryKey,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
@@ -533,6 +534,114 @@ export const projects = pgTable("projects", {
    */
   publicShareToken: varchar("public_share_token", { length: 64 }).unique(),
 }, (table) => [index("projects_company_created_idx").on(table.companyId, table.createdAt)]);
+
+/** Responsabilidade operacional na obra — não substitui permissions da empresa. */
+export const projectMembers = pgTable(
+  "project_members",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    projectRole: varchar("project_role", { length: 40 }).notNull(),
+    isActive: boolean("is_active").notNull().default(true),
+    addedByUserId: uuid("added_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    unique("project_members_project_user_uidx").on(table.projectId, table.userId),
+    index("project_members_company_idx").on(table.companyId),
+    index("project_members_user_idx").on(table.userId),
+  ],
+);
+
+export const projectApprovalRoutes = pgTable(
+  "project_approval_routes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+    workflowType: varchar("workflow_type", { length: 40 }).notNull(),
+    approvalMode: varchar("approval_mode", { length: 20 }).notNull().default("any"),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    unique("project_approval_routes_project_type_uidx").on(table.projectId, table.workflowType),
+    index("project_approval_routes_company_idx").on(table.companyId),
+  ],
+);
+
+export const projectApprovalSteps = pgTable(
+  "project_approval_steps",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    routeId: uuid("route_id")
+      .notNull()
+      .references(() => projectApprovalRoutes.id, { onDelete: "cascade" }),
+    stepOrder: integer("step_order").notNull(),
+    minimumApprovals: integer("minimum_approvals").notNull().default(1),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [index("project_approval_steps_route_idx").on(table.routeId)],
+);
+
+export const projectApprovalStepUsers = pgTable(
+  "project_approval_step_users",
+  {
+    stepId: uuid("step_id")
+      .notNull()
+      .references(() => projectApprovalSteps.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+  },
+  (table) => [primaryKey({ name: "project_approval_step_users_pk", columns: [table.stepId, table.userId] })],
+);
+
+/**
+ * Tarefa de acção (aprovação / correcção) — distinta de notification (informação).
+ * Fonte de verdade da Caixa de Acções.
+ */
+export const workflowTasks = pgTable(
+  "workflow_tasks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+    projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+    workflowType: varchar("workflow_type", { length: 40 }).notNull(),
+    entityType: varchar("entity_type", { length: 40 }).notNull(),
+    entityId: uuid("entity_id").notNull(),
+    assignedUserId: uuid("assigned_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    stepOrder: integer("step_order").notNull().default(1),
+    status: varchar("status", { length: 20 }).notNull().default("pending"),
+    kind: varchar("kind", { length: 30 }).notNull().default("approval"),
+    title: varchar("title", { length: 300 }).notNull(),
+    body: text("body"),
+    link: text("link"),
+    projectNameSnapshot: varchar("project_name_snapshot", { length: 200 }),
+    requestedByUserId: uuid("requested_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    requestedAt: timestamp("requested_at").notNull().defaultNow(),
+    actedAt: timestamp("acted_at"),
+    decision: varchar("decision", { length: 40 }),
+    comment: text("comment"),
+    targetType: varchar("target_type", { length: 40 }),
+    targetId: uuid("target_id"),
+    notificationPresentedAt: timestamp("notification_presented_at"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    index("workflow_tasks_assignee_status_idx").on(table.assignedUserId, table.status),
+    index("workflow_tasks_company_status_idx").on(table.companyId, table.status),
+    index("workflow_tasks_project_idx").on(table.projectId),
+    index("workflow_tasks_entity_idx").on(table.entityType, table.entityId, table.status),
+  ],
+);
 
 export const usageEvents = pgTable(
   "usage_events",

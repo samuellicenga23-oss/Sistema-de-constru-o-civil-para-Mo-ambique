@@ -610,6 +610,13 @@
       "when": 1787164800000,
       "tag": "0086_document_review_and_notification_priority",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1787251200000,
+      "tag": "0087_project_approvals_and_workflow_tasks",
+      "breakpoints": true
     }
   ]
 }

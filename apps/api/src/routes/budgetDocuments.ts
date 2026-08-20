@@ -32,11 +32,19 @@ import { documentLockedMessage, evaluateDocumentReadiness } from "../services/do
 import { loadProjectPlantContext } from "../services/plantMeasurementLink.js";
 import { recordAuditEvent } from "../services/auditTrail.js";
 import { emitWorkflowEvent } from "../services/workflowEvents.js";
+import { assertMatrixApproval } from "../services/companyApproval.js";
+import { assertApproversAvailable } from "../services/resolveProjectApproval.js";
+import {
+  assertUserCanActOnEntity,
+  completePendingApprovalTasks,
+  createApprovalTasks,
+  createCorrectionTask,
+} from "../services/workflowTasks.js";
+import { workflowTypeFromDocumentType } from "../services/projectWorkflowTypes.js";
 import { CURRENCIES, DEFAULT_IVA_RATE, UNITS, LINE_ITEM_KINDS, fixedSigo, planUsesDirectDocumentApproval, boqEditSessionSchema } from "@sigo/shared";
 import { applyBoqEditSession, BoqEditConflictError, BoqEditValidationError } from "../services/boqEditSession.js";
 import { compareBudgetRevisions } from "../services/budgetRevisionDiff.js";
 import { getCompanySubscription } from "../services/subscriptionEntitlements.js";
-import { assertMatrixApproval } from "../services/companyApproval.js";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista"] as const;
 
@@ -307,8 +315,31 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
           isSubmitter: document.submittedByUserId === request.currentUser!.id,
         });
         if (!decision.ok) return reply.code(decision.status).send({ error: decision.error });
+        const assignment = await assertUserCanActOnEntity({
+          companyId,
+          entityType: "budget_document",
+          entityId: id,
+          userId: request.currentUser!.id,
+        });
+        if (!assignment.ok) return reply.code(403).send({ error: assignment.error });
       } else if (request.currentUser!.role !== "admin_empresa" && request.currentUser!.role !== "orcamentista") {
         return reply.code(403).send({ error: "A aprovação do documento exige um administrador da empresa" });
+      }
+    }
+    if (parsed.data.status === "submetido") {
+      const workflowType = workflowTypeFromDocumentType(document.documentType);
+      const approvers = await assertApproversAvailable({
+        companyId,
+        projectId: document.projectId,
+        workflowType,
+        excludeUserId: request.currentUser!.id,
+      });
+      if (!approvers.ok) {
+        return reply.code(409).send({
+          code: approvers.code,
+          error: approvers.error,
+          projectId: document.projectId,
+        });
       }
     }
     if (parsed.data.status !== document.status && !transitions[document.status].includes(parsed.data.status)) {
@@ -379,18 +410,39 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
     });
 
     const actor = { id: request.currentUser!.id, name: request.currentUser!.name, email: request.currentUser!.email };
+    const workflowType = workflowTypeFromDocumentType(document.documentType);
     if (parsed.data.status === "submetido") {
-      await emitWorkflowEvent({
-        event: "document.submitted",
+      const resolved = await assertApproversAvailable({
         companyId,
-        entityId: id,
-        title: updated.title,
-        link: `/documentos/${id}`,
-        actor,
-        reason: parsed.data.decisionNote,
-        logger: request.log,
+        projectId: document.projectId,
+        workflowType,
+        excludeUserId: request.currentUser!.id,
       });
+      if (resolved.ok) {
+        await createApprovalTasks({
+          companyId,
+          projectId: document.projectId,
+          workflowType,
+          entityType: "budget_document",
+          entityId: id,
+          title: updated.title,
+          body: parsed.data.decisionNote ?? null,
+          link: `/documentos/${id}`,
+          requestedByUserId: request.currentUser!.id,
+          resolved: resolved.resolved,
+        });
+      }
     } else if (parsed.data.status === "aprovado") {
+      await completePendingApprovalTasks({
+        companyId,
+        entityType: "budget_document",
+        entityId: id,
+        actorUserId: request.currentUser!.id,
+        decision: "approved",
+        comment: parsed.data.decisionNote,
+        projectId: document.projectId,
+        workflowType,
+      });
       await emitWorkflowEvent({
         event: "document.approved",
         companyId,
@@ -403,6 +455,29 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
         logger: request.log,
       });
     } else if (parsed.data.status === "rascunho" && document.status === "submetido") {
+      if (document.submittedByUserId) {
+        await createCorrectionTask({
+          companyId,
+          projectId: document.projectId,
+          workflowType,
+          entityType: "budget_document",
+          entityId: id,
+          assignedUserId: document.submittedByUserId,
+          title: `Correcção necessária — ${updated.title}`,
+          body: parsed.data.decisionNote ?? "Documento devolvido.",
+          link: `/documentos/${id}`,
+          requestedByUserId: request.currentUser!.id,
+        });
+      } else {
+        await completePendingApprovalTasks({
+          companyId,
+          entityType: "budget_document",
+          entityId: id,
+          actorUserId: request.currentUser!.id,
+          decision: "returned",
+          comment: parsed.data.decisionNote,
+        });
+      }
       await emitWorkflowEvent({
         event: "document.returned",
         companyId,
