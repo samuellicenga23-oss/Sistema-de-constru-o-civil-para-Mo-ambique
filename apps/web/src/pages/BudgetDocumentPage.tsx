@@ -629,21 +629,27 @@ export default function BudgetDocumentPage() {
   const [changingStatus, setChangingStatus] = useState(false);
   const [reviewAction, setReviewAction] = useState<"submit" | "approve" | "return" | null>(null);
   const [activeLineEditId, setActiveLineEditId] = useState<string | null>(null);
+  const [activeLineDirty, setActiveLineDirty] = useState(false);
   const [showDocumentComments, setShowDocumentComments] = useState(false);
 
   async function handleRequestLineEdit(id: string | null, _dirty: boolean) {
     if (id === activeLineEditId) return true;
-    if (activeLineEditId && id !== null && id !== activeLineEditId) {
+    if (activeLineEditId && id !== null && id !== activeLineEditId && activeLineDirty) {
       const ok = await confirm({
         title: "Trocar de linha?",
-        message: "Guarde ou cancele a linha que está a editar antes de abrir outra.",
+        message: "Há alterações por guardar nesta linha. Descartar e continuar?",
         confirmLabel: "Descartar e continuar",
         danger: true,
       });
       if (!ok) return false;
     }
     setActiveLineEditId(id);
+    setActiveLineDirty(false);
     return true;
+  }
+
+  function handleLineEditDirtyChange(id: string, dirty: boolean) {
+    if (id === activeLineEditId) setActiveLineDirty(dirty);
   }
 
   async function handleStatusChange(status: "rascunho" | "submetido" | "aprovado", decisionNote?: string) {
@@ -1358,6 +1364,7 @@ export default function BudgetDocumentPage() {
                           mutations={editSession.editing ? editSession.mutations : undefined}
                           activeEditId={editSession.editing ? null : activeLineEditId}
                           onRequestEdit={editSession.editing ? undefined : handleRequestLineEdit}
+                          onEditDirtyChange={editSession.editing ? undefined : handleLineEditDirtyChange}
                           documentId={documentId}
                         />
                       ))}

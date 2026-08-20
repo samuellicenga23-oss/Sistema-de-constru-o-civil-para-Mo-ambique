@@ -162,7 +162,9 @@ export default function CatalogPage() {
         materialLines: [],
         equipmentLines: [],
       });
-      navigate(`/catalogo/composicoes/${created.id}`);
+      navigate(`/catalogo/composicoes/${created.id}`, {
+        state: { flash: "Composição criada. Já está nas suas composições." },
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao criar composição");
     }

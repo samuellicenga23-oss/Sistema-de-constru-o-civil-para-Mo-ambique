@@ -207,6 +207,7 @@ export default function LineItemRow({
   mutations = defaultBoqLineMutations,
   activeEditId = null,
   onRequestEdit,
+  onEditDirtyChange,
   documentId = null,
 }: {
   node: LineItemNode;
@@ -222,6 +223,8 @@ export default function LineItemRow({
   /** Only one line may be in edit mode at a time (lifted state). */
   activeEditId?: string | null;
   onRequestEdit?: (id: string | null, dirty: boolean) => Promise<boolean> | boolean;
+  /** Report whether the active edit row has unsaved changes (for click-outside / switch). */
+  onEditDirtyChange?: (id: string, dirty: boolean) => void;
   documentId?: string | null;
 }) {
   const { confirm, dialog } = useConfirmDialog();
@@ -239,6 +242,8 @@ export default function LineItemRow({
   const [saving, setSaving] = useState(false);
   const [linkingComposition, setLinkingComposition] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const editBlockRef = useRef<HTMLTableRowElement>(null);
+  const measureBlockRef = useRef<HTMLTableRowElement>(null);
 
   const canEdit = !readOnly;
   const isEditing = activeEditId === node.id;
@@ -264,6 +269,11 @@ export default function LineItemRow({
   }, [node.description, node.quantity, node.unitPrice, node.sellingUnitPrice, isEditing]);
 
   useEffect(() => {
+    if (!isEditing) return;
+    onEditDirtyChange?.(node.id, dirty);
+  }, [isEditing, dirty, node.id, onEditDirtyChange]);
+
+  useEffect(() => {
     if (!menuOpen) return;
     function onDoc(e: MouseEvent) {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
@@ -271,6 +281,31 @@ export default function LineItemRow({
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
   }, [menuOpen]);
+
+  useEffect(() => {
+    if (!isEditing || dirty) return;
+    function onDoc(e: MouseEvent) {
+      const target = e.target as Node;
+      if (editBlockRef.current?.contains(target)) return;
+      if (measureBlockRef.current?.contains(target)) return;
+      void cancelEdit();
+      setShowMeasurements(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [isEditing, dirty]);
+
+  useEffect(() => {
+    if (!showMeasurements || isEditing) return;
+    function onDoc(e: MouseEvent) {
+      const target = e.target as Node;
+      if (editBlockRef.current?.contains(target)) return;
+      if (measureBlockRef.current?.contains(target)) return;
+      setShowMeasurements(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [showMeasurements, isEditing]);
 
   const editHistoryRef = useRef<{ desc: string[]; qty: string[]; idx: number }>({
     desc: [],
@@ -327,6 +362,19 @@ export default function LineItemRow({
     setDescDraft(node.description);
     setQtyDraft(node.quantity != null ? String(node.quantity) : "");
     setUnitPriceDraft(node.unitPrice != null ? String(node.unitPrice) : "");
+    // Em medições, editar o item abre também a memória de cálculo (não só o título).
+    if (measurementOnly && node.kind === "item" && allowLivePersistence) {
+      setShowMeasurements(true);
+    }
+  }
+
+  async function openMeasurements() {
+    if (!canEdit || node.kind !== "item" || !allowLivePersistence) return;
+    if (measurementOnly) {
+      await beginEdit();
+      return;
+    }
+    setShowMeasurements((current) => !current);
   }
 
   async function cancelEdit() {
@@ -398,7 +446,11 @@ export default function LineItemRow({
 
   return (
     <Fragment>
-      <tr id={node.kind === "item" ? `line-item-${node.id}` : undefined} className={`${rowBg} table-row text-sm group scroll-mt-24`}>
+      <tr
+        ref={editBlockRef}
+        id={node.kind === "item" ? `line-item-${node.id}` : undefined}
+        className={`${rowBg} table-row text-sm group scroll-mt-24`}
+      >
         <td className={`py-2 px-2 text-xs align-top ${isChapter ? "text-brand-700 font-bold" : missingPrice ? "text-amber-800 font-bold" : "text-gray-400"}`}>
           {node.code}
         </td>
@@ -449,6 +501,15 @@ export default function LineItemRow({
                   pushEditHistory(descDraft, e.target.value);
                 }}
               />
+            ) : measurementOnly && canEdit && allowLivePersistence ? (
+              <button
+                type="button"
+                className="tabular-nums text-brand-800 hover:underline"
+                title="Abrir memória de cálculo"
+                onClick={() => void openMeasurements()}
+              >
+                {node.quantity ?? "—"}
+              </button>
             ) : (
               <span className="tabular-nums">{node.quantity ?? "—"}</span>
             )
@@ -503,10 +564,25 @@ export default function LineItemRow({
               </button>
             </span>
           ) : (
-            <span className="inline-flex items-center gap-1">
-              {canEdit && node.kind !== "nota" && (
-                <button type="button" className="btn btn-secondary btn-sm" onClick={() => void beginEdit()}>
-                  <IconPencil className="h-3.5 w-3.5" /> Editar
+            <span className="inline-flex items-center justify-end gap-0.5">
+              {canEdit && node.kind === "item" && allowLivePersistence && (
+                <button
+                  type="button"
+                  className="icon-btn"
+                  title={measurementOnly ? "Editar medição e memória de cálculo" : "Memória de cálculo"}
+                  onClick={() => void openMeasurements()}
+                >
+                  <IconRuler className="h-3.5 w-3.5" />
+                </button>
+              )}
+              {canEdit && node.kind !== "nota" && !(measurementOnly && node.kind === "item") && (
+                <button type="button" className="icon-btn" title="Editar linha" onClick={() => void beginEdit()}>
+                  <IconPencil className="h-3.5 w-3.5" />
+                </button>
+              )}
+              {canEdit && measurementOnly && node.kind !== "item" && node.kind !== "nota" && (
+                <button type="button" className="icon-btn" title="Editar descrição" onClick={() => void beginEdit()}>
+                  <IconPencil className="h-3.5 w-3.5" />
                 </button>
               )}
               <div className="relative" ref={menuRef}>
@@ -526,7 +602,7 @@ export default function LineItemRow({
                       </button>
                     )}
                     {canEdit && allowLivePersistence && node.kind === "item" && (
-                      <button type="button" className="block w-full px-3 py-2 text-left text-xs font-medium text-slate-700 hover:bg-slate-50" onClick={() => { setMenuOpen(false); setShowMeasurements((s) => !s); }}>
+                      <button type="button" className="block w-full px-3 py-2 text-left text-xs font-medium text-slate-700 hover:bg-slate-50" onClick={() => { setMenuOpen(false); void openMeasurements(); }}>
                         <span className="inline-flex items-center gap-1"><IconRuler className="h-3.5 w-3.5" /> Memória de cálculo</span>
                       </button>
                     )}
@@ -571,7 +647,7 @@ export default function LineItemRow({
       )}
 
       {showMeasurements && node.kind === "item" && (
-        <tr>
+        <tr ref={measureBlockRef}>
           <td colSpan={colSpan} className="bg-white pb-2">
             <div className="sm:ml-14">
               <MeasurementGrid
@@ -618,6 +694,7 @@ export default function LineItemRow({
           mutations={mutations}
           activeEditId={activeEditId}
           onRequestEdit={onRequestEdit}
+          onEditDirtyChange={onEditDirtyChange}
           documentId={documentId}
         />
       ))}

@@ -85,12 +85,13 @@ export default function CompositionTechnicalV2Panel({
         derivedCostLines: derived.map((row) => ({ name: row.name.trim(), basis: row.basis, percentage: Number(row.percentage), notes: row.notes ?? null })),
       });
       if (updated.id && updated.id !== compositionId) {
-        setMessage("Guardado na sua cópia pessoal da composição.");
+        // A página pai navega e mostra o aviso de cópia pessoal.
         onCompositionIdChange?.(updated.id);
         onChanged?.();
         return;
       }
-      setDetail(updated); setMessage("Parâmetros técnicos guardados e APU recalculada.");
+      setDetail(updated);
+      setMessage("Composição actualizada. Parâmetros técnicos guardados e APU recalculada.");
       await reload(); onChanged?.();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Não foi possível guardar APU 2.0"); }
     finally { setSaving(false); }

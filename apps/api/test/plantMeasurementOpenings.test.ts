@@ -69,6 +69,13 @@ describe("medições ligadas aos vãos da planta", () => {
     expect(result.lines).toHaveLength(1);
     expect(result.lines[0]).toMatchObject({ count: 2, length: 1.5, width: 1.2 });
   });
+  it("representa área total do piso térreo como length × width (não só count)", () => {
+    const result = buildMeasurementLinesFromPlant("1.1", rooms, openings);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.lines).toHaveLength(1);
+    expect(result.lines[0]).toMatchObject({ count: 1, length: 100, width: 1, height: null });
+  });
 });
 
 describe("medições ligadas às redes técnicas", () => {

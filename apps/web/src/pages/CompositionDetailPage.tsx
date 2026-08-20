@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { catalogApi, type CostCompositionDetail, type LabourCategory, type Material, type Equipment } from "../api/catalog";
 import Layout from "../components/Layout";
 import LoadingState from "../components/LoadingState";
@@ -10,6 +10,8 @@ import { useAuth } from "../auth/AuthContext";
 import { IconTrash, IconPlus, IconBack } from "../components/icons";
 import CompositionTechnicalV2Panel from "../components/CompositionTechnicalV2Panel";
 import { resolveSupplierLookupId } from "../utils/resourceIdentity";
+
+type CompositionLocationState = { flash?: string };
 
 function money(value: string | number) {
   return Number(value).toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -235,6 +237,7 @@ export default function CompositionDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const { confirm, dialog } = useConfirmDialog();
   const [detail, setDetail] = useState<CostCompositionDetail | null>(null);
   const [labourCategories, setLabourCategories] = useState<LabourCategory[]>([]);
@@ -258,6 +261,19 @@ export default function CompositionDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [forking, setForking] = useState(false);
+
+  function flash(text: string) {
+    setMessage(text);
+    window.setTimeout(() => setMessage((current) => (current === text ? null : current)), 7000);
+  }
+
+  useEffect(() => {
+    const flashText = (location.state as CompositionLocationState | null)?.flash;
+    if (!flashText) return;
+    flash(flashText);
+    navigate(location.pathname + location.search, { replace: true, state: {} });
+  }, [location.state, location.pathname, location.search, navigate]);
   const [showShare, setShowShare] = useState(false);
   const [shareEmail, setShareEmail] = useState("");
   const [sharePermission, setSharePermission] = useState<"view" | "edit">("view");
@@ -315,9 +331,8 @@ export default function CompositionDetailPage() {
     reload(id).catch((err) => setError(err.message));
   }, [id]);
 
-  // Guardar sempre funciona directamente — se a composição ainda pertencer ao catálogo
-  // partilhado, o backend clona-a silenciosamente para a empresa; se o id devolvido for
-  // diferente do actual, navegamos para o novo endereço (a "sua" cópia) sem o utilizador notar.
+  // Guardar sempre funciona directamente — se a composição ainda não for sua, o backend
+  // cria cópia pessoal; navegamos para o novo id e mostramos aviso visível.
   async function handleSave() {
     if (!id || !detail) return;
     setSaving(true);
@@ -340,15 +355,17 @@ export default function CompositionDetailPage() {
         materialLines,
         equipmentLines,
       });
-      setMessage(
-        result.id !== id
-          ? "Composição guardada na sua cópia pessoal — passa a ser a sua versão prioritária."
-          : "Composição gravada — o novo preço unitário já está em uso para novos itens do orçamento.",
-      );
       if (result.id !== id) {
-        navigate(`/catalogo/composicoes/${result.id}`, { replace: true });
+        navigate(`/catalogo/composicoes/${result.id}`, {
+          replace: true,
+          state: {
+            flash:
+              "Composição actualizada e guardada nas suas composições. Esta passa a ser a sua versão prioritária.",
+          } satisfies CompositionLocationState,
+        });
       } else {
         await reload(id);
+        flash("Composição actualizada. O novo preço unitário já está em uso para novos itens do orçamento.");
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao guardar");
@@ -374,11 +391,19 @@ export default function CompositionDetailPage() {
   async function handleFork() {
     if (!id) return;
     setError(null);
+    setForking(true);
     try {
       const copy = await catalogApi.forkComposition(id);
-      navigate(`/catalogo/composicoes/${copy.id}`);
+      navigate(`/catalogo/composicoes/${copy.id}`, {
+        state: {
+          flash:
+            "Composição duplicada com sucesso. Esta cópia é sua — pode editá-la sem afectar o original.",
+        } satisfies CompositionLocationState,
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao duplicar");
+    } finally {
+      setForking(false);
     }
   }
 
@@ -409,7 +434,15 @@ export default function CompositionDetailPage() {
   }
 
   if (!detail) {
-    return <LoadingState fullScreen label="A carregar composição..." />;
+    return (
+      <Layout title="Composição">
+        <div className="mx-auto w-full max-w-6xl space-y-5">
+          {error && <AlertBanner tone="error" onDismiss={() => setError(null)}>{error}</AlertBanner>}
+          {message && <AlertBanner tone="success" onDismiss={() => setMessage(null)}>{message}</AlertBanner>}
+          <LoadingState fullScreen label="A carregar composição..." />
+        </div>
+      </Layout>
+    );
   }
 
   // Usa o preço ao vivo do catálogo quando o recurso ainda lá está; senão, a reserva
@@ -437,7 +470,9 @@ export default function CompositionDetailPage() {
       actions={
         <>
           <span className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold tabular-nums text-slate-900">{money(unitCost)} MZN/{detail.outputUnit}</span>
-          <button type="button" onClick={() => void handleFork()} className="btn btn-secondary btn-sm">Duplicar</button>
+          <button type="button" onClick={() => void handleFork()} disabled={forking} className="btn btn-secondary btn-sm">
+            {forking ? "A duplicar..." : "Duplicar"}
+          </button>
           {detail.ownerUserId === user?.id && (
             <button type="button" onClick={() => void openShare()} className="btn btn-secondary btn-sm">Partilhar</button>
           )}
@@ -492,7 +527,15 @@ export default function CompositionDetailPage() {
               <CompositionTechnicalV2Panel
                 compositionId={detail.id}
                 onChanged={() => void reload(detail.id)}
-                onCompositionIdChange={(nextId) => navigate(`/catalogo/composicoes/${nextId}`, { replace: true })}
+                onCompositionIdChange={(nextId) =>
+                  navigate(`/catalogo/composicoes/${nextId}`, {
+                    replace: true,
+                    state: {
+                      flash:
+                        "Composição actualizada e guardada nas suas composições. Esta passa a ser a sua versão prioritária.",
+                    } satisfies CompositionLocationState,
+                  })
+                }
               />
             </div>
           </details>

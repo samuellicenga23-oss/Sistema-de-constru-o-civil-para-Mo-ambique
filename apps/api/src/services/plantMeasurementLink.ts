@@ -346,6 +346,8 @@ export function buildMeasurementLinesFromPlant(
 
   if (strategy.kind === "single_total") {
     const total = filtered.reduce((s, r) => s + r.areaM2, 0);
+    // Representar área total como length × width (= total × 1) para a fórmula "area"
+    // do preview/apply — guardar só em `count` fazia o motor exigir C/L e rebentar com 500.
     return {
       ok: true,
       strategy: `área total (${strategy.filter})`,
@@ -353,9 +355,9 @@ export function buildMeasurementLinesFromPlant(
       lines: [
         {
           description: `Soma de ${filtered.length} compartimento(s) — planta`,
-          count: total,
-          length: null,
-          width: null,
+          count: 1,
+          length: total,
+          width: 1,
           height: null,
           sortOrder: 0,
         },

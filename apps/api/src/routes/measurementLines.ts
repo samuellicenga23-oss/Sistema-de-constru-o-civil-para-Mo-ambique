@@ -159,6 +159,22 @@ function oldRowAsInput(row: typeof measurementLines.$inferSelect): LineInput {
   };
 }
 
+function inferPlantPreviewFormula(
+  line: { count: number; length: number | null; width: number | null; height: number | null },
+  compositionDefault: MeasurementFormulaType,
+): MeasurementFormulaType {
+  if (line.height != null && line.width != null && line.length != null) return "volume";
+  if (line.width != null && line.length != null) return "area";
+  if (line.length != null) {
+    if (compositionDefault === "weight" || compositionDefault === "reinforcement" || compositionDefault === "section_length") {
+      return compositionDefault;
+    }
+    return "length";
+  }
+  // Só quantidade (vãos, equipamento, contagens) — nunca reutilizar "area"/"volume" sem C/L/H.
+  return "count";
+}
+
 async function plantPreview(lineItemId: string, companyId: string) {
   const item = await assertLineItemOwned(lineItemId, companyId);
   if (!item || item.kind !== "item" || !item.code) return null;
@@ -173,29 +189,33 @@ async function plantPreview(lineItemId: string, companyId: string) {
   const built = buildMeasurementLinesFromPlant(item.code, rooms, openings, hydroPipes, item.description, hydroEquipment);
   if (!built.ok) return { ok: false as const, reason: built.reason };
   const compositionDefault = await resolveDefaultFormula(item);
-  const lines = built.lines.map((line, index) => {
-    let formulaType: MeasurementFormulaType = compositionDefault;
-    if (line.height != null && line.width != null && line.length != null) formulaType = "volume";
-    else if (line.width != null && line.length != null) formulaType = "area";
-    else if (line.length != null && formulaType !== "volume" && formulaType !== "area" && formulaType !== "wall_area") formulaType = "length";
-    const candidate: LineInput = {
-      description: line.description,
-      formulaType,
-      sign: 1,
-      count: line.count,
-      length: line.length,
-      width: line.width,
-      height: line.height,
-      coefficient: 1,
-      source: "plant",
-      sourceRef: `plant:${projectRow.projectId}`,
-      sortOrder: index,
+  try {
+    const lines = built.lines.map((line, index) => {
+      const formulaType = inferPlantPreviewFormula(line, compositionDefault);
+      const candidate: LineInput = {
+        description: line.description,
+        formulaType,
+        sign: 1,
+        count: line.count,
+        length: line.length,
+        width: line.width,
+        height: line.height,
+        coefficient: 1,
+        source: "plant",
+        sourceRef: `plant:${projectRow.projectId}`,
+        sortOrder: index,
+      };
+      const calculation = validateCalculatedInput(candidate);
+      return { ...candidate, partial: calculation.partial, expression: calculation.expression };
+    });
+    const fingerprint = createHash("sha256").update(JSON.stringify(lines.map(({ partial: _p, expression: _e, ...line }) => line))).digest("hex");
+    return { ok: true as const, lines, fingerprint, roomCount: built.roomCount, strategy: built.strategy };
+  } catch (cause) {
+    return {
+      ok: false as const,
+      reason: cause instanceof Error ? cause.message : "Não foi possível calcular o preview a partir da planta.",
     };
-    const calculation = validateCalculatedInput(candidate);
-    return { ...candidate, partial: calculation.partial, expression: calculation.expression };
-  });
-  const fingerprint = createHash("sha256").update(JSON.stringify(lines.map(({ partial: _p, expression: _e, ...line }) => line))).digest("hex");
-  return { ok: true as const, lines, fingerprint, roomCount: built.roomCount, strategy: built.strategy };
+  }
 }
 
 export async function measurementLineRoutes(app: FastifyInstance) {

@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState, type FormEvent } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { groupMeasurementsByFloorZone } from "../utils/measurementLocationGroups";
 import {
   measurementLinesApi,
@@ -89,6 +89,16 @@ export default function MeasurementGrid({
   const [preview, setPreview] = useState<PlantMeasurementPreview | null>(null);
   const [selectedPreview, setSelectedPreview] = useState<number[]>([]);
   const [working, setWorking] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
+  const formSnapshotRef = useRef("");
+
+  function formSnapshot() {
+    return JSON.stringify({
+      editingId, formulaType, sign, description, count, length, width, height,
+      directQuantity, coefficient, unitWeight, diameterMm, baseQuantity, percentage,
+      block, floor, zone, room, axis, element, showLocation,
+    });
+  }
 
   async function reload() {
     const active = await measurementLinesApi.list(lineItemId);
@@ -99,6 +109,23 @@ export default function MeasurementGrid({
   useEffect(() => {
     if (!editingId) setFormulaType(suggestedFormula);
   }, [suggestedFormula, lineItemId, editingId]);
+
+  useEffect(() => {
+    formSnapshotRef.current = formSnapshot();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- snapshot only when entering/leaving edit mode
+  }, [editingId, lineItemId]);
+
+  useEffect(() => {
+    if (!editingId) return;
+    function onDoc(e: MouseEvent) {
+      if (formRef.current?.contains(e.target as Node)) return;
+      if (formSnapshot() !== formSnapshotRef.current) return;
+      resetForm();
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+    // Recapture latest form values while editing a line.
+  });
 
   const groupedLines = useMemo(() => groupMeasurementsByFloorZone(lines), [lines]);
   const total = useMemo(() => lines.reduce((sum, line) => sum + line.partial, 0), [lines]);
@@ -120,6 +147,7 @@ export default function MeasurementGrid({
   function resetForm() {
     setEditingId(null); setFormulaType(suggestedFormula); setDescription(""); setCount("1"); setLength(""); setWidth(""); setHeight("");
     setDirectQuantity(""); setCoefficient("1"); setUnitWeight(""); setDiameterMm(""); setBaseQuantity(""); setPercentage(""); setSign(1);
+    setBlock(""); setFloor(""); setZone(""); setRoom(""); setAxis(""); setElement(""); setShowLocation(false);
   }
 
   function startEdit(line: MeasurementLine) {
@@ -201,7 +229,7 @@ export default function MeasurementGrid({
 
     {showHistory && <div className="rounded-lg border border-slate-200 bg-white p-3"><div className="mb-2"><strong className="text-slate-800">Histórico</strong></div><div className="max-h-56 overflow-auto space-y-1">{history.map((row) => <div key={row.id} className={`grid grid-cols-[70px_1fr_100px] gap-2 rounded px-2 py-1.5 ${row.isActive ? "bg-emerald-50" : "bg-slate-50 text-slate-500"}`}><span>rev. {row.revisionNo}{row.isActive ? " · activa" : ""}</span><span className="truncate">{row.description || label(row.formulaType)} · {location(row)}</span><strong className="text-right tabular-nums">{row.partial.toFixed(6)}</strong></div>)}</div></div>}
 
-    <form onSubmit={handleAdd} className="space-y-3 rounded-lg border border-slate-200 bg-white p-3">
+    <form ref={formRef} onSubmit={handleAdd} className="space-y-3 rounded-lg border border-slate-200 bg-white p-3">
       {editingId && <div className="flex items-center justify-between rounded-lg bg-amber-50 px-3 py-2 text-amber-800"><span>A editar — guardar cria revisão nova</span><button type="button" className="btn btn-ghost btn-sm" onClick={resetForm}>Cancelar</button></div>}
       <div className="grid gap-2 md:grid-cols-[180px_110px_1fr]">
         <label><span className="label">Fórmula</span><select className="input input-sm w-full" value={formulaType} onChange={(e) => setFormulaType(e.target.value as MeasurementFormulaType)}>{FORMULAS.map((row) => <option key={row.value} value={row.value}>{row.label}</option>)}</select></label>
@@ -227,7 +255,7 @@ export default function MeasurementGrid({
     </form>
 
     {hasPlantRooms && itemCode && <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2"><strong className="text-emerald-900">Planta</strong><button type="button" disabled={working} className="btn btn-secondary btn-sm" onClick={() => void openPlantPreview()}>Preview</button></div>
+      <div className="flex flex-wrap items-center justify-between gap-2"><strong className="text-emerald-900">Planta</strong><button type="button" disabled={working} className="btn btn-secondary btn-sm" onClick={() => void openPlantPreview()}>{working ? "A calcular…" : "Pré-visualizar"}</button></div>
       {preview && <div className="mt-3 space-y-2"><div className="max-h-64 overflow-auto rounded border border-emerald-200 bg-white">{preview.lines.map((line, index) => <label key={index} className="flex cursor-pointer items-start gap-2 border-b border-slate-100 px-3 py-2 last:border-0"><input type="checkbox" checked={selectedPreview.includes(index)} onChange={(e) => setSelectedPreview((current) => e.target.checked ? [...current, index] : current.filter((value) => value !== index))} /><span className="flex-1"><strong>{line.description || `Linha ${index + 1}`}</strong><span className="ml-2 text-slate-500">{line.expression} = {line.partial.toFixed(6)}</span></span></label>)}</div><div className="flex flex-wrap justify-end gap-2"><button type="button" className="btn btn-ghost btn-sm" onClick={() => setPreview(null)}>Cancelar</button><button type="button" className="btn btn-secondary btn-sm" disabled={!selectedPreview.length || working} onClick={() => void applyPlant("merge")}>Fundir</button><button type="button" className="btn btn-primary btn-sm" disabled={!selectedPreview.length || working} onClick={() => void applyPlant("replace")}>Substituir</button></div></div>}
     </div>}
   </div>;
