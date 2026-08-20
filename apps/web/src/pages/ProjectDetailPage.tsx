@@ -4,20 +4,18 @@ import { boqApi, type BudgetDocument, type Project, type ProjectMaterialSpecific
 import { measurementApi, type MeasurementCertificate } from "../api/measurement";
 import { plantsApi, type Plant, type PlantProcessingProgress } from "../api/plants";
 import { catalogApi, type PriceZone } from "../api/catalog";
-import { suppliersApi } from "../api/suppliers";
 import Layout from "../components/Layout";
 import PlantUploadProgress from "../components/PlantUploadProgress";
 import BlockingProcessingOverlay from "../components/BlockingProcessingOverlay";
 import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { usePlantPolling } from "../hooks/usePlantPolling";
 import { SectionHeader } from "../components/WorkspaceUI";
-import ProjectWorkspaceNav from "../components/ProjectWorkspaceNav";
+import ProjectWorkspaceNav, { faseQueryFor, resolveProjectFase } from "../components/ProjectWorkspaceNav";
 import ProjectWorkflowBanner from "../components/ProjectWorkflowBanner";
 import PublicShareModal from "../components/PublicShareModal";
-import { IconDoc, IconClipboard, IconMap, IconPlus, IconRuler, IconTrash, IconUpload } from "../components/icons";
+import { IconClipboard, IconPlus, IconTrash, IconUpload } from "../components/icons";
 import { useAuth } from "../auth/AuthContext";
-import { UNITS, type Unit, planUsesDirectDocumentApproval } from "@sigo/shared";
-import { companiesApi } from "../api/companies";
+import { UNITS, type Unit } from "@sigo/shared";
 
 const PLANT_STATUS_BADGE: Record<Plant["processingStatus"], { label: string; cls: string }> = {
   pendente: { label: "Pendente", cls: "badge-gray" },
@@ -56,9 +54,8 @@ export default function ProjectDetailPage() {
   const [plants, setPlants] = useState<Plant[]>([]);
   const [zones, setZones] = useState<PriceZone[]>([]);
   const [savingZone, setSavingZone] = useState(false);
-  const [savingFloors, setSavingFloors] = useState(false);
-  const [title, setTitle] = useState("Mapa de Quantidades");
-  const [template, setTemplate] = useState<"padrao" | "vazio">("padrao");
+  const [title] = useState("Mapa de Quantidades");
+  const [template] = useState<"padrao" | "vazio">("padrao");
   const [selectedDocId, setSelectedDocId] = useState("");
   const [periodDate, setPeriodDate] = useState(todayStr());
   const [uploading, setUploading] = useState(false);
@@ -68,19 +65,10 @@ export default function ProjectDetailPage() {
   const [reprocessingPlantId, setReprocessingPlantId] = useState<string | null>(null);
   const [reprocessProgress, setReprocessProgress] = useState<PlantProcessingProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [costReadiness, setCostReadiness] = useState({ materials: 0, quoted: 0, zonePriced: 0, suppliers: 0, compositions: 0 });
   const [materialSpecifications, setMaterialSpecifications] = useState<ProjectMaterialSpecification[]>([]);
   const [newMaterial, setNewMaterial] = useState<{ name: string; unit: Unit; specification: string }>({ name: "", unit: "un", specification: "" });
   const [addingMaterial, setAddingMaterial] = useState(false);
   const [workflowStatus, setWorkflowStatus] = useState<ProjectWorkflowStatus | null>(null);
-  const [directApproval, setDirectApproval] = useState(false);
-
-  useEffect(() => {
-    companiesApi
-      .me()
-      .then((data) => setDirectApproval(planUsesDirectDocumentApproval(data.subscription?.plan ?? data.company.subscription?.plan)))
-      .catch(() => setDirectApproval(false));
-  }, []);
 
   async function reload() {
     if (!projectId) return;
@@ -101,18 +89,6 @@ export default function ProjectDetailPage() {
     if (!selectedDocId || !docs.some((document) => document.id === selectedDocId && document.status === "aprovado")) {
       setSelectedDocId(firstBudget?.id ?? "");
     }
-    const [catalogMaterials, supplierList, compositionList] = await Promise.all([
-      catalogApi.listMaterials(proj.zoneId ?? undefined),
-      suppliersApi.list(),
-      catalogApi.listCompositions(proj.zoneId ?? undefined),
-    ]);
-    setCostReadiness({
-      materials: catalogMaterials.length,
-      quoted: catalogMaterials.filter((material) => material.marketPrice != null).length,
-      zonePriced: catalogMaterials.filter((material) => proj.zoneId ? material.zonePrice != null : Number(material.baseUnitCost) > 0).length,
-      suppliers: supplierList.length,
-      compositions: compositionList.length,
-    });
   }
 
   useEffect(() => {
@@ -141,20 +117,6 @@ export default function ProjectDetailPage() {
     }
   }
 
-  async function handleFloorsChange(newFloors: number) {
-    if (!projectId) return;
-    setSavingFloors(true);
-    setError(null);
-    try {
-      const updated = await boqApi.updateProject(projectId, { floors: newFloors });
-      setProject(updated);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro ao actualizar o número de pisos");
-    } finally {
-      setSavingFloors(false);
-    }
-  }
-
   async function handleAddMaterial(e: FormEvent) {
     e.preventDefault();
     if (!projectId || !newMaterial.name.trim()) return;
@@ -175,15 +137,18 @@ export default function ProjectDetailPage() {
     }
   }
 
-  async function handleCreate(e: FormEvent) {
-    e.preventDefault();
+  async function handleCreateQuickBudget() {
     if (!projectId) return;
     setError(null);
     try {
-      await boqApi.createBudgetDocument(projectId, { title, template, documentType: "orcamento" });
-      await reload();
+      const created = await boqApi.createBudgetDocument(projectId, {
+        title: title.trim() || "Mapa de Quantidades",
+        template,
+        documentType: "orcamento",
+      });
+      navigate(`/documentos/${created.id}?fase=orcamento`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro ao criar documento");
+      setError(err instanceof Error ? err.message : "Erro ao criar orçamento");
     }
   }
 
@@ -224,7 +189,10 @@ export default function ProjectDetailPage() {
     setError(null);
     try {
       const { document } = await boqApi.prepareMeasurementWorkspace(projectId);
-      navigate(project?.measurementMode === "importar" ? `/documentos/${document.id}` : `/documentos/${document.id}?assistente=1`);
+      const dest = project?.measurementMode === "importar"
+        ? `/documentos/${document.id}?fase=medicao`
+        : `/documentos/${document.id}?fase=medicao&assistente=1`;
+      navigate(dest);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Não foi possível preparar as medições");
     } finally {
@@ -336,61 +304,41 @@ export default function ProjectDetailPage() {
   const latestCompletedPlant = completedPlants[completedPlants.length - 1];
   const usesPlants = project.measurementMode === "plantas";
 
-  const faseParam = searchParams.get("fase");
-  const fase: "medicao" | "orcamento" | "gestao" | "hibrido" =
-    faseParam === "gestao"
-      ? "gestao"
-      : faseParam === "medicao" || faseParam === "orcamento"
-        ? faseParam
-        : project.projectType === "medicao"
-          ? "medicao"
-          : project.projectType === "orcamento"
-            ? "orcamento"
-            : "hibrido";
-  // Em projectos híbridos, o hub deve mostrar medições E orçamentos mesmo quando
-  // se entra a partir de /medicoes ou /orcamentos (fase filtrada).
-  const isHibrido = project.projectType === "hibrido";
-  const showMedicao = fase === "medicao" || fase === "hibrido" || fase === "gestao" || isHibrido;
-  const showOrcamento = fase === "orcamento" || fase === "hibrido" || fase === "gestao" || isHibrido;
-  // Plantas e preparação de preços são o ponto de partida da obra — não esconder
-  // só porque se entrou por Orçamentos; em gestão mantêm-se acessíveis.
-  const showPlantas = fase !== "gestao" || usesPlants || plants.length > 0;
-  // Preços e composições pertencem ao orçamento; nunca devem bloquear o levantamento.
+  // O URL define o workspace. Sem `fase` → visão geral. Híbrido NÃO misture módulos.
+  const fase = resolveProjectFase(searchParams.get("fase"));
+  const isVisao = fase === "visao";
+  const showMedicao = fase === "medicao" || isVisao;
+  const showOrcamento = fase === "orcamento" || isVisao;
+  const showPlantas = isVisao || (fase === "medicao" && (usesPlants || plants.length > 0));
+  const showPlantasFull = isVisao || (fase === "medicao" && (!hasMeasuredBudget || plants.some((p) => p.processingStatus !== "concluido")));
   const showPrepararObra = fase === "orcamento";
-  const showCertificados = fase === "gestao" || (fase === "orcamento" && approvedBudgetDocuments.length > 0);
+  const showCertificados = fase === "gestao";
+  const showControlBanner = isVisao;
+  const showMetricCards = isVisao;
+  const showMaterials = isVisao;
 
-  const workflowSteps = fase === "orcamento"
+  const measurementPrepSteps = usesPlants
     ? [
-        { label: "1. Projecto", detail: "Dados da obra registados", done: true },
-        { label: "2. Preços", detail: project.zoneId ? "Zona definida" : "Definir zona e cotações", done: Boolean(project.zoneId) },
-        { label: "3. Orçamento", detail: budgetDocuments.length ? "Mapa criado" : "Criar ou receber da medição", done: budgetDocuments.length > 0 },
-        { label: "4. Aprovar", detail: approvedBudgetDocuments.length ? "Pronto para gestão" : (directApproval ? "Aprovar o orçamento" : "Submeter e aprovar"), done: approvedBudgetDocuments.length > 0 },
+        { label: "Identificar a obra", done: true },
+        { label: "Carregar projectos", done: plants.length > 0 },
+        { label: "Confirmar dados", done: completedPlants.length > 0 && failedPlants.length === 0 },
+        { label: "Quantificar", done: hasMeasuredBudget },
+        { label: "Enviar a orçamentos", done: budgetDocuments.length > 0 },
       ]
-    : usesPlants
-      ? [
-          { label: "1. Identificar a obra", detail: "Projecto criado", done: true },
-          { label: "2. Carregar projectos", detail: plants.length ? `${plants.length} ficheiro(s)` : "Arquitectura, estrutura ou ambos", done: plants.length > 0 },
-          { label: "3. Confirmar dados", detail: failedPlants.length ? `${failedPlants.length} ficheiro(s) requerem atenção` : completedPlants.length ? "Dados prontos para revisão" : "A aguardar análise", done: completedPlants.length > 0 && failedPlants.length === 0 },
-          { label: "4. Quantificar", detail: hasMeasuredBudget ? "Quantidades prontas" : "Diagnóstico antes do cálculo", done: hasMeasuredBudget },
-          ...(fase === "medicao"
-            ? [{ label: "5. Enviar a orçamentos", detail: budgetDocuments.length ? "Já enviado" : "Aprovar levantamento e criar orçamento", done: budgetDocuments.length > 0 }]
-            : [{ label: "5. Orçamentar", detail: budgetDocuments.length ? "Levantamento ligado ao orçamento" : "Enviar quando o levantamento estiver pronto", done: budgetDocuments.length > 0 }]),
-        ]
-      : [
-          { label: "1. Projecto", detail: "Dados da obra registados", done: true },
-          { label: "2. Levantamento", detail: project.measurementMode === "importar" ? "Quantidades importadas do Excel" : "Introdução manual no assistente", done: project.measurementMode === "importar" || hasMeasuredBudget },
-          ...(fase === "medicao"
-            ? [{ label: "3. Enviar a orçamentos", detail: budgetDocuments.length ? "Já enviado" : "Aprovar e criar orçamento", done: budgetDocuments.length > 0 }]
-            : [{ label: "3. Orçamento", detail: "Rever quantidades, preços e percentagens", done: hasMeasuredBudget }]),
-        ];
-  const completedWorkflowSteps = workflowSteps.filter((step) => step.done).length;
-  const workflowProgress = Math.round((completedWorkflowSteps / workflowSteps.length) * 100);
+    : [
+        { label: "Projecto", done: true },
+        { label: "Levantamento", done: project.measurementMode === "importar" || hasMeasuredBudget },
+        { label: "Enviar a orçamentos", done: budgetDocuments.length > 0 },
+      ];
+  const completedPrepSteps = measurementPrepSteps.filter((step) => step.done).length;
+  const prepIncomplete = fase === "medicao" && completedPrepSteps < measurementPrepSteps.length;
 
   const backTo =
-    fase === "gestao" ? "/gestao" : fase === "medicao" ? "/medicoes" : fase === "orcamento" ? "/orcamentos" : project.projectType === "medicao" ? "/medicoes" : "/orcamentos";
-  const backLabel = fase === "gestao" ? "Gestão" : fase === "medicao" ? "Levantamentos" : "Orçamentos";
+    fase === "gestao" ? "/gestao" : fase === "medicao" ? "/medicoes" : fase === "orcamento" ? "/orcamentos" : "/orcamentos";
+  const backLabel =
+    fase === "gestao" ? "Gestão" : fase === "medicao" ? "Levantamentos" : fase === "orcamento" ? "Orçamentos" : "Obras";
   const navMode = fase === "gestao" ? "site" : fase === "medicao" ? "measurement" : "budget";
-  const faseQuery = fase === "gestao" ? "?fase=gestao" : `?fase=${fase === "hibrido" ? "orcamento" : fase}`;
+  const faseQuery = faseQueryFor(fase === "visao" ? "orcamento" : fase);
 
   return (
     <Layout
@@ -398,472 +346,365 @@ export default function ProjectDetailPage() {
       back={{ label: backLabel, fallbackTo: backTo }}
       actions={
         <div className="flex flex-wrap items-center gap-2">
-          {(user?.role === "admin_empresa" || user?.role === "orcamentista") && fase !== "gestao" && (
+          {(user?.role === "admin_empresa" || user?.role === "orcamentista") && fase === "visao" && (
             <button type="button" onClick={() => setShowPublicShare(true)} className="btn btn-secondary btn-sm">
-              Partilhar com o dono da obra
+              Partilhar
             </button>
           )}
-          {approvedBudgetDocuments.length > 0 && fase !== "gestao" && (
+          {fase === "visao" && approvedBudgetDocuments.length > 0 && (
             <Link to={`/projectos/${projectId}?fase=gestao`} className="btn btn-primary btn-sm">
-              Abrir gestão da obra
+              Gestão da obra
             </Link>
           )}
         </div>
       }
     >
-      <div className="mx-auto grid w-full max-w-7xl items-start gap-5 xl:grid-cols-2">
-        <div className="xl:col-span-2">
+      <div className="mx-auto grid w-full max-w-5xl items-start gap-5">
+        <div>
           <ProjectWorkspaceNav projectId={projectId!} mode={navMode} />
         </div>
-        {error && <p className="text-sm text-red-600 xl:col-span-2">{error}</p>}
-        {uploadNotice && <p className="text-sm text-emerald-700 xl:col-span-2">{uploadNotice}</p>}
+        {error && <p className="text-sm text-red-600">{error}</p>}
+        {uploadNotice && <p className="text-sm text-emerald-700">{uploadNotice}</p>}
         {searchParams.get("uploadErro") === "1" && (
-          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 xl:col-span-2">
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
             {searchParams.get("motivo") === "excel"
-              ? "O projecto foi criado, mas a importação Excel falhou. Abra o mapa de quantidades e importe novamente — confirme os nomes das secções/folhas."
+              ? "O projecto foi criado, mas a importação Excel falhou. Abra o mapa de quantidades e importe novamente."
               : searchParams.get("motivo") === "planta"
-                ? "O projecto foi criado, mas um PDF não pôde ser analisado. Reveja o ficheiro abaixo ou continue com medição manual / Excel."
-                : "O projecto foi criado, mas um passo falhou. O registo da obra está seguro — siga as indicações abaixo."}
+                ? "O projecto foi criado, mas um PDF não pôde ser analisado. Continue com medição manual ou Excel."
+                : "O projecto foi criado, mas um passo falhou."}
           </div>
         )}
 
-        <ProjectWorkflowBanner status={workflowStatus} projectId={projectId!} />
+        {showControlBanner && <ProjectWorkflowBanner status={workflowStatus} projectId={projectId!} />}
 
-        {(fase === "medicao" || fase === "hibrido" || (fase === "orcamento" && usesPlants && !budgetDocuments.length)) && (
-        <section className="card order-2 overflow-hidden xl:col-span-2">
-          <div className="flex flex-col gap-4 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center justify-between gap-3">
-                <h2 className="text-sm font-bold text-slate-950">{usesPlants ? "Preparação do levantamento" : project.measurementMode === "importar" ? "Levantamento importado" : "Levantamento manual"}</h2>
-                <span className="text-xs font-semibold text-slate-500">{completedWorkflowSteps}/{workflowSteps.length}</span>
-              </div>
-              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
-                <div className="h-full rounded-full bg-brand-600" style={{ width: `${workflowProgress}%` }} />
-              </div>
-            </div>
-            <div className="shrink-0">
-            {
-              !usesPlants ? (
-                <button onClick={handlePrepareMeasurements} disabled={preparingMeasurements} className="btn btn-primary btn-sm">
-                  <IconRuler className="h-3.5 w-3.5" />
-                  {preparingMeasurements ? "A abrir..." : "Abrir levantamento"}
-                </button>
-              ) : completedPlants.length > 0 ? (
-                <button onClick={handlePrepareMeasurements} disabled={preparingMeasurements} className="btn btn-primary btn-sm">
-                  <IconRuler className="h-3.5 w-3.5" />
-                  {preparingMeasurements ? "A preparar..." : hasMeasuredBudget ? "Rever levantamento" : "Preparar levantamento"}
-                </button>
-              ) : (
-                <a href="#plantas-do-projecto" className="btn btn-primary btn-sm">
-                  <IconUpload className="h-3.5 w-3.5" /> Carregar plantas
-                </a>
-              )
-            }
-            </div>
-          </div>
-          <div className="flex overflow-x-auto border-t border-slate-100 px-4 py-3">
-            {workflowSteps.map((step) => (
-              <div key={step.label} className="flex shrink-0 items-center gap-2 pr-5 text-xs">
-                <span className={`grid h-5 w-5 place-items-center rounded-full font-bold ${step.done ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{step.done ? "✓" : "·"}</span>
-                <span className={step.done ? "font-semibold text-slate-700" : "text-slate-500"}>{step.label.replace(/^\d+\.\s*/, "")}</span>
-              </div>
-            ))}
-          </div>
-          {usesPlants && latestCompletedPlant && (
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-5 py-3 text-xs text-slate-600">
-              <span>Último ficheiro analisado: <strong className="text-slate-800">{latestCompletedPlant.originalFileName}</strong></span>
-              <Link to={`/plantas/${latestCompletedPlant.id}`} className="font-semibold text-brand-700 hover:underline">Rever dados extraídos →</Link>
-            </div>
-          )}
-        </section>
-        )}
-
-        {fase === "orcamento" && (
-        <section className="card order-2 overflow-hidden xl:col-span-2">
-          <div className="flex flex-col gap-4 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center justify-between gap-3">
-                <h2 className="text-sm font-bold text-slate-950">Fluxo de orçamento</h2>
-                <span className="text-xs font-semibold text-slate-500">{completedWorkflowSteps}/{workflowSteps.length}</span>
-              </div>
-              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
-                <div className="h-full rounded-full bg-brand-600" style={{ width: `${workflowProgress}%` }} />
-              </div>
-            </div>
-          </div>
-          <div className="flex overflow-x-auto border-t border-slate-100 px-4 py-3">
-            {workflowSteps.map((step) => (
-              <div key={step.label} className="flex shrink-0 items-center gap-2 pr-5 text-xs">
-                <span className={`grid h-5 w-5 place-items-center rounded-full font-bold ${step.done ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{step.done ? "✓" : "·"}</span>
-                <span className={step.done ? "font-semibold text-slate-700" : "text-slate-500"}>{step.label.replace(/^\d+\.\s*/, "")}</span>
-              </div>
-            ))}
-          </div>
-        </section>
-        )}
-
-        <details className="card order-6 overflow-hidden xl:col-span-2">
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4">
-            <span>
-              <strong className="block text-sm text-slate-900">Materiais especificados</strong>
-              <small className="mt-0.5 block text-slate-500">{materialSpecifications.length} material(is) associado(s) ao projecto</small>
-            </span>
-            <span className="badge badge-gray">Ver e editar</span>
-          </summary>
-          <div className="flex justify-end border-t border-slate-100 px-4 py-3">
-            <Link to="/catalogo" className="btn btn-secondary btn-sm">Abrir catálogo</Link>
-          </div>
-          {materialSpecifications.length > 0 && (
-            <div className="divide-y divide-slate-100 border-t border-slate-100">
-              {materialSpecifications.map((material) => (
-                <div key={material.id} className="grid gap-1 px-5 py-3 sm:grid-cols-[minmax(0,1fr)_7rem_10rem] sm:items-center">
-                  <div className="min-w-0"><strong className="block truncate text-sm text-slate-900">{material.name}</strong>{material.specification && <span className="block truncate text-xs text-slate-500">{material.specification}</span>}</div>
-                  <span className="text-sm text-slate-500">{material.unit}</span>
-                  <span className={`badge w-fit ${material.pricePending ? "badge-yellow" : "badge-green"}`}>{material.pricePending ? "Preço pendente" : "Com preço"}</span>
-                </div>
-              ))}
-            </div>
-          )}
-          <form onSubmit={handleAddMaterial} className="grid gap-2 border-t border-slate-100 p-4 sm:grid-cols-[1fr_7rem_1.2fr_auto]">
-            <input required value={newMaterial.name} onChange={(event) => setNewMaterial({ ...newMaterial, name: event.target.value })} className="input" placeholder="Material" />
-            <select value={newMaterial.unit} onChange={(event) => setNewMaterial({ ...newMaterial, unit: event.target.value as Unit })} className="input">
-              {UNITS.map((unit) => <option key={unit} value={unit}>{unit}</option>)}
-            </select>
-            <input value={newMaterial.specification} onChange={(event) => setNewMaterial({ ...newMaterial, specification: event.target.value })} className="input" placeholder="Classe, dimensões, acabamento ou norma" />
-            <button type="submit" disabled={addingMaterial} className="btn btn-secondary"><IconPlus className="h-4 w-4" /> Adicionar</button>
-          </form>
-        </details>
-
-        <section className="card order-1 overflow-hidden xl:col-span-2">
-          <div className={`grid gap-px bg-slate-200 sm:grid-cols-3 ${showPrepararObra ? "xl:grid-cols-[0.8fr_0.8fr_0.8fr_1.8fr]" : "xl:grid-cols-3"}`}>
-            {(fase === "orcamento"
-              ? [
-                  ["Orçamentos", budgetDocuments.length],
-                  ["Aprovados", approvedBudgetDocuments.length],
-                  ["Levantamentos origem", measurementDocuments.length],
-                ]
-              : [
-                  ["Levantamentos", measurementDocuments.length],
-                  ...(showOrcamento ? [["Orçamentos", budgetDocuments.length] as const] : [["A enviar", budgetDocuments.length ? "Sim" : "Não"] as const]),
-                  ["Plantas", plants.length],
-                ]
-            ).map(([label, value]) => (
-              <div key={String(label)} className="bg-white px-5 py-4">
-                <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</span>
-                <strong className="mt-1 block text-2xl text-slate-950">{value}</strong>
-              </div>
-            ))}
-            {showPrepararObra && (
-            <label className="bg-white px-5 py-4 sm:col-span-3 xl:col-span-1">
-              <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Zona de preços</span>
-              <select
-                value={project.zoneId ?? ""}
-                disabled={savingZone}
-                onChange={(e) => handleZoneChange(e.target.value)}
-                className="input"
-              >
-                <option value="">Sem zona definida</option>
-                {zones.map((z) => (
-                  <option key={z.id} value={z.id}>{z.name}</option>
-                ))}
-              </select>
-            </label>
-            )}
-            {showPrepararObra && (
-            <label className="bg-white px-5 py-4 sm:col-span-3 xl:col-span-1">
-              <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Pisos (cronograma)</span>
-              <input
-                type="number"
-                min={1}
-                max={20}
-                value={project.floors}
-                disabled={savingFloors}
-                onChange={(e) => handleFloorsChange(Math.max(1, Math.min(20, Number(e.target.value) || 1)))}
-                className="input"
-              />
-            </label>
-            )}
-          </div>
-          {showPrepararObra && plants.some((plant) => (plant.structuralSummary?.floors?.length ?? 0) > 0) && (
-            <div className="border-t border-slate-100 px-5 py-4">
-              <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Alturas por piso</p>
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {(plants.find((plant) => plant.structuralSummary?.floors?.length)?.structuralSummary?.floors ?? []).map((floor) => (
-                  <div key={floor.id ?? floor.label} className="rounded-lg border border-slate-200 px-3 py-2 text-sm">
-                    <strong className="text-slate-900">{floor.label}</strong>
-                    <span className="mt-0.5 block text-xs text-slate-500">
-                      {floor.floorToFloorHeightM ? `${Number(floor.floorToFloorHeightM).toFixed(2)} m` : "sem pé-direito"}
-                      {floor.elevationM != null ? ` · cota ${Number(floor.elevationM).toFixed(2)} m` : ""}
-                    </span>
-                  </div>
-                ))}
-              </div>
-              {plants.find((plant) => plant.structuralSummary?.floors?.length) && (
-                <Link
-                  to={`/plantas/${plants.find((plant) => plant.structuralSummary?.floors?.length)!.id}`}
-                  className="mt-3 inline-flex text-xs font-semibold text-brand-700"
+        {/* ——— Workspace Levantamentos ——— */}
+        {fase === "medicao" && (
+          <>
+            {prepIncomplete && (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
+                <span className="text-sm font-semibold text-slate-800">
+                  Preparação {completedPrepSteps}/{measurementPrepSteps.length}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (usesPlants && completedPlants.length === 0) {
+                      document.getElementById("plantas-do-projecto")?.scrollIntoView({ behavior: "smooth" });
+                      return;
+                    }
+                    void handlePrepareMeasurements();
+                  }}
+                  disabled={preparingMeasurements}
+                  className="btn btn-primary btn-sm"
                 >
-                  Editar alturas
-                </Link>
-              )}
-            </div>
-          )}
-        </section>
-
-        {showPrepararObra && (
-        <details
-          id="preparar-obra"
-          open={!project.zoneId || costReadiness.compositions === 0}
-          className="card order-2 overflow-hidden xl:col-span-2"
-        >
-          <summary className="cursor-pointer list-none px-5 py-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <strong className="text-slate-900">Preparar custos do orçamento</strong>
-              <span className="text-xs text-slate-500">Zona · preços · composições</span>
-            </div>
-          </summary>
-          <div className="border-t border-slate-200 px-5 py-3 text-sm text-slate-600">
-            Esta preparação afecta apenas preços do orçamento. O levantamento de quantidades continua independente.
-          </div>
-          <div className="grid gap-px border-t border-slate-200 bg-slate-200 sm:grid-cols-2 xl:grid-cols-4">
-            {[
-              { n: 1, title: "Zona da obra", value: project.zoneId ? "Definida" : "Em falta", detail: project.zoneId ? zones.find((zone) => zone.id === project.zoneId)?.name ?? "Zona seleccionada" : "Defina a zona no cartão de dados da obra.", ok: Boolean(project.zoneId), href: undefined as string | undefined },
-              { n: 2, title: "Preços de fornecedores", value: `${costReadiness.quoted}/${costReadiness.materials}`, detail: `${costReadiness.suppliers} preço(s) de fornecedor disponível(is). Opcional: o catálogo base continua utilizável.`, ok: costReadiness.quoted > 0, href: "/gestao/fornecedores" },
-              { n: 3, title: "Preços adoptados", value: `${costReadiness.zonePriced}/${costReadiness.materials}`, detail: project.zoneId ? "Preços próprios da zona; restantes usam preço base." : "A aguardar zona para validar cobertura.", ok: Boolean(project.zoneId) && costReadiness.zonePriced === costReadiness.materials, href: "/catalogo" },
-              { n: 4, title: "Composições / capítulos", value: String(costReadiness.compositions), detail: "Ligue capítulos a composições no Catálogo para o custo unitário entrar no orçamento.", ok: costReadiness.compositions > 0, href: "/catalogo" },
-            ].map((item) => (
-              <div key={item.n} className="bg-white p-4">
-                <div className="flex items-center gap-2">
-                  <span className={`grid h-6 w-6 place-items-center rounded-full text-xs font-bold ${item.ok ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{item.ok ? "✓" : item.n}</span>
-                  <p className="text-sm font-semibold text-slate-900">{item.title}</p>
-                </div>
-                <p className="mt-2 text-lg font-bold text-slate-900">{item.value}</p>
-                <p className="mt-1 text-xs text-slate-500">{item.detail}</p>
-                {item.href && !item.ok && (
-                  <Link to={item.href} className="mt-2 inline-block text-xs font-semibold text-brand-700 hover:underline">
-                    Resolver →
-                  </Link>
-                )}
+                  {preparingMeasurements ? "A abrir..." : usesPlants && completedPlants.length === 0 ? "Carregar planta" : "Continuar"}
+                </button>
               </div>
-            ))}
-          </div>
-        </details>
-        )}
-
-        {/* Levantamentos técnicos */}
-        {showMedicao && (
-        <section className="card order-3">
-          <SectionHeader title="Levantamentos" actions={<IconRuler className="w-4 h-4 text-blue-700" />} />
-          <ul>
-            {measurementDocuments.map((d) => (
-              <li key={d.id} className="table-row group">
-                <Link to={`/documentos/${d.id}${faseQuery}`} className="flex flex-col gap-2 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
-                  <span className="min-w-0 break-words font-medium text-gray-900">{d.title} {d.revision ? <span className="font-normal text-gray-400">rev. {d.revision}</span> : ""}</span>
-                  <span className="flex shrink-0 flex-wrap items-center gap-2">
-                    <span className="badge badge-brand">Quantidades</span>
-                    <span className={`badge ${DOC_STATUS_BADGE[d.status] ?? "badge-gray"}`}>{d.status}</span>
-                    <button onClick={(e) => handleDeleteDocument(e, d.id, d.title)} className="icon-btn-danger opacity-0 pointer-coarse:opacity-100 group-hover:opacity-100" title="Eliminar levantamento"><IconTrash className="h-3.5 w-3.5" /></button>
-                  </span>
+            )}
+            {usesPlants && latestCompletedPlant && (
+              <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-slate-600">
+                <span className="truncate font-medium text-slate-800">{latestCompletedPlant.originalFileName}</span>
+                <Link to={`/plantas/${latestCompletedPlant.id}`} className="shrink-0 font-semibold text-brand-700 hover:underline">
+                  Ver planta
                 </Link>
-              </li>
-            ))}
-            {measurementDocuments.length === 0 && <li className="px-5 py-4 text-sm text-gray-400">Sem levantamento.</li>}
-          </ul>
-        </section>
-        )}
-
-        {/* Orçamentos */}
-        {showOrcamento && (
-        <section className="card order-3">
-          <SectionHeader title="Orçamentos" actions={<IconDoc className="w-4 h-4 text-blue-700" />} />
-          <ul>
-            {budgetDocuments.map((d) => {
-              const sourceMeasurement = d.sourceMeasurementDocumentId
-                ? measurementDocuments.find((m) => m.id === d.sourceMeasurementDocumentId)
-                : undefined;
-              const siblingCount = d.sourceMeasurementDocumentId
-                ? budgetDocuments.filter((other) => other.sourceMeasurementDocumentId === d.sourceMeasurementDocumentId).length
-                : 0;
-              return (
-              <li key={d.id} className="table-row group">
-                <Link to={`/documentos/${d.id}${faseQuery}`} className="flex flex-col gap-2 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
-                  <span className="min-w-0">
-                    <span className="block break-words font-medium text-gray-900">
-                      {d.title} {d.revision ? <span className="text-gray-400 font-normal">rev. {d.revision}</span> : ""}
-                    </span>
-                    {sourceMeasurement && (
-                      <span className="mt-1 block text-xs text-slate-500">
-                        A partir de «{sourceMeasurement.title}»
-                        {siblingCount > 1 ? ` · ${siblingCount} cenários desta medição` : ""}
+              </div>
+            )}
+            <section className="card overflow-hidden">
+              <SectionHeader
+                title="Levantamentos"
+                actions={
+                  <button
+                    type="button"
+                    onClick={handlePrepareMeasurements}
+                    disabled={preparingMeasurements}
+                    className="btn btn-primary btn-sm"
+                  >
+                    <IconPlus className="h-4 w-4" />
+                    {preparingMeasurements ? "A abrir..." : "Novo levantamento"}
+                  </button>
+                }
+              />
+              <ul>
+                {measurementDocuments.map((d) => (
+                  <li key={d.id} className="table-row group">
+                    <Link to={`/documentos/${d.id}${faseQuery}`} className="flex flex-col gap-2 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+                      <span className="min-w-0">
+                        <span className="block break-words font-medium text-gray-900">
+                          {d.title}
+                          {d.revision ? <span className="font-normal text-gray-400"> · rev. {d.revision}</span> : null}
+                        </span>
                       </span>
-                    )}
-                  </span>
-                  <span className="flex shrink-0 flex-wrap items-center gap-2">
-                    {siblingCount > 1 && <span className="badge badge-brand">Cenário</span>}
-                    <span className="badge badge-gray">{d.currency}</span>
-                    <span className={`badge ${DOC_STATUS_BADGE[d.status] ?? "badge-gray"}`}>{d.status}</span>
-                    <button
-                      onClick={(e) => handleDeleteDocument(e, d.id, d.title)}
-                      className="icon-btn-danger opacity-0 pointer-coarse:opacity-100 group-hover:opacity-100"
-                      title="Eliminar documento"
-                    >
-                      <IconTrash className="w-3.5 h-3.5" />
+                      <span className="flex shrink-0 flex-wrap items-center gap-2">
+                        <span className={`badge ${DOC_STATUS_BADGE[d.status] ?? "badge-gray"}`}>{d.status}</span>
+                        <span className="btn btn-secondary btn-sm pointer-events-none">Abrir</span>
+                        <button onClick={(e) => handleDeleteDocument(e, d.id, d.title)} className="icon-btn-danger opacity-0 pointer-coarse:opacity-100 group-hover:opacity-100" title="Eliminar">
+                          <IconTrash className="h-3.5 w-3.5" />
+                        </button>
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+                {measurementDocuments.length === 0 && (
+                  <li className="px-5 py-10 text-center">
+                    <p className="text-sm text-slate-500">Sem levantamentos</p>
+                    <button type="button" onClick={handlePrepareMeasurements} disabled={preparingMeasurements} className="btn btn-primary btn-sm mt-4">
+                      <IconPlus className="h-4 w-4" /> Novo levantamento
                     </button>
-                  </span>
-                </Link>
-              </li>
-              );
-            })}
-            {budgetDocuments.length === 0 && <li className="px-5 py-4 text-sm text-gray-400">Sem orçamento. Abra uma medição concluída e escolha “Criar orçamento”. Pode criar vários cenários a partir da mesma medição.</li>}
-          </ul>
-          <details className="border-t border-gray-100">
-            <summary className="cursor-pointer px-5 py-3 text-xs font-semibold text-slate-600 hover:bg-slate-50">Criar outro mapa ou revisão manual</summary>
-            <form onSubmit={handleCreate} className="grid gap-3 px-5 pb-5 sm:grid-cols-2">
-              <div className="min-w-0">
-                <label className="label">Título do novo documento</label>
-                <input value={title} onChange={(e) => setTitle(e.target.value)} className="input" />
-              </div>
-              <div className="min-w-0">
-                <label className="label">Modelo</label>
-                <select value={template} onChange={(e) => setTemplate(e.target.value as "padrao" | "vazio")} className="input">
-                  <option value="padrao">Estrutura SIGO ligada ao catálogo</option>
-                  <option value="vazio">Documento vazio/manual</option>
-                </select>
-              </div>
-              <button type="submit" className="btn btn-secondary w-full sm:w-fit"><IconPlus className="w-4 h-4" /> Criar</button>
-            </form>
-          </details>
-        </section>
-        )}
-
-        {/* Plantas */}
-        {showPlantas && (
-        <section id="plantas-do-projecto" className="card order-4 scroll-mt-24">
-          <SectionHeader title="Projectos e desenhos" actions={<IconMap className="w-4 h-4 text-blue-700" />} />
-          <ul>
-            {plants.map((p) => (
-              <li key={p.id} className="table-row group">
-                {p.processingStatus === "concluido" ? (
-                  <Link to={`/plantas/${p.id}`} className="flex items-center justify-between px-5 py-3">
-                    <span className="min-w-0 pr-3">
-                      <span className="block font-medium text-gray-900 truncate">{p.originalFileName}</span>
-                      {p.documentAnalysis && (
-                        <span className="mt-0.5 block text-[11px] leading-4 text-slate-500">
-                          {p.documentAnalysis.isMultiDiscipline ? "Projecto completo" : p.documentAnalysis.sections[0]?.label ?? "PDF"}
-                          {` · ${p.documentAnalysis.pageCount} páginas`}
-                          {p.documentAnalysis.sections.map((section) => ` · ${section.label} ${sectionPages(section.startPage, section.endPage)}`).join("")}
-                        </span>
-                      )}
-                    </span>
-                    <span className="flex items-center gap-2 shrink-0">
-                      {p.documentAnalysis?.isMultiDiscipline && <span className="badge badge-brand">{p.documentAnalysis.sections.length} secções</span>}
-                      <span className={`badge ${PLANT_STATUS_BADGE[p.processingStatus].cls}`}>{PLANT_STATUS_BADGE[p.processingStatus].label}</span>
-                      <button
-                        onClick={(e) => handleDeletePlant(e, p.id, p.originalFileName)}
-                        className="icon-btn-danger opacity-0 pointer-coarse:opacity-100 group-hover:opacity-100"
-                        title="Eliminar planta"
-                      >
-                        <IconTrash className="w-3.5 h-3.5" />
-                      </button>
-                    </span>
-                  </Link>
-                ) : (
-                  <div className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-                    <span className="min-w-0 sm:pr-2">
-                      <span className="block break-words font-medium text-gray-500 sm:truncate">{p.originalFileName}</span>
-                      {p.processingStatus === "processando" && (
-                        <span className="block text-[11px] text-blue-700">
-                          {p.processingStage ?? "A analisar"}
-                          {p.processingCurrentPage && p.processingTotalPages ? ` · página ${p.processingCurrentPage}/${p.processingTotalPages}` : ""}
-                        </span>
-                      )}
+                  </li>
+                )}
+              </ul>
+            </section>
+            {(showPlantasFull || (fase === "medicao" && usesPlants && completedPlants.length === 0)) && (
+              <section id="plantas-do-projecto" className="card scroll-mt-24">
+                <SectionHeader title="Plantas em curso" />
+                <ul>
+                  {plants.filter((p) => p.processingStatus !== "concluido").map((p) => (
+                    <li key={p.id} className="table-row px-5 py-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="min-w-0 break-words text-sm font-medium text-slate-700">{p.originalFileName}</span>
+                        <span className={`badge ${PLANT_STATUS_BADGE[p.processingStatus].cls}`}>{PLANT_STATUS_BADGE[p.processingStatus].label}</span>
+                      </div>
                       {p.processingStatus === "erro" && (
-                        <span className="mt-0.5 block text-[11px] leading-4 text-red-700">
-                          Análise interrompida aos {p.processingProgress}%. A equipa SIGO responde em até 5 horas e regulariza a leitura.
-                          {p.errorMessage ? ` (${p.errorMessage})` : ""}
-                        </span>
-                      )}
-                    </span>
-                    <span className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:shrink-0">
-                      <span className={`badge ${PLANT_STATUS_BADGE[p.processingStatus].cls}`}>{p.processingStatus === "processando" ? `${p.processingProgress}%` : PLANT_STATUS_BADGE[p.processingStatus].label}</span>
-                      {p.processingStatus === "erro" && (
-                        <>
-                          <Link to={`/plantas/${p.id}/completar`} className="btn btn-primary btn-sm">
-                            Preencher dados em falta
-                          </Link>
-                          <button onClick={(e) => handleReprocessPlant(e, p.id)} disabled={reprocessingPlantId === p.id} className="btn btn-secondary btn-sm">
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <Link to={`/plantas/${p.id}/completar`} className="btn btn-primary btn-sm">Completar</Link>
+                          <button type="button" onClick={(e) => handleReprocessPlant(e, p.id)} disabled={reprocessingPlantId === p.id} className="btn btn-secondary btn-sm">
                             {reprocessingPlantId === p.id ? "A tentar..." : "Tentar novamente"}
                           </button>
-                        </>
+                        </div>
                       )}
-                      <button
-                        onClick={(e) => handleDeletePlant(e, p.id, p.originalFileName)}
-                        className="icon-btn-danger opacity-0 pointer-coarse:opacity-100 group-hover:opacity-100"
-                        title="Eliminar planta"
-                      >
-                        <IconTrash className="w-3.5 h-3.5" />
-                      </button>
-                    </span>
-                  </div>
-                )}
-              </li>
-            ))}
-            {plants.length === 0 && (
-              <li className="px-5 py-4 text-sm text-gray-400">
-                Sem PDFs.
-              </li>
+                    </li>
+                  ))}
+                  {plants.length === 0 && <li className="px-5 py-4 text-sm text-slate-400">Sem PDFs</li>}
+                </ul>
+                <form onSubmit={handleUploadPlant} className="grid items-end gap-3 border-t border-gray-100 px-4 py-4 sm:grid-cols-[minmax(0,1fr)_auto]">
+                  <input type="file" name="plantFile" accept="application/pdf" required className="input py-1.5 file:mr-3 file:rounded-md file:border-0 file:bg-brand-100 file:px-2.5 file:py-1 file:text-xs file:font-medium file:text-brand-800" />
+                  <button type="submit" disabled={uploading} className="btn btn-secondary w-full sm:w-auto">
+                    <IconUpload className="h-4 w-4" /> {uploading ? "A carregar..." : "Adicionar PDF"}
+                  </button>
+                </form>
+              </section>
             )}
-          </ul>
-          <form onSubmit={handleUploadPlant} className="grid items-end gap-3 border-t border-gray-100 px-4 py-4 sm:px-5 sm:grid-cols-[minmax(0,1fr)_auto]">
-            {plants.some((p) => p.processingStatus === "processando" || p.processingStatus === "pendente") && (
-              <div className="sm:col-span-2">
-                {plants.filter((p) => p.processingStatus === "processando" || p.processingStatus === "pendente").map((p) => (
-                  <PlantUploadProgress key={p.id} progress={p} compact />
-                ))}
-              </div>
-            )}
-            <div className="min-w-0">
-              <label className="label">Ficheiro PDF</label>
-              <input type="file" name="plantFile" accept="application/pdf" required className="input py-1.5 file:mr-3 file:rounded-md file:border-0 file:bg-brand-100 file:text-brand-800 file:px-2.5 file:py-1 file:text-xs file:font-medium" />
-            </div>
-            <button type="submit" disabled={uploading} className="btn btn-primary w-full sm:w-auto">
-              <IconUpload className="w-4 h-4" />
-              {uploading ? "A carregar PDF..." : plants.length > 0 ? "Adicionar PDF" : "Carregar PDF"}
-            </button>
-          </form>
-        </section>
+          </>
         )}
 
-        {/* Certificados de obra (avanço físico — distinto das medições de projecto) */}
-        {showCertificados && (
-        <section id="certificados-obra" className="card order-8 xl:col-span-2 scroll-mt-24">
-          <SectionHeader
-            title="Autos de medição"
-            actions={<IconClipboard className="w-4 h-4 text-blue-700" />}
-          />
+        {/* ——— Workspace Orçamentos ——— */}
+        {fase === "orcamento" && (
+          <>
+            {showPrepararObra && !project.zoneId && (
+              <label className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm">
+                <span className="font-semibold text-slate-700">Zona de preços</span>
+                <select value={project.zoneId ?? ""} disabled={savingZone} onChange={(e) => handleZoneChange(e.target.value)} className="input max-w-xs">
+                  <option value="">Definir zona</option>
+                  {zones.map((z) => (
+                    <option key={z.id} value={z.id}>{z.name}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <section className="card overflow-hidden">
+              <SectionHeader
+                title="Orçamentos"
+                actions={
+                  <button type="button" onClick={() => void handleCreateQuickBudget()} className="btn btn-primary btn-sm">
+                    <IconPlus className="h-4 w-4" /> Novo orçamento
+                  </button>
+                }
+              />
+              <ul>
+                {budgetDocuments.map((d) => {
+                  const sourceMeasurement = d.sourceMeasurementDocumentId
+                    ? measurementDocuments.find((m) => m.id === d.sourceMeasurementDocumentId)
+                    : undefined;
+                  return (
+                    <li key={d.id} className="table-row group">
+                      <Link to={`/documentos/${d.id}${faseQuery}`} className="flex flex-col gap-2 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+                        <span className="min-w-0">
+                          <span className="block break-words font-medium text-gray-900">
+                            {d.title}
+                            {d.revision ? <span className="font-normal text-gray-400"> · rev. {d.revision}</span> : null}
+                          </span>
+                          {sourceMeasurement && (
+                            <span className="mt-0.5 block text-xs text-slate-500">Origem: {sourceMeasurement.title}</span>
+                          )}
+                        </span>
+                        <span className="flex shrink-0 flex-wrap items-center gap-2">
+                          <span className="badge badge-gray">{d.currency}</span>
+                          <span className={`badge ${DOC_STATUS_BADGE[d.status] ?? "badge-gray"}`}>{d.status}</span>
+                          <span className="btn btn-secondary btn-sm pointer-events-none">Abrir</span>
+                          <button onClick={(e) => handleDeleteDocument(e, d.id, d.title)} className="icon-btn-danger opacity-0 pointer-coarse:opacity-100 group-hover:opacity-100" title="Eliminar">
+                            <IconTrash className="h-3.5 w-3.5" />
+                          </button>
+                        </span>
+                      </Link>
+                    </li>
+                  );
+                })}
+                {budgetDocuments.length === 0 && (
+                  <li className="px-5 py-10 text-center">
+                    <p className="text-sm text-slate-500">Sem orçamentos</p>
+                    <button type="button" onClick={() => void handleCreateQuickBudget()} className="btn btn-primary btn-sm mt-4">
+                      <IconPlus className="h-4 w-4" /> Novo orçamento
+                    </button>
+                  </li>
+                )}
+              </ul>
+            </section>
+          </>
+        )}
+
+        {/* ——— Visão geral ——— */}
+        {isVisao && (
+          <>
+            {showMetricCards && (
+              <section className="card overflow-hidden">
+                <div className="grid gap-px bg-slate-200 sm:grid-cols-3">
+                  {[
+                    ["Levantamentos", measurementDocuments.length],
+                    ["Orçamentos", budgetDocuments.length],
+                    ["Plantas", plants.length],
+                  ].map(([label, value]) => (
+                    <div key={String(label)} className="bg-white px-5 py-4">
+                      <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</span>
+                      <strong className="mt-1 block text-2xl text-slate-950">{value}</strong>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {showMedicao && (
+              <section className="card">
+                <SectionHeader
+                  title="Levantamentos"
+                  actions={
+                    <Link to={`/projectos/${projectId}?fase=medicao`} className="btn btn-ghost btn-sm">
+                      Abrir →
+                    </Link>
+                  }
+                />
+                <ul>
+                  {measurementDocuments.slice(0, 5).map((d) => (
+                    <li key={d.id} className="table-row">
+                      <Link to={`/documentos/${d.id}?fase=medicao`} className="flex items-center justify-between gap-3 px-5 py-3">
+                        <span className="truncate font-medium text-gray-900">{d.title}</span>
+                        <span className={`badge ${DOC_STATUS_BADGE[d.status] ?? "badge-gray"}`}>{d.status}</span>
+                      </Link>
+                    </li>
+                  ))}
+                  {measurementDocuments.length === 0 && <li className="px-5 py-4 text-sm text-slate-400">Sem levantamentos</li>}
+                </ul>
+              </section>
+            )}
+
+            {showOrcamento && (
+              <section className="card">
+                <SectionHeader
+                  title="Orçamentos"
+                  actions={
+                    <Link to={`/projectos/${projectId}?fase=orcamento`} className="btn btn-ghost btn-sm">
+                      Abrir →
+                    </Link>
+                  }
+                />
+                <ul>
+                  {budgetDocuments.slice(0, 5).map((d) => (
+                    <li key={d.id} className="table-row">
+                      <Link to={`/documentos/${d.id}?fase=orcamento`} className="flex items-center justify-between gap-3 px-5 py-3">
+                        <span className="truncate font-medium text-gray-900">{d.title}</span>
+                        <span className={`badge ${DOC_STATUS_BADGE[d.status] ?? "badge-gray"}`}>{d.status}</span>
+                      </Link>
+                    </li>
+                  ))}
+                  {budgetDocuments.length === 0 && <li className="px-5 py-4 text-sm text-slate-400">Sem orçamentos</li>}
+                </ul>
+              </section>
+            )}
+
+            {showPlantas && plants.length > 0 && (
+              <section className="card">
+                <SectionHeader title="Plantas" />
+                <ul>
+                  {plants.slice(0, 4).map((p) => (
+                    <li key={p.id} className="table-row">
+                      {p.processingStatus === "concluido" ? (
+                        <Link to={`/plantas/${p.id}`} className="flex items-center justify-between gap-3 px-5 py-3">
+                          <span className="truncate text-sm font-medium text-gray-900">{p.originalFileName}</span>
+                          <span className={`badge ${PLANT_STATUS_BADGE[p.processingStatus].cls}`}>{PLANT_STATUS_BADGE[p.processingStatus].label}</span>
+                        </Link>
+                      ) : (
+                        <div className="flex items-center justify-between gap-3 px-5 py-3">
+                          <span className="truncate text-sm text-gray-500">{p.originalFileName}</span>
+                          <span className={`badge ${PLANT_STATUS_BADGE[p.processingStatus].cls}`}>{PLANT_STATUS_BADGE[p.processingStatus].label}</span>
+                        </div>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+
+            {showMaterials && (
+              <details className="card overflow-hidden">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4">
+                  <span>
+                    <strong className="block text-sm text-slate-900">Materiais especificados</strong>
+                    <small className="mt-0.5 block text-slate-500">{materialSpecifications.length}</small>
+                  </span>
+                </summary>
+                <div className="flex justify-end border-t border-slate-100 px-4 py-3">
+                  <Link to="/catalogo" className="btn btn-secondary btn-sm">Catálogo</Link>
+                </div>
+                {materialSpecifications.length > 0 && (
+                  <div className="divide-y divide-slate-100 border-t border-slate-100">
+                    {materialSpecifications.map((material) => (
+                      <div key={material.id} className="grid gap-1 px-5 py-3 sm:grid-cols-[minmax(0,1fr)_7rem_10rem] sm:items-center">
+                        <div className="min-w-0">
+                          <strong className="block truncate text-sm text-slate-900">{material.name}</strong>
+                          {material.specification && <span className="block truncate text-xs text-slate-500">{material.specification}</span>}
+                        </div>
+                        <span className="text-sm text-slate-500">{material.unit}</span>
+                        <span className={`badge w-fit ${material.pricePending ? "badge-yellow" : "badge-green"}`}>
+                          {material.pricePending ? "Preço pendente" : "Com preço"}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <form onSubmit={handleAddMaterial} className="grid gap-2 border-t border-slate-100 p-4 sm:grid-cols-[1fr_7rem_1.2fr_auto]">
+                  <input required value={newMaterial.name} onChange={(event) => setNewMaterial({ ...newMaterial, name: event.target.value })} className="input" placeholder="Material" />
+                  <select value={newMaterial.unit} onChange={(event) => setNewMaterial({ ...newMaterial, unit: event.target.value as Unit })} className="input">
+                    {UNITS.map((unit) => <option key={unit} value={unit}>{unit}</option>)}
+                  </select>
+                  <input value={newMaterial.specification} onChange={(event) => setNewMaterial({ ...newMaterial, specification: event.target.value })} className="input" placeholder="Especificação" />
+                  <button type="submit" disabled={addingMaterial} className="btn btn-secondary"><IconPlus className="h-4 w-4" /> Adicionar</button>
+                </form>
+              </details>
+            )}
+          </>
+        )}
+
+        {/* ——— Gestão ——— */}
+        {fase === "gestao" && showCertificados && (
+        <section id="certificados-obra" className="card scroll-mt-24">
+          <SectionHeader title="Autos de medição" actions={<IconClipboard className="h-4 w-4 text-blue-700" />} />
           {approvedBudgetDocuments.length === 0 ? (
             <div className="border-t border-gray-100 px-5 py-4 text-sm text-slate-600">
               <p>Aprove um orçamento para abrir o primeiro Auto de Medição.</p>
-              {budgetDocuments[0] && <Link to={`/documentos/${budgetDocuments[0].id}${faseQuery}`} className="action-link mt-2 inline-block">Rever orçamento →</Link>}
-              {!budgetDocuments[0] && measurementDocuments[0] && <Link to={`/documentos/${measurementDocuments[0].id}${faseQuery}`} className="action-link mt-2 inline-block">Enviar medição para orçamento →</Link>}
+              <Link to={`/projectos/${projectId}?fase=orcamento`} className="action-link mt-2 inline-block">Ir a orçamentos →</Link>
             </div>
           ) : (
           <div className="grid md:grid-cols-2">
-            <ul className="md:border-r border-gray-100">
+            <ul className="border-gray-100 md:border-r">
               {certificates.map((c) => (
                 <li key={c.id} className="table-row group">
                   <Link to={`/autos/${c.id}`} className="flex items-center justify-between px-5 py-3">
                     <span className="font-medium text-gray-900">
-                      Auto n.º {c.number} <span className="text-gray-400 font-normal">— {c.periodDate}</span>
+                      Auto n.º {c.number} <span className="font-normal text-gray-400">— {c.periodDate}</span>
                     </span>
                     <span className="flex items-center gap-2">
                       <span className={`badge ${DOC_STATUS_BADGE[c.status] ?? "badge-gray"}`}>{c.status}</span>
-                      <button
-                        onClick={(e) => handleDeleteCertificate(e, c.id, c.number)}
-                        className="icon-btn-danger opacity-0 pointer-coarse:opacity-100 group-hover:opacity-100"
-                        title="Eliminar certificado"
-                      >
-                        <IconTrash className="w-3.5 h-3.5" />
+                      <button onClick={(e) => handleDeleteCertificate(e, c.id, c.number)} className="icon-btn-danger opacity-0 pointer-coarse:opacity-100 group-hover:opacity-100" title="Eliminar">
+                        <IconTrash className="h-3.5 w-3.5" />
                       </button>
                     </span>
                   </Link>
@@ -871,14 +712,12 @@ export default function ProjectDetailPage() {
               ))}
               {certificates.length === 0 && <li className="px-5 py-4 text-sm text-gray-400">Ainda não há autos de medição.</li>}
             </ul>
-            <form onSubmit={handleCreateCertificate} className="flex gap-2 items-end px-5 py-4 flex-wrap">
-              <div className="flex-1 min-w-[160px]">
-                <label className="label">Orçamento base (contrato)</label>
+            <form onSubmit={handleCreateCertificate} className="flex flex-wrap items-end gap-2 px-5 py-4">
+              <div className="min-w-[160px] flex-1">
+                <label className="label">Orçamento base</label>
                 <select value={selectedDocId} onChange={(e) => setSelectedDocId(e.target.value)} className="input">
                   {approvedBudgetDocuments.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.title} {d.status !== "aprovado" ? "(ainda não aprovado)" : ""}
-                    </option>
+                    <option key={d.id} value={d.id}>{d.title}</option>
                   ))}
                 </select>
               </div>
@@ -887,8 +726,7 @@ export default function ProjectDetailPage() {
                 <input type="date" value={periodDate} onChange={(e) => setPeriodDate(e.target.value)} className="input" />
               </div>
               <button type="submit" className="btn btn-primary" disabled={!selectedDocId}>
-                <IconPlus className="w-4 h-4" />
-                Novo auto
+                <IconPlus className="h-4 w-4" /> Novo auto
               </button>
             </form>
           </div>
