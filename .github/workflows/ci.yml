@@ -30,7 +30,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U postgres -d sigo_test"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -46,7 +46,8 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Dependências actuais do workspace (incluindo cookie/jest-dom) já exigem Node >=22.
+          node-version: 22
           cache: npm
 
       # npm ci (não npm install) — instalação reproduzível a partir do package-lock.json,
@@ -54,21 +55,23 @@ jobs:
       - name: Instalar dependências
         run: npm ci
 
-      - name: Build (shared → api → web)
+      - name: Build completo (shared → api → web → supplier)
         run: npm run build
 
       - name: Validar scripts operacionais de produção
         run: bash -n deploy/lib.sh deploy/preflight.sh deploy/backup.sh deploy/deploy.sh deploy/rollback.sh deploy/status.sh
 
+      # Aqui só verificamos estrutura/segredos/documentação. O gate local `npm run quality:release`
+      # continua completo; no CI build e testes têm passos próprios para evitar duplicação e para
+      # que uma falha indique exactamente qual etapa quebrou.
       - name: Bloqueios estruturais da release
-        run: npm run quality:release
+        run: node scripts/release-readiness.mjs --structural-only
 
       - name: Typecheck do pacote partilhado
         run: npm run typecheck --workspace=packages/shared
 
       # Corre ANTES das migrations/testes: só compara o schema.ts actual com as migrations já
-      # commitadas (não precisa de ligação real à BD) — apanha o caso de alguém editar o schema
-      # e esquecer-se de gerar/commitar a migration correspondente.
+      # commitadas — apanha o caso de alguém editar o schema e esquecer-se da migration.
       - name: Verificar que schema e migrations estão sincronizados
         run: |
           npm run db:generate --workspace=apps/api
@@ -88,15 +91,13 @@ jobs:
         run: npm run test --workspace=apps/web
 
       # Informativo, nunca bloqueia — o objectivo é visibilidade sobre CVEs em dependências
-      # transitivas, não travar todos os merges por causa de uma vulnerabilidade de baixo risco
-      # sem correcção disponível ainda.
+      # transitivas, não travar todos os merges por vulnerabilidade sem correcção disponível.
       - name: Auditoria de dependências (informativo)
         run: npm audit --audit-level=high || true
 
   plant-service-tests:
     # Job à parte (não depende de Postgres/Node) — o leitor de plantas é um serviço Python
-    # independente; um teste dele a falhar não deve ficar escondido atrás dos testes do
-    # Node só porque corriam no mesmo job.
+    # independente; um teste dele a falhar não deve ficar escondido atrás dos testes Node.
     runs-on: ubuntu-latest
 
     steps:
