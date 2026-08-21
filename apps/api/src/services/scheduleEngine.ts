@@ -46,6 +46,8 @@ import {
 } from "./schedulePlanningProfile.js";
 import { resolveProjectFloors } from "./scheduleFloorDetection.js";
 import { buildValueSCurve, computeCpmNetwork, inLookahead, lookaheadWindow } from "./scheduleCpm.js";
+import { buildScheduleMaterialAlerts } from "./scheduleLogisticsAlerts.js";
+import { loadProjectWorkCalendar, toWorkCalendarOptions } from "./workCalendar.js";
 
 export { addWorkingDays, computeSuccessorDates, isWorkingDay, shiftWorkingDays, workingDaysInclusive } from "./schedulePlanning.js";
 
@@ -734,6 +736,8 @@ function weightBasisFromPersistedTasks(
 }
 
 export async function getProjectSchedule(projectId: string) {
+  const workCalendar = await loadProjectWorkCalendar(projectId);
+  const calendar = toWorkCalendarOptions(workCalendar);
   const tasks: Array<typeof scheduleTasks.$inferSelect> = await db.select().from(scheduleTasks).where(eq(scheduleTasks.projectId, projectId)).orderBy(scheduleTasks.sortOrder);
   if (!tasks.length) {
     return {
@@ -969,9 +973,9 @@ export async function getProjectSchedule(projectId: string) {
     orderedEnriched.reduce((min, task) => task.startDate < min ? task.startDate : min, orderedEnriched[0].startDate),
   );
   const asOf = new Date().toISOString().slice(0, 10);
-  const window2 = lookaheadWindow(asOf, 2);
-  const window4 = lookaheadWindow(asOf, 4);
-  const window6 = lookaheadWindow(asOf, 6);
+  const window2 = lookaheadWindow(asOf, 2, calendar);
+  const window4 = lookaheadWindow(asOf, 4, calendar);
+  const window6 = lookaheadWindow(asOf, 6, calendar);
   const withCpm = orderedEnriched.map((task) => {
     const row = cpm.get(task.id);
     return {
@@ -983,17 +987,30 @@ export async function getProjectSchedule(projectId: string) {
       lateFinish: row?.lateFinish ?? task.endDate,
       totalFloatDays: row?.totalFloatDays ?? 0,
       isCritical: row?.isCritical ?? false,
-      dateVarianceDays: task.baselineEndDate ? workingDaysInclusive(task.baselineEndDate, task.endDate) - 1 : 0,
+      dateVarianceDays: task.baselineEndDate ? workingDaysInclusive(task.baselineEndDate, task.endDate, calendar) - 1 : 0,
       durationVarianceDays: task.baselineStartDate && task.baselineEndDate
-        ? task.durationDays - workingDaysInclusive(task.baselineStartDate, task.baselineEndDate)
+        ? task.durationDays - workingDaysInclusive(task.baselineStartDate, task.baselineEndDate, calendar)
         : 0,
       progressVariance: task.progress,
     };
   });
 
+  const materialAlerts = await buildScheduleMaterialAlerts({
+    projectId,
+    asOf,
+    calendar,
+    tasks: withCpm.map((task) => ({ id: task.id, name: task.name, startDate: task.startDate, status: task.status })),
+  });
+
   return {
     tasks: withCpm,
     dependencies,
+    calendar: {
+      saturdayWorking: workCalendar.saturdayWorking,
+      hoursPerDay: workCalendar.hoursPerDay,
+      useNationalHolidays: workCalendar.useNationalHolidays,
+      holidayCount: workCalendar.holidays?.size ?? 0,
+    },
     startDate: withCpm.reduce((min, task) => task.startDate < min ? task.startDate : min, withCpm[0].startDate),
     endDate: withCpm.reduce((max, task) => task.endDate > max ? task.endDate : max, withCpm[0].endDate),
     overallProgress: plannedValue > 0
@@ -1025,6 +1042,7 @@ export async function getProjectSchedule(projectId: string) {
         4: withCpm.filter((task) => !task.isSummary && inLookahead(task, window4)).length,
         6: withCpm.filter((task) => !task.isSummary && inLookahead(task, window6)).length,
       },
+      materialAlerts,
     },
     sCurve: buildValueSCurve(withCpm, asOf, 16),
   };

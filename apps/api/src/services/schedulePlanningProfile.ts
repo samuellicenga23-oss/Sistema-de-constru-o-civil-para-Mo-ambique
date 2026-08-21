@@ -29,6 +29,16 @@ export type SchedulePlanningZone = {
   share: number | null;
 };
 
+/** Hipótese de planeamento (chuva/acessibilidade) — não meteorologia adivinhada. */
+export type SchedulePlanningAllowance = {
+  kind: "rain" | "cyclone_wind" | "heat" | "accessibility";
+  month: number;
+  /** Código de província MZ ou null = todas as regiões. */
+  regionCode: string | null;
+  enabled: boolean;
+  note: string | null;
+};
+
 export type SchedulePlanningProfile = {
   schemaVersion: 1;
   startDate: string;
@@ -50,6 +60,8 @@ export type SchedulePlanningProfile = {
   roofKindOverride: Exclude<RoofKind, "unknown"> | null;
   targetDurationDays: number | null;
   notes: string | null;
+  /** Allowances configuráveis por mês/região — hipóteses de risco climático/logístico. */
+  planningAllowances: SchedulePlanningAllowance[];
 };
 
 export type PlanningContext = {
@@ -131,6 +143,7 @@ export function defaultSchedulePlanningProfile(context: PlanningContext, startDa
     roofKindOverride: context.detectedRoofKind === "unknown" ? null : context.detectedRoofKind,
     targetDurationDays: null,
     notes: null,
+    planningAllowances: [],
   };
 }
 
@@ -167,6 +180,15 @@ export function mergeSchedulePlanningProfile(
     tradeFronts: base.tradeFronts,
     crewSizes: { ...base.crewSizes, ...(saved.crewSizes ?? {}) },
     cureLags: { ...base.cureLags, ...(saved.cureLags ?? {}) },
+    planningAllowances: Array.isArray(saved.planningAllowances)
+      ? saved.planningAllowances.map((entry) => ({
+          kind: entry.kind ?? "rain",
+          month: Number(entry.month),
+          regionCode: entry.regionCode ?? null,
+          enabled: Boolean(entry.enabled),
+          note: entry.note ?? null,
+        }))
+      : base.planningAllowances,
   };
 }
 
@@ -215,6 +237,14 @@ export function validateSchedulePlanningProfile(profile: SchedulePlanningProfile
   }
   if (!context.supportsFloorPlanning && profile.locationStrategy !== "boq") {
     errors.push("Este mapa não tem metadados estruturados suficientes para uma repartição automática por piso/zona; preserve a organização do BOQ.");
+  }
+  for (const allowance of profile.planningAllowances) {
+    if (!Number.isInteger(allowance.month) || allowance.month < 1 || allowance.month > 12) {
+      errors.push("Cada allowance de planeamento deve indicar um mês válido (1–12).");
+    }
+    if (allowance.regionCode && !/^[A-Z]{2}$/.test(allowance.regionCode)) {
+      errors.push("Código de região inválido no allowance de planeamento.");
+    }
   }
   return errors;
 }

@@ -227,6 +227,12 @@ export const users = pgTable("users", {
   preferredLanguage: varchar("preferred_language", { length: 10 }).notNull().default("pt"),
   /** Permissões efectivas deste utilizador (cópia do template da função na criação; ajuste fino próprio). */
   permissions: jsonb("permissions").$type<string[]>().notNull().default([]),
+  /** Ausência / delegação — tasks novas podem ser encaminhadas ao delegado. */
+  absentFrom: date("absent_from"),
+  absentTo: date("absent_to"),
+  delegateUserId: uuid("delegate_user_id").references((): AnyPgColumn => users.id, { onDelete: "set null" }),
+  delegateTaskTypes: jsonb("delegate_task_types").$type<string[]>().notNull().default([]),
+  notificationPrefs: jsonb("notification_prefs").$type<{ digestEmail?: boolean }>().notNull().default({ digestEmail: false }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   // Contas criadas por um admin (fluxo antigo) ficam já verificadas — só o registo público
   // (self-service) exige confirmar o email antes do primeiro login.

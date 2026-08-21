@@ -1,3 +1,4 @@
+import { addWorkingDays as sharedAddWorkingDays, isWorkingDay as sharedIsWorkingDay, shiftWorkingDays as sharedShiftWorkingDays, workingDaysInclusive as sharedWorkingDaysInclusive, type WorkCalendarOptions } from "@sigo/shared";
 import { DEFAULT_ASSUMED_FRONT_COUNT, DEFAULT_FALLBACK_CREW_SIZE, type PlanningContext, type PlanningTrade, type SchedulePlanningProfile } from "./schedulePlanningProfile.js";
 import { executionActivityName } from "./scheduleActivityNames.js";
 
@@ -121,35 +122,20 @@ const PLANNING_TRADE_LABELS: Record<PlanningTrade, string> = {
   external: "Trabalhos exteriores",
 };
 
-export function isWorkingDay(date: string): boolean {
-  return new Date(`${date}T00:00:00Z`).getUTCDay() !== 0;
+export function isWorkingDay(date: string, calendar?: WorkCalendarOptions): boolean {
+  return sharedIsWorkingDay(date, calendar);
 }
 
-export function shiftWorkingDays(date: string, days: number): string {
-  if (days === 0) return date;
-  const value = new Date(`${date}T00:00:00Z`);
-  const step = days > 0 ? 1 : -1;
-  let remaining = Math.abs(days);
-  while (remaining > 0) {
-    value.setUTCDate(value.getUTCDate() + step);
-    if (value.getUTCDay() !== 0) remaining -= 1;
-  }
-  return value.toISOString().slice(0, 10);
+export function shiftWorkingDays(date: string, days: number, calendar?: WorkCalendarOptions): string {
+  return sharedShiftWorkingDays(date, days, calendar);
 }
 
-export function addWorkingDays(date: string, days: number): string {
-  return shiftWorkingDays(date, days);
+export function addWorkingDays(date: string, days: number, calendar?: WorkCalendarOptions): string {
+  return sharedAddWorkingDays(date, days, calendar);
 }
 
-export function workingDaysInclusive(startDate: string, endDate: string): number {
-  let cursor = new Date(`${startDate}T00:00:00Z`);
-  const end = new Date(`${endDate}T00:00:00Z`);
-  let count = 0;
-  while (cursor <= end) {
-    if (cursor.getUTCDay() !== 0) count += 1;
-    cursor = new Date(cursor.getTime() + DAY_MS);
-  }
-  return Math.max(1, count);
+export function workingDaysInclusive(startDate: string, endDate: string, calendar?: WorkCalendarOptions): number {
+  return sharedWorkingDaysInclusive(startDate, endDate, calendar);
 }
 
 export function computeSuccessorDates(

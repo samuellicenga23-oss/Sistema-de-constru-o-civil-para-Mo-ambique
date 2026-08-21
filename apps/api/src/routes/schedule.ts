@@ -2,10 +2,11 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { count, eq } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { scheduleTasks } from "../db/schema.js";
+import { mzHolidays, projectScheduleCalendars, scheduleTasks } from "../db/schema.js";
 import { requireCompanyUser, requireRole } from "../auth/middleware.js";
 import { assertDocumentOwned, assertProjectOwned } from "../services/accessControl.js";
 import { assertApprovedOrcamentoForSite } from "../services/siteGate.js";
+import { loadProjectWorkCalendar } from "../services/workCalendar.js";
 import {
   addWorkingDays,
   cascadeSuccessorDates,
@@ -156,6 +157,44 @@ async function validateParentTask(parentId: string | null | undefined, projectId
 }
 
 export async function scheduleRoutes(app: FastifyInstance) {
+  app.get("/api/mz/holidays", { preHandler: requireCompanyUser }, async (request) => {
+    const year = Number((request.query as { year?: string }).year) || new Date().getFullYear();
+    return db.select().from(mzHolidays).where(eq(mzHolidays.year, year)).orderBy(mzHolidays.date);
+  });
+
+  app.get("/api/projects/:projectId/schedule/calendar", { preHandler: requireCompanyUser }, async (request, reply) => {
+    const { projectId } = request.params as { projectId: string };
+    if (!(await assertProjectOwned(projectId, companyIdOf(request)))) return reply.code(404).send({ error: "Projecto não encontrado" });
+    return loadProjectWorkCalendar(projectId);
+  });
+
+  app.put("/api/projects/:projectId/schedule/calendar", { preHandler: requireRole(...WRITE_ROLES) }, async (request, reply) => {
+    const { projectId } = request.params as { projectId: string };
+    if (!(await assertProjectOwned(projectId, companyIdOf(request)))) return reply.code(404).send({ error: "Projecto não encontrado" });
+    const parsed = z.object({
+      saturdayWorking: z.boolean(),
+      hoursPerDay: z.number().min(1).max(24).optional().nullable(),
+      useNationalHolidays: z.boolean(),
+    }).safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    await db.insert(projectScheduleCalendars).values({
+      projectId,
+      saturdayWorking: parsed.data.saturdayWorking,
+      hoursPerDay: parsed.data.hoursPerDay != null ? String(parsed.data.hoursPerDay) : null,
+      useNationalHolidays: parsed.data.useNationalHolidays,
+      updatedAt: new Date(),
+    }).onConflictDoUpdate({
+      target: projectScheduleCalendars.projectId,
+      set: {
+        saturdayWorking: parsed.data.saturdayWorking,
+        hoursPerDay: parsed.data.hoursPerDay != null ? String(parsed.data.hoursPerDay) : null,
+        useNationalHolidays: parsed.data.useNationalHolidays,
+        updatedAt: new Date(),
+      },
+    });
+    return loadProjectWorkCalendar(projectId);
+  });
+
   app.get("/api/projects/:projectId/schedule", { preHandler: requireCompanyUser }, async (request, reply) => {
     const { projectId } = request.params as { projectId: string };
     if (!(await assertProjectOwned(projectId, companyIdOf(request)))) return reply.code(404).send({ error: "Projecto não encontrado" });

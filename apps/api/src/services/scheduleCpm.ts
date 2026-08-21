@@ -1,3 +1,4 @@
+import { type WorkCalendarOptions } from "@sigo/shared";
 import { addWorkingDays, shiftWorkingDays, workingDaysInclusive, type DependencyType } from "./schedulePlanning.js";
 
 export type CpmActivity = {
@@ -133,8 +134,8 @@ export function computeCpmNetwork(activities: CpmActivity[], dependencies: CpmDe
   return results;
 }
 
-export function lookaheadWindow(asOf: string, weeks: 2 | 4 | 6) {
-  const end = addWorkingDays(asOf, weeks * 6 - 1);
+export function lookaheadWindow(asOf: string, weeks: 2 | 4 | 6, calendar?: WorkCalendarOptions) {
+  const end = addWorkingDays(asOf, weeks * 6 - 1, calendar);
   return { start: asOf, end };
 }
 

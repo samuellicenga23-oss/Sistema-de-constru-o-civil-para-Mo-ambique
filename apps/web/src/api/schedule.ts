@@ -26,6 +26,7 @@ export type SchedulePlanningProfile = {
   roofKindOverride: "sheet" | "slab" | null;
   targetDurationDays: number | null;
   notes: string | null;
+  planningAllowances: Array<{ kind: "rain" | "cyclone_wind" | "heat" | "accessibility"; month: number; regionCode: string | null; enabled: boolean; note: string | null }>;
 };
 
 export type SchedulePlanningContext = {
@@ -196,12 +197,14 @@ export type ProjectSchedule = {
   planningAssumptions?: string[];
   planningProfile?: SchedulePlanningProfile;
   validation: ScheduleValidation;
+  calendar?: { saturdayWorking: boolean; hoursPerDay: number; useNationalHolidays: boolean; holidayCount: number };
   lookahead?: {
     weeks: number;
     start: string | null;
     end: string | null;
     tasks: Array<{ id: string; name: string; startDate: string; endDate: string; status: ScheduleTaskStatus; isCritical?: boolean }>;
     windows?: Record<number, number>;
+    materialAlerts?: Array<{ taskId: string; taskName: string; startDate: string; daysUntilStart: number; message: string }>;
   };
   sCurve?: Array<{ weekIndex: number; startDate: string; endDate: string; plannedCumulative: number; actualCumulative: number }>;
 };

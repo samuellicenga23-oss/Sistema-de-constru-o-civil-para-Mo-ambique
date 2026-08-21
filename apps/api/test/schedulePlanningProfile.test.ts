@@ -96,4 +96,13 @@ describe("Assistente de Planeamento", () => {
     profile.floorLabels[1] = "";
     expect(validateSchedulePlanningProfile(profile, ctx).join(" ")).toMatch(/designação/i);
   });
+
+  it("valida allowance de chuva por mês/região", () => {
+    const ctx = context();
+    const profile = {
+      ...defaultSchedulePlanningProfile(ctx, startDate),
+      planningAllowances: [{ kind: "rain" as const, month: 13, regionCode: "MP", enabled: true, note: "Época chuvosa" }],
+    };
+    expect(validateSchedulePlanningProfile(profile, ctx).join(" ")).toMatch(/mês/i);
+  });
 });
