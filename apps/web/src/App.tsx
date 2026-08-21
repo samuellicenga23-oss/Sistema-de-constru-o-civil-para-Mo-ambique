@@ -28,6 +28,7 @@ const QuickCalcPage = lazy(() => import("./pages/QuickCalcPage"));
 const ProjectFinancialPage = lazy(() => import("./pages/ProjectFinancialPage"));
 const ProjectSiteDiaryPage = lazy(() => import("./pages/ProjectSiteDiaryPage"));
 const ProjectFieldQualityPage = lazy(() => import("./pages/ProjectFieldQualityPage"));
+const ProjectWorkforcePage = lazy(() => import("./pages/ProjectWorkforcePage"));
 const QuoteRequestsPage = lazy(() => import("./pages/QuoteRequestsPage"));
 const SuppliersPage = lazy(() => import("./pages/SuppliersPage"));
 const ProjectProcurementPage = lazy(() => import("./pages/ProjectProcurementPage"));
@@ -178,6 +179,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <ProjectFieldQualityPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/projectos/:projectId/equipas"
+        element={
+          <ProtectedRoute>
+            <ProjectWorkforcePage />
           </ProtectedRoute>
         }
       />

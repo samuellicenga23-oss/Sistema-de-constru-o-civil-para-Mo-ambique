@@ -1993,6 +1993,73 @@ export const hstRecords = pgTable("hst_records", {
   unique("hst_records_offline_sync").on(table.projectId, table.offlineSyncKey),
 ]);
 
+// ---------- Mão-de-obra, equipas e subempreiteiros ----------
+
+export const workforceWorkerKindEnum = pgEnum("workforce_worker_kind", ["employee", "casual", "subcontract_worker"]);
+export const workforceTimesheetStatusEnum = pgEnum("workforce_timesheet_status", ["rascunho", "submetido", "aprovado"]);
+
+export const workforceWorkers = pgTable("workforce_workers", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+  projectId: uuid("project_id").references(() => projects.id, { onDelete: "set null" }),
+  kind: workforceWorkerKindEnum("kind").notNull().default("employee"),
+  name: varchar("name", { length: 200 }).notNull(),
+  trade: varchar("trade", { length: 100 }),
+  reference: varchar("reference", { length: 80 }),
+  contact: varchar("contact", { length: 120 }),
+  hourlyCost: numeric("hourly_cost", { precision: 14, scale: 4 }),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [index("workforce_workers_company_project_idx").on(table.companyId, table.projectId)]);
+
+export const workforceCrews = pgTable("workforce_crews", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+  projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 200 }).notNull(),
+  foremanUserId: uuid("foreman_user_id").references(() => users.id, { onDelete: "set null" }),
+  trade: varchar("trade", { length: 100 }),
+  defaultProductivityNotes: text("default_productivity_notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [index("workforce_crews_project_idx").on(table.projectId)]);
+
+export const workforceCrewMembers = pgTable("workforce_crew_members", {
+  crewId: uuid("crew_id").notNull().references(() => workforceCrews.id, { onDelete: "cascade" }),
+  workerId: uuid("worker_id").notNull().references(() => workforceWorkers.id, { onDelete: "cascade" }),
+}, (table) => [primaryKey({ columns: [table.crewId, table.workerId] })]);
+
+export const workforceTimesheets = pgTable("workforce_timesheets", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+  workerId: uuid("worker_id").references(() => workforceWorkers.id, { onDelete: "set null" }),
+  crewId: uuid("crew_id").references(() => workforceCrews.id, { onDelete: "set null" }),
+  workDate: date("work_date").notNull(),
+  hours: numeric("hours", { precision: 6, scale: 2 }).notNull().default("8"),
+  overtimeHours: numeric("overtime_hours", { precision: 6, scale: 2 }).notNull().default("0"),
+  scheduleTaskId: uuid("schedule_task_id").references(() => scheduleTasks.id, { onDelete: "set null" }),
+  diaryEntryId: uuid("diary_entry_id").references(() => siteDiaryEntries.id, { onDelete: "set null" }),
+  status: workforceTimesheetStatusEnum("status").notNull().default("rascunho"),
+  notes: text("notes"),
+  createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [index("workforce_timesheets_project_date_idx").on(table.projectId, table.workDate)]);
+
+export const projectSubcontractors = pgTable("project_subcontractors", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+  projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 200 }).notNull(),
+  nuit: varchar("nuit", { length: 50 }),
+  contractRef: varchar("contract_ref", { length: 120 }),
+  scope: text("scope"),
+  contractValue: numeric("contract_value", { precision: 14, scale: 2 }),
+  retentionRate: numeric("retention_rate", { precision: 5, scale: 4 }).notNull().default("0"),
+  progressNotes: text("progress_notes"),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [index("project_subcontractors_project_idx").on(table.projectId)]);
+
 // ---------- Compras, Fornecedores e Armazém ----------
 
 export const purchaseOrderStatusEnum = pgEnum("purchase_order_status", ["rascunho", "aprovado", "recebido", "cancelado"]);

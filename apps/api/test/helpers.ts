@@ -27,7 +27,8 @@ export async function truncateAll() {
     purchase_orders, purchase_order_lines, stock_movements, fuel_logs, warehouses, notifications,
     price_observations, mz_districts, mz_provinces, mz_holidays, fiscal_rate_profiles, price_zone_districts, payment_method_catalog,
     project_schedule_calendars, procurement_payment_terms_catalog,
-    inspection_checklist_templates, quality_inspections, hst_records
+    inspection_checklist_templates, quality_inspections, hst_records,
+    workforce_workers, workforce_crews, workforce_crew_members, workforce_timesheets, project_subcontractors
   CASCADE`;
 }
 

@@ -687,6 +687,13 @@
       "when": 1788115200000,
       "tag": "0098_treasury_fiscal_receipts",
       "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "7",
+      "when": 1788201600000,
+      "tag": "0099_workforce_subcontractors_inss",
+      "breakpoints": true
     }
   ]
 }

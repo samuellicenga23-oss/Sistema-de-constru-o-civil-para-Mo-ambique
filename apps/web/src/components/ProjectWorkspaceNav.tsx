@@ -72,6 +72,13 @@ export default function ProjectWorkspaceNav({
       moduleHint: "site_diary" as const,
     },
     {
+      to: `/projectos/${projectId}/equipas${faseQuery}`,
+      path: `/projectos/${projectId}/equipas`,
+      label: "Equipas",
+      show: can(user, "diario.registar") || can(user, "diario.aprovar"),
+      moduleHint: "site_diary" as const,
+    },
+    {
       to: `/projectos/${projectId}/cronograma${faseQuery}`,
       path: `/projectos/${projectId}/cronograma`,
       label: "Cronograma",
