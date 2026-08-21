@@ -53,9 +53,9 @@ describe("quadro de pilares", () => {
     expect(columnConcreteVolumeM3(group({ code: "P1", quantity: 4, widthCm: 30, depthCm: 20 }), null)).toBe(0);
   });
 
-  it("calcula betão rectangular e circular", () => {
-    expect(columnConcreteVolumeM3(group({ code: "P1", quantity: 2, widthCm: 30, depthCm: 20 }), 3.3)).toBe(0.4);
-    expect(columnConcreteVolumeM3(group({ code: "P2", quantity: 1, shape: "circular", diameterCm: 40 }), 3)).toBe(0.38);
+  it("calcula betão rectangular e circular sem truncar para duas casas", () => {
+    expect(columnConcreteVolumeM3(group({ code: "P1", quantity: 2, widthCm: 30, depthCm: 20 }), 3.3)).toBe(0.396);
+    expect(columnConcreteVolumeM3(group({ code: "P2", quantity: 1, shape: "circular", diameterCm: 40 }), 3)).toBe(0.376991);
   });
 
   it("calcula aço longitudinal sem substituir mapa", () => {
