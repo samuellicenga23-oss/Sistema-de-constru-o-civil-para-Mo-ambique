@@ -10,6 +10,7 @@ import type { ApprovalMode, ProjectWorkflowType } from "./projectWorkflowTypes.j
 import { WORKFLOW_TASK_PRIORITY, PROJECT_WORKFLOW_LABELS } from "./projectWorkflowTypes.js";
 import type { ResolvedApprovalRoute, ResolvedApprover } from "./resolveProjectApproval.js";
 import { resolveProjectApprovalRoute } from "./resolveProjectApproval.js";
+import { resolveTaskAssignee } from "./workflowDelegation.js";
 
 export type WorkflowTaskKind = "approval" | "correction";
 
@@ -41,22 +42,32 @@ export async function createApprovalTasks(input: {
       ),
     );
 
-  const values = input.resolved.approvers.map((approver) => ({
-    companyId: input.companyId,
-    projectId: input.projectId,
-    workflowType: input.workflowType,
-    entityType: input.entityType,
-    entityId: input.entityId,
-    assignedUserId: approver.id,
-    stepOrder: input.resolved.stepOrder,
-    status: "pending" as const,
-    kind: "approval" as const,
-    title: input.title,
-    body: input.body ?? null,
-    link: input.link,
-    projectNameSnapshot: project?.name ?? null,
-    requestedByUserId: input.requestedByUserId,
-  }));
+  const values = [];
+  for (const approver of input.resolved.approvers) {
+    const resolved = await resolveTaskAssignee({
+      companyId: input.companyId,
+      intendedUserId: approver.id,
+      workflowType: input.workflowType,
+    });
+    values.push({
+      companyId: input.companyId,
+      projectId: input.projectId,
+      workflowType: input.workflowType,
+      entityType: input.entityType,
+      entityId: input.entityId,
+      assignedUserId: resolved.userId,
+      stepOrder: input.resolved.stepOrder,
+      status: "pending" as const,
+      kind: "approval" as const,
+      title: input.title,
+      body: resolved.delegatedFrom
+        ? [input.body, `(Delegado de ${approver.name})`].filter(Boolean).join("\n")
+        : (input.body ?? null),
+      link: input.link,
+      projectNameSnapshot: project?.name ?? null,
+      requestedByUserId: input.requestedByUserId,
+    });
+  }
 
   if (!values.length) return { taskIds: [], notifiedUserIds: [] };
 
@@ -397,6 +408,7 @@ export async function reassignWorkflowTask(input: {
   taskId: string;
   toUserId: string;
   actorUserId: string;
+  allowAssignee?: boolean;
 }) {
   const [task] = await db
     .select()
@@ -404,6 +416,11 @@ export async function reassignWorkflowTask(input: {
     .where(and(eq(workflowTasks.id, input.taskId), eq(workflowTasks.companyId, input.companyId), eq(workflowTasks.status, "pending")))
     .limit(1);
   if (!task) return { ok: false as const, error: "Tarefa não encontrada" };
+
+  const isAssignee = task.assignedUserId === input.actorUserId;
+  if (isAssignee && !input.allowAssignee) {
+    return { ok: false as const, error: "Reatribuição pelo responsável exige confirmação explícita." };
+  }
 
   const [user] = await db
     .select()

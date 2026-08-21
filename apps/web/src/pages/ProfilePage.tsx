@@ -50,6 +50,11 @@ export default function ProfilePage() {
   const [dataSaver, setDataSaver] = useState(isDataSaverEnabled());
   const [savingLanguage, setSavingLanguage] = useState(false);
   const [languageSaved, setLanguageSaved] = useState(false);
+  const [digestEmail, setDigestEmail] = useState(false);
+  const [savingDigest, setSavingDigest] = useState(false);
+  const [absentFrom, setAbsentFrom] = useState("");
+  const [absentTo, setAbsentTo] = useState("");
+  const [savingDelegation, setSavingDelegation] = useState(false);
 
   async function reloadSessions() {
     setSessions(await api.listSessions());
@@ -58,6 +63,11 @@ export default function ProfilePage() {
   useEffect(() => {
     if (user?.companyId) {
       companiesApi.me().then((d) => setCompany(d.company)).catch(() => {});
+      api.getDelegation().then((d) => {
+        setDigestEmail(Boolean(d.notificationPrefs?.digestEmail));
+        setAbsentFrom(d.absentFrom ?? "");
+        setAbsentTo(d.absentTo ?? "");
+      }).catch(() => {});
     }
     reloadSessions().catch(() => {});
   }, [user?.companyId]);
@@ -306,6 +316,67 @@ export default function ProfilePage() {
               </label>
               <p className="muted mt-1">Menos actualizações automáticas, imagens mais pequenas e sem pré-carregar PDFs.</p>
             </div>
+            <div>
+              <p className="label mb-1.5">Resumo por email</p>
+              <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={digestEmail}
+                  disabled={savingDigest}
+                  onChange={async (e) => {
+                    setSavingDigest(true);
+                    setError(null);
+                    try {
+                      await api.updateProfile({ notificationPrefs: { digestEmail: e.target.checked } });
+                      setDigestEmail(e.target.checked);
+                    } catch (err) {
+                      setError(err instanceof ApiError ? err.message : "Erro ao guardar preferência");
+                    } finally {
+                      setSavingDigest(false);
+                    }
+                  }}
+                  className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                />
+                Digest diário de notificações (em vez de email imediato)
+              </label>
+            </div>
+            {user.companyId && (
+              <div className="sm:col-span-2 lg:col-span-3 rounded-lg border border-slate-200 p-4">
+                <p className="label mb-2">Ausência / delegação de acções</p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="label">Ausente desde</label>
+                    <input className="input" type="date" value={absentFrom} onChange={(e) => setAbsentFrom(e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="label">Ausente até</label>
+                    <input className="input" type="date" value={absentTo} onChange={(e) => setAbsentTo(e.target.value)} />
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm mt-3"
+                  disabled={savingDelegation}
+                  onClick={async () => {
+                    setSavingDelegation(true);
+                    setError(null);
+                    try {
+                      await api.updateProfile({
+                        absentFrom: absentFrom || null,
+                        absentTo: absentTo || null,
+                      });
+                    } catch (err) {
+                      setError(err instanceof ApiError ? err.message : "Erro ao guardar delegação");
+                    } finally {
+                      setSavingDelegation(false);
+                    }
+                  }}
+                >
+                  {savingDelegation ? "A guardar…" : "Guardar ausência"}
+                </button>
+                <p className="muted mt-2">Tasks novas podem ser encaminhadas ao delegado configurado pelo administrador. Reatribuições ficam registadas em auditoria.</p>
+              </div>
+            )}
             <div>
               <p className="label mb-1.5">Ajuda</p>
               <button

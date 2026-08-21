@@ -30,6 +30,8 @@ export const priceObservationResourceTypeEnum = pgEnum("price_observation_resour
 export const priceObservationConfidenceEnum = pgEnum("price_observation_confidence", ["confirmed", "estimated", "unverified"]);
 export const currencyEnum = pgEnum("currency", ["MZN", "USD"]);
 export const unitEnum = pgEnum("unit", ["m", "m2", "m3", "ml", "kg", "un", "vg", "h"]);
+export const materialSkuTypeEnum = pgEnum("material_sku_type", ["standard", "combustivel"]);
+export const warehouseKindEnum = pgEnum("warehouse_kind", ["central", "project", "temporary"]);
 export const lineItemKindEnum = pgEnum("line_item_kind", ["capitulo", "grupo", "item", "nota"]);
 export const lineItemOriginEnum = pgEnum("line_item_origin", ["manual", "planta", "composicao", "estimativa"]);
 export const lineItemQuantitySourceEnum = pgEnum("line_item_quantity_source", ["manual", "measurement", "plant", "import", "bim", "estimate"]);
@@ -317,6 +319,8 @@ export const materials = pgTable(
     // de compra (ex: 10 para um camião de 10m3).
     purchasePackageLabel: varchar("purchase_package_label", { length: 100 }),
     purchasePackageQty: numeric("purchase_package_qty", { precision: 14, scale: 4 }),
+    skuType: materialSkuTypeEnum("sku_type").notNull().default("standard"),
+    minStockQty: numeric("min_stock_qty", { precision: 14, scale: 3 }),
     createdBySupplierAccountId: uuid("created_by_supplier_account_id").references((): AnyPgColumn => supplierAccounts.id, { onDelete: "set null" }),
   },
   (table) => [unique().on(table.companyId, table.name)]
@@ -2699,11 +2703,18 @@ export const supplierInvoiceCreditNotes = pgTable("supplier_invoice_credit_notes
 ]);
 
 // Movimento de stock por projecto (um "armazém" simples por obra, não multi-armazém ainda) —
-// "entrada" acontece automaticamente quando uma ordem de compra passa a "recebido" (ver
-// purchasing.ts), ou pode ser lançada manualmente; "saída" regista consumo em obra. O stock
-// actual de cada material é sempre calculado on-the-fly (soma de entradas − saídas), nunca
-// guardado como um número à parte que possa dessincronizar. Também ligado ao material real do
-// Catálogo, pela mesma razão das linhas de compra.
+export const warehouses = pgTable("warehouses", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+  projectId: uuid("project_id").references(() => projects.id, { onDelete: "cascade" }),
+  kind: warehouseKindEnum("kind").notNull().default("project"),
+  name: varchar("name", { length: 160 }).notNull(),
+  location: varchar("location", { length: 240 }),
+  responsibleUserId: uuid("responsible_user_id").references(() => users.id, { onDelete: "set null" }),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [index("warehouses_company_project_idx").on(table.companyId, table.projectId)]);
+
 export const stockMovements = pgTable("stock_movements", {
   id: uuid("id").primaryKey().defaultRandom(),
   projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
@@ -2712,6 +2723,10 @@ export const stockMovements = pgTable("stock_movements", {
   quantity: numeric("quantity", { precision: 14, scale: 3 }).notNull(),
   unitCost: numeric("unit_cost", { precision: 14, scale: 4 }),
   currency: currencyEnum("currency").default("MZN"),
+  reason: varchar("reason", { length: 40 }),
+  warehouseId: uuid("warehouse_id").references(() => warehouses.id, { onDelete: "set null" }),
+  odometerReading: numeric("odometer_reading", { precision: 14, scale: 1 }),
+  equipmentId: uuid("equipment_id").references(() => equipment.id, { onDelete: "set null" }),
   notes: text("notes"),
   purchaseOrderId: uuid("purchase_order_id").references(() => purchaseOrders.id, { onDelete: "cascade" }),
   goodsReceiptLineId: uuid("goods_receipt_line_id").references(() => goodsReceiptLines.id, { onDelete: "cascade" }),
@@ -2724,6 +2739,22 @@ export const stockMovements = pgTable("stock_movements", {
   // por linha de recepção, que representa um evento físico único e confirmado.
   unique("stock_goods_receipt_line_unique").on(table.goodsReceiptLineId),
 ]);
+
+export const fuelLogs = pgTable("fuel_logs", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  stockMovementId: uuid("stock_movement_id").notNull().references(() => stockMovements.id, { onDelete: "cascade" }),
+  materialId: uuid("material_id").notNull().references(() => materials.id),
+  liters: numeric("liters", { precision: 14, scale: 3 }).notNull(),
+  odometerReading: numeric("odometer_reading", { precision: 14, scale: 1 }),
+  equipmentId: uuid("equipment_id").references(() => equipment.id, { onDelete: "set null" }),
+  ticketRef: varchar("ticket_ref", { length: 120 }),
+  photoRef: varchar("photo_ref", { length: 400 }),
+  notes: text("notes"),
+  loggedAt: date("logged_at").notNull(),
+  createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [unique("fuel_logs_movement_unique").on(table.stockMovementId)]);
 
 // Preço de um material específico por fornecedor, opcionalmente por zona (transporte varia por
 // zona tal como material_zone_prices) — é isto que faz aparecer "materiais" dentro de um

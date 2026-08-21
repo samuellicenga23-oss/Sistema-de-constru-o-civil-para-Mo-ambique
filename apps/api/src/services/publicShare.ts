@@ -200,6 +200,15 @@ export type PublicProjectSummary = {
     decisionAt: string | null;
     decisionNote: string | null;
   }>;
+  /** Decisões pendentes — caixa de acções do portal cliente. */
+  actionInbox: Array<{
+    id: string;
+    title: string;
+    description: string;
+    kind: "decisao";
+    href: string;
+    dueHint: string | null;
+  }>;
 };
 
 /** Só é chamada depois de confirmar que o token existe — nunca expõe custos internos. */
@@ -319,6 +328,8 @@ export async function getPublicProjectSummary(token: string): Promise<PublicProj
     }));
   }
 
+  const decisoes = await listClientDecisions(project.id);
+
   return {
     projectName: project.name,
     currency: project.currency,
@@ -346,6 +357,16 @@ export async function getPublicProjectSummary(token: string): Promise<PublicProj
           }
         : null,
     diary,
-    decisoes: await listClientDecisions(project.id),
+    decisoes,
+    actionInbox: decisoes
+      .filter((row) => row.status === "pendente")
+      .map((row) => ({
+        id: row.id,
+        title: row.title,
+        description: row.description,
+        kind: "decisao" as const,
+        href: `#decisao-${row.id}`,
+        dueHint: null,
+      })),
   };
 }

@@ -163,15 +163,19 @@ export async function workflowTaskRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
-  app.post("/api/workflow-tasks/:id/reassign", { preHandler: requireRole("admin_empresa") }, async (request, reply) => {
+  app.post("/api/workflow-tasks/:id/reassign", { preHandler: requireCompanyUser }, async (request, reply) => {
     const { id } = request.params as { id: string };
-    const parsed = z.object({ toUserId: z.string().uuid() }).safeParse(request.body);
+    const parsed = z.object({ toUserId: z.string().uuid(), allowAssignee: z.boolean().optional() }).safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    const companyId = companyIdOf(request);
+    const actorUserId = request.currentUser!.id;
+    const isAdmin = request.currentUser!.role === "admin_empresa" || request.currentUser!.role === "super_admin";
     const result = await reassignWorkflowTask({
-      companyId: companyIdOf(request),
+      companyId,
       taskId: id,
       toUserId: parsed.data.toUserId,
-      actorUserId: request.currentUser!.id,
+      actorUserId,
+      allowAssignee: isAdmin || parsed.data.allowAssignee === true,
     });
     if (!result.ok) return reply.code(400).send({ error: result.error });
     return result.task;

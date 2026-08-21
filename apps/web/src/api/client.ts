@@ -37,8 +37,24 @@ export const api = {
   logout: () => request<{ ok: true }>("/auth/logout", { method: "POST" }),
   changePassword: (currentPassword: string, newPassword: string) =>
     request<{ ok: true }>("/auth/change-password", { method: "POST", body: JSON.stringify({ currentPassword, newPassword }) }),
-  updateProfile: (data: { name?: string; preferredLanguage?: string }) =>
+  updateProfile: (data: {
+    name?: string;
+    preferredLanguage?: string;
+    absentFrom?: string | null;
+    absentTo?: string | null;
+    delegateUserId?: string | null;
+    delegateTaskTypes?: string[];
+    notificationPrefs?: { digestEmail?: boolean };
+  }) =>
     request<CurrentUser>("/auth/me", { method: "PATCH", body: JSON.stringify(data) }),
+  getDelegation: () =>
+    request<{
+      absentFrom: string | null;
+      absentTo: string | null;
+      delegateUserId: string | null;
+      delegateTaskTypes: string[];
+      notificationPrefs: { digestEmail?: boolean };
+    }>("/auth/me/delegation"),
   uploadAvatar: async (file: File) => {
     const form = new FormData();
     form.append("file", file);

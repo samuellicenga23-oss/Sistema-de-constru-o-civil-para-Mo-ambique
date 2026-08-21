@@ -22,6 +22,7 @@ import { detectImageExtension } from "../services/imageValidation.js";
 import { createTrialCompany } from "../services/companyOnboarding.js";
 import { env } from "../env.js";
 import { isCompanyUserRole, resolveRoleTemplate } from "@sigo/shared";
+import { getUserDelegationSettings, saveUserDelegationSettings } from "../services/workflowDelegation.js";
 
 // Extrai os dados da sessão que ajudam o utilizador a reconhecer o dispositivo mais tarde (ecrã
 // de Perfil → "Sessões") — nenhum dos dois é uma identidade forte, só um auxiliar visual.
@@ -449,6 +450,11 @@ export async function authRoutes(app: FastifyInstance) {
   const updateProfileSchema = z.object({
     name: z.string().min(1).optional(),
     preferredLanguage: z.string().min(2).max(10).optional(),
+    absentFrom: z.string().nullable().optional(),
+    absentTo: z.string().nullable().optional(),
+    delegateUserId: z.string().uuid().nullable().optional(),
+    delegateTaskTypes: z.array(z.string()).optional(),
+    notificationPrefs: z.object({ digestEmail: z.boolean().optional() }).optional(),
   });
 
   // Editar os próprios dados de perfil (nome, idioma preferido) — nunca email/perfil/empresa,
@@ -459,13 +465,62 @@ export async function authRoutes(app: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     if (Object.keys(parsed.data).length === 0) return request.currentUser;
 
-    await db.update(users).set(parsed.data).where(eq(users.id, request.currentUser!.id));
+    const userId = request.currentUser!.id;
+    const companyId = request.currentUser!.companyId;
+    const { name, preferredLanguage, absentFrom, absentTo, delegateUserId, delegateTaskTypes, notificationPrefs } = parsed.data;
+
+    const profilePatch: Record<string, unknown> = {};
+    if (name !== undefined) profilePatch.name = name;
+    if (preferredLanguage !== undefined) profilePatch.preferredLanguage = preferredLanguage;
+    if (Object.keys(profilePatch).length) {
+      await db.update(users).set(profilePatch).where(eq(users.id, userId));
+    }
+
+    const delegationTouched =
+      absentFrom !== undefined ||
+      absentTo !== undefined ||
+      delegateUserId !== undefined ||
+      delegateTaskTypes !== undefined ||
+      notificationPrefs !== undefined;
+
+    if (delegationTouched && companyId) {
+      const current = (await getUserDelegationSettings(userId)) ?? {
+        absentFrom: null,
+        absentTo: null,
+        delegateUserId: null,
+        delegateTaskTypes: [],
+        notificationPrefs: { digestEmail: false },
+      };
+      const result = await saveUserDelegationSettings({
+        userId,
+        companyId,
+        actorUserId: userId,
+        settings: {
+          absentFrom: absentFrom !== undefined ? absentFrom : current.absentFrom,
+          absentTo: absentTo !== undefined ? absentTo : current.absentTo,
+          delegateUserId: delegateUserId !== undefined ? delegateUserId : current.delegateUserId,
+          delegateTaskTypes: delegateTaskTypes !== undefined ? delegateTaskTypes : current.delegateTaskTypes,
+          notificationPrefs: {
+            ...current.notificationPrefs,
+            ...(notificationPrefs ?? {}),
+          },
+        },
+      });
+      if (!result.ok) return reply.code(400).send({ error: result.error });
+    }
+
     const sessionId = request.cookies?.sid;
     if (sessionId) {
       const refreshed = await getSessionUser(sessionId);
       if (refreshed) return refreshed;
     }
     return request.currentUser;
+  });
+
+  app.get("/api/auth/me/delegation", { preHandler: requireAuth }, async (request, reply) => {
+    const settings = await getUserDelegationSettings(request.currentUser!.id);
+    if (!settings) return reply.code(404).send({ error: "Utilizador não encontrado" });
+    return settings;
   });
 
   app.post("/api/auth/me/avatar", { preHandler: requireAuth }, async (request, reply) => {
