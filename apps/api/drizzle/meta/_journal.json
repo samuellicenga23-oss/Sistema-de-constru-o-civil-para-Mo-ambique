@@ -624,6 +624,13 @@
       "when": 1787337600000,
       "tag": "0088_mozambique_locale_geography_fiscal",
       "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1787424000000,
+      "tag": "0089_price_observations_regional",
+      "breakpoints": true
     }
   ]
 }

@@ -1207,10 +1207,12 @@ export async function companyRoutes(app: FastifyInstance) {
         workingDaysPerMonth: z.number().int().min(1).max(31).optional(),
         workingHoursPerDay: z.number().min(1).max(24).optional(),
         emailNotificationPrefs: z.object({ workflow: z.boolean() }).optional(),
+        effectivePricePolicy: z.enum(["manual", "last_confirmed", "median_n"]).optional(),
+        effectivePriceMedianN: z.number().int().min(1).max(50).optional(),
       })
       .safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
-    const { workingDaysPerMonth, workingHoursPerDay, email, emailNotificationPrefs, nuit, nuitForeign, phone, ...rest } = parsed.data;
+    const { workingDaysPerMonth, workingHoursPerDay, email, emailNotificationPrefs, nuit, nuitForeign, phone, effectivePricePolicy, effectivePriceMedianN, ...rest } = parsed.data;
 
     const [current] = await db.select().from(companies).where(eq(companies.id, companyId)).limit(1);
     const foreign = nuitForeign ?? current?.nuitForeign ?? false;
@@ -1232,6 +1234,8 @@ export async function companyRoutes(app: FastifyInstance) {
         ...(workingDaysPerMonth !== undefined ? { workingDaysPerMonth } : {}),
         ...(workingHoursPerDay !== undefined ? { workingHoursPerDay: workingHoursPerDay.toString() } : {}),
         ...(emailNotificationPrefs !== undefined ? { emailNotificationPrefs } : {}),
+        ...(effectivePricePolicy !== undefined ? { effectivePricePolicy } : {}),
+        ...(effectivePriceMedianN !== undefined ? { effectivePriceMedianN } : {}),
       })
       .where(eq(companies.id, companyId))
       .returning();

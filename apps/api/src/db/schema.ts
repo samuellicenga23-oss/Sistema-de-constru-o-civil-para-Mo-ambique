@@ -26,6 +26,8 @@ export const userRoleEnum = pgEnum("user_role", [
   "visualizador",
 ]);
 export const vendorGovernanceStatusEnum = pgEnum("vendor_governance_status", ["qualificado", "preferencial", "observacao", "bloqueado"]);
+export const priceObservationResourceTypeEnum = pgEnum("price_observation_resource_type", ["material", "labour", "equipment"]);
+export const priceObservationConfidenceEnum = pgEnum("price_observation_confidence", ["confirmed", "estimated", "unverified"]);
 export const currencyEnum = pgEnum("currency", ["MZN", "USD"]);
 export const unitEnum = pgEnum("unit", ["m", "m2", "m3", "ml", "kg", "un", "vg", "h"]);
 export const lineItemKindEnum = pgEnum("line_item_kind", ["capitulo", "grupo", "item", "nota"]);
@@ -84,6 +86,10 @@ export const companies = pgTable("companies", {
   }>>(),
   /** Templates de permissões por função — se vazio/null usa SYSTEM_ROLE_PERMISSIONS. */
   rolePermissions: jsonb("role_permissions").$type<Partial<Record<"admin_empresa" | "orcamentista" | "engenheiro_fiscal" | "visualizador", string[]>>>(),
+  /** Política para resolver preço efectivo a partir de observações: manual | last_confirmed | median_n. */
+  effectivePricePolicy: varchar("effective_price_policy", { length: 40 }).notNull().default("last_confirmed"),
+  /** N usado quando effectivePricePolicy = median_n. */
+  effectivePriceMedianN: integer("effective_price_median_n").notNull().default(5),
   brandName: varchar("brand_name", { length: 100 }),
   primaryColor: varchar("primary_color", { length: 7 }).notNull().default("#1AADB4"),
   accentColor: varchar("accent_color", { length: 7 }).notNull().default("#ED6C22"),
@@ -1918,6 +1924,36 @@ export const suppliers = pgTable("suppliers", {
   offersEquipment: boolean("offers_equipment").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
+
+/** Histórico append-only de observações de preço regional por recurso (familyKey). */
+export const priceObservations = pgTable(
+  "price_observations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+    resourceFamilyKey: uuid("resource_family_key").notNull(),
+    resourceType: priceObservationResourceTypeEnum("resource_type").notNull(),
+    refId: uuid("ref_id"),
+    supplierId: uuid("supplier_id").references(() => suppliers.id, { onDelete: "set null" }),
+    zoneId: uuid("zone_id").references(() => priceZones.id, { onDelete: "set null" }),
+    districtId: uuid("district_id").references(() => mzDistricts.id, { onDelete: "set null" }),
+    currency: currencyEnum("currency").notNull().default("MZN"),
+    unitCost: numeric("unit_cost", { precision: 14, scale: 4 }).notNull(),
+    unit: unitEnum("unit").notNull(),
+    vatIncluded: boolean("vat_included").notNull().default(false),
+    transportIncluded: boolean("transport_included").notNull().default(true),
+    observedAt: timestamp("observed_at").notNull(),
+    source: varchar("source", { length: 240 }).notNull(),
+    reference: text("reference"),
+    confidence: priceObservationConfidenceEnum("confidence").notNull().default("estimated"),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    index("price_observations_company_family_idx").on(table.companyId, table.resourceFamilyKey, table.resourceType),
+    index("price_observations_observed_at_idx").on(table.observedAt),
+  ],
+);
 
 export const supplierComplianceDocuments = pgTable("supplier_compliance_documents", {
   id: uuid("id").primaryKey().defaultRandom(),

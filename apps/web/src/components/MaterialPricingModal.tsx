@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { catalogApi, type Material } from "../api/catalog";
+import { priceObservationsApi } from "../api/priceObservations";
+import { formatObservationDate, getPriceObservationBadge } from "../utils/priceObservationBadge";
 import Modal from "./Modal";
 
 type MaterialSupplierRow = {
@@ -23,6 +25,7 @@ function money(value: string | number) {
 /** Só consulta — a empresa não cria nem edita preços de fornecedores. */
 export default function MaterialPricingModal({ material, onClose }: { material: Material; onClose: () => void; onChanged?: () => void }) {
   const [supplierRows, setSupplierRows] = useState<MaterialSupplierRow[]>([]);
+  const [lastObservation, setLastObservation] = useState<{ observedAt: string; source: string; confidence: "confirmed" | "estimated" | "unverified" } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -32,6 +35,21 @@ export default function MaterialPricingModal({ material, onClose }: { material: 
       .catch((err) => setError(err instanceof Error ? err.message : String(err)));
   }, [material.id]);
 
+  useEffect(() => {
+    if (!material.familyKey) return;
+    priceObservationsApi
+      .list({ resourceFamilyKey: material.familyKey, resourceType: "material", refId: material.id, limit: 1 })
+      .then(({ observations }) => {
+        const latest = observations[0];
+        if (!latest) {
+          setLastObservation(null);
+          return;
+        }
+        setLastObservation({ observedAt: latest.observedAt, source: latest.source, confidence: latest.confidence });
+      })
+      .catch(() => setLastObservation(null));
+  }, [material.familyKey, material.id]);
+
   return (
     <Modal
       title={`Cotações — ${material.name}`}
@@ -40,6 +58,16 @@ export default function MaterialPricingModal({ material, onClose }: { material: 
       maxWidth="max-w-2xl"
     >
       {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
+
+      {lastObservation && (() => {
+        const badge = getPriceObservationBadge(lastObservation);
+        return (
+          <p className="mb-3 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+            <span className={`badge ${badge.className}`}>{badge.label}</span>
+            <span>Última observação: {formatObservationDate(lastObservation.observedAt)} · {lastObservation.source}</span>
+          </p>
+        );
+      })()}
 
       <section>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
