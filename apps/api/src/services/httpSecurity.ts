@@ -26,3 +26,21 @@ export const SECURITY_HEADERS = {
   "Content-Security-Policy":
     "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; script-src 'self'; connect-src 'self'",
 } as const;
+
+const REQUIRED_API_HEADERS = ["X-Content-Type-Options", "X-Frame-Options", "Referrer-Policy", "Permissions-Policy", "Content-Security-Policy"] as const;
+
+/** Verifica cabeçalhos de segurança aplicados numa resposta API. */
+export function auditSecurityHeaders(headers: Record<string, string | string[] | undefined>): {
+  ok: boolean;
+  missing: string[];
+  present: string[];
+} {
+  const present: string[] = [];
+  const missing: string[] = [];
+  for (const name of REQUIRED_API_HEADERS) {
+    const value = headers[name.toLowerCase()] ?? headers[name];
+    if (value && String(value).trim()) present.push(name);
+    else missing.push(name);
+  }
+  return { ok: missing.length === 0, missing, present };
+}

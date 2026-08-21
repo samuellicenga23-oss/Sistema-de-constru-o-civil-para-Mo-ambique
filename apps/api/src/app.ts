@@ -55,7 +55,7 @@ import { marketplaceRoutes } from "./routes/marketplace.js";
 import { notificationRoutes } from "./routes/notifications.js";
 import { documentReviewCommentRoutes } from "./routes/documentReviewComments.js";
 import { projectTeamRoutes, workflowTaskRoutes } from "./routes/projectTeam.js";
-import { mutationOriginAllowed, SECURITY_HEADERS } from "./services/httpSecurity.js";
+import { mutationOriginAllowed, SECURITY_HEADERS, auditSecurityHeaders } from "./services/httpSecurity.js";
 import { captureException } from "./services/monitoring.js";
 import { normalizeSigoDecimals } from "@sigo/shared";
 import { recordHttpResponse } from "./services/httpMetrics.js";
@@ -107,6 +107,33 @@ async function plantServiceReadiness(): Promise<ServiceCheck> {
     return { status: "ok", latencyMs: Date.now() - startedAt, version: typeof body.parserVersion === "string" ? body.parserVersion : undefined };
   } catch {
     return { status: "error", latencyMs: Date.now() - startedAt, detail: "plant_service_unavailable" };
+  }
+}
+
+async function mailReadiness(): Promise<ServiceCheck & { stub?: boolean }> {
+  const startedAt = Date.now();
+  try {
+    const { isMailEnabled } = await import("./services/mailer.js");
+    const enabled = isMailEnabled();
+    return {
+      status: "ok",
+      latencyMs: Date.now() - startedAt,
+      detail: enabled ? "smtp_configured" : "stub_log_only",
+      stub: !enabled,
+    };
+  } catch {
+    return { status: "error", latencyMs: Date.now() - startedAt, detail: "mail_check_failed", stub: true };
+  }
+}
+
+async function storageReadiness(): Promise<ServiceCheck> {
+  const startedAt = Date.now();
+  try {
+    const { access, constants } = await import("node:fs/promises");
+    await access(env.uploadsDir, constants.R_OK | constants.W_OK);
+    return { status: "ok", latencyMs: Date.now() - startedAt, detail: "uploads_rw" };
+  } catch {
+    return { status: "error", latencyMs: Date.now() - startedAt, detail: "uploads_unavailable" };
   }
 }
 
@@ -205,12 +232,28 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   // Readiness verifica em paralelo a base, migrações e o leitor de plantas.
   app.get("/api/ready", async (_request, reply) => {
     reply.header("Cache-Control", "no-store");
-    const [database, plantService] = await Promise.all([databaseReadiness(), plantServiceReadiness()]);
+    const [database, plantService, mail, storage] = await Promise.all([
+      databaseReadiness(),
+      plantServiceReadiness(),
+      mailReadiness(),
+      storageReadiness(),
+    ]);
     const coreReady = database.status === "ok";
-    const fullyOperational = coreReady && plantService.status === "ok";
-    // O leitor é uma capacidade isolada: se falhar, novos PDFs aguardam, mas orçamento,
-    // diário, compras e financeiro continuam acessíveis. Só base/migrações tornam a API indisponível.
-    return reply.code(coreReady ? 200 : 503).send({ status: fullyOperational ? "ready" : "degraded", release: env.release, services: { database, plantService } });
+    const fullyOperational = coreReady && plantService.status === "ok" && storage.status === "ok";
+    const security = auditSecurityHeaders(Object.fromEntries(
+      Object.entries(SECURITY_HEADERS).map(([k, v]) => [k.toLowerCase(), v]),
+    ));
+    return reply.code(coreReady ? 200 : 503).send({
+      status: fullyOperational ? "ready" : "degraded",
+      release: env.release,
+      services: { database, plantService, mail, storage },
+      securityHeaders: security,
+      notes: [
+        mail.stub ? "Mail em modo stub (SMTP não configurado) — notificações ficam só in-app." : "Mail SMTP configurado.",
+        storage.status === "ok" ? "Storage de uploads acessível." : "Storage indisponível — uploads falham.",
+        plantService.status !== "ok" ? "Plant-service degradado — novos PDFs aguardam." : null,
+      ].filter(Boolean),
+    });
   });
 
   await app.register(authRoutes);

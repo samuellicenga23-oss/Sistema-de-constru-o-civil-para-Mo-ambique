@@ -939,6 +939,12 @@ export async function companyRoutes(app: FastifyInstance) {
     return getOperationalHealth();
   });
 
+  app.get("/api/admin/backup-manifest", { preHandler: requireRole("super_admin") }, async (_request, reply) => {
+    const { buildUploadsBackupManifest } = await import("../services/backupManifest.js");
+    reply.header("Cache-Control", "no-store");
+    return buildUploadsBackupManifest();
+  });
+
   app.post("/api/admin/monitoring/test", { preHandler: requireRole("super_admin") }, async (request, reply) => {
     const { isMonitoringEnabled, captureException: capture } = await import("../services/monitoring.js");
     if (!isMonitoringEnabled()) {
