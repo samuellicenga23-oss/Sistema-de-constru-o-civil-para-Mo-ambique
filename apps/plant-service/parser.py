@@ -1069,12 +1069,12 @@ def _normalise_opening_code(raw_code: str) -> str:
 
 def _opening_dimension_to_m(raw_value: str) -> float:
     """Aceita metros, centímetros ou milímetros usados em mapas de vãos."""
-    value = _to_float(raw_value)
-    if value >= 300:
-        return value / 1000
-    if value > 20:
-        return value / 100
-    return value
+    from unit_normalize import parse_length_to_m
+
+    parsed = parse_length_to_m(raw_value)
+    if parsed.normalized_m is None:
+        return _to_float(raw_value)
+    return parsed.normalized_m
 
 
 def extract_opening_schedule(text: str, page_number: int) -> list[Opening]:
@@ -3693,6 +3693,24 @@ def parse_pdf(file_bytes: bytes, progress_callback=None, detection_tags: list[st
     )
     document_analysis.quality_issues = build_technical_quality_issues(
         document_analysis, selected_rooms, selected_openings, structural_summary
+    )
+    from schedule_detect import classify_page_tables
+    from technical_issues import cross_check_structural
+
+    for page_text in document_text_parts:
+        for table in classify_page_tables(page_text):
+            if table.kind != "desconhecido":
+                tag = f"schedule:{table.kind}"
+                if tag not in document_analysis.matched_tags:
+                    document_analysis.matched_tags.append(tag)
+    document_analysis.quality_issues.extend(
+        cross_check_structural(
+            structural_summary,
+            rebar_schedules,
+            selected_rooms,
+            beam_spans,
+            document_text_parts,
+        )
     )
     document_analysis.requires_technical_confirmation = any(
         issue.requires_confirmation for issue in document_analysis.quality_issues

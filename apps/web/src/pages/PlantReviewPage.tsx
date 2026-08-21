@@ -45,12 +45,30 @@ function gapCompletarHash(gap: string): string {
   return "regularizacao";
 }
 
+type ReviewFilter = "all" | "confirmados" | "rever" | "conflitos";
+
 type FamilyPopup = {
   id: string;
   title: string;
   lines: string[];
   hash: string;
 };
+
+function matchesReviewFilter(severity: "info" | "warning" | "critical", filter: ReviewFilter): boolean {
+  if (filter === "all") return true;
+  if (filter === "confirmados") return severity === "info";
+  if (filter === "rever") return severity === "warning";
+  return severity === "critical";
+}
+
+function reviewFilterChipClass(active: boolean, tone: "neutral" | "ok" | "warn" | "danger"): string {
+  const base = "rounded-full px-3 py-1 text-xs font-semibold transition-colors";
+  if (!active) return `${base} border border-slate-200 bg-white text-slate-600 hover:border-slate-300`;
+  if (tone === "ok") return `${base} border border-emerald-300 bg-emerald-100 text-emerald-900`;
+  if (tone === "warn") return `${base} border border-amber-300 bg-amber-100 text-amber-900`;
+  if (tone === "danger") return `${base} border border-red-300 bg-red-100 text-red-900`;
+  return `${base} border border-brand-300 bg-brand-100 text-brand-900`;
+}
 
 // Ordena os pisos por senso comum de construção: térreo primeiro, depois pisos numerados a
 // subir, depois zonas especiais (anexo, cobertura), e por fim o que não foi identificado.
@@ -99,6 +117,7 @@ export default function PlantReviewPage() {
   const [savingColumns, setSavingColumns] = useState(false);
   const [gapPopup, setGapPopup] = useState<string | null>(null);
   const [familyPopup, setFamilyPopup] = useState<FamilyPopup | null>(null);
+  const [reviewFilter, setReviewFilter] = useState<ReviewFilter>("all");
 
   useEffect(() => {
     if (!id) return;
@@ -643,9 +662,11 @@ export default function PlantReviewPage() {
   // possível puxar automaticamente da planta, sem lhe perguntar como reformatar o ficheiro — por
   // isso listamos factos concretos (o quê não foi encontrado) e nunca pedimos para reenviar nada.
   const structuredQualityIssues = plant.documentAnalysis?.qualityIssues ?? [];
-  const gaps: string[] = structuredQualityIssues
-    .filter((issue) => issue.severity !== "info")
-    .map((issue) => issue.message);
+  type GapItem = { message: string; severity: "info" | "warning" | "critical" };
+  const gapItems: GapItem[] = structuredQualityIssues.map((issue) => ({
+    message: issue.message,
+    severity: issue.severity,
+  }));
   const detectedDisciplines = new Set(plant.documentAnalysis?.sections.map((section) => section.discipline));
   const hasArchitecture = detectedDisciplines.size > 0 ? detectedDisciplines.has("arquitectura") : plant.discipline === "arquitectura";
   const hasStructure = detectedDisciplines.size > 0 ? detectedDisciplines.has("estrutura") : plant.discipline === "estrutura";
@@ -680,39 +701,57 @@ export default function PlantReviewPage() {
   const slabDiameterLabel = formatSteelDiameterBreakdown(steelByFamilyDiameter.slabs);
   const stairDiameterLabel = formatSteelDiameterBreakdown(steelByFamilyDiameter.stairs);
   if (plant.processingStatus === "erro") {
-    gaps.push(
-      plant.errorMessage
+    gapItems.push({
+      message: plant.errorMessage
         ? `Não foi possível processar este ficheiro: ${plant.errorMessage}.`
-        : "Não foi possível processar este ficheiro."
-    );
+        : "Não foi possível processar este ficheiro.",
+      severity: "critical",
+    });
   } else if (structuredQualityIssues.length === 0) {
     if (hasStructure) {
       const s = plant.structuralSummary;
       if (!s) {
-        gaps.push(
-          "Não foi possível identificar nenhum elemento estrutural (sapatas, pilares ou vigas) nesta planta — o formato deste desenho ainda não é reconhecido pelo sistema."
-        );
+        gapItems.push({
+          message: "Não foi possível identificar nenhum elemento estrutural (sapatas, pilares ou vigas) nesta planta — o formato deste desenho ainda não é reconhecido pelo sistema.",
+          severity: "critical",
+        });
       } else {
-        if (s.footingsCount === 0) gaps.push("Não foram identificadas sapatas/fundações.");
-        if (s.columnsCount === 0) gaps.push("Não foram identificados pilares.");
-        if (s.beamsCount === 0) gaps.push("Não foram identificadas vigas.");
-        if (s.slabsCount === 0) gaps.push("Não foi identificada armadura de laje/cobertura.");
+        if (s.footingsCount === 0) gapItems.push({ message: "Não foram identificadas sapatas/fundações.", severity: "warning" });
+        if (s.columnsCount === 0) gapItems.push({ message: "Não foram identificados pilares.", severity: "warning" });
+        if (s.beamsCount === 0) gapItems.push({ message: "Não foram identificadas vigas.", severity: "warning" });
+        if (s.slabsCount === 0) gapItems.push({ message: "Não foi identificada armadura de laje/cobertura.", severity: "warning" });
         if (s.totalSteelWeightKg === 0 && rebarSchedules.length === 0 && (s.footingsCount > 0 || s.columnsCount > 0 || s.beamsCount > 0)) {
-          gaps.push(
-            "Não foi possível determinar o peso total de aço — este desenho não parece incluir resumos de peso por elemento, apenas posições/comprimentos de varões."
-          );
+          gapItems.push({
+            message: "Não foi possível determinar o peso total de aço — este desenho não parece incluir resumos de peso por elemento, apenas posições/comprimentos de varões.",
+            severity: "warning",
+          });
         }
       }
     }
     if (hasArchitecture && rooms.length === 0) {
-      gaps.push("Não foram identificados compartimentos (áreas) nas páginas de arquitectura.");
+      gapItems.push({ message: "Não foram identificados compartimentos (áreas) nas páginas de arquitectura.", severity: "critical" });
     }
     if (hasArchitecture && openings.length === 0) {
-      gaps.push("Não foram encontrados quadros ou etiquetas inequívocas de portas e janelas. Registe os vãos manualmente antes de calcular as paredes líquidas.");
+      gapItems.push({
+        message: "Não foram encontrados quadros ou etiquetas inequívocas de portas e janelas. Registe os vãos manualmente antes de calcular as paredes líquidas.",
+        severity: "warning",
+      });
     } else if (openings.some((opening) => opening.needsConfirmation || !opening.widthM || !opening.heightM || opening.location === "desconhecida")) {
-      gaps.push(`${openings.filter((opening) => opening.needsConfirmation || !opening.widthM || !opening.heightM || opening.location === "desconhecida").length} vão(s) precisam de confirmação de dimensão ou localização.`);
+      gapItems.push({
+        message: `${openings.filter((opening) => opening.needsConfirmation || !opening.widthM || !opening.heightM || opening.location === "desconhecida").length} vão(s) precisam de confirmação de dimensão ou localização.`,
+        severity: "warning",
+      });
     }
   }
+
+  const visibleGapItems = gapItems.filter((item) => item.severity !== "info" && matchesReviewFilter(item.severity, reviewFilter));
+  const gaps = visibleGapItems.map((item) => item.message);
+  const reviewCounts = {
+    confirmados: structuredQualityIssues.filter((issue) => issue.severity === "info").length,
+    rever: gapItems.filter((item) => item.severity === "warning").length,
+    conflitos: gapItems.filter((item) => item.severity === "critical").length,
+  };
+  const hasActionableGaps = gapItems.some((item) => item.severity !== "info");
 
   return (
     <Layout
@@ -740,10 +779,10 @@ export default function PlantReviewPage() {
           <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-brand-700">
-                {gaps.length > 0 ? "Análise parcial" : "Análise concluída"}
+                {hasActionableGaps ? "Análise parcial" : "Análise concluída"}
               </p>
               <h2 className="mt-1 text-lg font-bold text-slate-900">
-                {gaps.length > 0 ? "Dados em falta" : "Resumo da planta"}
+                {hasActionableGaps ? "Dados em falta" : "Resumo da planta"}
               </h2>
               <p className="mt-1 max-w-2xl text-sm text-slate-600">
                 {rooms.length} compartimento(s) · {totalRoomsArea.toFixed(2)} m²
@@ -829,9 +868,9 @@ export default function PlantReviewPage() {
           </details>
         )}
 
-        {gaps.length > 0 && (
+        {hasActionableGaps && (
           <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
-            {gaps.length} ponto(s) por regularizar — consulte a lista de validação no final desta página, ou{" "}
+            {gapItems.filter((item) => item.severity !== "info").length} ponto(s) por regularizar — consulte a lista de validação no final desta página, ou{" "}
             <Link to={`/plantas/${plant.id}/completar`} className="font-semibold underline">edite os dados agora</Link>.
           </div>
         )}
@@ -1255,9 +1294,35 @@ export default function PlantReviewPage() {
             <p className="mt-1 text-sm text-slate-600">
               Confirme apenas os pontos que o desenho não permitiu medir com segurança.
             </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button type="button" className={reviewFilterChipClass(reviewFilter === "all", "neutral")} onClick={() => setReviewFilter("all")}>
+                Todos
+              </button>
+              <button type="button" className={reviewFilterChipClass(reviewFilter === "confirmados", "ok")} onClick={() => setReviewFilter("confirmados")}>
+                Confirmados ({reviewCounts.confirmados})
+              </button>
+              <button type="button" className={reviewFilterChipClass(reviewFilter === "rever", "warn")} onClick={() => setReviewFilter("rever")}>
+                Rever ({reviewCounts.rever})
+              </button>
+              <button type="button" className={reviewFilterChipClass(reviewFilter === "conflitos", "danger")} onClick={() => setReviewFilter("conflitos")}>
+                Conflitos ({reviewCounts.conflitos})
+              </button>
+            </div>
           </div>
           <div className="space-y-3 p-4">
-            {gaps.length === 0 ? (
+            {reviewFilter === "confirmados" ? (
+              structuredQualityIssues.filter((issue) => issue.severity === "info").length > 0 ? (
+                structuredQualityIssues.filter((issue) => issue.severity === "info").map((issue, index) => (
+                  <div key={`${issue.code}-${index}`} className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+                    {issue.message}
+                  </div>
+                ))
+              ) : (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+                  Sem notas informativas pendentes.
+                </div>
+              )
+            ) : gaps.length === 0 ? (
               <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
                 Sem lacunas críticas. Os dados estão prontos para medição.
               </div>
