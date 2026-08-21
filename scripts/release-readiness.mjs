@@ -3,6 +3,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 
+const structuralOnly = process.argv.includes("--structural-only");
 const requiredFiles = [
   "package-lock.json",
   "apps/api/.env.example",
@@ -46,8 +47,10 @@ function step(label, command, args) {
   const result = run(command, args, { shell: process.platform === "win32" });
   if (result.stdout?.trim()) process.stdout.write(result.stdout);
   if (result.stderr?.trim()) process.stderr.write(result.stderr);
-  if (result.status !== 0) failures.push(`${label} falhou (exit ${result.status})`);
-  else console.log(`✓ ${label}`);
+  if (result.status !== 0) {
+    const termination = result.signal ? `signal ${result.signal}` : `exit ${result.status}`;
+    failures.push(`${label} falhou (${termination})`);
+  } else console.log(`✓ ${label}`);
 }
 
 for (const warning of warnings) console.warn(`AVISO: ${warning}`);
@@ -58,6 +61,14 @@ if (failures.length) {
 }
 
 console.log(`Prontidão estrutural aprovada: ${requiredFiles.length} ficheiros verificados.`);
+
+// No CI, build/migrations/testes são passos explícitos do workflow: correr tudo novamente
+// dentro de spawnSync duplica CPU/RAM, mascara a etapa que falhou e pode terminar por sinal.
+// O modo local normal continua a ser o gate completo e mantém o comportamento histórico.
+if (structuralOnly) {
+  console.log("✓ quality:release estrutural concluído — sem duplicar build/testes do CI.");
+  process.exit(0);
+}
 
 step("Typecheck shared", "npm", ["run", "build:shared"]);
 step("Typecheck API", "npm", ["run", "build", "--workspace=apps/api"]);

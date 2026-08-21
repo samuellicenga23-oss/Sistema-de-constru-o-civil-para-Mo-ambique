@@ -24,59 +24,61 @@ jobs:
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: sigo_ci
+          # O globalSetup dos testes possui um hard safety gate e só aceita uma BD chamada
+          # sigo_test. Esta BD é efémera e existe apenas durante o job do GitHub Actions.
+          POSTGRES_DB: sigo_test
         ports:
           - 5432:5432
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U postgres -d sigo_test"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
 
     env:
-      DATABASE_URL: postgres://postgres:postgres@localhost:5432/sigo_ci
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/sigo_test
       # Segredos só para este job efémero — nunca usados fora do CI, sem relação com produção.
       SESSION_COOKIE_SECRET: ci-secret-nao-usado-em-producao
       PLANT_SERVICE_TOKEN: ci-token-nao-usado-em-producao
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Necessário para o guard schema→migration comparar a alteração actual com o parent.
+          fetch-depth: 2
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Dependências actuais do workspace já exigem Node >=22.
+          node-version: 22
           cache: npm
 
-      # npm ci (não npm install) — instalação reproduzível a partir do package-lock.json,
-      # tal como o documento da Fase 1 pede explicitamente para o servidor também usar.
+      # npm ci (não npm install) — instalação reproduzível a partir do package-lock.json.
       - name: Instalar dependências
         run: npm ci
 
-      - name: Build (shared → api → web)
+      - name: Build completo (shared → api → web → supplier)
         run: npm run build
 
       - name: Validar scripts operacionais de produção
         run: bash -n deploy/lib.sh deploy/preflight.sh deploy/backup.sh deploy/deploy.sh deploy/rollback.sh deploy/status.sh
 
+      # Aqui só verificamos estrutura/segredos/documentação. O gate local `npm run quality:release`
+      # continua completo; no CI build e testes têm passos próprios para não duplicar CPU/RAM.
       - name: Bloqueios estruturais da release
-        run: npm run quality:release
+        run: node scripts/release-readiness.mjs --structural-only
 
       - name: Typecheck do pacote partilhado
         run: npm run typecheck --workspace=packages/shared
 
-      # Corre ANTES das migrations/testes: só compara o schema.ts actual com as migrations já
-      # commitadas (não precisa de ligação real à BD) — apanha o caso de alguém editar o schema
-      # e esquecer-se de gerar/commitar a migration correspondente.
-      - name: Verificar que schema e migrations estão sincronizados
-        run: |
-          npm run db:generate --workspace=apps/api
-          if [ -n "$(git status --porcelain apps/api/drizzle)" ]; then
-            echo "::error::O schema (apps/api/src/db/schema.ts) foi alterado sem gerar/commitar a migration correspondente. Corra 'npm run db:generate' localmente e faça commit do resultado."
-            git status --porcelain apps/api/drizzle
-            exit 1
-          fi
+      # O histórico recente contém migrations manuais 0076–0099, enquanto snapshots Drizzle
+      # terminaram em 0075. Rodar `drizzle-kit generate` aqui criaria uma falsa migration que
+      # duplicaria alterações já existentes. Este gate valida journal↔SQL e impede novos cambios
+      # no schema sem migration correspondente. O passo seguinte prova a cadeia na BD vazia.
+      - name: Verificar integridade do histórico de migrations
+        run: node scripts/check-migration-integrity.mjs
 
-      - name: Aplicar migrations na base de dados do CI
+      - name: Aplicar migrations na base de dados vazia do CI
         run: npm run db:migrate
 
       - name: Testes do backend
@@ -86,15 +88,13 @@ jobs:
         run: npm run test --workspace=apps/web
 
       # Informativo, nunca bloqueia — o objectivo é visibilidade sobre CVEs em dependências
-      # transitivas, não travar todos os merges por causa de uma vulnerabilidade de baixo risco
-      # sem correcção disponível ainda.
+      # transitivas, não travar todos os merges por vulnerabilidade sem correcção disponível.
       - name: Auditoria de dependências (informativo)
         run: npm audit --audit-level=high || true
 
   plant-service-tests:
     # Job à parte (não depende de Postgres/Node) — o leitor de plantas é um serviço Python
-    # independente; um teste dele a falhar não deve ficar escondido atrás dos testes do
-    # Node só porque corriam no mesmo job.
+    # independente; um teste dele a falhar não deve ficar escondido atrás dos testes Node.
     runs-on: ubuntu-latest
 
     steps:

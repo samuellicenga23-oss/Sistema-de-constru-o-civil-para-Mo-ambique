@@ -1,22 +1,38 @@
 export const SIGO_DECIMAL_PLACES = 2;
+export const SIGO_TECHNICAL_DECIMAL_PLACES = 6;
 
-export function roundToSigoPrecision(value: number): number {
+function roundToDecimalPlaces(value: number, decimalPlaces: number): number {
   if (!Number.isFinite(value)) return 0;
-  return Math.round((value + Number.EPSILON) * 100) / 100;
+  const factor = 10 ** decimalPlaces;
+  return Math.round((value + Math.sign(value || 1) * Number.EPSILON) * factor) / factor;
+}
+
+/**
+ * Precisão interna usada em cálculos técnicos (quantidades, dimensões, volumes,
+ * pesos, coeficientes e produtividade). Não deve ser confundida com a precisão
+ * de apresentação monetária/visual.
+ */
+export function roundToSigoPrecision(value: number): number {
+  return roundToDecimalPlaces(value, SIGO_TECHNICAL_DECIMAL_PLACES);
+}
+
+/** Arredondamento exclusivo para apresentação/valores que exigem 2 casas. */
+export function roundToDisplayPrecision(value: number): number {
+  return roundToDecimalPlaces(value, SIGO_DECIMAL_PLACES);
 }
 
 export function fixedSigo(value: number): string {
-  return roundToSigoPrecision(value).toFixed(SIGO_DECIMAL_PLACES);
+  return roundToDisplayPrecision(value).toFixed(SIGO_DECIMAL_PLACES);
 }
 
 export function formatSigoNumber(value: number, locale = "pt-MZ"): string {
-  return roundToSigoPrecision(value).toLocaleString(locale, {
+  return roundToDisplayPrecision(value).toLocaleString(locale, {
     minimumFractionDigits: SIGO_DECIMAL_PLACES,
     maximumFractionDigits: SIGO_DECIMAL_PLACES,
   });
 }
 
-/** Apresentação de quantidades BOQ/medição — 2 casas na UI; valor interno mantém precisão alta. */
+/** Apresentação de quantidades BOQ/medição — 2 casas na UI; valor interno mantém precisão técnica. */
 export function formatQuantityDisplay(
   value: number | null | undefined,
   _unit?: string | null,
@@ -31,16 +47,10 @@ export function formatQuantityDisplay(
 }
 
 /**
- * Normaliza apenas números de negócio recebidos em estruturas JSON. Inteiros
- * permanecem inteiros e strings/datas/ficheiros não são alterados.
+ * Compatibilidade com o hook histórico da API. A entrada JSON NÃO é arredondada:
+ * a precisão é uma regra do domínio e da persistência, nunca uma transformação
+ * global antes da validação. Mantemos a função para não quebrar imports antigos.
  */
 export function normalizeSigoDecimals<T>(value: T): T {
-  if (typeof value === "number") return roundToSigoPrecision(value) as T;
-  if (Array.isArray(value)) return value.map((item) => normalizeSigoDecimals(item)) as T;
-  if (value && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype) {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, normalizeSigoDecimals(item)]),
-    ) as T;
-  }
   return value;
 }
