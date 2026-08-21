@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { eq, and, or, isNull, desc, inArray, sql as drizzleSql } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { purchaseOrders, purchaseOrderLines, purchaseRequisitions, purchaseOrderShipments, goodsReceipts, supplierInvoices, stockMovements, suppliers, materials, budgetDocuments, financialEntries, scheduleTasks, supplierAccounts, materialZonePrices, supplierMaterialPrices, priceZones } from "../db/schema.js";
+import { purchaseOrders, purchaseOrderLines, purchaseRequisitions, purchaseOrderShipments, goodsReceipts, supplierInvoices, stockMovements, fuelLogs, warehouses, suppliers, materials, budgetDocuments, financialEntries, scheduleTasks, supplierAccounts, materialZonePrices, supplierMaterialPrices, priceZones } from "../db/schema.js";
 import { requireCompanyUser, requirePermission, requireRole } from "../auth/middleware.js";
 import { assertProjectOwned } from "../services/accessControl.js";
 import { assertApprovedOrcamentoForSite } from "../services/siteGate.js";
@@ -13,6 +13,7 @@ import { assertSupplierMarketplaceAccess } from "../services/subscriptionEntitle
 import { assertVendorNotBlocked } from "../services/vendorGovernance.js";
 import { resolveEffectiveVendorGovernance } from "../services/companyVendorGovernance.js";
 import { resolveBuyerContact } from "../services/buyerContact.js";
+import { computeStockBalances, fuelLowStockAlerts } from "../services/stockFuel.js";
 import { notifySupplierAccount } from "../services/notifications.js";
 import { sendEmail, emailLayout, escapeHtml } from "../services/mailer.js";
 import { env } from "../env.js";
@@ -636,6 +637,12 @@ export async function purchasingRoutes(app: FastifyInstance) {
     currency: z.enum(CURRENCIES).default("MZN"),
     notes: z.string().optional(),
     date: z.string().min(1),
+    reason: z.enum(["consumo", "combustivel", "ajuste", "perda", "transferencia", "abertura"]).optional(),
+    warehouseId: z.string().uuid().nullable().optional(),
+    odometerReading: z.number().nonnegative().nullable().optional(),
+    equipmentId: z.string().uuid().nullable().optional(),
+    fuelTicketRef: z.string().trim().max(120).optional(),
+    fuelPhotoRef: z.string().trim().max(400).optional(),
   });
 
   app.get("/api/projects/:projectId/stock-movements", { preHandler: requireCompanyUser }, async (request, reply) => {
@@ -661,8 +668,9 @@ export async function purchasingRoutes(app: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     const material = await findVisibleMaterial(parsed.data.materialId, companyId);
     if (!material) return reply.code(404).send({ error: "Material não encontrado no Catálogo" });
+    const movementReason = parsed.data.reason ?? (material.skuType === "combustivel" && parsed.data.type === "saida" ? "combustivel" : null);
 
-    const { quantity, unitCost, ...rest } = parsed.data;
+    const { quantity, unitCost, fuelTicketRef, fuelPhotoRef, ...rest } = parsed.data;
     const result = await db.transaction(async (tx) => {
       // Serializa movimentos do mesmo material/obra. Sem este bloqueio, duas saídas simultâneas
       // podiam ambas ler o saldo antigo e produzir stock negativo.
@@ -672,7 +680,29 @@ export async function purchasingRoutes(app: FastifyInstance) {
         const available = movements.reduce((sum, movement) => sum + (movement.type === "entrada" ? Number(movement.quantity) : -Number(movement.quantity)), 0);
         if (quantity > available + 0.0001) return { error: `Stock insuficiente de ${material.name}: disponível ${available.toFixed(2)} ${material.unit}` } as const;
       }
-      const [row] = await tx.insert(stockMovements).values({ ...rest, projectId, quantity: quantity.toString(), unitCost: unitCost !== undefined ? unitCost.toString() : null, createdByUserId: request.currentUser!.id }).returning();
+      const [row] = await tx.insert(stockMovements).values({
+        ...rest,
+        reason: movementReason,
+        projectId,
+        quantity: quantity.toString(),
+        unitCost: unitCost !== undefined ? unitCost.toString() : null,
+        odometerReading: parsed.data.odometerReading != null ? String(parsed.data.odometerReading) : null,
+        createdByUserId: request.currentUser!.id,
+      }).returning();
+      if (movementReason === "combustivel" && parsed.data.type === "saida") {
+        await tx.insert(fuelLogs).values({
+          projectId,
+          stockMovementId: row.id,
+          materialId: parsed.data.materialId,
+          liters: quantity.toString(),
+          odometerReading: parsed.data.odometerReading != null ? String(parsed.data.odometerReading) : null,
+          equipmentId: parsed.data.equipmentId ?? null,
+          ticketRef: fuelTicketRef ?? null,
+          photoRef: fuelPhotoRef ?? null,
+          loggedAt: parsed.data.date,
+          createdByUserId: request.currentUser!.id,
+        });
+      }
       return { row } as const;
     });
     if ("error" in result) return reply.code(409).send({ error: result.error });
@@ -721,32 +751,53 @@ export async function purchasingRoutes(app: FastifyInstance) {
   });
 
   // Stock actual por material = soma de entradas − soma de saídas, sempre calculado on-the-fly.
+  app.get("/api/projects/:projectId/warehouses", { preHandler: requireCompanyUser }, async (request, reply) => {
+    const { projectId } = request.params as { projectId: string };
+    const companyId = companyIdOf(request);
+    const project = await assertProjectOwned(projectId, companyId);
+    if (!project) return reply.code(404).send({ error: "Projecto não encontrado" });
+    return db.select().from(warehouses).where(and(eq(warehouses.companyId, companyId), or(eq(warehouses.projectId, projectId), isNull(warehouses.projectId)))).orderBy(warehouses.name);
+  });
+
   app.get("/api/projects/:projectId/stock-summary", { preHandler: requireCompanyUser }, async (request, reply) => {
     const { projectId } = request.params as { projectId: string };
     const project = await assertProjectOwned(projectId, companyIdOf(request));
     if (!project) return reply.code(404).send({ error: "Projecto não encontrado" });
 
     const rows = await db
-      .select({ movement: stockMovements, materialName: materials.name, materialUnit: materials.unit })
+      .select({ movement: stockMovements, materialName: materials.name, materialUnit: materials.unit, skuType: materials.skuType, minStockQty: materials.minStockQty })
       .from(stockMovements)
       .innerJoin(materials, eq(stockMovements.materialId, materials.id))
       .where(eq(stockMovements.projectId, projectId));
 
-    const byMaterial = new Map<string, { materialName: string; unit: string; balance: number; valueIn: number }>();
+    const balances = computeStockBalances(rows.map((r) => ({
+      materialId: r.movement.materialId,
+      materialName: r.materialName,
+      unit: r.materialUnit,
+      skuType: r.skuType,
+      minStockQty: r.minStockQty,
+      type: r.movement.type,
+      quantity: r.movement.quantity,
+    })));
+    const fuelAlerts = fuelLowStockAlerts(balances);
+    const valueInByMaterial = new Map<string, number>();
     for (const r of rows) {
-      const materialId = r.movement.materialId;
-      const bucket = byMaterial.get(materialId) ?? { materialName: r.materialName, unit: r.materialUnit, balance: 0, valueIn: 0 };
-      const qty = Number(r.movement.quantity);
-      if (r.movement.type === "entrada") {
-        bucket.balance += qty;
-        bucket.valueIn += qty * Number(r.movement.unitCost ?? 0);
-      } else {
-        bucket.balance -= qty;
-      }
-      byMaterial.set(materialId, bucket);
+      if (r.movement.type !== "entrada") continue;
+      valueInByMaterial.set(r.movement.materialId, (valueInByMaterial.get(r.movement.materialId) ?? 0) + Number(r.movement.quantity) * Number(r.movement.unitCost ?? 0));
     }
-    return Array.from(byMaterial.entries())
-      .map(([materialId, v]) => ({ materialName: v.materialName, materialId, unit: v.unit, balance: v.balance, valueIn: v.valueIn }))
-      .sort((a, b) => a.materialName.localeCompare(b.materialName, "pt"));
+
+    return {
+      items: balances.map((row) => ({
+        materialId: row.materialId,
+        materialName: row.materialName,
+        unit: row.unit,
+        balance: row.balance,
+        valueIn: valueInByMaterial.get(row.materialId) ?? 0,
+        skuType: row.skuType,
+        minStockQty: row.minStockQty,
+        lowFuel: fuelAlerts.some((alert) => alert.materialId === row.materialId),
+      })).sort((a, b) => a.materialName.localeCompare(b.materialName, "pt")),
+      fuelAlerts,
+    };
   });
 }

@@ -29,6 +29,7 @@ const CODE_CATEGORY: Record<string, ControlActionCategory> = {
   purchase_overdue: "material_risk",
   purchase_start_late: "material_risk",
   stock_exhausted: "material_risk",
+  fuel_low_stock: "material_risk",
   schedule_unlinked: "documentation",
   diary_stale: "documentation",
   client_invoice_draft: "documentation",

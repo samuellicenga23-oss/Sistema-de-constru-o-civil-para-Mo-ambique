@@ -4,6 +4,7 @@ import { budgetDocuments, financialEntries, invoiceCreditNotes, invoiceReceipts,
 import { getBudgetDocumentSummary } from "./boqEngine.js";
 import { getProjectSchedule } from "./scheduleEngine.js";
 import { pickNextAction, rankControlActions, type ControlAlert } from "./controlTower.js";
+import { computeStockBalances, fuelLowStockAlerts } from "./stockFuel.js";
 import { computeEarnedValueForecast } from "./projectForecast.js";
 import { procurementStartOverdue } from "./vendorGovernance.js";
 
@@ -31,7 +32,7 @@ export async function getProjectControl(projectId: string, currency: string) {
   const [documents, entries, movements, orders, supplierBills, clientInvoices, certificates, diaryEntries, schedule, requisitions] = await Promise.all([
     db.select().from(budgetDocuments).where(eq(budgetDocuments.projectId, projectId)),
     db.select().from(financialEntries).where(eq(financialEntries.projectId, projectId)),
-    db.select({ movement: stockMovements, materialName: materials.name, unit: materials.unit })
+    db.select({ movement: stockMovements, materialName: materials.name, unit: materials.unit, skuType: materials.skuType, minStockQty: materials.minStockQty })
       .from(stockMovements)
       .innerJoin(materials, eq(stockMovements.materialId, materials.id))
       .where(eq(stockMovements.projectId, projectId)),
@@ -186,6 +187,18 @@ export async function getProjectControl(projectId: string, currency: string) {
   const negativeStock = stock.filter((item) => item.balance < -0.0001);
   if (negativeStock.length) alerts.push({ code: "stock_negative", level: "critical", title: "Stock negativo", detail: `${negativeStock.length} material(is) têm saídas superiores às entradas. Reveja os movimentos.`, href: `/projectos/${projectId}/compras?fase=gestao` });
   if (stock.some((item) => item.estimatedCost)) alerts.push({ code: "stock_cost_estimated", level: "info", title: "Consumo com custo estimado", detail: "Há saídas valorizadas pelo custo médio porque não possuem custo unitário próprio.", href: `/projectos/${projectId}/compras?fase=gestao` });
+  const fuelAlerts = fuelLowStockAlerts(computeStockBalances(movements.map(({ movement, materialName, unit, skuType, minStockQty }) => ({
+    materialId: movement.materialId,
+    materialName,
+    unit,
+    skuType,
+    minStockQty,
+    type: movement.type,
+    quantity: movement.quantity,
+  }))));
+  for (const alert of fuelAlerts) {
+    alerts.push({ ...alert, href: `/projectos/${projectId}/compras?fase=gestao` });
+  }
   const submittedCertificates = certificates.filter((certificate) => certificate.status === "submetido");
   if (submittedCertificates.length) alerts.push({ code: "certificate_pending", level: "warning", title: "Autos aguardam decisão", detail: `${submittedCertificates.length} Auto(s) submetido(s) precisam de aprovação ou devolução.`, href: `/projectos/${projectId}?fase=gestao#certificados-obra` });
   const draftInvoices = clientInvoices.filter((invoice) => invoice.status === "rascunho");
