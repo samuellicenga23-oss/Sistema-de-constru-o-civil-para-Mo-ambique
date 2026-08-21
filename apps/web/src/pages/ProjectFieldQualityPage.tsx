@@ -117,7 +117,7 @@ export default function ProjectFieldQualityPage() {
   }
 
   return (
-    <Layout>
+    <Layout title="Qualidade e HST">
       <div className="mx-auto max-w-5xl space-y-4 p-4">
         <div className="flex items-center gap-2">
           <Link to={`/projectos/${projectId}${faseQuery}`} className="btn btn-ghost btn-sm">
@@ -140,7 +140,7 @@ export default function ProjectFieldQualityPage() {
         {tab === "inspections" ? (
           <div className="grid gap-4 lg:grid-cols-2">
             <form onSubmit={handleInspection} className="card card-pad space-y-3">
-              <SectionHeader title="Nova inspecção" subtitle="Templates internos — não substituem norma legal" />
+              <SectionHeader title="Nova inspecção" description="Templates internos — não substituem norma legal" />
               <label className="block text-sm">
                 Especialidade
                 <select className="input mt-1 w-full" value={trade} onChange={(e) => setTrade(e.target.value)}>
@@ -174,7 +174,7 @@ export default function ProjectFieldQualityPage() {
               </button>
             </form>
             <div className="card card-pad space-y-2">
-              <SectionHeader title="Registos" subtitle={`${inspections.length} inspecções`} />
+              <SectionHeader title="Registos" description={`${inspections.length} inspecções`} />
               {inspections.length === 0 ? (
                 <p className="text-sm text-slate-500">Sem inspecções registadas.</p>
               ) : (
@@ -198,7 +198,7 @@ export default function ProjectFieldQualityPage() {
         ) : (
           <div className="grid gap-4 lg:grid-cols-2">
             <form onSubmit={handleHst} className="card card-pad space-y-3">
-              <SectionHeader title="Registo HST" subtitle="Inclui observações de risco em campo" />
+              <SectionHeader title="Registo HST" description="Inclui observações de risco em campo" />
               <label className="block text-sm">
                 Tipo
                 <select className="input mt-1 w-full" value={hstType} onChange={(e) => setHstType(e.target.value as HstRecord["recordType"])}>
@@ -224,7 +224,7 @@ export default function ProjectFieldQualityPage() {
               </button>
             </form>
             <div className="card card-pad space-y-2">
-              <SectionHeader title="Registos HST" subtitle={`${hstRecords.length} entradas`} />
+              <SectionHeader title="Registos HST" description={`${hstRecords.length} entradas`} />
               {hstRecords.length === 0 ? (
                 <p className="text-sm text-slate-500">Sem registos HST.</p>
               ) : (

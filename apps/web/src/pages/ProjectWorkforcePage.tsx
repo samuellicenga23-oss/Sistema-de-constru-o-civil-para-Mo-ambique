@@ -84,7 +84,7 @@ export default function ProjectWorkforcePage() {
   }
 
   return (
-    <Layout>
+    <Layout title="Equipas">
       <div className="mx-auto max-w-5xl space-y-4 p-4">
         <div className="flex items-center gap-2">
           <Link to={`/projectos/${projectId}${faseQuery}`} className="btn btn-ghost btn-sm"><IconBack /> Voltar</Link>
@@ -96,27 +96,27 @@ export default function ProjectWorkforcePage() {
 
         <div className="grid gap-4 lg:grid-cols-2">
           <form onSubmit={addWorker} className="card card-pad space-y-2">
-            <SectionHeader title="Trabalhadores" subtitle={`${workers.length} registados`} />
+            <SectionHeader title="Trabalhadores" description={`${workers.length} registados`} />
             <input className="input w-full" placeholder="Nome" value={workerName} onChange={(e) => setWorkerName(e.target.value)} />
             <button type="submit" className="btn btn-primary btn-sm"><IconPlus /> Adicionar</button>
             <ul className="text-sm">{workers.map((w) => <li key={w.id}>{w.name}{w.trade ? ` · ${w.trade}` : ""}</li>)}</ul>
           </form>
 
           <form onSubmit={addCrew} className="card card-pad space-y-2">
-            <SectionHeader title="Equipas" subtitle={`${crews.length} equipas`} />
+            <SectionHeader title="Equipas" description={`${crews.length} equipas`} />
             <input className="input w-full" placeholder="Nome da equipa" value={crewName} onChange={(e) => setCrewName(e.target.value)} />
             <button type="submit" className="btn btn-primary btn-sm"><IconPlus /> Criar equipa</button>
             <ul className="text-sm">{crews.map((c) => <li key={c.id}>{c.name}</li>)}</ul>
           </form>
 
           <div className="card card-pad space-y-2">
-            <SectionHeader title="Timesheets" subtitle="Registo diário stub" />
+            <SectionHeader title="Timesheets" description="Registo diário stub" />
             <button type="button" className="btn btn-secondary btn-sm" onClick={() => void addTimesheet()}>Registar 8h hoje</button>
             <ul className="text-sm">{timesheets.map((t) => <li key={t.id}>{t.workDate}: {t.hours}h (+{t.overtimeHours}h extra)</li>)}</ul>
           </div>
 
           <form onSubmit={addSubcontractor} className="card card-pad space-y-2">
-            <SectionHeader title="Subempreiteiros" subtitle={`${subcontractors.length} registos`} />
+            <SectionHeader title="Subempreiteiros" description={`${subcontractors.length} registos`} />
             <input className="input w-full" placeholder="Nome" value={subName} onChange={(e) => setSubName(e.target.value)} />
             <input className="input w-full" placeholder="NUIT" value={subNuit} onChange={(e) => setSubNuit(e.target.value)} />
             <button type="submit" className="btn btn-primary btn-sm"><IconPlus /> Registar</button>

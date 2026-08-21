@@ -91,6 +91,13 @@ const planningProfileSchema = z.object({
   roofKindOverride: z.enum(["sheet", "slab"]).nullable(),
   targetDurationDays: z.number().int().min(7).max(3650).nullable(),
   notes: z.string().max(4000).nullable(),
+  planningAllowances: z.array(z.object({
+    kind: z.enum(["rain", "cyclone_wind", "heat", "accessibility"]),
+    month: z.number().int().min(1).max(12),
+    regionCode: z.string().max(8).nullable(),
+    enabled: z.boolean(),
+    note: z.string().max(500).nullable(),
+  })).max(48).optional().default([]),
 });
 const planningSetupInput = z.object({
   budgetDocumentId: z.string().uuid(),

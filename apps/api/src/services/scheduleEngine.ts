@@ -1009,7 +1009,9 @@ export async function getProjectSchedule(projectId: string) {
       saturdayWorking: workCalendar.saturdayWorking,
       hoursPerDay: workCalendar.hoursPerDay,
       useNationalHolidays: workCalendar.useNationalHolidays,
-      holidayCount: workCalendar.holidays?.size ?? 0,
+      holidayCount: Array.isArray(workCalendar.holidays)
+        ? workCalendar.holidays.length
+        : (workCalendar.holidays instanceof Set ? workCalendar.holidays.size : 0),
     },
     startDate: withCpm.reduce((min, task) => task.startDate < min ? task.startDate : min, withCpm[0].startDate),
     endDate: withCpm.reduce((max, task) => task.endDate > max ? task.endDate : max, withCpm[0].endDate),

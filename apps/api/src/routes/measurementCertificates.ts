@@ -79,6 +79,7 @@ export async function measurementCertificateRoutes(app: FastifyInstance) {
     const certificate = await assertCertificateOwned(id, request.currentUser!.companyId!);
     if (!certificate) return reply.code(404).send({ error: "Auto de medição não encontrado" });
     const detail = await getCertificateDetail(id);
+    if (!detail) return reply.code(404).send({ error: "Auto de medição não encontrado" });
     const [document] = await db.select({
       currency: budgetDocuments.currency,
       ivaRate: budgetDocuments.ivaRate,
@@ -93,12 +94,12 @@ export async function measurementCertificateRoutes(app: FastifyInstance) {
       profitMarginRate: Number(document?.profitMarginRate ?? 0),
     };
     const unitPriceFactor = calculateBudgetTotals(1, commercialRates).unitPriceFactor;
-    const clientLines = detail?.lines.map((line) => ({
+    const clientLines = detail.lines.map((line) => ({
       ...line,
       unitPrice: line.unitPrice * unitPriceFactor,
       periodValue: line.periodValue * unitPriceFactor,
       cumulativeValue: line.cumulativeValue * unitPriceFactor,
-    })) ?? [];
+    }));
     return {
       ...detail,
       lines: clientLines,

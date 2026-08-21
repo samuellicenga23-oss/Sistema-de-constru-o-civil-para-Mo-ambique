@@ -73,7 +73,7 @@ export async function buildTreasuryForecast(projectId: string, currency: string)
       source: "supplier_invoice",
       label: `Factura fornecedor ${bill.invoiceNumber ?? bill.id.slice(0, 8)}`,
       dueDate: bill.dueDate,
-      amount: Number(bill.totalAmount ?? bill.netAmount ?? 0),
+      amount: Number(bill.totalAmount ?? 0),
       currency: bill.currency ?? currency,
       confidence: "alta",
     });
@@ -88,10 +88,10 @@ export async function buildTreasuryForecast(projectId: string, currency: string)
       id: po.id,
       kind: "despesa",
       source: "purchase_order",
-      label: `OC ${po.orderNumber ?? po.id.slice(0, 8)}`,
-      dueDate: null,
-      amount: Number(po.totalAmount ?? 0),
-      currency: po.currency ?? currency,
+      label: `OC ${po.id.slice(0, 8)}`,
+      dueDate: po.requiredByDate ?? po.promisedDeliveryDate,
+      amount: Number(po.transportCost ?? 0),
+      currency,
       confidence: "baixa",
     });
   }
