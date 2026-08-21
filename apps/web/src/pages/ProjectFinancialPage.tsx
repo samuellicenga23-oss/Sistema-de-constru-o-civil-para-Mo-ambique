@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { boqApi, type Project } from "../api/boq";
-import { financialApi, type ClientStatement, type FinancialEntry, type FinancialSummary, type ProjectControl, type ProjectContract, type ProjectInvoice } from "../api/financial";
+import { financialApi, type ClientStatement, type FinancialEntry, type FinancialSummary, type ProjectControl, type ProjectContract, type ProjectInvoice, type TreasuryForecast } from "../api/financial";
 import { clientPaymentsApi, type ClientPaymentPlan } from "../api/clientPayments";
 import { procurementIntelligenceApi } from "../api/procurementIntelligence";
 import Layout from "../components/Layout";
@@ -44,6 +44,7 @@ export default function ProjectFinancialPage() {
   const [invoices, setInvoices] = useState<ProjectInvoice[]>([]);
   const [contract, setContract] = useState<ProjectContract | null>(null);
   const [statement, setStatement] = useState<ClientStatement | null>(null);
+  const [treasuryForecast, setTreasuryForecast] = useState<TreasuryForecast | null>(null);
   const [clientPlan, setClientPlan] = useState<ClientPaymentPlan | null>(null);
   const [planSuggestion, setPlanSuggestion] = useState<{ amount: number; currency: string } | null>(null);
   const [showClientPayments, setShowClientPayments] = useState(false);
@@ -92,6 +93,7 @@ export default function ProjectFinancialPage() {
     const contractData = await financialApi.getContract(projectId).catch(() => null);
     setContract(contractData);
     setStatement(contractData ? await financialApi.clientStatement(projectId).catch(() => null) : null);
+    setTreasuryForecast(await financialApi.treasuryForecast(projectId).catch(() => null));
   }
 
   useEffect(() => {
@@ -395,6 +397,31 @@ export default function ProjectFinancialPage() {
           </div>
           {control.alerts.length > 0 && <div className="divide-y divide-slate-100 border-t border-slate-100">{control.alerts.map((alert) => <Link key={alert.code} to={alert.href} className="flex items-center justify-between gap-4 px-5 py-3 hover:bg-slate-50"><div><strong className={`text-sm ${alert.level === "critical" ? "text-red-700" : alert.level === "warning" ? "text-amber-800" : "text-blue-700"}`}>{alert.title}</strong><p className="mt-0.5 text-xs text-slate-500">{alert.detail}</p></div><span className="text-xs font-semibold text-blue-700">Abrir</span></Link>)}</div>}
         </section>}
+
+        <section className="card overflow-hidden">
+          <SectionHeader title="Tesouraria (forecast)" description={treasuryForecast ? `Actualizado ${treasuryForecast.forecastDate}` : "Indisponível"} />
+          {treasuryForecast ? (
+            <>
+              <div className="grid gap-px bg-slate-100 sm:grid-cols-3">
+                <div className="bg-white px-5 py-3 text-sm"><span className="text-xs text-slate-500">A receber</span><strong className="mt-1 block text-green-700">{fmt(treasuryForecast.totals.receitas, treasuryForecast.currency)}</strong></div>
+                <div className="bg-white px-5 py-3 text-sm"><span className="text-xs text-slate-500">A pagar</span><strong className="mt-1 block text-red-700">{fmt(treasuryForecast.totals.despesas, treasuryForecast.currency)}</strong></div>
+                <div className="bg-white px-5 py-3 text-sm"><span className="text-xs text-slate-500">Saldo previsto</span><strong className="mt-1 block">{fmt(treasuryForecast.totals.net, treasuryForecast.currency)}</strong></div>
+              </div>
+              {treasuryForecast.lines.length > 0 && (
+                <ul className="divide-y divide-slate-100 border-t border-slate-100 text-sm">
+                  {treasuryForecast.lines.slice(0, 8).map((line) => (
+                    <li key={`${line.source}-${line.id}`} className="flex justify-between gap-3 px-5 py-2">
+                      <span>{line.label} <span className="text-xs text-slate-400">({line.confidence})</span></span>
+                      <span className={line.kind === "receita" ? "text-green-700" : "text-red-700"}>{line.kind === "despesa" ? "−" : "+"}{fmt(line.amount, treasuryForecast.currency)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
+          ) : (
+            <p className="px-5 py-4 text-sm text-slate-500">Sem linhas de forecast disponíveis.</p>
+          )}
+        </section>
 
         <section className="card overflow-hidden">
           <SectionHeader title="Contrato e conta-corrente" description={contract ? `${contract.contractNumber} · ${contract.clientName}` : undefined} actions={<button type="button" className="btn btn-secondary btn-sm" onClick={() => { setContractNumber(contract?.contractNumber ?? ""); setContractClient(contract?.clientName ?? project.client ?? ""); setContractAmount(contract?.originalAmount ?? ""); setShowContractForm(true); }}>{contract ? "Ver contrato" : "Criar contrato"}</button>} />

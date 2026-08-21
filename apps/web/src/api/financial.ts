@@ -102,6 +102,13 @@ export type ProjectContract = {
 };
 export type ClientStatement = { currency: string; contract: { originalAmount: number; approvedVariations: number; revisedAmount: number; advanceAmount: number; retentionRate: number }; totals: { invoiced: number; credited: number; received: number; outstanding: number } };
 
+export type TreasuryForecast = {
+  forecastDate: string;
+  currency: string;
+  lines: Array<{ id: string; kind: "receita" | "despesa"; source: string; label: string; dueDate: string | null; amount: number; confidence: string }>;
+  totals: { receitas: number; despesas: number; net: number };
+};
+
 export const financialApi = {
   list: (projectId: string) => request<FinancialEntry[]>(`/projects/${projectId}/financial-entries`),
   create: (projectId: string, data: FinancialEntryInput) =>
@@ -113,7 +120,7 @@ export const financialApi = {
   control: (projectId: string) => request<ProjectControl>(`/projects/${projectId}/control`),
   listInvoices: (projectId: string) => request<ProjectInvoice[]>(`/projects/${projectId}/invoices`),
   issueInvoice: (id: string, data: { invoiceNumber: string; issueDate: string; dueDate?: string; retentionRate?: number; notes?: string }) => request<ProjectInvoice>(`/invoices/${id}/issue`, { method: "PUT", body: JSON.stringify(data) }),
-  addReceipt: (id: string, data: { amount: number; receivedDate: string; reference?: string; notes?: string }, idempotencyKey = crypto.randomUUID()) => request(`/invoices/${id}/receipts`, { method: "POST", headers: { "Idempotency-Key": idempotencyKey }, body: JSON.stringify(data) }),
+  addReceipt: (id: string, data: { amount: number; receivedDate: string; paymentMethodCode?: string; providerRef?: string; maskedAccount?: string; reference?: string; notes?: string }, idempotencyKey = crypto.randomUUID()) => request(`/invoices/${id}/receipts`, { method: "POST", headers: { "Idempotency-Key": idempotencyKey }, body: JSON.stringify(data) }),
   uploadReceiptProof: (id: string, file: File) => { const body = new FormData(); body.append("file", file); return request(`/invoice-receipts/${id}/proof`, { method: "POST", body }); },
   createCreditNote: (id: string, data: { creditNumber: string; issueDate: string; amount: number; reason: string }) => request(`/invoices/${id}/credit-notes`, { method: "POST", body: JSON.stringify(data) }),
   issueCreditNote: (id: string) => request(`/credit-notes/${id}/issue`, { method: "PUT" }),
@@ -123,4 +130,5 @@ export const financialApi = {
   applyClientDecision: (variationId: string, data?: { decisionNote?: string }) =>
     request(`/contract-variations/${variationId}/apply-client-decision`, { method: "POST", body: JSON.stringify(data ?? {}) }),
   clientStatement: (projectId: string) => request<ClientStatement>(`/projects/${projectId}/client-statement`),
+  treasuryForecast: (projectId: string) => request<TreasuryForecast>(`/projects/${projectId}/treasury-forecast`),
 };

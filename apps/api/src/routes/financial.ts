@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { eq, desc, inArray } from "drizzle-orm";
+import { eq, desc, inArray, and } from "drizzle-orm";
 import { db } from "../db/index.js";
 import {
   financialEntries,
@@ -19,6 +19,9 @@ import { assertProjectOwned } from "../services/accessControl.js";
 import { getBudgetDocumentSummary } from "../services/boqEngine.js";
 import { CURRENCIES } from "@sigo/shared";
 import { recordAuditEvent } from "../services/auditTrail.js";
+import { buildTreasuryForecast } from "../services/treasuryForecast.js";
+import { maputoTodayIso } from "@sigo/shared";
+import { treasuryCashflowForecastLines } from "../db/schema.js";
 
 const WRITE_ROLES = ["admin_empresa", "orcamentista"] as const;
 
@@ -328,5 +331,31 @@ export async function financialRoutes(app: FastifyInstance) {
       margemRealizada: valorRecebido - custoRealizado,
       fluxoCaixaMensal,
     };
+  });
+
+  app.get("/api/projects/:projectId/treasury-forecast", { preHandler: requireCompanyUser }, async (request, reply) => {
+    const { projectId } = request.params as { projectId: string };
+    const project = await assertProjectOwned(projectId, companyIdOf(request));
+    if (!project) return reply.code(404).send({ error: "Projecto não encontrado" });
+    const forecastDate = maputoTodayIso();
+    const lines = await buildTreasuryForecast(projectId, project.currency);
+    await db.delete(treasuryCashflowForecastLines).where(and(eq(treasuryCashflowForecastLines.projectId, projectId), eq(treasuryCashflowForecastLines.forecastDate, forecastDate)));
+    if (lines.length) {
+      await db.insert(treasuryCashflowForecastLines).values(lines.map((line) => ({
+        projectId,
+        forecastDate,
+        kind: line.kind,
+        sourceType: line.source,
+        sourceId: line.id,
+        label: line.label,
+        dueDate: line.dueDate,
+        amount: line.amount.toFixed(2),
+        currency: line.currency as "MZN" | "USD",
+        confidence: line.confidence,
+      })));
+    }
+    const receitas = lines.filter((l) => l.kind === "receita").reduce((s, l) => s + l.amount, 0);
+    const despesas = lines.filter((l) => l.kind === "despesa").reduce((s, l) => s + l.amount, 0);
+    return { forecastDate, currency: project.currency, lines, totals: { receitas, despesas, net: receitas - despesas } };
   });
 }

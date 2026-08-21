@@ -116,7 +116,15 @@ export async function invoiceRoutes(app: FastifyInstance) {
     const { id } = request.params as { id: string };
     const invoice = await findInvoice(id, request.currentUser!.companyId!);
     if (!invoice) return reply.code(404).send({ error: "Factura não encontrada" });
-    const parsed = z.object({ amount: z.number().positive(), receivedDate: z.string().min(1), reference: z.string().max(150).optional(), notes: z.string().max(2000).optional() }).safeParse(request.body);
+    const parsed = z.object({
+      amount: z.number().positive(),
+      receivedDate: z.string().min(1),
+      paymentMethodCode: z.string().max(40).optional(),
+      providerRef: z.string().max(150).optional(),
+      maskedAccount: z.string().max(80).optional(),
+      reference: z.string().max(150).optional(),
+      notes: z.string().max(2000).optional(),
+    }).safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     const rawKey = request.headers["idempotency-key"];
     const idempotencyKey = typeof rawKey === "string" ? rawKey.trim().slice(0, 100) || null : null;
@@ -141,7 +149,18 @@ export async function invoiceRoutes(app: FastifyInstance) {
       const paid = receipts.reduce((sum, row) => sum + Number(row.amount), 0);
       const effectiveAmount = Math.max(0, Number(lockedInvoice.netAmount) - credits.reduce((sum, row) => sum + Number(row.amount), 0));
       if (paid + parsed.data.amount > effectiveAmount + 0.01) return { error: "O recebimento ultrapassa o saldo líquido da factura" } as const;
-      const [receipt] = await tx.insert(invoiceReceipts).values({ invoiceId: id, amount: parsed.data.amount.toFixed(2), receivedDate: parsed.data.receivedDate, reference: parsed.data.reference, notes: parsed.data.notes, idempotencyKey, createdByUserId: request.currentUser!.id }).returning();
+      const [receipt] = await tx.insert(invoiceReceipts).values({
+        invoiceId: id,
+        amount: parsed.data.amount.toFixed(2),
+        receivedDate: parsed.data.receivedDate,
+        paymentMethodCode: parsed.data.paymentMethodCode,
+        providerRef: parsed.data.providerRef,
+        maskedAccount: parsed.data.maskedAccount,
+        reference: parsed.data.reference,
+        notes: parsed.data.notes,
+        idempotencyKey,
+        createdByUserId: request.currentUser!.id,
+      }).returning();
       const totalPaid = paid + parsed.data.amount;
       const status = totalPaid + 0.01 >= effectiveAmount ? "paga" : "parcial";
       const [updated] = await tx.update(projectInvoices).set({ status }).where(eq(projectInvoices.id, id)).returning();

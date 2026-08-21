@@ -1344,6 +1344,7 @@ export const projectInvoices = pgTable("project_invoices", {
   status: invoiceStatusEnum("status").notNull().default("rascunho"),
   grossAmount: numeric("gross_amount", { precision: 14, scale: 2 }).notNull(),
   ivaRate: numeric("iva_rate", { precision: 5, scale: 4 }).notNull(),
+  ivaRateSource: varchar("iva_rate_source", { length: 240 }),
   retentionRate: numeric("retention_rate", { precision: 5, scale: 4 }).notNull().default("0"),
   retentionAmount: numeric("retention_amount", { precision: 14, scale: 2 }).notNull().default("0"),
   netAmount: numeric("net_amount", { precision: 14, scale: 2 }).notNull(),
@@ -1378,6 +1379,9 @@ export const invoiceReceipts = pgTable("invoice_receipts", {
   invoiceId: uuid("invoice_id").notNull().references(() => projectInvoices.id, { onDelete: "cascade" }),
   amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
   receivedDate: date("received_date").notNull(),
+  paymentMethodCode: varchar("payment_method_code", { length: 40 }).references(() => paymentMethodCatalog.code, { onDelete: "set null" }),
+  providerRef: varchar("provider_ref", { length: 150 }),
+  maskedAccount: varchar("masked_account", { length: 80 }),
   reference: varchar("reference", { length: 150 }),
   notes: text("notes"),
   proofFilePath: text("proof_file_path"),
@@ -1386,6 +1390,22 @@ export const invoiceReceipts = pgTable("invoice_receipts", {
   createdByUserId: uuid("created_by_user_id").references(() => users.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (table) => [unique("invoice_receipt_idempotency_unique").on(table.invoiceId, table.idempotencyKey)]);
+
+/** Stub de linhas de forecast de tesouraria (persistência opcional para auditoria). */
+export const treasuryCashflowForecastLines = pgTable("treasury_cashflow_forecast_lines", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  forecastDate: date("forecast_date").notNull(),
+  kind: financialEntryTypeEnum("kind").notNull(),
+  sourceType: varchar("source_type", { length: 40 }).notNull(),
+  sourceId: uuid("source_id"),
+  label: varchar("label", { length: 200 }).notNull(),
+  dueDate: date("due_date"),
+  amount: numeric("amount", { precision: 14, scale: 2 }).notNull(),
+  currency: currencyEnum("currency").notNull().default("MZN"),
+  confidence: varchar("confidence", { length: 20 }).notNull().default("media"),
+  generatedAt: timestamp("generated_at").notNull().defaultNow(),
+}, (table) => [index("treasury_forecast_project_date_idx").on(table.projectId, table.forecastDate)]);
 
 export const invoiceCreditNotes = pgTable("invoice_credit_notes", {
   id: uuid("id").primaryKey().defaultRandom(),

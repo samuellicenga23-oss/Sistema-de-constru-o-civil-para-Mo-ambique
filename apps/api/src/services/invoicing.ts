@@ -2,6 +2,7 @@ import { and, eq, sum } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { budgetDocuments, financialEntries, invoiceCreditNotes, invoiceReceipts, measurementCertificateLines, measurementCertificates, projectInvoices, projects } from "../db/schema.js";
 import { calculateBudgetTotals } from "./budgetTotals.js";
+import { resolveIvaRateForCompany } from "./fiscalRateResolver.js";
 
 export async function createDraftInvoiceForCertificate(certificateId: string, actorUserId: string) {
   const [existing] = await db.select().from(projectInvoices).where(eq(projectInvoices.measurementCertificateId, certificateId)).limit(1);
@@ -30,9 +31,12 @@ export async function createDraftInvoiceForCertificate(certificateId: string, ac
     certificate.submittedByUserId && certificate.submittedByUserId !== actorUserId
       ? certificate.submittedByUserId
       : null;
+  const companyIva = await resolveIvaRateForCompany(project.companyId, certificate.periodDate);
+  const ivaRate = companyIva != null ? companyIva.toString() : document.ivaRate;
+  const ivaRateSource = companyIva != null ? "fiscal_rate_profiles" : "budget_document";
   const [invoice] = await db.insert(projectInvoices).values({
     projectId: certificate.projectId, measurementCertificateId: certificateId, clientName: project.client,
-    grossAmount: grossAmount.toFixed(2), ivaRate: document.ivaRate, netAmount: grossAmount.toFixed(2),
+    grossAmount: grossAmount.toFixed(2), ivaRate, ivaRateSource, netAmount: grossAmount.toFixed(2),
     currency: document.currency, createdByUserId: preparerId,
   }).returning();
   return invoice;

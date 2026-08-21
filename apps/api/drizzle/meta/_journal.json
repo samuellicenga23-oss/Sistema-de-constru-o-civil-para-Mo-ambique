@@ -680,6 +680,13 @@
       "when": 1788028800000,
       "tag": "0097_contract_retention_variations",
       "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1788115200000,
+      "tag": "0098_treasury_fiscal_receipts",
+      "breakpoints": true
     }
   ]
 }
