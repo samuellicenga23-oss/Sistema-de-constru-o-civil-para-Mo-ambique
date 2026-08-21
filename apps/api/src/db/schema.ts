@@ -385,6 +385,15 @@ export const paymentMethodCatalog = pgTable("payment_method_catalog", {
   sortOrder: integer("sort_order").notNull().default(0),
 });
 
+/** Termos de pagamento moçambicanos (crédito N dias) — seed configurável. */
+export const procurementPaymentTermsCatalog = pgTable("procurement_payment_terms_catalog", {
+  code: varchar("code", { length: 40 }).primaryKey(),
+  label: varchar("label", { length: 120 }).notNull(),
+  daysCredit: integer("days_credit").notNull(),
+  sortOrder: integer("sort_order").notNull().default(0),
+  isActive: boolean("is_active").notNull().default(true),
+});
+
 /** Feriados nacionais MZ — actualizáveis por ano (seed configurável, não constantes eternas). */
 export const mzHolidays = pgTable("mz_holidays", {
   year: integer("year").notNull(),
@@ -2012,9 +2021,23 @@ export const suppliers = pgTable("suppliers", {
   id: uuid("id").primaryKey().defaultRandom(),
   companyId: uuid("company_id").references(() => companies.id, { onDelete: "cascade" }),
   name: varchar("name", { length: 200 }).notNull(),
+  legalName: varchar("legal_name", { length: 200 }),
+  tradeName: varchar("trade_name", { length: 200 }),
   contact: varchar("contact", { length: 150 }),
   location: varchar("location", { length: 200 }),
+  province: varchar("province", { length: 100 }),
+  district: varchar("district", { length: 100 }),
   nuit: varchar("nuit", { length: 30 }),
+  nuitForeign: boolean("nuit_foreign").notNull().default(false),
+  bankDetails: text("bank_details"),
+  mobileWalletContact: varchar("mobile_wallet_contact", { length: 80 }),
+  preferredCurrency: currencyEnum("preferred_currency").default("MZN"),
+  defaultLeadTimeDays: integer("default_lead_time_days"),
+  /** Mapa zoneId → dias de lead time opcional por zona. */
+  leadTimeByZone: jsonb("lead_time_by_zone").$type<Record<string, number> | null>(),
+  paymentMethodCode: varchar("payment_method_code", { length: 40 }).references(() => paymentMethodCatalog.code, { onDelete: "set null" }),
+  /** prospect = ficha incompleta permitida; formal = cadastro completo para OC. */
+  vendorRegistrationStatus: varchar("vendor_registration_status", { length: 20 }).notNull().default("prospect"),
   notes: text("notes"),
   governanceStatus: vendorGovernanceStatusEnum("governance_status").notNull().default("qualificado"),
   blockedReason: text("blocked_reason"),
@@ -2173,6 +2196,7 @@ export const procurementRfqs = pgTable("procurement_rfqs", {
   allowPartialAward: boolean("allow_partial_award").notNull().default(false),
   paymentRequirements: text("payment_requirements"),
   commercialTerms: text("commercial_terms"),
+  regionalNote: text("regional_note"),
   createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
   openedAt: timestamp("opened_at"),
   closedAt: timestamp("closed_at"),
@@ -2289,6 +2313,8 @@ export const purchaseOrders = pgTable("purchase_orders", {
   // Snapshot fiscal da ordem. O total aprovado no Financeiro usa esta taxa, mesmo que a taxa
   // padrão da empresa venha a mudar depois.
   ivaRate: numeric("iva_rate", { precision: 5, scale: 4 }).notNull().default("0.16"),
+  paymentTermsCode: varchar("payment_terms_code", { length: 40 }).references(() => procurementPaymentTermsCatalog.code, { onDelete: "set null" }),
+  regionalNote: text("regional_note"),
   createdByUserId: uuid("created_by_user_id").references(() => users.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (table) => [index("purchase_orders_project_status_idx").on(table.projectId, table.status)]);
