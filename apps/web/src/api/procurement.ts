@@ -54,6 +54,7 @@ export type ProcurementRfq = {
   allowPartialAward: boolean;
   paymentRequirements: string | null;
   commercialTerms: string | null;
+  regionalNote: string | null;
   invitationCount?: number;
   responseCount?: number;
   createdAt: string;

@@ -49,6 +49,7 @@ import {
   type RfqLineSnapshot,
   type SupplierQuoteSnapshot,
 } from "../services/procurementWorkflow.js";
+import { buildProcurementRegionalNote, resolvePaymentTermsCode } from "../services/procurementMz.js";
 
 const canRequestMaterials = requirePermission("materiais.requisitar");
 const canApproveMaterials = requirePermission("materiais.aprovar");
@@ -194,6 +195,7 @@ const createRfqInput = z.object({
   allowPartialAward: z.boolean().default(false),
   paymentRequirements: z.string().trim().max(3000).optional(),
   commercialTerms: z.string().trim().max(5000).optional(),
+  regionalNote: z.string().trim().max(2000).optional(),
   singleSourceJustification: z.string().trim().max(3000).optional(),
 });
 
@@ -226,6 +228,16 @@ const awardInput = z.object({
 });
 
 export async function procurementWorkflowRoutes(app: FastifyInstance) {
+  app.get("/api/procurement/payment-terms-catalog", { preHandler: requireCompanyUser }, async () => {
+    const { procurementPaymentTermsCatalog } = await import("../db/schema.js");
+    return db.select().from(procurementPaymentTermsCatalog).orderBy(procurementPaymentTermsCatalog.sortOrder);
+  });
+
+  app.get("/api/procurement/payment-methods-catalog", { preHandler: requireCompanyUser }, async () => {
+    const { paymentMethodCatalog } = await import("../db/schema.js");
+    return db.select().from(paymentMethodCatalog).orderBy(paymentMethodCatalog.sortOrder);
+  });
+
   // ---------- Empresa / obra: Requisições ----------
   app.get("/api/projects/:projectId/procurement/requisitions", { preHandler: requireCompanyUser }, async (request, reply) => {
     const { projectId } = request.params as { projectId: string };
@@ -450,6 +462,7 @@ export async function procurementWorkflowRoutes(app: FastifyInstance) {
       const [lockedRequisition] = await tx.select({ status: purchaseRequisitions.status }).from(purchaseRequisitions).where(eq(purchaseRequisitions.id, requisition.id)).limit(1);
       if (!lockedRequisition || lockedRequisition.status !== "aprovada") throw new Error("A requisição já deixou de estar disponível para abrir uma nova RFQ");
       const reference = await nextReference(tx, companyId, "RFQ");
+      const regionalNote = parsed.data.regionalNote ?? await buildProcurementRegionalNote(requisition.projectId);
       const [created] = await tx.insert(procurementRfqs).values({
         companyId,
         projectId: requisition.projectId,
@@ -466,6 +479,7 @@ export async function procurementWorkflowRoutes(app: FastifyInstance) {
         allowPartialAward: parsed.data.allowPartialAward,
         paymentRequirements: parsed.data.paymentRequirements ?? null,
         commercialTerms: [parsed.data.commercialTerms, parsed.data.singleSourceJustification ? `Fonte única: ${parsed.data.singleSourceJustification}` : null].filter(Boolean).join("\n\n") || null,
+        regionalNote,
         createdByUserId: request.currentUser!.id,
         openedAt: new Date(),
       }).returning();
@@ -609,11 +623,11 @@ export async function procurementWorkflowRoutes(app: FastifyInstance) {
           requiredByDate: rfq.requiredByDate,
           procurementAwardId: award.id,
           purchaseRequisitionId: rfq.requisitionId,
-          // Se o fornecedor cotou transporte à parte, este valor acompanha a OC e entra no
-          // compromisso financeiro. Quando transporte está incluído, fica 0.
           transportCost: (quote.transportIncluded ? 0 : quote.transportCost).toFixed(2),
           notes: `Gerada automaticamente por adjudicação ${rfq.reference}. ${parsed.data.decisionReason}`,
           ivaRate: (await tx.select({ ivaRate: projects.ivaRate }).from(projects).where(eq(projects.id, rfq.projectId)).limit(1))[0]?.ivaRate ?? "0.16",
+          paymentTermsCode: resolvePaymentTermsCode(quote.paymentTerms),
+          regionalNote: rfq.regionalNote,
           createdByUserId: request.currentUser!.id,
         }).returning();
         await tx.insert(purchaseOrderLines).values(supplierAllocations.map((allocation) => {

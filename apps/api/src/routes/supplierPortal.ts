@@ -22,7 +22,7 @@ import {
 import { requireSupplierAuth } from "../auth/supplierMiddleware.js";
 import { sendEmail, emailLayout, escapeHtml } from "../services/mailer.js";
 import { listNotificationsForSupplierAccount, markAllNotificationsRead, markNotificationRead, notifyUsers } from "../services/notifications.js";
-import { CURRENCIES } from "@sigo/shared";
+import { CURRENCIES, validateNuitMz } from "@sigo/shared";
 import { env } from "../env.js";
 import { ensureSigoMarketplaceSupplier, isSigoPricesAccount } from "../services/sigoPrices.js";
 import { addCatalogItem, hasAnyOffer, selectedResourceIds, setSupplierOffers } from "../services/supplierOfferings.js";
@@ -461,8 +461,20 @@ export async function supplierPortalRoutes(app: FastifyInstance) {
 
   const profileSchema = z.object({
     name: z.string().trim().min(1).max(200),
+    legalName: z.string().trim().max(200).optional(),
+    tradeName: z.string().trim().max(200).optional(),
     contact: z.string().trim().max(150).optional(),
     nuit: z.string().trim().max(30).optional(),
+    nuitForeign: z.boolean().optional().default(false),
+    province: z.string().trim().max(100).optional(),
+    district: z.string().trim().max(100).optional(),
+    bankDetails: z.string().trim().max(2000).optional(),
+    mobileWalletContact: z.string().trim().max(80).optional(),
+    preferredCurrency: z.enum(CURRENCIES).optional(),
+    defaultLeadTimeDays: z.number().int().min(0).max(3650).optional().nullable(),
+    leadTimeByZone: z.record(z.string().uuid(), z.number().int().min(0).max(3650)).optional().nullable(),
+    paymentMethodCode: z.string().trim().max(40).optional().nullable(),
+    vendorRegistrationStatus: z.enum(["prospect", "formal"]).optional(),
     zoneId: z.string().uuid(),
   });
 
@@ -475,9 +487,36 @@ export async function supplierPortalRoutes(app: FastifyInstance) {
     const [zone] = await db.select().from(priceZones).where(and(eq(priceZones.id, parsed.data.zoneId), isNull(priceZones.companyId))).limit(1);
     if (!zone) return reply.code(400).send({ error: "Zona inválida" });
 
+    const nuitCheck = validateNuitMz(parsed.data.nuit, { foreign: parsed.data.nuitForeign });
+    if (!nuitCheck.ok) return reply.code(400).send({ error: nuitCheck.error });
+
+    if (parsed.data.paymentMethodCode) {
+      const { paymentMethodCatalog } = await import("../db/schema.js");
+      const [method] = await db.select({ code: paymentMethodCatalog.code }).from(paymentMethodCatalog).where(eq(paymentMethodCatalog.code, parsed.data.paymentMethodCode)).limit(1);
+      if (!method) return reply.code(400).send({ error: "Meio de pagamento inválido" });
+    }
+
     const [row] = await db
       .update(suppliers)
-      .set({ name: parsed.data.name, contact: parsed.data.contact || null, nuit: parsed.data.nuit || null, zoneId: zone.id, location: zone.name })
+      .set({
+        name: parsed.data.name,
+        legalName: parsed.data.legalName ?? null,
+        tradeName: parsed.data.tradeName ?? null,
+        contact: parsed.data.contact || null,
+        nuit: nuitCheck.nuit,
+        nuitForeign: nuitCheck.foreign,
+        province: parsed.data.province ?? null,
+        district: parsed.data.district ?? null,
+        bankDetails: parsed.data.bankDetails ?? null,
+        mobileWalletContact: parsed.data.mobileWalletContact ?? null,
+        preferredCurrency: parsed.data.preferredCurrency ?? undefined,
+        defaultLeadTimeDays: parsed.data.defaultLeadTimeDays ?? null,
+        leadTimeByZone: parsed.data.leadTimeByZone ?? null,
+        paymentMethodCode: parsed.data.paymentMethodCode ?? null,
+        vendorRegistrationStatus: parsed.data.vendorRegistrationStatus ?? undefined,
+        zoneId: zone.id,
+        location: zone.name,
+      })
       .where(eq(suppliers.id, supplier.id))
       .returning();
     return row;

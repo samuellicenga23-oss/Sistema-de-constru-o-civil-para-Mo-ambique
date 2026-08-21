@@ -633,10 +633,38 @@
       "breakpoints": true
     },
     {
+      "idx": 90,
+      "version": "7",
+      "when": 1787510400000,
+      "tag": "0090_commercial_mz_clients_tenders",
+      "breakpoints": true
+    },
+    {
+      "idx": 91,
+      "version": "7",
+      "when": 1787596800000,
+      "tag": "0091_quality_hst_inspections",
+      "breakpoints": true
+    },
+    {
       "idx": 92,
       "version": "7",
       "when": 1787683200000,
       "tag": "0092_schedule_calendar_mz",
+      "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1787770000000,
+      "tag": "0094_user_delegation_portal_prefs",
+      "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1787856000000,
+      "tag": "0095_procurement_mz",
       "breakpoints": true
     }
   ]

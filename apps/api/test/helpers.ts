@@ -25,7 +25,8 @@ export async function truncateAll() {
     suppliers, supplier_material_prices, supplier_labour_prices, supplier_equipment_prices,
     supplier_accounts, supplier_sessions, quote_requests, quote_request_lines, supplier_price_feeds,
     purchase_orders, purchase_order_lines, stock_movements, notifications,
-    price_observations, mz_districts, mz_provinces, fiscal_rate_profiles, price_zone_districts, payment_method_catalog,
+    price_observations, mz_districts, mz_provinces, mz_holidays, fiscal_rate_profiles, price_zone_districts, payment_method_catalog,
+    project_schedule_calendars, procurement_payment_terms_catalog,
     inspection_checklist_templates, quality_inspections, hst_records
   CASCADE`;
 }

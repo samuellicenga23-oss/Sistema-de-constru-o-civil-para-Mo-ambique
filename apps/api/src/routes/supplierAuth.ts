@@ -12,6 +12,7 @@ import {
 } from "../auth/supplierSession.js";
 import { requireSupplierAuth } from "../auth/supplierMiddleware.js";
 import { env } from "../env.js";
+import { validateNuitMz } from "@sigo/shared";
 import { hasAnyOffer, setSupplierOffers } from "../services/supplierOfferings.js";
 
 function sessionMetaOf(request: FastifyRequest) {
@@ -96,6 +97,7 @@ export async function supplierAuthRoutes(app: FastifyInstance) {
     password: z.string().min(8, "A palavra-passe deve ter pelo menos 8 caracteres"),
     phone: z.string().trim().max(60).optional(),
     nuit: z.string().trim().max(30).optional(),
+    nuitForeign: z.boolean().optional().default(false),
     zoneId: z.string().uuid(),
     offersMaterials: z.boolean().default(false),
     offersLabour: z.boolean().default(false),
@@ -150,6 +152,9 @@ export async function supplierAuthRoutes(app: FastifyInstance) {
       const [zone] = await db.select().from(priceZones).where(and(eq(priceZones.id, parsed.data.zoneId), isNull(priceZones.companyId))).limit(1);
       if (!zone) return reply.code(400).send({ error: "Zona inválida" });
 
+      const nuitCheck = validateNuitMz(parsed.data.nuit, { foreign: parsed.data.nuitForeign });
+      if (!nuitCheck.ok) return reply.code(400).send({ error: nuitCheck.error });
+
       const passwordHash = await hashPassword(parsed.data.password);
       const [account] = await db
         .insert(supplierAccounts)
@@ -169,7 +174,8 @@ export async function supplierAuthRoutes(app: FastifyInstance) {
           name: parsed.data.name,
           contact: parsed.data.phone || null,
           location: zone.name,
-          nuit: parsed.data.nuit || null,
+          nuit: nuitCheck.nuit,
+          nuitForeign: nuitCheck.foreign,
           zoneId: zone.id,
           supplierAccountId: account.id,
           offersMaterials: offers.offersMaterials,
