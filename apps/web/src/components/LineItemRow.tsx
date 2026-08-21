@@ -2,15 +2,18 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import type { LineItemNode, LineItemKind } from "../api/boq";
 import type { CostComposition } from "../api/catalog";
 import { boqApi } from "../api/boq";
+import { ApiError } from "../api/http";
 import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { isItemMissingPrice } from "../utils/boqHelpers";
 import MeasurementGrid from "./MeasurementGrid";
 import ChapterSpecBulkEditor from "./ChapterSpecBulkEditor";
 import LineItemSidePanel from "./LineItemSidePanel";
+import LineItemProvenancePanel from "./LineItemProvenancePanel";
 import DocumentReviewCommentsPanel from "./DocumentReviewCommentsPanel";
 import { IconPlus, IconPencil, IconRuler, IconTrash } from "./icons";
 import MoneyInput from "./MoneyInput";
 import { boqProvenanceBadge } from "../utils/boqProvenance";
+import { formatQuantityDisplay } from "../lib/quantityFormat";
 
 export type BoqLineMutations = {
   createItem: (
@@ -69,12 +72,18 @@ function money(value: number, currency = "") {
 
 // Larguras fixas para as colunas numéricas — a DESCRIÇÃO fica com o espaço restante e
 // quebra dentro da sua própria coluna, nunca "empurrando" as colunas seguintes.
-export function BoqHeaderRow({ measurementOnly = false }: { measurementOnly?: boolean }) {
+export function BoqHeaderRow({ measurementOnly = false, bulkSelect = false }: { measurementOnly?: boolean; bulkSelect?: boolean }) {
   if (measurementOnly) {
-    return <colgroup><col className="w-16" /><col /><col className="w-14" /><col className="w-28" /><col className="w-20" /><col className="w-28" /></colgroup>;
+    return (
+      <colgroup>
+        {bulkSelect ? <col className="w-10" /> : null}
+        <col className="w-16" /><col /><col className="w-14" /><col className="w-28" /><col className="w-20" /><col className="w-28" />
+      </colgroup>
+    );
   }
   return (
     <colgroup>
+      {bulkSelect ? <col className="w-10" /> : null}
       <col className="w-16" />
       <col />
       <col className="hidden w-12 sm:table-column" />
@@ -86,10 +95,38 @@ export function BoqHeaderRow({ measurementOnly = false }: { measurementOnly?: bo
   );
 }
 
-export function BoqTableHead({ readOnly = false, measurementOnly = false }: { readOnly?: boolean; measurementOnly?: boolean }) {
+export function BoqTableHead({
+  readOnly = false,
+  measurementOnly = false,
+  bulkSelect = false,
+  allItemsSelected = false,
+  someItemsSelected = false,
+  onToggleSelectAll,
+}: {
+  readOnly?: boolean;
+  measurementOnly?: boolean;
+  bulkSelect?: boolean;
+  allItemsSelected?: boolean;
+  someItemsSelected?: boolean;
+  onToggleSelectAll?: () => void;
+}) {
   return (
     <thead>
       <tr className="table-head-row">
+        {bulkSelect && (
+          <th className="py-2 px-1 font-medium">
+            <input
+              type="checkbox"
+              checked={allItemsSelected}
+              ref={(el) => {
+                if (el) el.indeterminate = someItemsSelected && !allItemsSelected;
+              }}
+              onChange={onToggleSelectAll}
+              aria-label="Seleccionar todos os itens"
+              className="rounded border-slate-300"
+            />
+          </th>
+        )}
         <th className="py-2 px-2 font-medium">Item</th>
         <th className="font-medium">Descrição</th>
         <th className="hidden font-medium sm:table-cell">Un</th>
@@ -209,6 +246,9 @@ export default function LineItemRow({
   onRequestEdit,
   onEditDirtyChange,
   documentId = null,
+  bulkSelect = false,
+  selected = false,
+  onToggleSelect,
 }: {
   node: LineItemNode;
   depth: number;
@@ -226,13 +266,17 @@ export default function LineItemRow({
   /** Report whether the active edit row has unsaved changes (for click-outside / switch). */
   onEditDirtyChange?: (id: string, dirty: boolean) => void;
   documentId?: string | null;
+  bulkSelect?: boolean;
+  selected?: boolean;
+  onToggleSelect?: (id: string, checked: boolean) => void;
 }) {
   const { confirm, dialog } = useConfirmDialog();
   const [showAdd, setShowAdd] = useState(false);
   const [showMeasurements, setShowMeasurements] = useState(false);
   const [showChapterSpecs, setShowChapterSpecs] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [panel, setPanel] = useState<"spec" | "apu" | "comments" | null>(null);
+  const [panel, setPanel] = useState<"spec" | "apu" | "comments" | "provenance" | null>(null);
+  const [editConflict, setEditConflict] = useState<string | null>(null);
   const [descDraft, setDescDraft] = useState(node.description);
   const [qtyDraft, setQtyDraft] = useState(node.quantity != null ? String(node.quantity) : "");
   const [unitPriceDraft, setUnitPriceDraft] = useState(
@@ -371,11 +415,14 @@ export default function LineItemRow({
   async function openMeasurements() {
     if (!canEdit || node.kind !== "item" || !allowLivePersistence) return;
     if (measurementOnly) {
+      setPanel("provenance");
       await beginEdit();
       return;
     }
     setShowMeasurements((current) => !current);
   }
+
+  const colSpan = (measurementOnly ? 6 : 7) + (bulkSelect ? 1 : 0);
 
   async function cancelEdit() {
     if (onRequestEdit) await onRequestEdit(null, false);
@@ -385,6 +432,7 @@ export default function LineItemRow({
 
   async function saveEdit() {
     setSaving(true);
+    setEditConflict(null);
     try {
       const payload: Parameters<BoqLineMutations["updateItem"]>[1] = { description: descDraft.trim() };
       if (node.kind === "item") {
@@ -397,6 +445,12 @@ export default function LineItemRow({
       await mutations.updateItem(node.id, payload);
       if (onRequestEdit) await onRequestEdit(null, false);
       onChange();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        setEditConflict(err.message || "Outro utilizador alterou este item. Recarregue o documento.");
+      } else {
+        throw err;
+      }
     } finally {
       setSaving(false);
     }
@@ -442,8 +496,6 @@ export default function LineItemRow({
           ? "bg-sky-50/80 ring-1 ring-inset ring-sky-200"
           : "";
 
-  const colSpan = measurementOnly ? 6 : 7;
-
   return (
     <Fragment>
       <tr
@@ -451,6 +503,19 @@ export default function LineItemRow({
         id={node.kind === "item" ? `line-item-${node.id}` : undefined}
         className={`${rowBg} table-row text-sm group scroll-mt-24`}
       >
+        {bulkSelect && (
+          <td className="py-2 px-1 align-top">
+            {node.kind === "item" ? (
+              <input
+                type="checkbox"
+                checked={selected}
+                onChange={(e) => onToggleSelect?.(node.id, e.target.checked)}
+                aria-label={`Seleccionar ${node.code ?? node.description}`}
+                className="rounded border-slate-300"
+              />
+            ) : null}
+          </td>
+        )}
         <td className={`py-2 px-2 text-xs align-top ${isChapter ? "text-brand-700 font-bold" : missingPrice ? "text-amber-800 font-bold" : "text-gray-400"}`}>
           {node.code}
         </td>
@@ -508,11 +573,11 @@ export default function LineItemRow({
                 title="Abrir memória de cálculo"
                 onClick={() => void openMeasurements()}
               >
-                {node.quantity == null ? "—" : Number(node.quantity).toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {formatQuantityDisplay(node.quantity, node.unit)}
               </button>
             ) : (
               <span className="tabular-nums">
-                {node.quantity == null ? "—" : Number(node.quantity).toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {formatQuantityDisplay(node.quantity, node.unit)}
               </span>
             )
           ) : null}
@@ -557,13 +622,16 @@ export default function LineItemRow({
         )}
         <td className="align-top text-right pr-2 whitespace-nowrap">
           {isEditing ? (
-            <span className="inline-flex gap-1">
-              <button type="button" className="btn btn-primary btn-sm" disabled={saving} onClick={() => void saveEdit()}>
-                {saving ? "…" : "Guardar"}
-              </button>
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => void cancelEdit()}>
-                Cancelar
-              </button>
+            <span className="inline-flex flex-col items-end gap-1">
+              <span className="inline-flex gap-1">
+                <button type="button" className="btn btn-primary btn-sm" disabled={saving} onClick={() => void saveEdit()}>
+                  {saving ? "…" : "Guardar"}
+                </button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => void cancelEdit()}>
+                  Cancelar
+                </button>
+              </span>
+              {editConflict ? <span className="max-w-[12rem] text-[10px] font-medium text-red-700">{editConflict}</span> : null}
             </span>
           ) : (
             <span className="inline-flex items-center justify-end gap-0.5">
@@ -698,6 +766,9 @@ export default function LineItemRow({
           onRequestEdit={onRequestEdit}
           onEditDirtyChange={onEditDirtyChange}
           documentId={documentId}
+          bulkSelect={bulkSelect}
+          selected={selected}
+          onToggleSelect={onToggleSelect}
         />
       ))}
 
@@ -723,6 +794,7 @@ export default function LineItemRow({
         onSaveSpec={() => void handleSaveSpecification()}
         onClose={() => setPanel(null)}
       >
+        {panel === "provenance" ? <LineItemProvenancePanel node={node} /> : null}
         {panel === "comments" && documentId ? (
           <DocumentReviewCommentsPanel
             documentId={documentId}

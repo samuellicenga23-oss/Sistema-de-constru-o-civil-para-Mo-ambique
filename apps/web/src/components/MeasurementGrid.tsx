@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { groupMeasurementsByFloorZone } from "../utils/measurementLocationGroups";
+import { formatQuantityDisplay } from "../lib/quantityFormat";
 import {
   measurementLinesApi,
   type MeasurementFormulaType,
@@ -35,10 +36,10 @@ function label(type: MeasurementFormulaType) {
   return FORMULAS.find((row) => row.value === type)?.label ?? "Legado";
 }
 function n(value: string | null | undefined) {
-  return value == null ? "—" : Number(value).toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return value == null ? "—" : formatQuantityDisplay(Number(value));
 }
 function qty(value: number) {
-  return value.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return formatQuantityDisplay(value);
 }
 function location(line: MeasurementLine) {
   return [line.block, line.floor, line.zone, line.room, line.axis, line.element].filter(Boolean).join(" / ") || "—";

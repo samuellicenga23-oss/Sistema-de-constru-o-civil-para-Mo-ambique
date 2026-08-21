@@ -41,7 +41,7 @@ import {
   createCorrectionTask,
 } from "../services/workflowTasks.js";
 import { workflowTypeFromDocumentType } from "../services/projectWorkflowTypes.js";
-import { CURRENCIES, DEFAULT_IVA_RATE, UNITS, LINE_ITEM_KINDS, fixedSigo, planUsesDirectDocumentApproval, boqEditSessionSchema } from "@sigo/shared";
+import { CURRENCIES, DEFAULT_IVA_RATE, UNITS, LINE_ITEM_KINDS, LINE_ITEM_ORIGINS, fixedSigo, planUsesDirectDocumentApproval, boqEditSessionSchema } from "@sigo/shared";
 import { applyBoqEditSession, BoqEditConflictError, BoqEditValidationError } from "../services/boqEditSession.js";
 import { compareBudgetRevisions } from "../services/budgetRevisionDiff.js";
 import { getCompanySubscription } from "../services/subscriptionEntitlements.js";
@@ -172,6 +172,7 @@ const lineItemSchema = z.object({
 });
 const lineItemUpdateSchema = lineItemSchema.partial().extend({
   technicalSpecification: z.string().nullable().optional(),
+  origin: z.enum(LINE_ITEM_ORIGINS).optional(),
 });
 
 const SPEC_MARKER = "\n\n— Especificação técnica —\n";
@@ -1315,7 +1316,7 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
     }
 
     let unitPrice = data.unitPrice;
-    let origin: "manual" | "planta" | "composicao" | undefined;
+    let origin: "manual" | "planta" | "composicao" | "estimativa" | undefined = data.origin;
     if (data.compositionId) {
       const composition = await assertCompositionVisible(data.compositionId, companyId, request.currentUser!.id);
       if (!composition) return reply.code(400).send({ error: "Composição de custo não encontrada" });
@@ -1324,7 +1325,7 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
       unitPrice = breakdown.unitCost;
       origin = "composicao";
     } else if (data.compositionId === null) {
-      origin = "manual";
+      origin = origin ?? "manual";
     }
 
     const zoneIdForSnapshot = data.compositionId ? await getZoneIdForSection(existing.sectionId) : null;
@@ -1337,7 +1338,7 @@ export async function budgetDocumentRoutes(app: FastifyInstance) {
         unitPrice: unitPrice !== undefined ? (unitPrice !== null ? fixedSigo(unitPrice) : null) : undefined,
         quantity: data.quantity !== undefined ? (data.quantity !== null ? fixedSigo(data.quantity) : null) : undefined,
         quantitySource: data.quantity !== undefined ? "manual" : undefined,
-        origin,
+        ...(origin !== undefined ? { origin } : {}),
       })
       .where(eq(lineItems.id, id))
       .returning();

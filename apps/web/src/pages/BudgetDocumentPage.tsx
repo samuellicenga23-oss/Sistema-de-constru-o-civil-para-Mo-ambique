@@ -32,6 +32,7 @@ import { practiceApi } from "../api/practice";
 import { companiesApi } from "../api/companies";
 import { planUsesDirectDocumentApproval } from "@sigo/shared";
 import { collectUnpricedItems, filterTreeToUnpricedOnly } from "../utils/boqHelpers";
+import { collectBoqItems, downloadTextFile, exportBoqSelectionCsv } from "../utils/boqBulkSelection";
 import { consumeAssistantSearchParams, documentHasBoqContent, shouldShowPrimaryMeasurementImport } from "../utils/measurementWorkspace";
 import MobileStickyActionBar from "../components/MobileStickyActionBar";
 import { ApiError } from "../api/http";
@@ -632,6 +633,12 @@ export default function BudgetDocumentPage() {
   const [activeLineEditId, setActiveLineEditId] = useState<string | null>(null);
   const [activeLineDirty, setActiveLineDirty] = useState(false);
   const [showDocumentComments, setShowDocumentComments] = useState(false);
+  const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(() => new Set());
+  const [bulkCompositionId, setBulkCompositionId] = useState("");
+  const [showBulkComposition, setShowBulkComposition] = useState(false);
+  const [showBulkOrigin, setShowBulkOrigin] = useState(false);
+  const [bulkOrigin, setBulkOrigin] = useState<"manual" | "planta" | "composicao" | "estimativa">("manual");
+  const [bulkWorking, setBulkWorking] = useState(false);
 
   async function handleRequestLineEdit(id: string | null, _dirty: boolean) {
     if (id === activeLineEditId) return true;
@@ -793,6 +800,117 @@ export default function BudgetDocumentPage() {
       section.name.toLocaleLowerCase("pt").includes(needle) || containsBudgetMatch(section.items, needle),
     );
   }, [editSession.editing, editSession.sections, summary?.sections, summary?.document.documentType, itemQuery, showOnlyUnpriced]);
+
+  // Filtro «Alterados desde submissão» omitido: budget_documents não expõe submittedAt na API
+  // nem line_items.updatedAt no resumo — requer migração + endpoint antes de activar (SIGO 03).
+
+  const bulkSelectEnabled = Boolean(summary) && user?.role !== "visualizador" && summary?.document.status === "rascunho";
+  const visibleBoqItems = useMemo(() => collectBoqItems(visibleSections), [visibleSections]);
+  const selectedItems = useMemo(
+    () => visibleBoqItems.filter((item) => selectedItemIds.has(item.id)),
+    [visibleBoqItems, selectedItemIds],
+  );
+  const allVisibleSelected = visibleBoqItems.length > 0 && visibleBoqItems.every((item) => selectedItemIds.has(item.id));
+  const someVisibleSelected = visibleBoqItems.some((item) => selectedItemIds.has(item.id));
+
+  function toggleItemSelection(id: string, checked: boolean) {
+    setSelectedItemIds((current) => {
+      const next = new Set(current);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAllVisible() {
+    setSelectedItemIds((current) => {
+      if (allVisibleSelected) {
+        const next = new Set(current);
+        for (const item of visibleBoqItems) next.delete(item.id);
+        return next;
+      }
+      const next = new Set(current);
+      for (const item of visibleBoqItems) next.add(item.id);
+      return next;
+    });
+  }
+
+  async function handleBulkDelete() {
+    if (!selectedItems.length) return;
+    const ok = await confirm({
+      title: "Eliminar itens seleccionados?",
+      message: `Eliminar ${selectedItems.length} item(ns) do mapa?`,
+      confirmLabel: "Eliminar",
+      danger: true,
+    });
+    if (!ok) return;
+    setBulkWorking(true);
+    setError(null);
+    try {
+      for (const item of selectedItems) {
+        if (editSession.editing) await editSession.mutations.deleteItem(item.id);
+        else await boqApi.deleteLineItem(item.id);
+      }
+      setSelectedItemIds(new Set());
+      if (!editSession.editing) await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao eliminar itens");
+    } finally {
+      setBulkWorking(false);
+    }
+  }
+
+  function handleBulkExportCsv() {
+    if (!selectedItems.length || !summary) return;
+    const slug = summary.document.title.replace(/[^\w\-]+/g, "_").slice(0, 40);
+    downloadTextFile(`${slug || "mapa"}-seleccionados.csv`, exportBoqSelectionCsv(selectedItems));
+  }
+
+  async function handleBulkAssociateComposition() {
+    if (!bulkCompositionId || !selectedItems.length) return;
+    setBulkWorking(true);
+    setError(null);
+    try {
+      for (const item of selectedItems) {
+        if (editSession.editing) await editSession.mutations.updateItem(item.id, { compositionId: bulkCompositionId });
+        else await boqApi.updateLineItem(item.id, { compositionId: bulkCompositionId });
+      }
+      setShowBulkComposition(false);
+      setBulkCompositionId("");
+      setSelectedItemIds(new Set());
+      if (!editSession.editing) await reload();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        setError(err.message || "Documento bloqueado ou alterado por outro utilizador.");
+      } else {
+        setError(err instanceof Error ? err.message : "Erro ao associar composição");
+      }
+    } finally {
+      setBulkWorking(false);
+    }
+  }
+
+  async function handleBulkSetOrigin() {
+    if (!selectedItems.length) return;
+    setBulkWorking(true);
+    setError(null);
+    try {
+      for (const item of selectedItems) {
+        await boqApi.updateLineItem(item.id, { origin: bulkOrigin });
+      }
+      setShowBulkOrigin(false);
+      setSelectedItemIds(new Set());
+      await reload();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        setError(err.message || "Documento bloqueado ou alterado por outro utilizador.");
+      } else {
+        setError(err instanceof Error ? err.message : "Erro ao definir origem");
+      }
+    } finally {
+      setBulkWorking(false);
+    }
+  }
 
   if (!summary) {
     return <LoadingState fullScreen label="A carregar documento..." />;
@@ -1273,6 +1391,29 @@ export default function BudgetDocumentPage() {
             )}
           </div>
 
+          {selectedItems.length > 0 && bulkSelectEnabled && (
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-brand-200 bg-brand-50/60 px-3 py-2.5">
+              <span className="text-sm font-semibold text-brand-950">{selectedItems.length} seleccionado(s)</span>
+              {!isMeasurementDocument && (
+                <button type="button" disabled={bulkWorking} onClick={() => setShowBulkComposition(true)} className="btn btn-secondary btn-sm">
+                  Associar composição
+                </button>
+              )}
+              <button type="button" disabled={bulkWorking} onClick={() => setShowBulkOrigin(true)} className="btn btn-secondary btn-sm">
+                Definir origem
+              </button>
+              <button type="button" disabled={bulkWorking} onClick={handleBulkExportCsv} className="btn btn-secondary btn-sm">
+                <IconDownload className="h-3.5 w-3.5" /> Exportar CSV
+              </button>
+              <button type="button" disabled={bulkWorking} onClick={() => void handleBulkDelete()} className="btn btn-danger btn-sm">
+                <IconTrash className="h-3.5 w-3.5" /> Eliminar
+              </button>
+              <button type="button" disabled={bulkWorking} onClick={() => setSelectedItemIds(new Set())} className="btn btn-ghost btn-sm">
+                Limpar
+              </button>
+            </div>
+          )}
+
           {visibleSections.map((section) => (
             <section key={section.id} className="card overflow-hidden">
               <div className="flex flex-col gap-2 border-b border-slate-100 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
@@ -1347,8 +1488,15 @@ export default function BudgetDocumentPage() {
                   </div>
                 ) : (
                   <table className="w-full min-w-[500px] border-collapse sm:min-w-[720px]">
-                    <BoqHeaderRow measurementOnly={isMeasurementDocument} />
-                    <BoqTableHead readOnly={mapReadOnly} measurementOnly={isMeasurementDocument} />
+                    <BoqHeaderRow measurementOnly={isMeasurementDocument} bulkSelect={bulkSelectEnabled} />
+                    <BoqTableHead
+                      readOnly={mapReadOnly}
+                      measurementOnly={isMeasurementDocument}
+                      bulkSelect={bulkSelectEnabled}
+                      allItemsSelected={allVisibleSelected}
+                      someItemsSelected={someVisibleSelected}
+                      onToggleSelectAll={toggleSelectAllVisible}
+                    />
                     <tbody>
                       {section.items.map((item) => (
                         <LineItemRow
@@ -1367,6 +1515,9 @@ export default function BudgetDocumentPage() {
                           onRequestEdit={editSession.editing ? undefined : handleRequestLineEdit}
                           onEditDirtyChange={editSession.editing ? undefined : handleLineEditDirtyChange}
                           documentId={documentId}
+                          bulkSelect={bulkSelectEnabled}
+                          selected={selectedItemIds.has(item.id)}
+                          onToggleSelect={toggleItemSelection}
                         />
                       ))}
                     </tbody>
@@ -1657,6 +1808,56 @@ export default function BudgetDocumentPage() {
         >
           <DocumentReviewCommentsPanel documentId={documentId} targetType="document" canWrite={!isClientView} />
         </LineItemSidePanel>
+      )}
+
+      {showBulkComposition && (
+        <ModalPortal>
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
+            <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl">
+              <h2 className="text-sm font-semibold text-slate-950">Associar composição em massa</h2>
+              <p className="mt-1 text-xs text-slate-500">{selectedItems.length} item(ns) seleccionado(s)</p>
+              <select
+                value={bulkCompositionId}
+                onChange={(e) => setBulkCompositionId(e.target.value)}
+                className="input mt-4 w-full"
+              >
+                <option value="">Escolher composição…</option>
+                {compositions.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+              <div className="mt-4 flex justify-end gap-2">
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowBulkComposition(false)} disabled={bulkWorking}>Cancelar</button>
+                <button type="button" className="btn btn-primary btn-sm" disabled={!bulkCompositionId || bulkWorking} onClick={() => void handleBulkAssociateComposition()}>
+                  {bulkWorking ? "A aplicar…" : "Associar"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </ModalPortal>
+      )}
+
+      {showBulkOrigin && (
+        <ModalPortal>
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
+            <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl">
+              <h2 className="text-sm font-semibold text-slate-950">Definir origem em massa</h2>
+              <p className="mt-1 text-xs text-slate-500">{selectedItems.length} item(ns) seleccionado(s)</p>
+              <select value={bulkOrigin} onChange={(e) => setBulkOrigin(e.target.value as typeof bulkOrigin)} className="input mt-4 w-full">
+                <option value="manual">Manual</option>
+                <option value="planta">Planta</option>
+                <option value="estimativa">Estimativa</option>
+                <option value="composicao">Composição</option>
+              </select>
+              <div className="mt-4 flex justify-end gap-2">
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowBulkOrigin(false)} disabled={bulkWorking}>Cancelar</button>
+                <button type="button" className="btn btn-primary btn-sm" disabled={bulkWorking} onClick={() => void handleBulkSetOrigin()}>
+                  {bulkWorking ? "A aplicar…" : "Aplicar"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </ModalPortal>
       )}
 
       {dialog}

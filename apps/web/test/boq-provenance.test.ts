@@ -6,7 +6,7 @@ describe("proveniência compacta no BOQ", () => {
   it("esconde origem manual e mostra planta/memória", () => {
     expect(boqProvenanceBadge("manual", "manual")).toBeNull();
     expect(boqProvenanceBadge("planta", "plant")?.label).toBe("Planta");
-    expect(boqProvenanceBadge("manual", "measurement")?.label).toBe("Memória");
+    expect(boqProvenanceBadge("manual", "measurement")?.label).toBe("Medido");
   });
 });
 

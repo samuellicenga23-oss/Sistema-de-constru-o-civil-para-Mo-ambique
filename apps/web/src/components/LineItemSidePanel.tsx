@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import LineItemCostSnapshotPanel from "./LineItemCostSnapshotPanel";
 
-type PanelKind = "spec" | "apu" | "comments" | null;
+type PanelKind = "spec" | "apu" | "comments" | "provenance" | null;
 
 export default function LineItemSidePanel({
   open,
@@ -47,12 +47,12 @@ export default function LineItemSidePanel({
         className="flex h-full w-full max-w-md flex-col bg-white shadow-xl"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
-        aria-label={kind === "apu" ? "APU" : kind === "spec" ? "Especificação" : "Comentários"}
+        aria-label={kind === "apu" ? "APU" : kind === "spec" ? "Especificação" : kind === "provenance" ? "Proveniência" : "Comentários"}
       >
         <header className="flex items-start justify-between gap-3 border-b border-slate-200 px-5 py-4">
           <div className="min-w-0">
             <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">
-              {kind === "apu" ? "Análise de Preço Unitário" : kind === "spec" ? "Especificação" : "Comentários"}
+              {kind === "apu" ? "Análise de Preço Unitário" : kind === "spec" ? "Especificação" : kind === "provenance" ? "Proveniência" : "Comentários"}
             </p>
             <h2 className="mt-1 truncate text-sm font-semibold text-slate-950">{title}</h2>
             {subtitle && <p className="mt-0.5 text-xs text-slate-500">{subtitle}</p>}
@@ -82,6 +82,7 @@ export default function LineItemSidePanel({
             )
           )}
           {kind === "apu" && lineItemId && <LineItemCostSnapshotPanel lineItemId={lineItemId} />}
+          {kind === "provenance" && (children ?? <p className="text-sm text-slate-500">Sem dados de proveniência.</p>)}
           {kind === "comments" && (children ?? <p className="text-sm text-slate-500">Sem comentários.</p>)}
         </div>
       </aside>

@@ -16,6 +16,20 @@ export function formatSigoNumber(value: number, locale = "pt-MZ"): string {
   });
 }
 
+/** Apresentação de quantidades BOQ/medição — 2 casas na UI; valor interno mantém precisão alta. */
+export function formatQuantityDisplay(
+  value: number | null | undefined,
+  _unit?: string | null,
+  locale = "pt-MZ",
+): string {
+  if (value == null || !Number.isFinite(value)) return "—";
+  // Reservado: precisão configurável por unidade/empresa/documento via _unit.
+  return value.toLocaleString(locale, {
+    minimumFractionDigits: SIGO_DECIMAL_PLACES,
+    maximumFractionDigits: SIGO_DECIMAL_PLACES,
+  });
+}
+
 /**
  * Normaliza apenas números de negócio recebidos em estruturas JSON. Inteiros
  * permanecem inteiros e strings/datas/ficheiros não são alterados.

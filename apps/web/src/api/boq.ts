@@ -336,7 +336,18 @@ export const boqApi = {
 
   updateLineItem: (
     id: string,
-    data: Partial<{ description: string; technicalSpecification: string | null; unit: string; quantity: number; unitPrice: number; compositionId: string | null }>,
+    data: Partial<{
+      description: string;
+      technicalSpecification: string | null;
+      unit: string;
+      quantity: number;
+      unitPrice: number;
+      compositionId: string | null;
+      origin: "manual" | "planta" | "composicao" | "estimativa";
+      /** Reservado para concorrência optimista — API ainda não valida If-Match/updatedAt. */
+      updatedAt?: string;
+    }>,
+    // Futuro: headers If-Match quando a API expuser versão por linha.
   ) => request<LineItemNode>(`/line-items/${id}`, { method: "PUT", body: JSON.stringify(data) }),
 
   deleteLineItem: (id: string) => request<{ ok: true }>(`/line-items/${id}`, { method: "DELETE" }),
