@@ -30,6 +30,13 @@ import { getBudgetDocumentSummary, type LineItemNode } from "../services/boqEngi
 import { loadCompanyBrand } from "../services/companyBrand.js";
 import { syncPracticeInvoiceReceivable } from "../services/practiceLedger.js";
 import { buildPracticeDocumentPdf } from "../services/practiceDocumentPdf.js";
+import {
+  PRACTICE_CLIENT_TYPES,
+  PRACTICE_TENDER_STATUSES,
+  validatePaymentMethodCodes,
+  validatePracticeClientNuit,
+  validateQuoteFxRate,
+} from "../services/commercialMz.js";
 
 const canView = requirePermission("escritorio.ver");
 const canManage = requirePermission("escritorio.gerir");
@@ -86,6 +93,25 @@ const quoteSchema = z.object({
   expectedCloseDate: z.string().optional().nullable(),
   ownerUserId: z.string().uuid().optional().nullable(),
   currency: z.enum(CURRENCIES).default("MZN"),
+  fxRate: z.number().positive().optional().nullable(),
+  paymentMethodCodes: z.array(z.string().max(40)).optional().default([]),
+  pipelineSource: z.string().max(80).optional().nullable(),
+  probabilityPct: z.number().min(0).max(100).optional().nullable(),
+  nextAction: z.string().max(200).optional().nullable(),
+  nextActionDate: z.string().optional().nullable(),
+  tenderReference: z.string().max(120).optional().nullable(),
+  tenderDeadline: z.string().optional().nullable(),
+  tenderStatus: z.enum(PRACTICE_TENDER_STATUSES).optional().nullable(),
+  tenderBidBond: z
+    .object({
+      amount: z.number().nonnegative().optional(),
+      reference: z.string().max(120).optional(),
+      expiresAt: z.string().optional(),
+    })
+    .optional()
+    .nullable(),
+  tenderDocsChecklist: z.array(z.object({ label: z.string().min(1).max(200), done: z.boolean() })).optional(),
+  tenderSubmissionEvidence: z.string().max(4000).optional().nullable(),
   notes: z.string().optional(),
   serviceCategory: z.enum(["project", "technical", "construction"]).optional().nullable(),
   serviceType: z.string().max(80).optional().nullable(),
@@ -149,11 +175,20 @@ const receiptSchema = z.object({
 
 const clientSchema = z.object({
   name: z.string().min(1).max(200),
+  legalName: z.string().max(240).optional().nullable(),
+  tradeName: z.string().max(200).optional().nullable(),
+  clientType: z.enum(PRACTICE_CLIENT_TYPES).optional().default("empresa"),
   contact: z.string().max(200).optional().nullable(),
   email: z.string().max(200).optional().nullable(),
   phone: z.string().max(80).optional().nullable(),
   address: z.string().optional().nullable(),
+  billingAddress: z.string().optional().nullable(),
+  province: z.string().max(100).optional().nullable(),
+  district: z.string().max(100).optional().nullable(),
   nuit: z.string().max(50).optional().nullable(),
+  nuitForeign: z.boolean().optional().default(false),
+  paymentTerms: z.string().max(200).optional().nullable(),
+  preferredCurrency: z.enum(CURRENCIES).optional().default("MZN"),
   notes: z.string().optional().nullable(),
 });
 
@@ -792,6 +827,47 @@ function quoteAdvancedFields(data: z.infer<typeof quoteSchema>) {
     expectedCloseDate: data.expectedCloseDate || data.validUntil || null,
     ownerUserId: data.ownerUserId ?? null,
     conditions: data.conditions ?? {},
+    fxRate: data.fxRate != null ? data.fxRate.toFixed(6) : null,
+    paymentMethodCodes: data.paymentMethodCodes ?? [],
+    pipelineSource: data.pipelineSource ?? null,
+    probabilityPct: data.probabilityPct != null ? data.probabilityPct.toFixed(2) : null,
+    nextAction: data.nextAction ?? null,
+    nextActionDate: data.nextActionDate || null,
+    tenderReference: data.tenderReference ?? null,
+    tenderDeadline: data.tenderDeadline || null,
+    tenderStatus: data.tenderStatus ?? null,
+    tenderBidBond: data.tenderBidBond ?? null,
+    tenderDocsChecklist: data.tenderDocsChecklist ?? [],
+    tenderSubmissionEvidence: data.tenderSubmissionEvidence ?? null,
+  };
+}
+
+async function assertQuoteCommercialFields(data: z.infer<typeof quoteSchema>) {
+  const fx = validateQuoteFxRate(data.currency, data.fxRate);
+  if (!fx.ok) return fx;
+  const methods = await validatePaymentMethodCodes(data.paymentMethodCodes);
+  if (!methods.ok) return methods;
+  return { ok: true as const, fxRate: fx.fxRate, paymentMethodCodes: methods.codes };
+}
+
+function clientRowFromInput(data: z.infer<typeof clientSchema>, nuit: string | null) {
+  return {
+    name: data.name,
+    legalName: data.legalName ?? null,
+    tradeName: data.tradeName ?? null,
+    clientType: data.clientType ?? "empresa",
+    contact: data.contact ?? null,
+    email: data.email ?? null,
+    phone: data.phone ?? null,
+    address: data.address ?? null,
+    billingAddress: data.billingAddress ?? null,
+    province: data.province ?? null,
+    district: data.district ?? null,
+    nuit,
+    nuitForeign: data.nuitForeign ?? false,
+    paymentTerms: data.paymentTerms ?? null,
+    preferredCurrency: data.preferredCurrency ?? "MZN",
+    notes: data.notes ?? null,
   };
 }
 
@@ -1251,17 +1327,13 @@ export async function practiceRoutes(app: FastifyInstance) {
   app.post("/api/practice/clients", { preHandler: canManage }, async (request, reply) => {
     const parsed = clientSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    const nuitCheck = validatePracticeClientNuit(parsed.data.nuit, parsed.data.nuitForeign ?? false);
+    if (!nuitCheck.ok) return reply.code(400).send({ error: nuitCheck.error });
     const [row] = await db
       .insert(practiceClients)
       .values({
         companyId: companyIdOf(request),
-        name: parsed.data.name,
-        contact: parsed.data.contact ?? null,
-        email: parsed.data.email ?? null,
-        phone: parsed.data.phone ?? null,
-        address: parsed.data.address ?? null,
-        nuit: parsed.data.nuit ?? null,
-        notes: parsed.data.notes ?? null,
+        ...clientRowFromInput(parsed.data, nuitCheck.nuit),
       })
       .returning();
     return reply.code(201).send(row);
@@ -1272,16 +1344,12 @@ export async function practiceRoutes(app: FastifyInstance) {
     if (!client) return reply.code(404).send({ error: "Cliente não encontrado" });
     const parsed = clientSchema.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
+    const nuitCheck = validatePracticeClientNuit(parsed.data.nuit, parsed.data.nuitForeign ?? false);
+    if (!nuitCheck.ok) return reply.code(400).send({ error: nuitCheck.error });
     const [row] = await db
       .update(practiceClients)
       .set({
-        name: parsed.data.name,
-        contact: parsed.data.contact ?? null,
-        email: parsed.data.email ?? null,
-        phone: parsed.data.phone ?? null,
-        address: parsed.data.address ?? null,
-        nuit: parsed.data.nuit ?? null,
-        notes: parsed.data.notes ?? null,
+        ...clientRowFromInput(parsed.data, nuitCheck.nuit),
         updatedAt: new Date(),
       })
       .where(eq(practiceClients.id, client.id))
@@ -1314,6 +1382,8 @@ export async function practiceRoutes(app: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     const constructionError = assertConstructionQuote(parsed.data);
     if (constructionError) return reply.code(409).send({ error: constructionError });
+    const commercial = await assertQuoteCommercialFields(parsed.data);
+    if (!commercial.ok) return reply.code(400).send({ error: commercial.error });
     const companyId = companyIdOf(request);
     const prepared = lineTotals(parsed.data.lines);
     const totalAmount = prepared.reduce((sum, line) => sum + line.amount, 0);
@@ -1337,6 +1407,8 @@ export async function practiceRoutes(app: FastifyInstance) {
         totalAmount: totalAmount.toFixed(2),
         createdByUserId: request.currentUser!.id,
         ...quoteAdvancedFields(parsed.data),
+        fxRate: commercial.fxRate,
+        paymentMethodCodes: commercial.paymentMethodCodes,
       })
       .returning();
     await db.insert(practiceQuoteLines).values(
@@ -1361,6 +1433,8 @@ export async function practiceRoutes(app: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
     const constructionError = assertConstructionQuote(parsed.data);
     if (constructionError) return reply.code(409).send({ error: constructionError });
+    const commercial = await assertQuoteCommercialFields(parsed.data);
+    if (!commercial.ok) return reply.code(400).send({ error: commercial.error });
     const prepared = lineTotals(parsed.data.lines);
     const totalAmount = prepared.reduce((sum, line) => sum + line.amount, 0);
     const [updated] = await db
@@ -1377,6 +1451,8 @@ export async function practiceRoutes(app: FastifyInstance) {
         totalAmount: totalAmount.toFixed(2),
         updatedAt: new Date(),
         ...quoteAdvancedFields(parsed.data),
+        fxRate: commercial.fxRate,
+        paymentMethodCodes: commercial.paymentMethodCodes,
       })
       .where(eq(practiceQuotes.id, quote.id))
       .returning();

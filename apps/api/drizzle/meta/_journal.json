@@ -631,6 +631,13 @@
       "when": 1787424000000,
       "tag": "0089_price_observations_regional",
       "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1787683200000,
+      "tag": "0092_schedule_calendar_mz",
+      "breakpoints": true
     }
   ]
 }

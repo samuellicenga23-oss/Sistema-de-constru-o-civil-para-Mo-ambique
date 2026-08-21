@@ -12,6 +12,7 @@ import {
   type ServiceCategory,
 } from "../comercial/proposalTemplates";
 import { practiceApi, type PracticeBudgetSource, type PracticeClient } from "../api/practice";
+import { MZ_PAYMENT_METHODS } from "@sigo/shared";
 
 type LineDraft = {
   phase: string;
@@ -80,6 +81,13 @@ export default function ProposalWizard({
   );
 
   const [validUntil, setValidUntil] = useState(() => new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10));
+  const [currency, setCurrency] = useState<"MZN" | "USD">("MZN");
+  const [fxRate, setFxRate] = useState("");
+  const [paymentMethodCodes, setPaymentMethodCodes] = useState<string[]>(["transferencia"]);
+  const [isTender, setIsTender] = useState(false);
+  const [tenderReference, setTenderReference] = useState("");
+  const [tenderDeadline, setTenderDeadline] = useState("");
+  const [tenderStatus, setTenderStatus] = useState<"rascunho" | "em_preparacao">("rascunho");
   const [conditions, setConditions] = useState(() => defaultConditions("arquitectura"));
   const [notes, setNotes] = useState("");
 
@@ -212,6 +220,12 @@ export default function ProposalWizard({
         clientId: clientId || null,
         issueDate: new Date().toISOString().slice(0, 10),
         validUntil: validUntil || undefined,
+        currency,
+        fxRate: currency !== "MZN" ? Number(fxRate) : null,
+        paymentMethodCodes,
+        tenderReference: isTender ? tenderReference.trim() || null : null,
+        tenderDeadline: isTender ? tenderDeadline || null : null,
+        tenderStatus: isTender ? tenderStatus : null,
         notes: notes.trim() || undefined,
         serviceCategory: service?.category,
         serviceType,
@@ -549,6 +563,19 @@ export default function ProposalWizard({
         {step === 5 && (
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
+              <label className="label">Moeda</label>
+              <select className="input" value={currency} onChange={(e) => setCurrency(e.target.value as "MZN" | "USD")}>
+                <option value="MZN">MZN (metical)</option>
+                <option value="USD">USD</option>
+              </select>
+            </div>
+            {currency !== "MZN" && (
+              <div>
+                <label className="label">Taxa FX (USD→MZN)</label>
+                <input className="input" type="number" min={0} step="0.0001" value={fxRate} onChange={(e) => setFxRate(e.target.value)} required />
+              </div>
+            )}
+            <div>
               <label className="label">Válida até</label>
               <input className="input" type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} />
             </div>
@@ -561,6 +588,50 @@ export default function ProposalWizard({
                 value={conditions.revisionsIncluded ?? 2}
                 onChange={(e) => setConditions({ ...conditions, revisionsIncluded: Number(e.target.value) })}
               />
+            </div>
+            <div className="sm:col-span-2">
+              <label className="label">Meios de pagamento</label>
+              <div className="flex flex-wrap gap-2">
+                {MZ_PAYMENT_METHODS.map((method) => (
+                  <label key={method.code} className="flex items-center gap-1.5 rounded-full border border-slate-200 px-2.5 py-1 text-xs">
+                    <input
+                      type="checkbox"
+                      checked={paymentMethodCodes.includes(method.code)}
+                      onChange={(e) =>
+                        setPaymentMethodCodes((prev) =>
+                          e.target.checked ? [...prev, method.code] : prev.filter((c) => c !== method.code),
+                        )
+                      }
+                    />
+                    {method.label}
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div className="sm:col-span-2 rounded-lg border border-slate-200 p-3">
+              <label className="flex items-center gap-2 text-sm font-medium text-slate-800">
+                <input type="checkbox" checked={isTender} onChange={(e) => setIsTender(e.target.checked)} />
+                Concurso / tender
+              </label>
+              {isTender && (
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="label">Referência</label>
+                    <input className="input" value={tenderReference} onChange={(e) => setTenderReference(e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="label">Prazo de entrega</label>
+                    <input className="input" type="date" value={tenderDeadline} onChange={(e) => setTenderDeadline(e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="label">Estado</label>
+                    <select className="input" value={tenderStatus} onChange={(e) => setTenderStatus(e.target.value as typeof tenderStatus)}>
+                      <option value="rascunho">Rascunho</option>
+                      <option value="em_preparacao">Em preparação</option>
+                    </select>
+                  </div>
+                </div>
+              )}
             </div>
             <div className="sm:col-span-2">
               <label className="label">Introdução</label>

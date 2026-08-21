@@ -379,6 +379,14 @@ export const paymentMethodCatalog = pgTable("payment_method_catalog", {
   sortOrder: integer("sort_order").notNull().default(0),
 });
 
+/** Feriados nacionais MZ — actualizáveis por ano (seed configurável, não constantes eternas). */
+export const mzHolidays = pgTable("mz_holidays", {
+  year: integer("year").notNull(),
+  date: date("date").notNull(),
+  name: varchar("name", { length: 160 }).notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [primaryKey({ columns: [table.year, table.date] }), index("mz_holidays_date_idx").on(table.date)]);
+
 // Preço de um material numa zona específica — substitui materials.baseUnitCost quando o
 // projecto tem uma zona atribuída e existe uma linha aqui para esse (material, zona). Um
 // material só pode ter preços por zona depois de ser clonado para a empresa (mesmo princípio de
@@ -585,6 +593,15 @@ export const projects = pgTable("projects", {
    */
   publicShareToken: varchar("public_share_token", { length: 64 }).unique(),
 }, (table) => [index("projects_company_created_idx").on(table.companyId, table.createdAt)]);
+
+/** Calendário de planeamento por obra — sábado, horas/dia e feriados nacionais. */
+export const projectScheduleCalendars = pgTable("project_schedule_calendars", {
+  projectId: uuid("project_id").primaryKey().references(() => projects.id, { onDelete: "cascade" }),
+  saturdayWorking: boolean("saturday_working").notNull().default(true),
+  hoursPerDay: numeric("hours_per_day", { precision: 4, scale: 1 }),
+  useNationalHolidays: boolean("use_national_holidays").notNull().default(true),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
 
 /** Responsabilidade operacional na obra — não substitui permissions da empresa. */
 export const projectMembers = pgTable(
@@ -1389,16 +1406,27 @@ export const practiceMilestoneStatusEnum = pgEnum("practice_milestone_status", [
   "pago",
 ]);
 export const practiceDocumentSeriesKindEnum = pgEnum("practice_document_series_kind", ["PRO", "FT", "RC"]);
+export const practiceClientTypeEnum = pgEnum("practice_client_type", ["particular", "empresa", "ong", "publico", "outro"]);
+export const practiceTenderStatusEnum = pgEnum("practice_tender_status", ["rascunho", "em_preparacao", "submetido", "adjudicado", "perdido", "cancelado"]);
 
 export const practiceClients = pgTable("practice_clients", {
   id: uuid("id").primaryKey().defaultRandom(),
   companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
   name: varchar("name", { length: 200 }).notNull(),
+  legalName: varchar("legal_name", { length: 240 }),
+  tradeName: varchar("trade_name", { length: 200 }),
+  clientType: practiceClientTypeEnum("client_type").notNull().default("empresa"),
   contact: varchar("contact", { length: 200 }),
   email: varchar("email", { length: 200 }),
   phone: varchar("phone", { length: 80 }),
   address: text("address"),
+  province: varchar("province", { length: 100 }),
+  district: varchar("district", { length: 100 }),
+  billingAddress: text("billing_address"),
+  paymentTerms: varchar("payment_terms", { length: 200 }),
+  preferredCurrency: currencyEnum("preferred_currency").notNull().default("MZN"),
   nuit: varchar("nuit", { length: 50 }),
+  nuitForeign: boolean("nuit_foreign").notNull().default(false),
   notes: text("notes"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -1466,6 +1494,20 @@ export const practiceQuotes = pgTable("practice_quotes", {
   discountAmount: numeric("discount_amount", { precision: 14, scale: 2 }),
   discountPercent: numeric("discount_percent", { precision: 5, scale: 2 }),
   acceptanceNotes: text("acceptance_notes"),
+  /** Taxa FX explícita quando currency ≠ MZN (ex.: USD→MZN). */
+  fxRate: numeric("fx_rate", { precision: 14, scale: 6 }),
+  /** Códigos do catálogo payment_method_catalog / MZ_PAYMENT_METHODS. */
+  paymentMethodCodes: jsonb("payment_method_codes").$type<string[]>().notNull().default([]),
+  pipelineSource: varchar("pipeline_source", { length: 80 }),
+  probabilityPct: numeric("probability_pct", { precision: 5, scale: 2 }),
+  nextAction: varchar("next_action", { length: 200 }),
+  nextActionDate: date("next_action_date"),
+  tenderReference: varchar("tender_reference", { length: 120 }),
+  tenderDeadline: date("tender_deadline"),
+  tenderStatus: practiceTenderStatusEnum("tender_status"),
+  tenderBidBond: jsonb("tender_bid_bond").$type<{ amount?: number; reference?: string; expiresAt?: string }>(),
+  tenderDocsChecklist: jsonb("tender_docs_checklist").$type<Array<{ label: string; done: boolean }>>().default([]),
+  tenderSubmissionEvidence: text("tender_submission_evidence"),
   sentAt: timestamp("sent_at"),
   createdByUserId: uuid("created_by_user_id").references(() => users.id),
   approvedAt: timestamp("approved_at"),
@@ -1837,6 +1879,68 @@ export const siteDiaryTaskProgress = pgTable("site_diary_task_progress", {
   progressPercent: numeric("progress_percent", { precision: 5, scale: 2 }).notNull(),
   notes: text("notes"),
 }, (table) => [unique("site_diary_task_progress_unique").on(table.diaryEntryId, table.scheduleTaskId)]);
+
+// ---------- Qualidade, HST e Inspecções de campo ----------
+
+export const inspectionChecklistTradeEnum = pgEnum("inspection_checklist_trade", [
+  "cofragem", "armadura", "betão", "alvenaria", "impermeabilizacao", "instalacoes", "acabamentos",
+]);
+export const qualityInspectionStatusEnum = pgEnum("quality_inspection_status", ["rascunho", "pass", "fail", "pendente"]);
+export const hstRecordTypeEnum = pgEnum("hst_record_type", ["toolbox_talk", "incidente", "observacao_risco", "ppe_check"]);
+
+/** Templates de checklist por empresa — procedimentos internos, não norma legal. */
+export const inspectionChecklistTemplates = pgTable("inspection_checklist_templates", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+  trade: inspectionChecklistTradeEnum("trade").notNull(),
+  name: varchar("name", { length: 200 }).notNull(),
+  items: jsonb("items").$type<Array<{ key: string; label: string; required?: boolean }>>().notNull().default([]),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => [unique("inspection_checklist_template_company_trade").on(table.companyId, table.trade)]);
+
+export const qualityInspections = pgTable("quality_inspections", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+  templateId: uuid("template_id").references(() => inspectionChecklistTemplates.id, { onDelete: "set null" }),
+  trade: inspectionChecklistTradeEnum("trade").notNull(),
+  location: varchar("location", { length: 200 }),
+  scheduleTaskId: uuid("schedule_task_id").references(() => scheduleTasks.id, { onDelete: "set null" }),
+  inspectorUserId: uuid("inspector_user_id").references(() => users.id, { onDelete: "set null" }),
+  inspectionDate: date("inspection_date").notNull(),
+  status: qualityInspectionStatusEnum("status").notNull().default("rascunho"),
+  checklistResults: jsonb("checklist_results").$type<Array<{ key: string; pass: boolean; notes?: string }>>().notNull().default([]),
+  photoRefs: jsonb("photo_refs").$type<string[]>().notNull().default([]),
+  notes: text("notes"),
+  diaryEntryId: uuid("diary_entry_id").references(() => siteDiaryEntries.id, { onDelete: "set null" }),
+  offlineSyncKey: varchar("offline_sync_key", { length: 100 }),
+  createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => [
+  index("quality_inspections_project_date_idx").on(table.projectId, table.inspectionDate),
+  unique("quality_inspections_offline_sync").on(table.projectId, table.offlineSyncKey),
+]);
+
+export const hstRecords = pgTable("hst_records", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  projectId: uuid("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  companyId: uuid("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+  recordType: hstRecordTypeEnum("record_type").notNull(),
+  recordDate: date("record_date").notNull(),
+  location: varchar("location", { length: 200 }),
+  description: text("description").notNull(),
+  photoRefs: jsonb("photo_refs").$type<string[]>().notNull().default([]),
+  diaryEntryId: uuid("diary_entry_id").references(() => siteDiaryEntries.id, { onDelete: "set null" }),
+  offlineSyncKey: varchar("offline_sync_key", { length: 100 }),
+  createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [
+  index("hst_records_project_date_idx").on(table.projectId, table.recordDate),
+  unique("hst_records_offline_sync").on(table.projectId, table.offlineSyncKey),
+]);
 
 // ---------- Compras, Fornecedores e Armazém ----------
 

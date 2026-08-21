@@ -129,11 +129,20 @@ export type PracticeClient = {
   id: string;
   companyId: string;
   name: string;
+  legalName?: string | null;
+  tradeName?: string | null;
+  clientType?: "particular" | "empresa" | "ong" | "publico" | "outro";
   contact: string | null;
   email: string | null;
   phone: string | null;
   address: string | null;
+  billingAddress?: string | null;
+  province?: string | null;
+  district?: string | null;
   nuit: string | null;
+  nuitForeign?: boolean;
+  paymentTerms?: string | null;
+  preferredCurrency?: string;
   notes: string | null;
   createdAt: string;
   updatedAt?: string;
@@ -151,6 +160,15 @@ export type PracticeQuote = {
   issueDate: string | null;
   validUntil: string | null;
   currency: string;
+  fxRate?: string | null;
+  paymentMethodCodes?: string[];
+  pipelineSource?: string | null;
+  probabilityPct?: string | null;
+  nextAction?: string | null;
+  nextActionDate?: string | null;
+  tenderReference?: string | null;
+  tenderDeadline?: string | null;
+  tenderStatus?: "rascunho" | "em_preparacao" | "submetido" | "adjudicado" | "perdido" | "cancelado" | null;
   notes: string | null;
   serviceType?: string | null;
   serviceCategory?: string | null;
@@ -542,22 +560,40 @@ export const practiceApi = {
     >(`/practice/clients/${id}`),
   createClient: (data: {
     name: string;
+    legalName?: string | null;
+    tradeName?: string | null;
+    clientType?: PracticeClient["clientType"];
     contact?: string | null;
     email?: string | null;
     phone?: string | null;
     address?: string | null;
+    billingAddress?: string | null;
+    province?: string | null;
+    district?: string | null;
     nuit?: string | null;
+    nuitForeign?: boolean;
+    paymentTerms?: string | null;
+    preferredCurrency?: string;
     notes?: string | null;
   }) => request<PracticeClient>("/practice/clients", { method: "POST", body: JSON.stringify(data) }),
   updateClient: (
     id: string,
     data: {
       name: string;
+      legalName?: string | null;
+      tradeName?: string | null;
+      clientType?: PracticeClient["clientType"];
       contact?: string | null;
       email?: string | null;
       phone?: string | null;
       address?: string | null;
+      billingAddress?: string | null;
+      province?: string | null;
+      district?: string | null;
       nuit?: string | null;
+      nuitForeign?: boolean;
+      paymentTerms?: string | null;
+      preferredCurrency?: string;
       notes?: string | null;
     },
   ) => request<PracticeClient>(`/practice/clients/${id}`, { method: "PUT", body: JSON.stringify(data) }),
@@ -573,6 +609,15 @@ export const practiceApi = {
     issueDate?: string;
     validUntil?: string;
     currency?: string;
+    fxRate?: number | null;
+    paymentMethodCodes?: string[];
+    pipelineSource?: string | null;
+    probabilityPct?: number | null;
+    nextAction?: string | null;
+    nextActionDate?: string | null;
+    tenderReference?: string | null;
+    tenderDeadline?: string | null;
+    tenderStatus?: PracticeQuote["tenderStatus"];
     notes?: string;
     serviceCategory?: string | null;
     serviceType?: string | null;

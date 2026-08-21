@@ -144,11 +144,20 @@ export default function PracticeOfficePage() {
   const [showClient, setShowClient] = useState(false);
   const [clientForm, setClientForm] = useState({
     name: "",
+    legalName: "",
+    tradeName: "",
+    clientType: "empresa" as PracticeClient["clientType"],
     contact: "",
     email: "",
     phone: "",
     address: "",
+    billingAddress: "",
+    province: "",
+    district: "",
     nuit: "",
+    nuitForeign: false,
+    paymentTerms: "",
+    preferredCurrency: "MZN",
     notes: "",
   });
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
@@ -280,15 +289,41 @@ export default function PracticeOfficePage() {
     try {
       await practiceApi.createClient({
         name: clientForm.name.trim(),
+        legalName: clientForm.legalName.trim() || null,
+        tradeName: clientForm.tradeName.trim() || null,
+        clientType: clientForm.clientType,
         contact: clientForm.contact.trim() || null,
         email: clientForm.email.trim() || null,
         phone: clientForm.phone.trim() || null,
         address: clientForm.address.trim() || null,
+        billingAddress: clientForm.billingAddress.trim() || null,
+        province: clientForm.province.trim() || null,
+        district: clientForm.district.trim() || null,
         nuit: clientForm.nuit.trim() || null,
+        nuitForeign: clientForm.nuitForeign,
+        paymentTerms: clientForm.paymentTerms.trim() || null,
+        preferredCurrency: clientForm.preferredCurrency,
         notes: clientForm.notes.trim() || null,
       });
       setShowClient(false);
-      setClientForm({ name: "", contact: "", email: "", phone: "", address: "", nuit: "", notes: "" });
+      setClientForm({
+        name: "",
+        legalName: "",
+        tradeName: "",
+        clientType: "empresa",
+        contact: "",
+        email: "",
+        phone: "",
+        address: "",
+        billingAddress: "",
+        province: "",
+        district: "",
+        nuit: "",
+        nuitForeign: false,
+        paymentTerms: "",
+        preferredCurrency: "MZN",
+        notes: "",
+      });
       await reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao criar cliente");
@@ -1475,6 +1510,23 @@ export default function PracticeOfficePage() {
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
+                <label className="label">Tipo</label>
+                <select className="input" value={clientForm.clientType ?? "empresa"} onChange={(e) => setClientForm({ ...clientForm, clientType: e.target.value as PracticeClient["clientType"] })}>
+                  <option value="particular">Particular</option>
+                  <option value="empresa">Empresa</option>
+                  <option value="ong">ONG / instituição</option>
+                  <option value="publico">Entidade pública</option>
+                  <option value="outro">Outro</option>
+                </select>
+              </div>
+              <div>
+                <label className="label">Moeda preferida</label>
+                <select className="input" value={clientForm.preferredCurrency} onChange={(e) => setClientForm({ ...clientForm, preferredCurrency: e.target.value })}>
+                  <option value="MZN">MZN</option>
+                  <option value="USD">USD</option>
+                </select>
+              </div>
+              <div>
                 <label className="label">Contacto</label>
                 <input className="input" value={clientForm.contact} onChange={(e) => setClientForm({ ...clientForm, contact: e.target.value })} />
               </div>
@@ -1488,12 +1540,32 @@ export default function PracticeOfficePage() {
               </div>
               <div>
                 <label className="label">NUIT</label>
-                <input className="input" value={clientForm.nuit} onChange={(e) => setClientForm({ ...clientForm, nuit: e.target.value })} />
+                <input className="input" value={clientForm.nuit} onChange={(e) => setClientForm({ ...clientForm, nuit: e.target.value })} disabled={clientForm.nuitForeign} />
+                <label className="mt-1 flex items-center gap-2 text-xs text-slate-600">
+                  <input type="checkbox" checked={clientForm.nuitForeign} onChange={(e) => setClientForm({ ...clientForm, nuitForeign: e.target.checked })} />
+                  Entidade estrangeira
+                </label>
+              </div>
+              <div>
+                <label className="label">Província</label>
+                <input className="input" value={clientForm.province} onChange={(e) => setClientForm({ ...clientForm, province: e.target.value })} />
+              </div>
+              <div>
+                <label className="label">Distrito</label>
+                <input className="input" value={clientForm.district} onChange={(e) => setClientForm({ ...clientForm, district: e.target.value })} />
               </div>
             </div>
             <div>
               <label className="label">Morada</label>
               <input className="input" value={clientForm.address} onChange={(e) => setClientForm({ ...clientForm, address: e.target.value })} />
+            </div>
+            <div>
+              <label className="label">Morada de facturação</label>
+              <input className="input" value={clientForm.billingAddress} onChange={(e) => setClientForm({ ...clientForm, billingAddress: e.target.value })} />
+            </div>
+            <div>
+              <label className="label">Condições de pagamento</label>
+              <input className="input" value={clientForm.paymentTerms} onChange={(e) => setClientForm({ ...clientForm, paymentTerms: e.target.value })} />
             </div>
             <div>
               <label className="label">Notas</label>
