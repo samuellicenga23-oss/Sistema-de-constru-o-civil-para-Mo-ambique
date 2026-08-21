@@ -71,6 +71,7 @@ export default function CompanySettingsPage() {
     setForm({
       name: data.company.name,
       nuit: data.company.nuit ?? "",
+      nuitForeign: data.company.nuitForeign ? "1" : "",
       address: data.company.address ?? "",
       province: data.company.province ?? "",
       district: data.company.district ?? "",
@@ -110,6 +111,7 @@ export default function CompanySettingsPage() {
       await companiesApi.updateMe({
         name: form.name,
         nuit: form.nuit,
+        nuitForeign: Boolean(form.nuitForeign),
         address: form.address,
         province: form.province,
         district: form.district,
@@ -226,6 +228,15 @@ export default function CompanySettingsPage() {
                   </div>
                 ))}
               </div>
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={Boolean(form.nuitForeign)}
+                  disabled={!canEdit}
+                  onChange={(e) => setForm((f) => ({ ...f, nuitForeign: e.target.checked ? "1" : "" }))}
+                />
+                Entidade estrangeira (NUIT moçambicano de 9 dígitos não obrigatório)
+              </label>
               <div>
                 <label className="label">Meios de pagamento</label>
                 <textarea

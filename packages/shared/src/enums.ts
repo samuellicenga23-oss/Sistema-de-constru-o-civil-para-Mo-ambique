@@ -56,6 +56,9 @@ export type PlantProcessingStatus = (typeof PLANT_PROCESSING_STATUSES)[number];
 export const DEFAULT_IVA_RATE = 0.16;
 export const DEFAULT_CONTINGENCIAS_RATE = 0.1;
 
+/** @deprecated Preferir resolveFiscalRateOnDate / fiscal_rate_profiles — valor só para seed/fallback. */
+export const DEFAULT_IVA_RATE_SEED = DEFAULT_IVA_RATE;
+
 export function calculateVatTotals(subtotal: number, ivaRate = DEFAULT_IVA_RATE) {
   const iva = subtotal * ivaRate;
   return { subtotal, ivaRate, iva, total: subtotal + iva };

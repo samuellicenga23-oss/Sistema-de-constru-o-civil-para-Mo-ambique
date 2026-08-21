@@ -12,6 +12,7 @@ import { companyRoutes } from "./routes/companies.js";
 import { userRoutes } from "./routes/users.js";
 import { catalogRoutes } from "./routes/catalog.js";
 import { priceZoneRoutes } from "./routes/priceZones.js";
+import { countryMzRoutes } from "./routes/countryMz.js";
 import { quickCalcRoutes } from "./routes/quickCalc.js";
 import { costCompositionRoutes } from "./routes/costCompositions.js";
 import { projectRoutes } from "./routes/projects.js";
@@ -215,6 +216,7 @@ export async function buildApp(opts: { logger?: boolean } = {}) {
   await app.register(userRoutes);
   await app.register(catalogRoutes);
   await app.register(priceZoneRoutes);
+  await app.register(countryMzRoutes);
   await app.register(quickCalcRoutes);
   await app.register(costCompositionRoutes);
   await app.register(projectRoutes);

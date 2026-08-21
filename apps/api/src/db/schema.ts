@@ -50,6 +50,8 @@ export const companies = pgTable("companies", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: varchar("name", { length: 200 }).notNull(),
   nuit: varchar("nuit", { length: 30 }),
+  /** true = entidade estrangeira; NUIT MZ de 9 dígitos não é obrigatório. */
+  nuitForeign: boolean("nuit_foreign").notNull().default(false),
   address: text("address"),
   logoUrl: text("logo_url"),
   defaultCurrency: currencyEnum("default_currency").notNull().default("MZN"),
@@ -326,6 +328,49 @@ export const priceZones = pgTable("price_zones", {
   sourceReference: text("source_reference"),
   effectiveDate: date("effective_date"),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+/** Geografia administrativa MZ — separada de zonas de preço. */
+export const mzProvinces = pgTable("mz_provinces", {
+  code: varchar("code", { length: 8 }).primaryKey(),
+  name: varchar("name", { length: 120 }).notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const mzDistricts = pgTable("mz_districts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  provinceCode: varchar("province_code", { length: 8 }).notNull().references(() => mzProvinces.code, { onDelete: "cascade" }),
+  code: varchar("code", { length: 16 }).notNull(),
+  name: varchar("name", { length: 160 }).notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (table) => [unique().on(table.provinceCode, table.code)]);
+
+/** Uma zona de preço pode abranger vários distritos. */
+export const priceZoneDistricts = pgTable("price_zone_districts", {
+  zoneId: uuid("zone_id").notNull().references(() => priceZones.id, { onDelete: "cascade" }),
+  districtId: uuid("district_id").notNull().references(() => mzDistricts.id, { onDelete: "cascade" }),
+}, (table) => [primaryKey({ columns: [table.zoneId, table.districtId] })]);
+
+/** Taxas fiscais effective-dated (IVA, INSS, …). companyId null = seed nacional. */
+export const fiscalRateProfiles = pgTable("fiscal_rate_profiles", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  companyId: uuid("company_id").references(() => companies.id, { onDelete: "cascade" }),
+  kind: varchar("kind", { length: 40 }).notNull(),
+  rate: numeric("rate", { precision: 8, scale: 6 }).notNull(),
+  effectiveFrom: date("effective_from").notNull(),
+  effectiveTo: date("effective_to"),
+  source: varchar("source", { length: 240 }),
+  reference: text("reference"),
+  createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const paymentMethodCatalog = pgTable("payment_method_catalog", {
+  code: varchar("code", { length: 40 }).primaryKey(),
+  label: varchar("label", { length: 120 }).notNull(),
+  isActive: boolean("is_active").notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
 });
 
 // Preço de um material numa zona específica — substitui materials.baseUnitCost quando o

@@ -11,7 +11,7 @@ import { requireRole, requireCompanyUser, requireAuth } from "../auth/middleware
 import { hashPassword } from "../auth/password.js";
 import { getSessionUser, setSessionActingCompany } from "../auth/session.js";
 import { env } from "../env.js";
-import { COMPANY_MODULE_KEYS, CURRENCIES, SUBSCRIPTION_STATUSES, SUBSCRIPTION_PLAN_KEYS, resolveRoleTemplate, isCompanyUserRole, getPlanDefinition } from "@sigo/shared";
+import { COMPANY_MODULE_KEYS, CURRENCIES, SUBSCRIPTION_STATUSES, SUBSCRIPTION_PLAN_KEYS, resolveRoleTemplate, isCompanyUserRole, getPlanDefinition, normalizePhoneMz, validateNuitMz } from "@sigo/shared";
 import { detectImageExtension, detectProofFileExtension } from "../services/imageValidation.js";
 import { sendEmail, emailLayout, escapeHtml, safeContentDispositionFilename } from "../services/mailer.js";
 import { createTrialCompany } from "../services/companyOnboarding.js";
@@ -1193,6 +1193,7 @@ export async function companyRoutes(app: FastifyInstance) {
       .object({
         name: z.string().min(1).optional(),
         nuit: z.string().optional(),
+        nuitForeign: z.boolean().optional(),
         address: z.string().optional(),
         province: z.string().optional(),
         district: z.string().optional(),
@@ -1209,12 +1210,24 @@ export async function companyRoutes(app: FastifyInstance) {
       })
       .safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
-    const { workingDaysPerMonth, workingHoursPerDay, email, emailNotificationPrefs, ...rest } = parsed.data;
+    const { workingDaysPerMonth, workingHoursPerDay, email, emailNotificationPrefs, nuit, nuitForeign, phone, ...rest } = parsed.data;
+
+    const [current] = await db.select().from(companies).where(eq(companies.id, companyId)).limit(1);
+    const foreign = nuitForeign ?? current?.nuitForeign ?? false;
+    let nextNuit: string | null | undefined;
+    if (nuit !== undefined || nuitForeign !== undefined) {
+      const nuitCheck = validateNuitMz(nuit !== undefined ? nuit : current?.nuit, { foreign });
+      if (!nuitCheck.ok) return reply.code(400).send({ error: nuitCheck.error });
+      if (nuit !== undefined) nextNuit = nuitCheck.nuit;
+    }
 
     const [row] = await db
       .update(companies)
       .set({
         ...rest,
+        ...(nextNuit !== undefined ? { nuit: nextNuit } : {}),
+        ...(nuitForeign !== undefined ? { nuitForeign } : {}),
+        ...(phone !== undefined ? { phone: normalizePhoneMz(phone) } : {}),
         ...(email !== undefined ? { email: email || null } : {}),
         ...(workingDaysPerMonth !== undefined ? { workingDaysPerMonth } : {}),
         ...(workingHoursPerDay !== undefined ? { workingHoursPerDay: workingHoursPerDay.toString() } : {}),

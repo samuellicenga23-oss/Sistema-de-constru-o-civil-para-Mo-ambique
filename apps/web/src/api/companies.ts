@@ -92,6 +92,7 @@ export type Company = {
   id: string;
   name: string;
   nuit: string | null;
+  nuitForeign?: boolean;
   address: string | null;
   logoUrl: string | null;
   defaultCurrency: string;
@@ -136,6 +137,7 @@ export type AdminCompanyUser = {
 export type CompanyUpdateInput = Partial<{
   name: string;
   nuit: string;
+  nuitForeign: boolean;
   address: string;
   province: string;
   district: string;
