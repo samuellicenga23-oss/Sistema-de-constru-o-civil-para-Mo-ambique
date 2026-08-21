@@ -59,9 +59,27 @@ export async function contractRoutes(app: FastifyInstance) {
     const [contract] = await db.select().from(projectContracts).where(eq(projectContracts.id, id)).limit(1);
     if (!contract || !(await assertProjectOwned(contract.projectId, request.currentUser!.companyId!))) return reply.code(404).send({ error: "Contrato não encontrado" });
     if (contract.status !== "activo") return reply.code(409).send({ error: "Active o contrato antes de criar uma adenda" });
-    const parsed = z.object({ title: z.string().trim().min(1).max(200), reason: z.string().trim().min(1).max(3000), amount: z.number(), impactDays: z.number().int().optional() }).safeParse(request.body);
+    const parsed = z.object({
+      title: z.string().trim().min(1).max(200),
+      scope: z.string().trim().max(5000).optional(),
+      reason: z.string().trim().min(1).max(3000),
+      amount: z.number(),
+      impactDays: z.number().int().optional(),
+      linkedTaskIds: z.array(z.string().uuid()).optional(),
+      evidenceUrls: z.array(z.string()).optional(),
+    }).safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.flatten() });
-    const [variation] = await db.insert(contractVariations).values({ contractId: id, title: parsed.data.title, reason: parsed.data.reason, amount: parsed.data.amount.toFixed(2), impactDays: parsed.data.impactDays ?? 0 }).returning();
+    const [variation] = await db.insert(contractVariations).values({
+      contractId: id,
+      title: parsed.data.title,
+      scope: parsed.data.scope,
+      reason: parsed.data.reason,
+      amount: parsed.data.amount.toFixed(2),
+      impactDays: parsed.data.impactDays ?? 0,
+      linkedTaskIds: parsed.data.linkedTaskIds ?? [],
+      evidenceUrls: parsed.data.evidenceUrls ?? [],
+      requestedByUserId: request.currentUser!.id,
+    }).returning();
     await recordAuditEvent({ companyId: request.currentUser!.companyId!, projectId: contract.projectId, actorUserId: request.currentUser!.id, entityType: "contract_variation", entityId: variation.id, action: "created", after: { title: variation.title, amount: variation.amount } });
     return reply.code(201).send(variation);
   });

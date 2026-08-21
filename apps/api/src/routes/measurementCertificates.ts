@@ -14,6 +14,7 @@ import {
 import { computeLabourByPhase } from "../services/labourByPhase.js";
 import { calculateBudgetTotals } from "../services/budgetTotals.js";
 import { createDraftInvoiceForCertificate } from "../services/invoicing.js";
+import { persistCertificateRetentionSnapshot } from "../services/certificateRetention.js";
 import { recordAuditEvent } from "../services/auditTrail.js";
 import { emitWorkflowEvent } from "../services/workflowEvents.js";
 import { buildCertificateFieldMeasurementPdf } from "../services/certificateFieldMeasurementPdf.js";
@@ -101,6 +102,15 @@ export async function measurementCertificateRoutes(app: FastifyInstance) {
     return {
       ...detail,
       lines: clientLines,
+      retention: detail.certificate.grossCertifiedAmount != null ? {
+        grossCertifiedAmount: Number(detail.certificate.grossCertifiedAmount),
+        retentionRateSnapshot: Number(detail.certificate.retentionRateSnapshot ?? 0),
+        retentionAmount: Number(detail.certificate.retentionAmount ?? 0),
+        previousRetentionHeld: Number(detail.certificate.previousRetentionHeld ?? 0),
+        netDueAmount: Number(detail.certificate.netDueAmount ?? 0),
+        releasedRetentionAmount: Number(detail.certificate.releasedRetentionAmount ?? 0),
+        contractVariationId: detail.certificate.contractVariationId,
+      } : null,
       financialParameters: {
         currency: document?.currency ?? "MZN",
         ivaRate: Number(document?.ivaRate ?? 0.16),
@@ -207,6 +217,7 @@ export async function measurementCertificateRoutes(app: FastifyInstance) {
     // devolvemos o Auto ao estado submetido para não deixar a execução e o financeiro divergirem.
     if (parsed.data.status === "aprovado") {
       try {
+        await persistCertificateRetentionSnapshot(id);
         await createDraftInvoiceForCertificate(id, request.currentUser!.id);
       } catch (error) {
         await db.update(measurementCertificates).set({ status: "submetido", approvedAt: null, approvedByUserId: null }).where(eq(measurementCertificates.id, id));
