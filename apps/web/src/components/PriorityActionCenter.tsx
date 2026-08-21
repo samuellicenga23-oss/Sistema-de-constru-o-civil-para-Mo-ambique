@@ -2,6 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { workflowTasksApi, type WorkflowTask } from "../api/projectTeam";
 import { notificationsApi, type AppNotification } from "../api/notifications";
+import { useDataSaverPollingInterval } from "../hooks/useDataSaverPolling";
+
+const POLL_BASE_MS = 12_000;
 
 type AttentionItem =
   | { kind: "task"; task: WorkflowTask }
@@ -13,6 +16,7 @@ type AttentionItem =
  */
 export default function PriorityActionCenter() {
   const navigate = useNavigate();
+  const pollMs = useDataSaverPollingInterval(POLL_BASE_MS);
   const [item, setItem] = useState<AttentionItem | null>(null);
 
   const load = useCallback(async () => {
@@ -31,7 +35,7 @@ export default function PriorityActionCenter() {
 
   useEffect(() => {
     void load();
-    const id = window.setInterval(load, 12_000);
+    const id = window.setInterval(load, pollMs);
     function onFocus() {
       void load();
     }
@@ -42,7 +46,7 @@ export default function PriorityActionCenter() {
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onFocus);
     };
-  }, [load]);
+  }, [load, pollMs]);
 
   if (!item) return null;
 

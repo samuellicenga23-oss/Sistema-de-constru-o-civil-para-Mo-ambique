@@ -1,4 +1,7 @@
+import { getPollingInterval } from "./lib/dataSaver";
+
 const RELOAD_KEY = "sigo-release-reload";
+const RELEASE_GUARD_BASE_MS = 5 * 60_000;
 
 export async function clearApplicationCaches() {
   if ("caches" in window) {
@@ -39,7 +42,7 @@ export function startReleaseGuard() {
     }
   };
   void check();
-  const interval = window.setInterval(check, 5 * 60_000);
+  const interval = window.setInterval(check, getPollingInterval(RELEASE_GUARD_BASE_MS));
   const onVisible = () => { if (document.visibilityState === "visible") void check(); };
   document.addEventListener("visibilitychange", onVisible);
   return () => {

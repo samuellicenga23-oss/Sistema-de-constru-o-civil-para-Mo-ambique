@@ -1,9 +1,13 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { workflowTasksApi, type WorkflowTask } from "../api/projectTeam";
+import { useDataSaverPollingInterval } from "../hooks/useDataSaverPolling";
+
+const POLL_BASE_MS = 60_000;
 
 export default function MyActionsMenu() {
   const navigate = useNavigate();
+  const pollMs = useDataSaverPollingInterval(POLL_BASE_MS);
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<WorkflowTask[]>([]);
   const [count, setCount] = useState(0);
@@ -20,9 +24,9 @@ export default function MyActionsMenu() {
 
   useEffect(() => {
     void reload();
-    const id = window.setInterval(reload, 60_000);
+    const id = window.setInterval(reload, pollMs);
     return () => window.clearInterval(id);
-  }, []);
+  }, [pollMs]);
 
   return (
     <div className="relative">

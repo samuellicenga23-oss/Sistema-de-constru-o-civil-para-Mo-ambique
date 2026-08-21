@@ -1,5 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { api, type CurrentUser, ApiError } from "../api/client";
+import { clearApplicationCaches } from "../releaseRecovery";
+import { clearOfflineOutbox } from "../lib/offlineOutbox";
 
 type AuthContextValue = {
   user: CurrentUser | null;
@@ -43,6 +45,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function logout() {
     await api.logout();
     setUser(null);
+    // Limpa caches PWA (JS/assets versionados) e rascunhos offline sensíveis da sessão.
+    // Lacuna: HTML da shell não fica em cache (navigateFallback null) — correcto.
+    // Lacuna: anexos /uploads/ são NetworkOnly; se algum browser os tiver em HTTP cache
+    // nativo fora do SW, não há API para invalidar — depende do no-store do servidor.
+    await clearApplicationCaches().catch(() => undefined);
+    await clearOfflineOutbox().catch(() => undefined);
   }
 
   // Recarrega o utilizador actual do servidor — usado depois de mudanças no Perfil (nome,

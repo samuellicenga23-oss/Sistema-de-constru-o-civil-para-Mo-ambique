@@ -33,6 +33,7 @@ import { companiesApi } from "../api/companies";
 import { planUsesDirectDocumentApproval } from "@sigo/shared";
 import { collectUnpricedItems, filterTreeToUnpricedOnly } from "../utils/boqHelpers";
 import { consumeAssistantSearchParams, documentHasBoqContent, shouldShowPrimaryMeasurementImport } from "../utils/measurementWorkspace";
+import MobileStickyActionBar from "../components/MobileStickyActionBar";
 import { ApiError } from "../api/http";
 
 function money(value: number, currency: string) {
@@ -1081,10 +1082,10 @@ export default function BudgetDocumentPage() {
         {/* Coluna principal: secções e itens */}
         <div className="min-w-0 space-y-5">
           {editSession.editing && (
-            <div className="sticky top-0 z-20 flex flex-wrap items-center gap-2 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2">
+            <MobileStickyActionBar>
               <button type="button" className="btn btn-secondary btn-sm" disabled={!editSession.canUndo} onClick={editSession.undo}>Desfazer</button>
               <button type="button" className="btn btn-secondary btn-sm" disabled={!editSession.canRedo} onClick={editSession.redo}>Refazer</button>
-              <span className="text-xs font-medium tabular-nums text-slate-700">{editSession.changeCount} alteração(ões)</span>
+              <span className="hidden text-xs font-medium tabular-nums text-slate-700 sm:inline">{editSession.changeCount} alteração(ões)</span>
               <span className="ml-auto flex flex-wrap gap-2">
                 <button
                   type="button"
@@ -1109,7 +1110,7 @@ export default function BudgetDocumentPage() {
                   {editSession.saving ? "A guardar…" : "Guardar"}
                 </button>
               </span>
-            </div>
+            </MobileStickyActionBar>
           )}
           {error && (
             <AlertBanner tone="error" onDismiss={() => { setError(null); setErrorBlockers([]); }}>

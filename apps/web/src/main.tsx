@@ -7,6 +7,7 @@ import AppErrorBoundary from "./components/AppErrorBoundary.tsx";
 import { applyTheme, getStoredTheme } from "./theme.ts";
 import { initMonitoring } from "./monitoring.ts";
 import { startReleaseGuard } from "./releaseRecovery.ts";
+import { startOfflineOutboxSync } from "./lib/offlineOutbox.ts";
 
 // Ao mudar CACHE_EPOCH, browsers com PWA antigo apagam Cache Storage e pedem update do SW.
 const CACHE_EPOCH = "20260812f";
@@ -28,6 +29,7 @@ if (typeof window !== "undefined" && window.localStorage.getItem(CACHE_EPOCH_KEY
 applyTheme(getStoredTheme());
 initMonitoring();
 startReleaseGuard();
+startOfflineOutboxSync();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

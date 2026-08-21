@@ -259,6 +259,15 @@ textarea {
   table td {
     overflow-wrap: anywhere;
   }
+
+  /* Espaço para a barra de acções fixa em edição de orçamento/medições */
+  .mobile-sticky-action-bar {
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  }
+
+  main:has(.mobile-sticky-action-bar) {
+    padding-bottom: 5rem;
+  }
 }
 
 /* Landing Magic Patterns — atmosfera e grelha */

@@ -12,6 +12,11 @@ import { useConfirmDialog } from "../hooks/useConfirmDialog";
 import { applyTheme, getStoredTheme, type Theme } from "../theme";
 import { IconTrash } from "../components/icons";
 import { useLanguage, type Language } from "../i18n";
+import {
+  DATA_SAVER_CHANGE_EVENT,
+  isDataSaverEnabled,
+  setDataSaverEnabled,
+} from "../lib/dataSaver";
 
 function fmtDateTime(iso: string | null) {
   if (!iso) return "Nunca";
@@ -42,6 +47,7 @@ export default function ProfilePage() {
   const [sessions, setSessions] = useState<UserSession[]>([]);
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [theme, setTheme] = useState<Theme>(getStoredTheme());
+  const [dataSaver, setDataSaver] = useState(isDataSaverEnabled());
   const [savingLanguage, setSavingLanguage] = useState(false);
   const [languageSaved, setLanguageSaved] = useState(false);
 
@@ -143,6 +149,19 @@ export default function ProfilePage() {
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Erro ao terminar sessões");
     }
+  }
+
+  useEffect(() => {
+    function syncDataSaver() {
+      setDataSaver(isDataSaverEnabled());
+    }
+    window.addEventListener(DATA_SAVER_CHANGE_EVENT, syncDataSaver);
+    return () => window.removeEventListener(DATA_SAVER_CHANGE_EVENT, syncDataSaver);
+  }, []);
+
+  function handleDataSaverToggle(enabled: boolean) {
+    setDataSaverEnabled(enabled);
+    setDataSaver(enabled);
   }
 
   function handleThemeChange(next: Theme) {
@@ -273,6 +292,19 @@ export default function ProfilePage() {
                 <option value="en">{t("english")}</option>
               </select>
               {languageSaved && <p className="mt-1 text-xs text-emerald-600">{t("languageSaved")}</p>}
+            </div>
+            <div>
+              <p className="label mb-1.5">Modo económico de dados</p>
+              <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={dataSaver}
+                  onChange={(e) => handleDataSaverToggle(e.target.checked)}
+                  className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500"
+                />
+                Poupar dados móveis
+              </label>
+              <p className="muted mt-1">Menos actualizações automáticas, imagens mais pequenas e sem pré-carregar PDFs.</p>
             </div>
             <div>
               <p className="label mb-1.5">Ajuda</p>

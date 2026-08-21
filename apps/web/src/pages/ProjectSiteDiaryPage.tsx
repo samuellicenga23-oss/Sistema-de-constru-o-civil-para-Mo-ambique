@@ -12,6 +12,7 @@ import PageSearch from "../components/PageSearch";
 import { SectionHeader } from "../components/WorkspaceUI";
 import { IconBack, IconPlus, IconTrash, IconDownload, IconUpload, IconPencil } from "../components/icons";
 import SiteDiaryCompleteForm from "../components/SiteDiaryCompleteForm";
+import { getImageLoadingProps, getThumbnailSizeClass, optimizeImageUrl } from "../lib/dataSaver";
 
 function todayStr() {
   const d = new Date();
@@ -390,7 +391,12 @@ export default function ProjectSiteDiaryPage() {
                       <div className="flex gap-2 flex-wrap">
                         {entry.photoUrls.map((url) => (
                           <div key={url} className="relative group/photo">
-                            <img src={url} alt="Foto da obra" className="w-24 h-24 object-cover rounded-md border border-gray-200" />
+                            <img
+                              src={optimizeImageUrl(url)}
+                              alt="Foto da obra"
+                              className={`${getThumbnailSizeClass()} object-cover rounded-md border border-gray-200`}
+                              {...getImageLoadingProps()}
+                            />
                             <button
                               onClick={() => handleDeletePhoto(entry.id, url)}
                               className="icon-btn-danger absolute -right-2 -top-2 !h-7 !w-7"

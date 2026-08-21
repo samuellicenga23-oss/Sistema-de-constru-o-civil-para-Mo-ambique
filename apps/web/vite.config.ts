@@ -33,6 +33,9 @@ export default defineConfig(({ mode }) => {
         cleanupOutdatedCaches: true,
         skipWaiting: true,
         clientsClaim: true,
+        // Logout (AuthContext) chama clearApplicationCaches — limpa Cache Storage.
+        // Lacuna documentada: sessionStorage (ex. sigo-release-reload) não é limpo no logout;
+        // anexos privados dependem de NetworkOnly + cabeçalhos no-store do servidor.
         // Assets versionados são guardados pelo runtime. Não os incluir no precache evita que
         // o service worker volte a descarregar bundles antigos preservados para abas abertas.
         // O HTML deve vir sempre do servidor depois de um deploy, nunca de um cache antigo.
