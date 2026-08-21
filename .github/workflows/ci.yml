@@ -43,15 +43,17 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Necessário para o guard schema→migration comparar a alteração actual com o parent.
+          fetch-depth: 2
 
       - uses: actions/setup-node@v4
         with:
-          # Dependências actuais do workspace (incluindo cookie/jest-dom) já exigem Node >=22.
+          # Dependências actuais do workspace já exigem Node >=22.
           node-version: 22
           cache: npm
 
-      # npm ci (não npm install) — instalação reproduzível a partir do package-lock.json,
-      # tal como o documento da Fase 1 pede explicitamente para o servidor também usar.
+      # npm ci (não npm install) — instalação reproduzível a partir do package-lock.json.
       - name: Instalar dependências
         run: npm ci
 
@@ -62,26 +64,21 @@ jobs:
         run: bash -n deploy/lib.sh deploy/preflight.sh deploy/backup.sh deploy/deploy.sh deploy/rollback.sh deploy/status.sh
 
       # Aqui só verificamos estrutura/segredos/documentação. O gate local `npm run quality:release`
-      # continua completo; no CI build e testes têm passos próprios para evitar duplicação e para
-      # que uma falha indique exactamente qual etapa quebrou.
+      # continua completo; no CI build e testes têm passos próprios para não duplicar CPU/RAM.
       - name: Bloqueios estruturais da release
         run: node scripts/release-readiness.mjs --structural-only
 
       - name: Typecheck do pacote partilhado
         run: npm run typecheck --workspace=packages/shared
 
-      # Corre ANTES das migrations/testes: só compara o schema.ts actual com as migrations já
-      # commitadas — apanha o caso de alguém editar o schema e esquecer-se da migration.
-      - name: Verificar que schema e migrations estão sincronizados
-        run: |
-          npm run db:generate --workspace=apps/api
-          if [ -n "$(git status --porcelain apps/api/drizzle)" ]; then
-            echo "::error::O schema (apps/api/src/db/schema.ts) foi alterado sem gerar/commitar a migration correspondente. Corra 'npm run db:generate' localmente e faça commit do resultado."
-            git status --porcelain apps/api/drizzle
-            exit 1
-          fi
+      # O histórico recente contém migrations manuais 0076–0099, enquanto snapshots Drizzle
+      # terminaram em 0075. Rodar `drizzle-kit generate` aqui criaria uma falsa migration que
+      # duplicaria alterações já existentes. Este gate valida journal↔SQL e impede novos cambios
+      # no schema sem migration correspondente. O passo seguinte prova a cadeia na BD vazia.
+      - name: Verificar integridade do histórico de migrations
+        run: node scripts/check-migration-integrity.mjs
 
-      - name: Aplicar migrations na base de dados do CI
+      - name: Aplicar migrations na base de dados vazia do CI
         run: npm run db:migrate
 
       - name: Testes do backend
